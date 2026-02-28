@@ -660,6 +660,17 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 						SSHPort:    deployCfg.SSHPort,
 					}); err == nil {
 						caddyOK := st.CaddyInstalled || strings.TrimSpace(domain) == ""
+						if caddyOK && strings.TrimSpace(domain) != "" {
+							configured, err := remoteCaddyDomainConfigured(deployConfig{
+								Host:       deployCfg.Host,
+								SSHUser:    deployCfg.SSHUser,
+								SSHKeyPath: deployCfg.SSHKeyPath,
+								SSHPort:    deployCfg.SSHPort,
+							}, domain)
+							if err != nil || !configured {
+								caddyOK = false
+							}
+						}
 						healthyExisting = st.RascalService && st.DockerInstalled && caddyOK && st.EnvFilePresent && st.CodexAuthPresent && st.RunnerImagePresent
 					}
 				}
@@ -2234,7 +2245,7 @@ func deployToExistingHost(cfg deployConfig) error {
 		"install -m 0600 /tmp/rascal-bootstrap/rascal.env /etc/rascal/rascal.env",
 		"install -m 0644 /tmp/rascal-bootstrap/rascal.service /etc/systemd/system/rascal.service",
 		fmt.Sprintf("install -m 0600 /tmp/rascal-bootstrap/auth.json %s", cfg.ServerCodexAuthDst),
-		"if [ -f /tmp/rascal-bootstrap/Caddyfile ]; then install -m 0644 /tmp/rascal-bootstrap/Caddyfile /etc/caddy/Caddyfile && systemctl enable caddy --now; fi",
+		"if [ -f /tmp/rascal-bootstrap/Caddyfile ]; then install -m 0644 /tmp/rascal-bootstrap/Caddyfile /etc/caddy/Caddyfile && systemctl enable caddy --now && (systemctl reload caddy || systemctl restart caddy); fi",
 		"systemctl daemon-reload",
 		"systemctl enable rascal --now",
 	}, " && ")

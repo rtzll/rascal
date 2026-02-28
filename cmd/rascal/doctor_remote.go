@@ -118,3 +118,21 @@ func waitForServerHealthSSH(cfg deployConfig, timeout time.Duration) error {
 	}
 	return fmt.Errorf("%s", lastErr)
 }
+
+func remoteCaddyDomainConfigured(cfg deployConfig, domain string) (bool, error) {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return true, nil
+	}
+	checkCmd := strings.Join([]string{
+		"set -eu",
+		"[ -f /etc/caddy/Caddyfile ]",
+		"grep -Fqs -- " + shellSingleQuote(domain) + " /etc/caddy/Caddyfile",
+		"echo ok",
+	}, "\n")
+	out, err := runLocalCapture("ssh", sshArgs(cfg, checkCmd)...)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) == "ok", nil
+}
