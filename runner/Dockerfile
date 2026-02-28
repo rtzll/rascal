@@ -1,12 +1,18 @@
 FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG NODE_MAJOR=22
+ARG NODE_MAJOR=24
 ARG GOOSE_VERSION=1.26.1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git gh bash jq ripgrep make gcc g++ openssl bzip2 libxcb1 \
-    python3 python3-pip nodejs npm \
+    python3 python3-pip gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && node --version \
+    && npm --version \
     && rm -rf /var/lib/apt/lists/*
 
 # Expected to provide `codex` in PATH.
