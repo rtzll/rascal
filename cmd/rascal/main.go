@@ -354,7 +354,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
-		Short: "Configure client and optionally deploy to an existing server",
+		Short: "Configure client, provision (optional), and deploy orchestrator",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			repo = firstNonEmpty(strings.TrimSpace(repo), a.cfg.DefaultRepo)
 			domain = strings.TrimSpace(domain)
