@@ -13,6 +13,7 @@ type remoteDoctorStatus struct {
 	DockerInstalled    bool   `json:"docker_installed"`
 	CaddyInstalled     bool   `json:"caddy_installed"`
 	EnvFilePresent     bool   `json:"env_file_present"`
+	AuthRuntimeSynced  bool   `json:"auth_runtime_synced"`
 	CodexAuthPresent   bool   `json:"codex_auth_present"`
 	RunnerImagePresent bool   `json:"runner_image_present"`
 }
@@ -35,6 +36,15 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 	status.DockerInstalled = check("command -v docker >/dev/null 2>&1 && echo ok")
 	status.CaddyInstalled = check("command -v caddy >/dev/null 2>&1 && echo ok")
 	status.EnvFilePresent = check("[ -f /etc/rascal/rascal.env ] && echo ok")
+	status.AuthRuntimeSynced = check(strings.Join([]string{
+		"set -eu",
+		"env_epoch=$(stat -c %Y /etc/rascal/rascal.env 2>/dev/null || echo 0)",
+		`svc_ts=$(systemctl show rascal -p ExecMainStartTimestamp --value 2>/dev/null || true)`,
+		`[ -n "$svc_ts" ]`,
+		`svc_epoch=$(date -d "$svc_ts" +%s 2>/dev/null || echo 0)`,
+		`[ "$svc_epoch" -ge "$env_epoch" ]`,
+		"echo ok",
+	}, " && "))
 	status.CodexAuthPresent = check("[ -f /etc/rascal/codex_auth.json ] && echo ok")
 	status.RunnerImagePresent = check("docker image inspect rascal-runner:latest >/dev/null 2>&1 && echo ok")
 	return status, nil

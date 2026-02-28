@@ -671,7 +671,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 								caddyOK = false
 							}
 						}
-						healthyExisting = st.RascalService && st.DockerInstalled && caddyOK && st.EnvFilePresent && st.CodexAuthPresent && st.RunnerImagePresent
+						healthyExisting = st.RascalService && st.DockerInstalled && caddyOK && st.EnvFilePresent && st.AuthRuntimeSynced && st.CodexAuthPresent && st.RunnerImagePresent
 					}
 				}
 				if !healthyExisting {
@@ -1122,6 +1122,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 						"docker_installed":     remoteStatus.DockerInstalled,
 						"caddy_installed":      remoteStatus.CaddyInstalled,
 						"env_file_present":     remoteStatus.EnvFilePresent,
+						"auth_runtime_synced":  remoteStatus.AuthRuntimeSynced,
 						"codex_auth_present":   remoteStatus.CodexAuthPresent,
 						"runner_image_present": remoteStatus.RunnerImagePresent,
 					}
@@ -1193,8 +1194,8 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					if errText, ok := remote["error"].(string); ok && strings.TrimSpace(errText) != "" {
 						a.println("remote (%s): error: %s", strings.TrimSpace(host), errText)
 					} else {
-						a.println("remote (%s): rascal=%v docker=%v caddy=%v env=%v codex_auth=%v runner_image=%v",
-							remote["host"], remote["rascal_service"], remote["docker_installed"], remote["caddy_installed"], remote["env_file_present"], remote["codex_auth_present"], remote["runner_image_present"])
+						a.println("remote (%s): rascal=%v docker=%v caddy=%v env=%v auth_synced=%v codex_auth=%v runner_image=%v",
+							remote["host"], remote["rascal_service"], remote["docker_installed"], remote["caddy_installed"], remote["env_file_present"], remote["auth_runtime_synced"], remote["codex_auth_present"], remote["runner_image_present"])
 					}
 				}
 				if !cfgExists {
@@ -1205,6 +1206,11 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				}
 				if strings.TrimSpace(a.cfg.APIToken) == "" {
 					a.println("hint: set local API token: `rascal config set api_token <token>`")
+				}
+				if remote != nil {
+					if synced, ok := remote["auth_runtime_synced"].(bool); ok && !synced {
+						a.println("hint: remote rascal.env changed after service start; restart rascal: `ssh %s@%s 'systemctl restart rascal'`", firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root"), firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host)))
+					}
 				}
 				return nil
 			})
