@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/christianrotzoll/rascal/internal/config"
-	ghapi "github.com/christianrotzoll/rascal/internal/github"
-	"github.com/christianrotzoll/rascal/internal/logs"
-	"github.com/christianrotzoll/rascal/internal/runner"
-	"github.com/christianrotzoll/rascal/internal/state"
+	"github.com/rtzll/rascal/internal/config"
+	ghapi "github.com/rtzll/rascal/internal/github"
+	"github.com/rtzll/rascal/internal/logs"
+	"github.com/rtzll/rascal/internal/runner"
+	"github.com/rtzll/rascal/internal/state"
 )
 
 var errTaskCompleted = errors.New("task is already completed")

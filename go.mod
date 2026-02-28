@@ -1,3 +1,3 @@
-module github.com/christianrotzoll/rascal
+module github.com/rtzll/rascal
 
 go 1.26

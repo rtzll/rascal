@@ -17,9 +17,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/christianrotzoll/rascal/internal/config"
-	ghapi "github.com/christianrotzoll/rascal/internal/github"
-	"github.com/christianrotzoll/rascal/internal/state"
+	"github.com/rtzll/rascal/internal/config"
+	ghapi "github.com/rtzll/rascal/internal/github"
+	"github.com/rtzll/rascal/internal/state"
 )
 
 type apiClient struct {
