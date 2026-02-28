@@ -7,7 +7,7 @@ import (
 )
 
 func TestSaveAndLoadClientConfig(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
+	path := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("RASCAL_CONFIG_PATH", path)
 	t.Setenv("RASCAL_SERVER_URL", "")
 	t.Setenv("RASCAL_API_TOKEN", "")
@@ -46,8 +46,8 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 }
 
 func TestLoadClientConfigEnvOverride(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("server_url: https://rascal.example.com\napi_token: from_file\ndefault_repo: owner/repo\n"), 0o600); err != nil {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("server_url = \"https://rascal.example.com\"\napi_token = \"from_file\"\ndefault_repo = \"owner/repo\"\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 

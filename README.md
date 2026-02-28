@@ -55,7 +55,7 @@ go run ./cmd/rascal logs <run_id>
 
 Global UX flags:
 
-- `--output table|json|yaml`
+- `--output table|json|toml`
 - `--no-color` (or set `NO_COLOR` environment variable)
 - `--quiet`
 - `--config <path>`

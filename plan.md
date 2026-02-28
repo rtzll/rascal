@@ -80,7 +80,7 @@ These defaults are chosen so headless automation works reliably and does not han
 - Config source precedence:
   1) explicit CLI flags
   2) environment variables (`RASCAL_*`)
-  3) config file (`~/.rascal/config.yaml`)
+  3) config file (`~/.rascal/config.toml`)
   4) built-in defaults
 - Provide built-in completion generation:
   - `rascal completion bash|zsh|fish|powershell`
@@ -550,7 +550,7 @@ This is ordered so a coding agent can start building immediately.
 - Build CLI with Cobra command tree and Viper-backed config loading.
 - `rascal bootstrap` (initially “deploy to existing server”)
 - `rascal run`, `rascal issue`, `rascal ps`, `rascal logs`
-- Config file in `~/.rascal/config.yaml`:
+- Config file in `~/.rascal/config.toml`:
   - server URL
   - api token
   - default repo

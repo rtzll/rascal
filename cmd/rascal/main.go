@@ -22,12 +22,12 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	"github.com/rtzll/rascal/internal/config"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/state"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"go.yaml.in/yaml/v3"
 )
 
 type apiClient struct {
@@ -110,7 +110,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().StringVar(&a.serverURLFlag, "server-url", "", "orchestrator base URL")
 	root.PersistentFlags().StringVar(&a.apiTokenFlag, "api-token", "", "orchestrator API token")
 	root.PersistentFlags().StringVar(&a.defaultRepoFlag, "default-repo", "", "default repository in OWNER/REPO form")
-	root.PersistentFlags().StringVar(&a.output, "output", "table", "output format: table|json|yaml")
+	root.PersistentFlags().StringVar(&a.output, "output", "table", "output format: table|json|toml")
 	root.PersistentFlags().BoolVar(&a.noColor, "no-color", false, "disable ANSI color/style output (also set by NO_COLOR)")
 	root.PersistentFlags().BoolVarP(&a.quiet, "quiet", "q", false, "reduce non-essential output")
 
@@ -137,7 +137,7 @@ func newRootCmd() *cobra.Command {
 func (a *app) initConfig() error {
 	v := viper.New()
 	v.SetConfigFile(a.configPath)
-	v.SetConfigType("yaml")
+	v.SetConfigType("toml")
 	v.SetDefault("server_url", "http://127.0.0.1:8080")
 	v.SetEnvPrefix("RASCAL")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -205,12 +205,12 @@ func (a *app) initConfig() error {
 	switch strings.ToLower(strings.TrimSpace(a.output)) {
 	case "", "table":
 		a.output = "table"
-	case "json", "yaml":
+	case "json", "toml":
 	default:
 		return &cliError{
 			Code:    exitInput,
 			Message: fmt.Sprintf("unsupported --output value %q", a.output),
-			Hint:    "use --output table|json|yaml",
+			Hint:    "use --output table|json|toml",
 		}
 	}
 
@@ -253,15 +253,15 @@ func (a *app) emit(v any, tableFn func() error) error {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(v)
-	case "yaml":
-		data, err := yaml.Marshal(v)
+	case "toml":
+		data, err := toml.Marshal(v)
 		if err != nil {
 			return err
 		}
 		_, err = os.Stdout.Write(data)
 		return err
 	default:
-		return &cliError{Code: exitInput, Message: "invalid output format", Hint: "use table|json|yaml"}
+		return &cliError{Code: exitInput, Message: "invalid output format", Hint: "use table|json|toml"}
 	}
 }
 
@@ -272,7 +272,7 @@ func (a *app) requireServerAuth() error {
 	return &cliError{
 		Code:    exitConfig,
 		Message: "missing API token",
-		Hint:    "set RASCAL_API_TOKEN, configure ~/.rascal/config.yaml, or run `rascal init`",
+		Hint:    "set RASCAL_API_TOKEN, configure ~/.rascal/config.toml, or run `rascal init`",
 	}
 }
 
@@ -287,7 +287,7 @@ func (a *app) newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize local Rascal CLI config",
-		Long:  "Create or update local Rascal config at ~/.rascal/config.yaml (or --config path).",
+		Long:  "Create or update local Rascal config at ~/.rascal/config.toml (or --config path).",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			serverURL = firstNonEmpty(strings.TrimSpace(serverURL), a.cfg.ServerURL)
 			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), a.cfg.APIToken)
@@ -1471,7 +1471,7 @@ func decodeServerError(resp *http.Response) error {
 func loadFileConfig(path string) (config.ClientConfig, error) {
 	v := viper.New()
 	v.SetConfigFile(path)
-	v.SetConfigType("yaml")
+	v.SetConfigType("toml")
 	v.SetDefault("server_url", "http://127.0.0.1:8080")
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError

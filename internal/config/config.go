@@ -76,9 +76,9 @@ func DefaultClientConfigPath() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".rascal/config.yaml"
+		return ".rascal/config.toml"
 	}
-	return filepath.Join(home, ".rascal", "config.yaml")
+	return filepath.Join(home, ".rascal", "config.toml")
 }
 
 func LoadClientConfig() ClientConfig {
@@ -95,7 +95,7 @@ func LoadClientConfigAtPath(path string) (ClientConfig, error) {
 		path = DefaultClientConfigPath()
 	}
 	v.SetConfigFile(path)
-	v.SetConfigType("yaml")
+	v.SetConfigType("toml")
 	v.SetDefault("server_url", "http://127.0.0.1:8080")
 	v.SetEnvPrefix("RASCAL")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -129,7 +129,7 @@ func SaveClientConfig(path string, cfg ClientConfig) error {
 	}
 
 	v := viper.New()
-	v.SetConfigType("yaml")
+	v.SetConfigType("toml")
 	v.Set("server_url", strings.TrimRight(strings.TrimSpace(cfg.ServerURL), "/"))
 	v.Set("api_token", strings.TrimSpace(cfg.APIToken))
 	v.Set("default_repo", strings.TrimSpace(cfg.DefaultRepo))
