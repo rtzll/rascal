@@ -1,0 +1,58 @@
+name: Deploy Rascal
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-rascal-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to server
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      DEPLOY_HOST: ${{ vars.RASCAL_DEPLOY_HOST || secrets.RASCAL_DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.RASCAL_DEPLOY_SSH_USER || secrets.RASCAL_DEPLOY_SSH_USER || 'root' }}
+      DEPLOY_PORT: ${{ vars.RASCAL_DEPLOY_SSH_PORT || secrets.RASCAL_DEPLOY_SSH_PORT || '22' }}
+      DEPLOY_RUNNER_IMAGE: ${{ vars.RASCAL_RUNNER_IMAGE || 'rascal-runner:latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate deploy config
+        run: |
+          if [ -z "${DEPLOY_HOST:-}" ]; then
+            echo "Missing DEPLOY_HOST. Set vars/secrets RASCAL_DEPLOY_HOST." >&2
+            exit 1
+          fi
+          if [ -z "${{ secrets.RASCAL_DEPLOY_SSH_KEY }}" ]; then
+            echo "Missing secret RASCAL_DEPLOY_SSH_KEY." >&2
+            exit 1
+          fi
+          if [ -z "${{ secrets.RASCAL_DEPLOY_KNOWN_HOSTS }}" ]; then
+            echo "Missing secret RASCAL_DEPLOY_KNOWN_HOSTS." >&2
+            exit 1
+          fi
+
+      - name: Configure SSH
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "${{ secrets.RASCAL_DEPLOY_SSH_KEY }}" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "${{ secrets.RASCAL_DEPLOY_KNOWN_HOSTS }}" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          chmod 644 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy
+        run: DEPLOY_SSH_KEY_PATH="$HOME/.ssh/id_ed25519" DEPLOY_KNOWN_HOSTS_PATH="$HOME/.ssh/known_hosts" bash deploy/scripts/ci_deploy.sh
