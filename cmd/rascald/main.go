@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,6 +37,7 @@ type server struct {
 	mu         sync.Mutex
 	activeRuns map[string]string
 	queuedRuns map[string][]string
+	runCancels map[string]context.CancelFunc
 }
 
 type runRequest struct {
@@ -59,6 +63,8 @@ type createIssueTaskRequest struct {
 	IssueNumber int    `json:"issue_number"`
 }
 
+type requestIDKey struct{}
+
 func main() {
 	cfg := config.LoadServerConfig()
 	if err := cfg.Ensure(); err != nil {
@@ -77,6 +83,7 @@ func main() {
 		gh:         ghapi.NewAPIClient(cfg.GitHubToken),
 		activeRuns: make(map[string]string),
 		queuedRuns: make(map[string][]string),
+		runCancels: make(map[string]context.CancelFunc),
 	}
 	s.recoverQueueState()
 
@@ -85,12 +92,13 @@ func main() {
 	mux.HandleFunc("/v1/runs", s.withAuth(s.handleListRuns))
 	mux.HandleFunc("/v1/runs/", s.withAuth(s.handleRunSubresources))
 	mux.HandleFunc("/v1/tasks", s.withAuth(s.handleCreateTask))
+	mux.HandleFunc("/v1/tasks/", s.withAuth(s.handleTaskSubresources))
 	mux.HandleFunc("/v1/tasks/issue", s.withAuth(s.handleCreateIssueTask))
 	mux.HandleFunc("/v1/webhooks/github", s.handleWebhook)
 
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           logRequests(mux),
+		Handler:           withRequestID(logRequests(mux)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -240,6 +248,30 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"run": run})
+}
+
+func (s *server) handleTaskSubresources(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+	path = strings.Trim(path, "/")
+	if path == "" {
+		http.Error(w, "task id is required", http.StatusBadRequest)
+		return
+	}
+	taskID, err := url.PathUnescape(path)
+	if err != nil {
+		http.Error(w, "invalid task id", http.StatusBadRequest)
+		return
+	}
+	task, ok := s.store.GetTask(taskID)
+	if !ok {
+		http.Error(w, "task not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task": task})
 }
 
 func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -392,11 +424,6 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 }
 
 func (s *server) handleRunSubresources(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	path := strings.TrimPrefix(r.URL.Path, "/v1/runs/")
 	path = strings.Trim(path, "/")
 	if path == "" {
@@ -404,13 +431,33 @@ func (s *server) handleRunSubresources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.HasSuffix(path, "/logs") {
+	switch {
+	case strings.HasSuffix(path, "/logs"):
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		runID := strings.TrimSuffix(path, "/logs")
 		runID = strings.Trim(runID, "/")
 		s.handleRunLogs(w, runID)
 		return
+	case strings.HasSuffix(path, "/cancel"):
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		runID := strings.TrimSuffix(path, "/cancel")
+		runID = strings.Trim(runID, "/")
+		s.handleCancelRun(w, runID)
+		return
+	default:
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleGetRun(w, path)
+		return
 	}
-	s.handleGetRun(w, path)
 }
 
 func (s *server) handleGetRun(w http.ResponseWriter, runID string) {
@@ -420,6 +467,39 @@ func (s *server) handleGetRun(w http.ResponseWriter, runID string) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"run": run})
+}
+
+func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
+	run, ok := s.store.GetRun(runID)
+	if !ok {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+	if run.Status == state.StatusSucceeded || run.Status == state.StatusFailed || run.Status == state.StatusCanceled {
+		writeJSON(w, http.StatusOK, map[string]any{"run": run, "canceled": false, "reason": "run already completed"})
+		return
+	}
+
+	s.mu.Lock()
+	if cancel, ok := s.runCancels[runID]; ok {
+		cancel()
+	}
+	removed := s.removeQueuedRunLocked(run.TaskID, runID)
+	s.mu.Unlock()
+
+	if removed {
+		updated, err := s.store.SetRunStatus(runID, state.StatusCanceled, "canceled by user")
+		if err != nil {
+			http.Error(w, "failed to cancel run", http.StatusInternalServerError)
+			return
+		}
+		_ = s.store.SetTaskPendingInput(run.TaskID, s.taskHasQueuedRuns(run.TaskID))
+		writeJSON(w, http.StatusOK, map[string]any{"run": updated, "canceled": true})
+		return
+	}
+
+	// If the run is active, cancellation is cooperative via context.
+	writeJSON(w, http.StatusAccepted, map[string]any{"run_id": runID, "cancel_requested": true})
 }
 
 func (s *server) handleRunLogs(w http.ResponseWriter, runID string) {
@@ -630,9 +710,25 @@ func (s *server) executeRun(runID string) {
 		PRNumber:    run.PRNumber,
 		Context:     run.Context,
 	}
-	result, err := s.runLauncherWithRetry(context.Background(), spec)
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	s.runCancels[runID] = cancel
+	s.mu.Unlock()
+
+	result, err := s.runLauncherWithRetry(ctx, spec)
+
+	s.mu.Lock()
+	delete(s.runCancels, runID)
+	s.mu.Unlock()
+
 	if err != nil {
-		updated, _ := s.store.SetRunStatus(run.ID, state.StatusFailed, err.Error())
+		status := state.StatusFailed
+		errText := err.Error()
+		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
+			status = state.StatusCanceled
+			errText = "canceled by user"
+		}
+		updated, _ := s.store.SetRunStatus(run.ID, status, errText)
 		s.finishRun(updated)
 		return
 	}
@@ -705,6 +801,34 @@ func (s *server) finishRun(run state.Run) {
 	}
 }
 
+func (s *server) removeQueuedRunLocked(taskID, runID string) bool {
+	queue := s.queuedRuns[taskID]
+	if len(queue) == 0 {
+		return false
+	}
+	out := queue[:0]
+	removed := false
+	for _, id := range queue {
+		if id == runID {
+			removed = true
+			continue
+		}
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		delete(s.queuedRuns, taskID)
+	} else {
+		s.queuedRuns[taskID] = out
+	}
+	return removed
+}
+
+func (s *server) taskHasQueuedRuns(taskID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.queuedRuns[taskID]) > 0
+}
+
 func (s *server) resolveTaskForPR(repo string, prNumber int) string {
 	task, ok := s.store.FindTaskByPR(repo, prNumber)
 	if ok {
@@ -748,8 +872,38 @@ func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
+		reqID := requestIDFromContext(r.Context())
+		if reqID != "" {
+			log.Printf("%s %s (%s) request_id=%s", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond), reqID)
+			return
+		}
 		log.Printf("%s %s (%s)", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
 	})
+}
+
+func withRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqID := newRequestID()
+		w.Header().Set("X-Request-ID", reqID)
+		ctx := context.WithValue(r.Context(), requestIDKey{}, reqID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func requestIDFromContext(ctx context.Context) string {
+	v := ctx.Value(requestIDKey{})
+	if id, ok := v.(string); ok {
+		return id
+	}
+	return ""
+}
+
+func newRequestID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("req_%d", time.Now().UnixNano())
+	}
+	return "req_" + hex.EncodeToString(b)
 }
 
 func issueTaskFromIssue(title, body string) string {
@@ -831,16 +985,28 @@ func (s *server) runLauncherWithRetry(ctx context.Context, spec runner.Spec) (ru
 		err error
 	)
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
 		res, err = s.launcher.Start(ctx, spec)
 		if err == nil {
 			return res, nil
+		}
+		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
+			return res, context.Canceled
 		}
 		if attempt == maxAttempts {
 			break
 		}
 		backoff := time.Duration(attempt) * time.Second
 		log.Printf("run %s attempt %d/%d failed: %v (retrying in %s)", spec.RunID, attempt, maxAttempts, err, backoff)
-		time.Sleep(backoff)
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return res, context.Canceled
+		case <-timer.C:
+		}
 	}
 	return res, err
 }

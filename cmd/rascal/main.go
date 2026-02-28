@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -10,9 +11,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -22,6 +26,7 @@ import (
 	"github.com/rtzll/rascal/internal/state"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"go.yaml.in/yaml/v3"
 )
 
 type apiClient struct {
@@ -35,10 +40,51 @@ type app struct {
 	serverURLFlag   string
 	apiTokenFlag    string
 	defaultRepoFlag string
+	output          string
+	noColor         bool
+	verbose         bool
+	quiet           bool
+	yes             bool
+	debug           bool
 	v               *viper.Viper
 	cfg             config.ClientConfig
 	client          apiClient
+	serverSource    string
+	tokenSource     string
+	repoSource      string
 }
+
+type cliError struct {
+	Code      int
+	Message   string
+	Hint      string
+	RequestID string
+	Cause     error
+}
+
+func (e *cliError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	if e.Cause != nil {
+		return e.Cause.Error()
+	}
+	return "unknown error"
+}
+
+func (e *cliError) Unwrap() error { return e.Cause }
+
+const (
+	exitSuccess = 0
+	exitGeneric = 1
+	exitInput   = 2
+	exitConfig  = 3
+	exitServer  = 4
+	exitRuntime = 5
+)
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
@@ -51,11 +97,15 @@ func newRootCmd() *cobra.Command {
 
 	root := &cobra.Command{
 		Use:           "rascal",
-		Short:         "Rascal CLI",
+		Short:         "Rascal CLI for orchestrating autonomous coding runs",
+		Long:          "Rascal is a CLI for starting, inspecting, and iterating autonomous coding runs on rascald.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			return a.initConfig()
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
 		},
 	}
 
@@ -63,14 +113,30 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().StringVar(&a.serverURLFlag, "server-url", "", "orchestrator base URL")
 	root.PersistentFlags().StringVar(&a.apiTokenFlag, "api-token", "", "orchestrator API token")
 	root.PersistentFlags().StringVar(&a.defaultRepoFlag, "default-repo", "", "default repository in OWNER/REPO form")
+	root.PersistentFlags().StringVar(&a.output, "output", "table", "output format: table|json|yaml")
+	root.PersistentFlags().BoolVar(&a.noColor, "no-color", false, "disable ANSI colors")
+	root.PersistentFlags().BoolVarP(&a.verbose, "verbose", "v", false, "enable verbose logs")
+	root.PersistentFlags().BoolVarP(&a.quiet, "quiet", "q", false, "reduce non-essential output")
+	root.PersistentFlags().BoolVar(&a.yes, "yes", false, "assume yes for interactive confirmations")
+	root.PersistentFlags().BoolVar(&a.debug, "debug", false, "print debug diagnostics")
 
+	root.AddCommand(a.newInitCmd())
 	root.AddCommand(a.newBootstrapCmd())
 	root.AddCommand(a.newRunCmd())
 	root.AddCommand(a.newIssueCmd())
 	root.AddCommand(a.newPSCmd())
 	root.AddCommand(a.newLogsCmd())
 	root.AddCommand(a.newDoctorCmd())
+	root.AddCommand(a.newOpenCmd())
+	root.AddCommand(a.newRerunCmd())
+	root.AddCommand(a.newRetryCmd())
+	root.AddCommand(a.newCancelCmd())
+	root.AddCommand(a.newTaskCmd())
+	root.AddCommand(a.newConfigCmd())
+	root.AddCommand(a.newAuthCmd())
 	root.AddCommand(newCompletionCmd(root))
+	root.AddCommand(&cobra.Command{Use: "repo", Short: "Advanced repository operations", Hidden: true})
+	root.AddCommand(&cobra.Command{Use: "infra", Short: "Advanced infrastructure operations", Hidden: true})
 
 	return root
 }
@@ -87,7 +153,12 @@ func (a *app) initConfig() error {
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
 		if !errors.As(err, &notFound) && !os.IsNotExist(err) {
-			return fmt.Errorf("read config file %q: %w", a.configPath, err)
+			return &cliError{
+				Code:    exitConfig,
+				Message: "failed to read config",
+				Hint:    fmt.Sprintf("fix %s or run `rascal init`", a.configPath),
+				Cause:   err,
+			}
 		}
 	}
 	a.v = v
@@ -100,12 +171,33 @@ func (a *app) initConfig() error {
 
 	if strings.TrimSpace(a.serverURLFlag) != "" {
 		a.cfg.ServerURL = strings.TrimSpace(a.serverURLFlag)
+		a.serverSource = "flag"
+	} else if strings.TrimSpace(os.Getenv("RASCAL_SERVER_URL")) != "" {
+		a.serverSource = "env"
+	} else if v.InConfig("server_url") {
+		a.serverSource = "config"
+	} else {
+		a.serverSource = "default"
 	}
 	if strings.TrimSpace(a.apiTokenFlag) != "" {
 		a.cfg.APIToken = strings.TrimSpace(a.apiTokenFlag)
+		a.tokenSource = "flag"
+	} else if strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")) != "" {
+		a.tokenSource = "env"
+	} else if v.InConfig("api_token") {
+		a.tokenSource = "config"
+	} else {
+		a.tokenSource = "unset"
 	}
 	if strings.TrimSpace(a.defaultRepoFlag) != "" {
 		a.cfg.DefaultRepo = strings.TrimSpace(a.defaultRepoFlag)
+		a.repoSource = "flag"
+	} else if strings.TrimSpace(os.Getenv("RASCAL_DEFAULT_REPO")) != "" {
+		a.repoSource = "env"
+	} else if v.InConfig("default_repo") {
+		a.repoSource = "config"
+	} else {
+		a.repoSource = "unset"
 	}
 
 	a.cfg.ServerURL = strings.TrimRight(a.cfg.ServerURL, "/")
@@ -118,7 +210,128 @@ func (a *app) initConfig() error {
 		token:   a.cfg.APIToken,
 		http:    &http.Client{Timeout: 30 * time.Second},
 	}
+
+	switch strings.ToLower(strings.TrimSpace(a.output)) {
+	case "", "table":
+		a.output = "table"
+	case "json", "yaml":
+	default:
+		return &cliError{
+			Code:    exitInput,
+			Message: fmt.Sprintf("unsupported --output value %q", a.output),
+			Hint:    "use --output table|json|yaml",
+		}
+	}
+
 	return nil
+}
+
+func (a *app) isTTY() bool {
+	st, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (st.Mode() & os.ModeCharDevice) != 0
+}
+
+func (a *app) println(msg string, args ...any) {
+	if a.quiet {
+		return
+	}
+	fmt.Printf(msg+"\n", args...)
+}
+
+func (a *app) vprintln(msg string, args ...any) {
+	if a.verbose {
+		fmt.Printf(msg+"\n", args...)
+	}
+}
+
+func (a *app) dprintln(msg string, args ...any) {
+	if a.debug {
+		fmt.Printf("[debug] "+msg+"\n", args...)
+	}
+}
+
+func (a *app) emit(v any, tableFn func() error) error {
+	switch a.output {
+	case "table":
+		if tableFn == nil {
+			return nil
+		}
+		return tableFn()
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(v)
+	case "yaml":
+		data, err := yaml.Marshal(v)
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.Write(data)
+		return err
+	default:
+		return &cliError{Code: exitInput, Message: "invalid output format", Hint: "use table|json|yaml"}
+	}
+}
+
+func (a *app) requireServerAuth() error {
+	if strings.TrimSpace(a.cfg.APIToken) != "" {
+		return nil
+	}
+	return &cliError{
+		Code:    exitConfig,
+		Message: "missing API token",
+		Hint:    "set RASCAL_API_TOKEN, configure ~/.rascal/config.yaml, or run `rascal init`",
+	}
+}
+
+func (a *app) newInitCmd() *cobra.Command {
+	var (
+		serverURL      string
+		apiToken       string
+		defaultRepo    string
+		nonInteractive bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Initialize local Rascal CLI config",
+		Long:  "Create or update local Rascal config at ~/.rascal/config.yaml (or --config path).",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			serverURL = firstNonEmpty(strings.TrimSpace(serverURL), a.cfg.ServerURL)
+			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), a.cfg.APIToken)
+			defaultRepo = firstNonEmpty(strings.TrimSpace(defaultRepo), a.cfg.DefaultRepo)
+
+			if !nonInteractive && a.isTTY() {
+				reader := bufio.NewReader(os.Stdin)
+				serverURL = promptString(reader, "Server URL", serverURL)
+				apiToken = promptString(reader, "API Token", apiToken)
+				defaultRepo = promptString(reader, "Default Repo (optional)", defaultRepo)
+			}
+
+			if strings.TrimSpace(serverURL) == "" {
+				return &cliError{Code: exitInput, Message: "server URL is required", Hint: "pass --server-url or run interactively"}
+			}
+
+			cfg := config.ClientConfig{
+				ServerURL:   strings.TrimRight(serverURL, "/"),
+				APIToken:    strings.TrimSpace(apiToken),
+				DefaultRepo: strings.TrimSpace(defaultRepo),
+			}
+			if err := config.SaveClientConfig(a.configPath, cfg); err != nil {
+				return &cliError{Code: exitConfig, Message: "failed to write config", Hint: "check file permissions", Cause: err}
+			}
+			a.println("config written: %s", a.configPath)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&serverURL, "server-url", "", "orchestrator base URL")
+	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token")
+	cmd.Flags().StringVar(&defaultRepo, "default-repo", "", "default repository OWNER/REPO")
+	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "disable prompts and rely on flags")
+	return cmd
 }
 
 func (a *app) newBootstrapCmd() *cobra.Command {
@@ -288,34 +501,39 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 func (a *app) newRunCmd() *cobra.Command {
 	var repo, task, baseBranch string
 	cmd := &cobra.Command{
-		Use:   "run",
-		Short: "Start an ad-hoc run",
+		Use:     "run",
+		Short:   "Start an ad-hoc run",
+		Example: "  rascal run -R owner/repo -t \"fix flaky tests\"\n  rascal run --repo owner/repo --task \"refactor\" --output json",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if err := a.requireServerAuth(); err != nil {
+				return err
+			}
 			repo = firstNonEmpty(strings.TrimSpace(repo), a.cfg.DefaultRepo)
 			task = strings.TrimSpace(task)
 			baseBranch = firstNonEmpty(strings.TrimSpace(baseBranch), "main")
 			if repo == "" || task == "" {
-				return fmt.Errorf("both --repo/-R and --task/-t are required")
+				return &cliError{Code: exitInput, Message: "both --repo/-R and --task/-t are required"}
 			}
 
 			payload := map[string]any{"repo": repo, "task": task, "base_branch": baseBranch}
 			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
 			if err != nil {
-				return err
+				return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
 			}
 			defer resp.Body.Close()
 			if resp.StatusCode >= 300 {
-				body, _ := io.ReadAll(resp.Body)
-				return fmt.Errorf("server error (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+				return decodeServerError(resp)
 			}
 			var out struct {
 				Run state.Run `json:"run"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-				return fmt.Errorf("decode response: %w", err)
+				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 			}
-			fmt.Printf("run created: %s (%s)\n", out.Run.ID, out.Run.Status)
-			return nil
+			return a.emit(map[string]any{"run": out.Run}, func() error {
+				a.println("run created: %s (%s)", out.Run.ID, out.Run.Status)
+				return nil
+			})
 		},
 	}
 	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository in OWNER/REPO form")
@@ -326,128 +544,551 @@ func (a *app) newRunCmd() *cobra.Command {
 
 func (a *app) newIssueCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "issue OWNER/REPO#123",
-		Short: "Start a run from an issue",
-		Args:  cobra.ExactArgs(1),
+		Use:     "issue OWNER/REPO#123",
+		Short:   "Start a run from an issue",
+		Example: "  rascal issue owner/repo#123\n  rascal issue owner/repo#123 --output json",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if err := a.requireServerAuth(); err != nil {
+				return err
+			}
 			repo, issueNumber, err := parseIssueRef(args[0])
 			if err != nil {
-				return err
+				return &cliError{Code: exitInput, Message: err.Error()}
 			}
 			payload := map[string]any{"repo": repo, "issue_number": issueNumber}
 			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks/issue", payload)
 			if err != nil {
-				return err
+				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 			}
 			defer resp.Body.Close()
 			if resp.StatusCode >= 300 {
-				body, _ := io.ReadAll(resp.Body)
-				return fmt.Errorf("server error (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+				return decodeServerError(resp)
 			}
 			var out struct {
 				Run state.Run `json:"run"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-				return fmt.Errorf("decode response: %w", err)
+				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 			}
-			fmt.Printf("issue run created: %s (%s)\n", out.Run.ID, out.Run.Status)
-			return nil
+			return a.emit(map[string]any{"run": out.Run}, func() error {
+				a.println("issue run created: %s (%s)", out.Run.ID, out.Run.Status)
+				return nil
+			})
 		},
 	}
 	return cmd
 }
 
 func (a *app) newPSCmd() *cobra.Command {
+	var (
+		limit    int
+		watch    bool
+		interval time.Duration
+	)
 	cmd := &cobra.Command{
-		Use:   "ps",
-		Short: "List recent runs",
+		Use:     "ps",
+		Aliases: []string{"ls"},
+		Short:   "List recent runs",
+		Example: "  rascal ps\n  rascal ps --watch\n  rascal ps --output json",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			resp, err := a.client.do(http.MethodGet, "/v1/runs", nil)
-			if err != nil {
+			if err := a.requireServerAuth(); err != nil {
 				return err
 			}
-			defer resp.Body.Close()
-			if resp.StatusCode >= 300 {
-				body, _ := io.ReadAll(resp.Body)
-				return fmt.Errorf("server error (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			if watch && a.output != "table" {
+				return &cliError{Code: exitInput, Message: "--watch is only supported with --output table"}
 			}
 
-			var out struct {
-				Runs []state.Run `json:"runs"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-				return fmt.Errorf("decode response: %w", err)
+			render := func(runs []state.Run) error {
+				return a.emit(map[string]any{"runs": runs}, func() error {
+					tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+					fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tTASK ID\tCREATED")
+					for _, run := range runs {
+						fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", run.ID, run.Status, run.Repo, run.TaskID, run.CreatedAt.Format(time.RFC3339))
+					}
+					return tw.Flush()
+				})
 			}
 
-			tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tTASK ID\tCREATED")
-			for _, run := range out.Runs {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", run.ID, run.Status, run.Repo, run.TaskID, run.CreatedAt.Format(time.RFC3339))
+			if !watch {
+				runs, err := a.fetchRuns(limit)
+				if err != nil {
+					return err
+				}
+				return render(runs)
 			}
-			return tw.Flush()
+
+			if interval <= 0 {
+				interval = 2 * time.Second
+			}
+			sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+			defer stop()
+
+			for {
+				runs, err := a.fetchRuns(limit)
+				if err != nil {
+					return err
+				}
+				if a.isTTY() {
+					_, _ = fmt.Fprint(os.Stdout, "\033[H\033[2J")
+				}
+				_ = render(runs)
+				select {
+				case <-sigCtx.Done():
+					return nil
+				case <-time.After(interval):
+				}
+			}
 		},
 	}
+	cmd.Flags().IntVar(&limit, "limit", 50, "max number of runs")
+	cmd.Flags().BoolVar(&watch, "watch", false, "refresh continuously")
+	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "refresh interval when --watch is enabled")
 	return cmd
 }
 
 func (a *app) newLogsCmd() *cobra.Command {
+	var (
+		follow   bool
+		interval time.Duration
+		since    time.Duration
+	)
 	cmd := &cobra.Command{
-		Use:   "logs <run_id>",
-		Short: "Fetch logs for a run",
-		Args:  cobra.ExactArgs(1),
-		ValidArgsFunction: func(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			if len(args) > 0 {
-				return nil, cobra.ShellCompDirectiveNoFileComp
+		Use:               "logs <run_id>",
+		Aliases:           []string{"tail"},
+		Short:             "Fetch logs for a run",
+		Example:           "  rascal logs run_abc123\n  rascal logs run_abc123 --follow --interval 2s",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.runIDCompletion,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if err := a.requireServerAuth(); err != nil {
+				return err
 			}
-			runs, err := a.fetchRuns(100)
-			if err != nil {
-				return nil, cobra.ShellCompDirectiveNoFileComp
+			if interval <= 0 {
+				interval = 2 * time.Second
 			}
-			out := make([]string, 0, len(runs))
-			for _, run := range runs {
-				if strings.HasPrefix(run.ID, toComplete) {
-					out = append(out, run.ID)
+
+			fetch := func() (string, error) {
+				resp, err := a.client.do(http.MethodGet, "/v1/runs/"+args[0]+"/logs", nil)
+				if err != nil {
+					return "", &cliError{Code: exitServer, Message: "request failed", Cause: err}
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode >= 300 {
+					return "", decodeServerError(resp)
+				}
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					return "", err
+				}
+				return string(body), nil
+			}
+
+			if !follow {
+				body, err := fetch()
+				if err != nil {
+					return err
+				}
+				if since > 0 {
+					body = filterLogsSince(body, time.Now().Add(-since))
+				}
+				_, err = io.WriteString(os.Stdout, body)
+				return err
+			}
+
+			sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+			defer stop()
+			last := ""
+			for {
+				body, err := fetch()
+				if err != nil {
+					return err
+				}
+				if since > 0 {
+					body = filterLogsSince(body, time.Now().Add(-since))
+				}
+				if strings.HasPrefix(body, last) {
+					diff := strings.TrimPrefix(body, last)
+					if diff != "" {
+						_, _ = io.WriteString(os.Stdout, diff)
+					}
+				} else if body != last {
+					_, _ = io.WriteString(os.Stdout, body)
+				}
+				last = body
+				select {
+				case <-sigCtx.Done():
+					return nil
+				case <-time.After(interval):
 				}
 			}
-			return out, cobra.ShellCompDirectiveNoFileComp
 		},
+	}
+	cmd.Flags().BoolVar(&follow, "follow", false, "stream logs by polling")
+	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "polling interval when --follow is enabled")
+	cmd.Flags().DurationVar(&since, "since", 0, "show logs since duration ago (best effort)")
+	return cmd
+}
+
+func (a *app) newDoctorCmd() *cobra.Command {
+	var fix bool
+	cmd := &cobra.Command{
+		Use:     "doctor",
+		Short:   "Inspect local CLI configuration",
+		Example: "  rascal doctor\n  rascal doctor --fix",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			_, statErr := os.Stat(a.configPath)
+			cfgExists := statErr == nil
+
+			if fix && !cfgExists {
+				if err := config.SaveClientConfig(a.configPath, a.cfg); err != nil {
+					return &cliError{Code: exitConfig, Message: "failed to auto-fix config", Cause: err}
+				}
+				cfgExists = true
+			}
+
+			diagnostics := map[string]any{
+				"config_path":      a.configPath,
+				"config_exists":    cfgExists,
+				"server_url":       a.cfg.ServerURL,
+				"server_source":    a.serverSource,
+				"api_token_set":    strings.TrimSpace(a.cfg.APIToken) != "",
+				"api_token_source": a.tokenSource,
+				"default_repo":     a.cfg.DefaultRepo,
+				"default_source":   a.repoSource,
+				"output_format":    a.output,
+			}
+			return a.emit(diagnostics, func() error {
+				a.println("config path: %s", a.configPath)
+				if cfgExists {
+					a.println("config file: present")
+				} else {
+					a.println("config file: missing")
+				}
+				a.println("server: %s (%s)", a.cfg.ServerURL, a.serverSource)
+				if a.cfg.APIToken == "" {
+					a.println("api token: missing")
+				} else {
+					a.println("api token: set (%s)", a.tokenSource)
+				}
+				if a.cfg.DefaultRepo == "" {
+					a.println("default repo: not set")
+				} else {
+					a.println("default repo: %s (%s)", a.cfg.DefaultRepo, a.repoSource)
+				}
+				return nil
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&fix, "fix", false, "attempt safe auto-fixes (create config file)")
+	return cmd
+}
+
+func (a *app) newOpenCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:               "open <run_id>",
+		Short:             "Print PR URL for a run",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.runIDCompletion,
 		RunE: func(_ *cobra.Command, args []string) error {
-			resp, err := a.client.do(http.MethodGet, "/v1/runs/"+args[0]+"/logs", nil)
+			if err := a.requireServerAuth(); err != nil {
+				return err
+			}
+			run, err := a.fetchRun(args[0])
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
-			if resp.StatusCode >= 300 {
-				body, _ := io.ReadAll(resp.Body)
-				return fmt.Errorf("server error (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			if strings.TrimSpace(run.PRURL) == "" {
+				return &cliError{Code: exitRuntime, Message: "run has no PR URL yet", Hint: "wait for run completion and PR creation"}
 			}
-			_, err = io.Copy(os.Stdout, resp.Body)
-			return err
+			a.println(run.PRURL)
+			return nil
 		},
 	}
 	return cmd
 }
 
-func (a *app) newDoctorCmd() *cobra.Command {
+func (a *app) newRerunCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "doctor",
-		Short: "Inspect local CLI configuration",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			fmt.Printf("config path: %s\n", a.configPath)
-			fmt.Printf("server: %s\n", a.cfg.ServerURL)
-			if a.cfg.APIToken == "" {
-				fmt.Println("api token: missing (set RASCAL_API_TOKEN or run bootstrap)")
-			} else {
-				fmt.Println("api token: set")
+		Use:               "rerun <run_id>",
+		Short:             "Create a new run from an existing run's task context",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.runIDCompletion,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if err := a.requireServerAuth(); err != nil {
+				return err
 			}
-			if a.cfg.DefaultRepo == "" {
-				fmt.Println("default repo: not set (set RASCAL_DEFAULT_REPO or run bootstrap --repo)")
-			} else {
-				fmt.Printf("default repo: %s\n", a.cfg.DefaultRepo)
+			src, err := a.fetchRun(args[0])
+			if err != nil {
+				return err
+			}
+			payload := map[string]any{
+				"repo":        src.Repo,
+				"task":        src.Task,
+				"base_branch": src.BaseBranch,
+			}
+			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
+			if err != nil {
+				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode >= 300 {
+				return decodeServerError(resp)
+			}
+			var out struct {
+				Run state.Run `json:"run"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+			}
+			return a.emit(map[string]any{"run": out.Run}, func() error {
+				a.println("rerun created: %s (%s)", out.Run.ID, out.Run.Status)
+				return nil
+			})
+		},
+	}
+	return cmd
+}
+
+func (a *app) newRetryCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:               "retry <run_id>",
+		Short:             "Retry a failed or canceled run",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.runIDCompletion,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if err := a.requireServerAuth(); err != nil {
+				return err
+			}
+			run, err := a.fetchRun(args[0])
+			if err != nil {
+				return err
+			}
+			if run.Status != state.StatusFailed && run.Status != state.StatusCanceled {
+				return &cliError{Code: exitInput, Message: "retry only supports failed or canceled runs"}
+			}
+			payload := map[string]any{
+				"repo":        run.Repo,
+				"task":        run.Task,
+				"base_branch": run.BaseBranch,
+			}
+			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
+			if err != nil {
+				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode >= 300 {
+				return decodeServerError(resp)
+			}
+			var out struct {
+				Run state.Run `json:"run"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+			}
+			return a.emit(map[string]any{"run": out.Run}, func() error {
+				a.println("retry run created: %s (%s)", out.Run.ID, out.Run.Status)
+				return nil
+			})
+		},
+	}
+	return cmd
+}
+
+func (a *app) newCancelCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:               "cancel <run_id>",
+		Short:             "Cancel a queued or running run",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.runIDCompletion,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if err := a.requireServerAuth(); err != nil {
+				return err
+			}
+			resp, err := a.client.do(http.MethodPost, "/v1/runs/"+args[0]+"/cancel", nil)
+			if err != nil {
+				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode >= 300 {
+				return decodeServerError(resp)
+			}
+			var out map[string]any
+			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+			}
+			return a.emit(out, func() error {
+				a.println("cancel request submitted for %s", args[0])
+				return nil
+			})
+		},
+	}
+	return cmd
+}
+
+func (a *app) newTaskCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "task <task_id>",
+		Short: "Show task status/details",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if err := a.requireServerAuth(); err != nil {
+				return err
+			}
+			task, err := a.fetchTask(args[0])
+			if err != nil {
+				return err
+			}
+			return a.emit(map[string]any{"task": task}, func() error {
+				tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+				fmt.Fprintln(tw, "TASK ID\tSTATUS\tREPO\tPR\tPENDING INPUT\tUPDATED")
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%t\t%s\n", task.ID, task.Status, task.Repo, task.PRNumber, task.PendingInput, task.UpdatedAt.Format(time.RFC3339))
+				return tw.Flush()
+			})
+		},
+	}
+	return cmd
+}
+
+func (a *app) newConfigCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Manage local config values",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "view",
+		Short: "View effective config",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			view := map[string]any{
+				"config_path":      a.configPath,
+				"server_url":       a.cfg.ServerURL,
+				"api_token":        maskSecret(a.cfg.APIToken),
+				"default_repo":     a.cfg.DefaultRepo,
+				"server_source":    a.serverSource,
+				"api_token_source": a.tokenSource,
+				"default_source":   a.repoSource,
+			}
+			return a.emit(view, func() error {
+				for _, key := range []string{"config_path", "server_url", "api_token", "default_repo", "server_source", "api_token_source", "default_source"} {
+					a.println("%s: %v", key, view[key])
+				}
+				return nil
+			})
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "get <key>",
+		Short: "Get a config key from local file",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cfg, err := loadFileConfig(a.configPath)
+			if err != nil {
+				return err
+			}
+			key := strings.TrimSpace(args[0])
+			switch key {
+			case "server_url":
+				a.println(cfg.ServerURL)
+			case "api_token":
+				a.println(maskSecret(cfg.APIToken))
+			case "default_repo":
+				a.println(cfg.DefaultRepo)
+			default:
+				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo"}
 			}
 			return nil
 		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "Set a config key in local file",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cfg, err := loadFileConfig(a.configPath)
+			if err != nil {
+				return err
+			}
+			key, val := strings.TrimSpace(args[0]), strings.TrimSpace(args[1])
+			switch key {
+			case "server_url":
+				cfg.ServerURL = strings.TrimRight(val, "/")
+			case "api_token":
+				cfg.APIToken = val
+			case "default_repo":
+				cfg.DefaultRepo = val
+			default:
+				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo"}
+			}
+			if err := config.SaveClientConfig(a.configPath, cfg); err != nil {
+				return &cliError{Code: exitConfig, Message: "failed to write config", Cause: err}
+			}
+			a.println("updated %s in %s", key, a.configPath)
+			return nil
+		},
+	})
+	return cmd
+}
+
+func (a *app) newAuthCmd() *cobra.Command {
+	var (
+		writeConfig bool
+		showRaw     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "auth",
+		Short: "Authentication helpers",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
 	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "rotate",
+		Short: "Generate fresh API and webhook tokens",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			apiToken, err := randomToken(32)
+			if err != nil {
+				return err
+			}
+			webhookSecret, err := randomToken(32)
+			if err != nil {
+				return err
+			}
+			if writeConfig {
+				cfg, err := loadFileConfig(a.configPath)
+				if err != nil {
+					return err
+				}
+				cfg.APIToken = apiToken
+				if err := config.SaveClientConfig(a.configPath, cfg); err != nil {
+					return &cliError{Code: exitConfig, Message: "failed to write config", Cause: err}
+				}
+			}
+			displayAPI := maskSecret(apiToken)
+			displayWebhook := maskSecret(webhookSecret)
+			if showRaw {
+				displayAPI = apiToken
+				displayWebhook = webhookSecret
+			}
+			out := map[string]any{
+				"api_token":      displayAPI,
+				"webhook_secret": displayWebhook,
+				"write_config":   writeConfig,
+			}
+			return a.emit(out, func() error {
+				a.println("api_token: %s", displayAPI)
+				a.println("webhook_secret: %s", displayWebhook)
+				if !showRaw {
+					a.println("use --show to print raw values")
+				}
+				return nil
+			})
+		},
+	})
+	cmd.PersistentFlags().BoolVar(&writeConfig, "write-config", false, "write generated API token to local config")
+	cmd.PersistentFlags().BoolVar(&showRaw, "show", false, "print raw token values")
 	return cmd
 }
 
@@ -473,26 +1114,208 @@ func newCompletionCmd(root *cobra.Command) *cobra.Command {
 			}
 		},
 	}
+	cmd.AddCommand(&cobra.Command{
+		Use:       "install [bash|zsh|fish|powershell]",
+		Short:     "Install completion script to a standard user path",
+		Args:      cobra.ExactValidArgs(1),
+		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			var (
+				target string
+				data   bytes.Buffer
+			)
+			switch args[0] {
+			case "bash":
+				target = filepath.Join(home, ".local", "share", "bash-completion", "completions", "rascal")
+				if err := root.GenBashCompletionV2(&data, true); err != nil {
+					return err
+				}
+			case "zsh":
+				target = filepath.Join(home, ".zfunc", "_rascal")
+				if err := root.GenZshCompletion(&data); err != nil {
+					return err
+				}
+			case "fish":
+				target = filepath.Join(home, ".config", "fish", "completions", "rascal.fish")
+				if err := root.GenFishCompletion(&data, true); err != nil {
+					return err
+				}
+			case "powershell":
+				target = filepath.Join(home, "Documents", "PowerShell", "Modules", "rascal_completion.ps1")
+				if err := root.GenPowerShellCompletionWithDesc(&data); err != nil {
+					return err
+				}
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(target, data.Bytes(), 0o644); err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "installed completion: %s\n", target)
+			return nil
+		},
+	})
 	return cmd
 }
 
+func (a *app) runIDCompletion(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	runs, err := a.fetchRuns(100)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	out := make([]string, 0, len(runs))
+	for _, run := range runs {
+		if strings.HasPrefix(run.ID, toComplete) {
+			out = append(out, run.ID)
+		}
+	}
+	sort.Strings(out)
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
 func (a *app) fetchRuns(limit int) ([]state.Run, error) {
+	if limit <= 0 {
+		limit = 50
+	}
 	resp, err := a.client.do(http.MethodGet, fmt.Sprintf("/v1/runs?limit=%d", limit), nil)
 	if err != nil {
-		return nil, err
+		return nil, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("server error (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, decodeServerError(resp)
 	}
 	var out struct {
 		Runs []state.Run `json:"runs"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 	}
 	return out.Runs, nil
+}
+
+func (a *app) fetchRun(runID string) (state.Run, error) {
+	resp, err := a.client.do(http.MethodGet, "/v1/runs/"+runID, nil)
+	if err != nil {
+		return state.Run{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return state.Run{}, decodeServerError(resp)
+	}
+	var out struct {
+		Run state.Run `json:"run"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return state.Run{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+	}
+	return out.Run, nil
+}
+
+func (a *app) fetchTask(taskID string) (state.Task, error) {
+	escaped := url.PathEscape(taskID)
+	resp, err := a.client.do(http.MethodGet, "/v1/tasks/"+escaped, nil)
+	if err != nil {
+		return state.Task{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return state.Task{}, decodeServerError(resp)
+	}
+	var out struct {
+		Task state.Task `json:"task"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return state.Task{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+	}
+	return out.Task, nil
+}
+
+func decodeServerError(resp *http.Response) error {
+	body, _ := io.ReadAll(resp.Body)
+	msg := strings.TrimSpace(string(body))
+	if msg == "" {
+		msg = http.StatusText(resp.StatusCode)
+	}
+	reqID := strings.TrimSpace(resp.Header.Get("X-Request-ID"))
+	hint := ""
+	if reqID != "" {
+		hint = "request id: " + reqID
+	}
+	return &cliError{
+		Code:      exitServer,
+		Message:   fmt.Sprintf("server error (%d): %s", resp.StatusCode, msg),
+		Hint:      hint,
+		RequestID: reqID,
+	}
+}
+
+func loadFileConfig(path string) (config.ClientConfig, error) {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("yaml")
+	v.SetDefault("server_url", "http://127.0.0.1:8080")
+	if err := v.ReadInConfig(); err != nil {
+		var notFound viper.ConfigFileNotFoundError
+		if !errors.As(err, &notFound) && !os.IsNotExist(err) {
+			return config.ClientConfig{}, &cliError{Code: exitConfig, Message: "failed to read config file", Cause: err}
+		}
+	}
+	return config.ClientConfig{
+		ServerURL:   strings.TrimRight(strings.TrimSpace(v.GetString("server_url")), "/"),
+		APIToken:    strings.TrimSpace(v.GetString("api_token")),
+		DefaultRepo: strings.TrimSpace(v.GetString("default_repo")),
+	}, nil
+}
+
+func promptString(r *bufio.Reader, label, def string) string {
+	if strings.TrimSpace(def) != "" {
+		fmt.Printf("%s [%s]: ", label, def)
+	} else {
+		fmt.Printf("%s: ", label)
+	}
+	line, _ := r.ReadString('\n')
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return def
+	}
+	return line
+}
+
+func filterLogsSince(input string, since time.Time) string {
+	if input == "" {
+		return input
+	}
+	lines := strings.Split(input, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			out = append(out, line)
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			end := strings.Index(line, "]")
+			if end > 1 {
+				ts := strings.TrimSpace(line[1:end])
+				if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
+					if parsed.Before(since) {
+						continue
+					}
+				}
+			}
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 func parseIssueRef(input string) (string, int, error) {
@@ -750,6 +1573,24 @@ func maskSecret(value string) string {
 }
 
 func exitErr(err error) {
+	code := exitGeneric
+	var ce *cliError
+	if errors.As(err, &ce) {
+		if ce.Code != 0 {
+			code = ce.Code
+		}
+		fmt.Fprintln(os.Stderr, "error:", ce.Error())
+		if strings.TrimSpace(ce.Hint) != "" {
+			fmt.Fprintln(os.Stderr, "hint:", ce.Hint)
+		}
+		if ce.Cause != nil {
+			fmt.Fprintln(os.Stderr, "cause:", ce.Cause)
+		}
+		if ce.RequestID != "" {
+			fmt.Fprintln(os.Stderr, "request_id:", ce.RequestID)
+		}
+		os.Exit(code)
+	}
 	fmt.Fprintln(os.Stderr, "error:", err)
-	os.Exit(1)
+	os.Exit(code)
 }

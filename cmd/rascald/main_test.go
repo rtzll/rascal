@@ -83,6 +83,7 @@ func newTestServer(t *testing.T, launcher runner.Launcher) *server {
 		gh:         ghapi.NewAPIClient(""),
 		activeRuns: make(map[string]string),
 		queuedRuns: make(map[string][]string),
+		runCancels: make(map[string]context.CancelFunc),
 	}
 }
 
@@ -298,4 +299,61 @@ func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
 	if calls := launcher.Calls(); calls != 2 {
 		t.Fatalf("expected 2 launcher calls, got %d", calls)
 	}
+}
+
+func TestHandleTaskSubresourcesGet(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	taskID := "owner/repo#22"
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{
+		ID:          taskID,
+		Repo:        "owner/repo",
+		IssueNumber: 22,
+	}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/owner%2Frepo%2322", nil)
+	rec := httptest.NewRecorder()
+	s.handleTaskSubresources(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestHandleCancelRunQueued(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer func() {
+		close(waitCh)
+		waitForServerIdle(t, s)
+	}()
+
+	first, err := s.createAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Task: "first"})
+	if err != nil {
+		t.Fatalf("create first run: %v", err)
+	}
+	second, err := s.createAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Task: "second"})
+	if err != nil {
+		t.Fatalf("create second run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run start")
+
+	rec := httptest.NewRecorder()
+	s.handleCancelRun(rec, second.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for queued cancel, got %d", rec.Code)
+	}
+
+	updated, ok := s.store.GetRun(second.ID)
+	if !ok {
+		t.Fatalf("missing run %s", second.ID)
+	}
+	if updated.Status != state.StatusCanceled {
+		t.Fatalf("expected canceled status, got %s", updated.Status)
+	}
+
+	_ = first
 }

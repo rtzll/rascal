@@ -14,10 +14,18 @@ Rascal is a self-hosted coding-agent orchestrator.
   - `POST /v1/webhooks/github`
 - `cmd/rascal`: CLI
   - `bootstrap`
+  - `init`
   - `run`
   - `issue`
   - `ps`
   - `logs`
+  - `open`
+  - `rerun`
+  - `retry`
+  - `cancel`
+  - `task`
+  - `config`
+  - `auth`
   - `doctor`
   - `completion`
 - Per-run artifact layout under `RASCAL_DATA_DIR/runs/<run_id>/`
@@ -41,6 +49,12 @@ go run ./cmd/rascal run -R OWNER/REPO -t "implement feature"
 go run ./cmd/rascal ps
 go run ./cmd/rascal logs <run_id>
 ```
+
+Global UX flags:
+
+- `--output table|json|yaml`
+- `--verbose`, `--quiet`, `--debug`
+- `--config <path>`
 
 ## Bootstrap
 
