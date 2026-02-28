@@ -31,6 +31,7 @@ type hcloudProvisionResult struct {
 	Host          string `json:"host"`
 	Location      string `json:"location"`
 	ServerType    string `json:"server_type"`
+	Architecture  string `json:"architecture"`
 	Image         string `json:"image"`
 	SSHKeyName    string `json:"ssh_key_name"`
 	FirewallName  string `json:"firewall_name,omitempty"`
@@ -74,7 +75,7 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 				return &cliError{Code: exitInput, Message: "missing Hetzner token", Hint: "set --token or HCLOUD_TOKEN"}
 			}
 			name = firstNonEmpty(strings.TrimSpace(name), fmt.Sprintf("rascal-%d", time.Now().UTC().Unix()))
-			serverType = firstNonEmpty(strings.TrimSpace(serverType), "cax11")
+			serverType = firstNonEmpty(strings.TrimSpace(serverType), "cx23")
 			location = firstNonEmpty(strings.TrimSpace(location), "fsn1")
 			image = firstNonEmpty(strings.TrimSpace(image), "ubuntu-24.04")
 			sshKeyName = firstNonEmpty(strings.TrimSpace(sshKeyName), "rascal")
@@ -112,6 +113,9 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 				a.println("host: %s", out.Host)
 				a.println("location: %s", out.Location)
 				a.println("server type: %s", out.ServerType)
+				if out.Architecture != "" {
+					a.println("architecture: %s", out.Architecture)
+				}
 				if out.FirewallID > 0 {
 					a.println("firewall: %s (%d)", out.FirewallName, out.FirewallID)
 				}
@@ -121,7 +125,7 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&token, "token", "", "Hetzner Cloud token (or HCLOUD_TOKEN)")
 	cmd.Flags().StringVar(&name, "name", "", "server name")
-	cmd.Flags().StringVar(&serverType, "server-type", "cax11", "Hetzner server type")
+	cmd.Flags().StringVar(&serverType, "server-type", "cx23", "Hetzner server type")
 	cmd.Flags().StringVar(&location, "location", "fsn1", "Hetzner location")
 	cmd.Flags().StringVar(&image, "image", "ubuntu-24.04", "Hetzner image")
 	cmd.Flags().StringVar(&sshKeyName, "ssh-key-name", "rascal", "Hetzner SSH key resource name")
@@ -192,6 +196,21 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 				webhookSecret = created
 			}
 
+			resolvedGoarch := goarch
+			if resolvedGoarch == "" {
+				detected, err := detectRemoteGOARCH(deployConfig{
+					Host:       host,
+					SSHUser:    firstNonEmpty(sshUser, "root"),
+					SSHKeyPath: sshKey,
+					SSHPort:    sshPort,
+				})
+				if err != nil {
+					return &cliError{Code: exitRuntime, Message: "auto-detect goarch failed", Hint: "set --goarch explicitly", Cause: err}
+				}
+				resolvedGoarch = detected
+				a.println("detected goarch: %s (remote host)", resolvedGoarch)
+			}
+
 			cfg := deployConfig{
 				Host:               host,
 				SSHUser:            firstNonEmpty(sshUser, "root"),
@@ -207,7 +226,7 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 				ServerDataDir:      "/var/lib/rascal",
 				ServerStatePath:    "/var/lib/rascal/state.json",
 				ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
-				GOARCH:             firstNonEmpty(goarch, "amd64"),
+				GOARCH:             resolvedGoarch,
 				Domain:             domain,
 			}
 			if err := deployToExistingHost(cfg); err != nil {
@@ -234,7 +253,7 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH user")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path")
 	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH port")
-	cmd.Flags().StringVar(&goarch, "goarch", "amd64", "GOARCH for rascald binary")
+	cmd.Flags().StringVar(&goarch, "goarch", "", "GOARCH for rascald binary (auto-detected when empty)")
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token")
 	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
@@ -368,6 +387,7 @@ func provisionHetznerServer(ctx context.Context, cfg hcloudProvisionConfig) (hcl
 		Host:          host,
 		Location:      cfg.Location,
 		ServerType:    cfg.ServerType,
+		Architecture:  strings.TrimSpace(string(serverType.Architecture)),
 		Image:         cfg.Image,
 		SSHKeyName:    sshKey.Name,
 		RootPassword:  strings.TrimSpace(res.RootPassword),

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -126,6 +127,37 @@ func TestRootHasRepoAndInfraCommands(t *testing.T) {
 	}
 }
 
+func TestBootstrapAndInfraDefaults(t *testing.T) {
+	root := newRootCmd()
+
+	bootstrapCmd, _, err := root.Find([]string{"bootstrap"})
+	if err != nil {
+		t.Fatalf("bootstrap command missing: %v", err)
+	}
+	if got := bootstrapCmd.Flags().Lookup("hcloud-server-type").DefValue; got != "cx23" {
+		t.Fatalf("bootstrap default hcloud server type = %q, want cx23", got)
+	}
+	if got := bootstrapCmd.Flags().Lookup("goarch").DefValue; got != "" {
+		t.Fatalf("bootstrap default goarch = %q, want empty for auto-detect", got)
+	}
+
+	provisionCmd, _, err := root.Find([]string{"infra", "provision-hetzner"})
+	if err != nil {
+		t.Fatalf("infra provision-hetzner command missing: %v", err)
+	}
+	if got := provisionCmd.Flags().Lookup("server-type").DefValue; got != "cx23" {
+		t.Fatalf("infra provision default server type = %q, want cx23", got)
+	}
+
+	deployCmd, _, err := root.Find([]string{"infra", "deploy-existing"})
+	if err != nil {
+		t.Fatalf("infra deploy-existing command missing: %v", err)
+	}
+	if got := deployCmd.Flags().Lookup("goarch").DefValue; got != "" {
+		t.Fatalf("infra deploy-existing default goarch = %q, want empty for auto-detect", got)
+	}
+}
+
 func TestAuthHelpContainsSync(t *testing.T) {
 	root := newRootCmd()
 	var stdout bytes.Buffer
@@ -179,6 +211,52 @@ func TestValidateDistinctGitHubTokens(t *testing.T) {
 	}
 }
 
+func TestGoarchFromUnameMachine(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		input string
+		want  string
+		ok    bool
+	}{
+		{input: "x86_64", want: "amd64", ok: true},
+		{input: "amd64", want: "amd64", ok: true},
+		{input: "aarch64", want: "arm64", ok: true},
+		{input: "arm64", want: "arm64", ok: true},
+		{input: "mips64", want: "", ok: false},
+	}
+
+	for _, tc := range cases {
+		got, ok := goarchFromUnameMachine(tc.input)
+		if got != tc.want || ok != tc.ok {
+			t.Fatalf("goarchFromUnameMachine(%q) = (%q, %t), want (%q, %t)", tc.input, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestGoarchFromHetznerArchitecture(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		input string
+		want  string
+		ok    bool
+	}{
+		{input: "x86", want: "amd64", ok: true},
+		{input: "amd64", want: "amd64", ok: true},
+		{input: "arm", want: "arm64", ok: true},
+		{input: "arm64", want: "arm64", ok: true},
+		{input: "sparc", want: "", ok: false},
+	}
+
+	for _, tc := range cases {
+		got, ok := goarchFromHetznerArchitecture(tc.input)
+		if got != tc.want || ok != tc.ok {
+			t.Fatalf("goarchFromHetznerArchitecture(%q) = (%q, %t), want (%q, %t)", tc.input, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 func TestLoadEnvFile(t *testing.T) {
 	path := t.TempDir() + "/.env"
 	content := `
@@ -213,6 +291,48 @@ func TestLoadEnvFileInvalidLine(t *testing.T) {
 	}
 	if _, err := loadEnvFile(path); err == nil {
 		t.Fatal("expected parse error for invalid env line")
+	}
+}
+
+func TestLoadGlobalEnvDefaultDotRascalEnv(t *testing.T) {
+	tmp := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(tmp, ".rascal.env"), []byte("RASCAL_TEST_ENV_FALLBACK=from_file\n"), 0o600); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+	t.Setenv("RASCAL_TEST_ENV_FALLBACK", "")
+
+	a := &app{}
+	if err := a.loadGlobalEnv(); err != nil {
+		t.Fatalf("loadGlobalEnv: %v", err)
+	}
+	if got := os.Getenv("RASCAL_TEST_ENV_FALLBACK"); got != "from_file" {
+		t.Fatalf("unexpected env value: %q", got)
+	}
+}
+
+func TestLoadGlobalEnvExplicitEnvWinsOverFile(t *testing.T) {
+	tmp := t.TempDir()
+	envPath := filepath.Join(tmp, "x.env")
+	if err := os.WriteFile(envPath, []byte("RASCAL_TEST_ENV_PRIORITY=from_file\n"), 0o600); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+	t.Setenv("RASCAL_TEST_ENV_PRIORITY", "from_env")
+
+	a := &app{envFilePath: envPath}
+	if err := a.loadGlobalEnv(); err != nil {
+		t.Fatalf("loadGlobalEnv: %v", err)
+	}
+	if got := os.Getenv("RASCAL_TEST_ENV_PRIORITY"); got != "from_env" {
+		t.Fatalf("expected env var to keep precedence, got %q", got)
 	}
 }
 
