@@ -16,6 +16,7 @@ COMMIT_MESSAGE_FILE="${META_DIR}/commit_message.txt"
 : "${RASCAL_REPO:?RASCAL_REPO is required}"
 : "${RASCAL_BASE_BRANCH:=main}"
 : "${RASCAL_HEAD_BRANCH:=rascal/${RASCAL_RUN_ID}}"
+: "${RASCAL_ISSUE_NUMBER:=0}"
 : "${RASCAL_TRIGGER:=cli}"
 
 mkdir -p "${META_DIR}" "${WORK_ROOT}" "${META_DIR}/goose" "${META_DIR}/codex"
@@ -213,6 +214,9 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
       pr_body="Automated changes from Rascal run ${RASCAL_RUN_ID}."
       if [[ -n "${commit_body}" ]]; then
         pr_body="${commit_body}"$'\n\n'"${pr_body}"
+      fi
+      if [[ "${RASCAL_ISSUE_NUMBER}" =~ ^[0-9]+$ ]] && [[ "${RASCAL_ISSUE_NUMBER}" -gt 0 ]]; then
+        pr_body="${pr_body}"$'\n\n'"Closes #${RASCAL_ISSUE_NUMBER}"
       fi
       if ! pr_create_output="$(gh pr create \
         --repo "${RASCAL_REPO}" \
