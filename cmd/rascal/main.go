@@ -2072,7 +2072,7 @@ func (c apiClient) doOverSSH(method, path string, body io.Reader) (*http.Respons
 	}
 
 	curlArgs := []string{
-		"curl", "-sS", "-i",
+		"curl", "-sS", "-i", "--raw",
 		"-X", shellSingleQuote(strings.TrimSpace(method)),
 		"-H", shellSingleQuote("Accept: application/json"),
 	}
