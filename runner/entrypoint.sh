@@ -90,7 +90,7 @@ cleanup_and_exit() {
   exit "$code"
 }
 
-trap 'cleanup_and_exit 1 "unexpected error"' ERR
+trap 'cleanup_and_exit 1 "unexpected error (line ${LINENO})"' ERR
 
 if [[ -d "${REPO_DIR}/.git" ]]; then
   log "repo already present, refreshing"
