@@ -56,11 +56,13 @@ GITHUB_ADMIN_TOKEN=...
 GITHUB_RUNTIME_TOKEN=...
 ```
 
+Rascal auto-loads `./.rascal.env` for all commands (as fallback).  
+You can also point to a custom file globally with `--env-file` or `RASCAL_ENV_FILE`.
+
 ## Quickstart
 
 ```bash
 go run ./cmd/rascal bootstrap \
-  --env-file .rascal.env \
   --repo OWNER/REPO \
   --domain rascal.example.com
 ```
@@ -88,7 +90,6 @@ go run ./cmd/rascal completion zsh
 
 ```bash
 go run ./cmd/rascal bootstrap \
-  --env-file .rascal.env \
   --repo OWNER/REPO \
   --host YOUR_SERVER_IP \
   --domain rascal.example.com

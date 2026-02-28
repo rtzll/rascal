@@ -38,6 +38,7 @@ type apiClient struct {
 
 type app struct {
 	configPath      string
+	envFilePath     string
 	serverURLFlag   string
 	apiTokenFlag    string
 	defaultRepoFlag string
@@ -99,6 +100,9 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if err := a.loadGlobalEnv(); err != nil {
+				return &cliError{Code: exitConfig, Message: "failed to load env file", Cause: err}
+			}
 			return a.initConfig()
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -107,6 +111,7 @@ func newRootCmd() *cobra.Command {
 	}
 
 	root.PersistentFlags().StringVar(&a.configPath, "config", config.DefaultClientConfigPath(), "config file path")
+	root.PersistentFlags().StringVar(&a.envFilePath, "env-file", "", "env file path (fallback: ./.rascal.env if present)")
 	root.PersistentFlags().StringVar(&a.serverURLFlag, "server-url", "", "orchestrator base URL")
 	root.PersistentFlags().StringVar(&a.apiTokenFlag, "api-token", "", "orchestrator API token")
 	root.PersistentFlags().StringVar(&a.defaultRepoFlag, "default-repo", "", "default repository in OWNER/REPO form")
@@ -364,30 +369,25 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 		hcloudFirewallName string
 		hcloudApplyFW      bool
 		hcloudTimeout      time.Duration
-		envFile            string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Configure client, provision (optional), and deploy orchestrator",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			fileEnv, err := loadEnvFile(envFile)
-			if err != nil {
-				return fmt.Errorf("load --env-file: %w", err)
-			}
 			repo = firstNonEmpty(strings.TrimSpace(repo), a.cfg.DefaultRepo)
 			domain = firstNonEmpty(strings.TrimSpace(domain), strings.TrimSpace(a.cfg.Domain))
 			serverURL = strings.TrimSpace(serverURL)
-			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), envFirst(fileEnv, "RASCAL_API_TOKEN"))
-			githubAdminToken = firstNonEmpty(strings.TrimSpace(githubAdminToken), envFirst(fileEnv, "GITHUB_ADMIN_TOKEN", "GITHUB_TOKEN"))
-			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), envFirst(fileEnv, "GITHUB_RUNTIME_TOKEN", "RASCAL_GITHUB_RUNTIME_TOKEN"))
-			webhookSecret = firstNonEmpty(strings.TrimSpace(webhookSecret), envFirst(fileEnv, "RASCAL_GITHUB_WEBHOOK_SECRET", "GITHUB_WEBHOOK_SECRET"))
+			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")))
+			githubAdminToken = firstNonEmpty(strings.TrimSpace(githubAdminToken), strings.TrimSpace(os.Getenv("GITHUB_ADMIN_TOKEN")), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
+			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
+			webhookSecret = firstNonEmpty(strings.TrimSpace(webhookSecret), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")), strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")))
 			host = firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.Host))
 			sshUser = strings.TrimSpace(sshUser)
 			sshKey = strings.TrimSpace(sshKey)
 			goarch = strings.TrimSpace(goarch)
 			codexAuthPath = strings.TrimSpace(codexAuthPath)
-			hcloudToken = firstNonEmpty(strings.TrimSpace(hcloudToken), envFirst(fileEnv, "HCLOUD_TOKEN"))
+			hcloudToken = firstNonEmpty(strings.TrimSpace(hcloudToken), strings.TrimSpace(os.Getenv("HCLOUD_TOKEN")))
 			hcloudServerName = strings.TrimSpace(hcloudServerName)
 			hcloudServerType = strings.TrimSpace(hcloudServerType)
 			hcloudLocation = strings.TrimSpace(hcloudLocation)
@@ -454,7 +454,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				out, err := provisionHetznerServer(ctx, hcloudProvisionConfig{
 					Token:         hcloudToken,
 					ServerName:    hcloudServerName,
-					ServerType:    firstNonEmpty(hcloudServerType, "cax11"),
+					ServerType:    firstNonEmpty(hcloudServerType, "cx23"),
 					Location:      firstNonEmpty(hcloudLocation, "fsn1"),
 					Image:         firstNonEmpty(hcloudImage, "ubuntu-24.04"),
 					SSHKeyName:    firstNonEmpty(hcloudSSHKeyName, "rascal"),
@@ -486,6 +486,42 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 
 			deployPerformed := false
 			if shouldDeploy {
+				resolvedGoarch := goarch
+				if resolvedGoarch == "" {
+					switch {
+					case provisionOut != nil:
+						detected, ok := goarchFromHetznerArchitecture(provisionOut.Architecture)
+						if ok {
+							resolvedGoarch = detected
+							a.println("detected goarch: %s (hcloud architecture: %s)", resolvedGoarch, provisionOut.Architecture)
+							break
+						}
+						detected, err := detectRemoteGOARCH(deployConfig{
+							Host:       host,
+							SSHUser:    firstNonEmpty(sshUser, "root"),
+							SSHKeyPath: sshKey,
+							SSHPort:    sshPort,
+						})
+						if err != nil {
+							return fmt.Errorf("auto-detect goarch: unable to map Hetzner architecture %q and ssh detection failed: %w", provisionOut.Architecture, err)
+						}
+						resolvedGoarch = detected
+						a.println("detected goarch: %s (remote host)", resolvedGoarch)
+					default:
+						detected, err := detectRemoteGOARCH(deployConfig{
+							Host:       host,
+							SSHUser:    firstNonEmpty(sshUser, "root"),
+							SSHKeyPath: sshKey,
+							SSHPort:    sshPort,
+						})
+						if err != nil {
+							return fmt.Errorf("auto-detect goarch: %w", err)
+						}
+						resolvedGoarch = detected
+						a.println("detected goarch: %s (remote host)", resolvedGoarch)
+					}
+				}
+
 				deployCfg := deployConfig{
 					Host:               host,
 					SSHUser:            firstNonEmpty(sshUser, "root"),
@@ -502,7 +538,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 					ServerDataDir:      "/var/lib/rascal",
 					ServerStatePath:    "/var/lib/rascal/state.json",
 					ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
-					GOARCH:             firstNonEmpty(goarch, "amd64"),
+					GOARCH:             resolvedGoarch,
 				}
 				healthyExisting := false
 				if provisionOut == nil {
@@ -625,13 +661,13 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH user for existing host deployment")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path for existing host deployment")
 	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH port for existing host deployment")
-	cmd.Flags().StringVar(&goarch, "goarch", "amd64", "GOARCH for rascald binary when deploying to existing host")
+	cmd.Flags().StringVar(&goarch, "goarch", "", "GOARCH for rascald binary (auto-detected when empty)")
 	cmd.Flags().BoolVar(&skipDeploy, "skip-deploy", false, "skip remote deployment")
 	cmd.Flags().BoolVar(&provisionNew, "provision-new", false, "force provisioning a new host when --hcloud-token is set")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path copied to the server")
 	cmd.Flags().StringVar(&hcloudToken, "hcloud-token", "", "Hetzner Cloud token (used to provision a host when needed)")
 	cmd.Flags().StringVar(&hcloudServerName, "hcloud-server-name", "", "Hetzner server name")
-	cmd.Flags().StringVar(&hcloudServerType, "hcloud-server-type", "cax11", "Hetzner server type")
+	cmd.Flags().StringVar(&hcloudServerType, "hcloud-server-type", "cx23", "Hetzner server type")
 	cmd.Flags().StringVar(&hcloudLocation, "hcloud-location", "fsn1", "Hetzner location")
 	cmd.Flags().StringVar(&hcloudImage, "hcloud-image", "ubuntu-24.04", "Hetzner image")
 	cmd.Flags().StringVar(&hcloudSSHKeyName, "hcloud-ssh-key-name", "rascal", "Hetzner SSH key resource name")
@@ -639,7 +675,6 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&hcloudFirewallName, "hcloud-firewall-name", "rascal-fw", "Hetzner firewall resource name")
 	cmd.Flags().BoolVar(&hcloudApplyFW, "hcloud-apply-firewall", true, "create/update and attach firewall (22,80,443)")
 	cmd.Flags().DurationVar(&hcloudTimeout, "hcloud-timeout", 8*time.Minute, "Hetzner provisioning timeout")
-	cmd.Flags().StringVar(&envFile, "env-file", "", "optional env file with bootstrap secrets (KEY=VALUE)")
 
 	return cmd
 }
@@ -1585,20 +1620,6 @@ func loadFileConfig(path string) (config.ClientConfig, error) {
 	}, nil
 }
 
-func envFirst(fileEnv map[string]string, keys ...string) string {
-	for _, key := range keys {
-		if v := strings.TrimSpace(fileEnv[key]); v != "" {
-			return v
-		}
-	}
-	for _, key := range keys {
-		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 func loadEnvFile(path string) (map[string]string, error) {
 	out := map[string]string{}
 	path = strings.TrimSpace(path)
@@ -1646,6 +1667,61 @@ func loadEnvFile(path string) (map[string]string, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func (a *app) loadGlobalEnv() error {
+	explicitPath := strings.TrimSpace(a.envFilePath)
+	if explicitPath == "" {
+		explicitPath = strings.TrimSpace(os.Getenv("RASCAL_ENV_FILE"))
+	}
+	path := ""
+	if explicitPath != "" {
+		expanded, err := expandPath(explicitPath)
+		if err != nil {
+			return err
+		}
+		st, err := os.Stat(expanded)
+		if err != nil {
+			return err
+		}
+		if st.IsDir() {
+			return fmt.Errorf("env file path is a directory: %s", expanded)
+		}
+		path = expanded
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		candidate := filepath.Join(cwd, ".rascal.env")
+		st, err := os.Stat(candidate)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return err
+			}
+		} else if !st.IsDir() {
+			path = candidate
+		}
+	}
+	if path == "" {
+		return nil
+	}
+	envMap, err := loadEnvFile(path)
+	if err != nil {
+		return err
+	}
+	for k, v := range envMap {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		if existing, ok := os.LookupEnv(k); ok && strings.TrimSpace(existing) != "" {
+			continue
+		}
+		if err := os.Setenv(k, v); err != nil {
+			return fmt.Errorf("set %s from env file: %w", k, err)
+		}
+	}
+	return nil
 }
 
 func noColorRequested(flagValue bool) bool {
@@ -1902,6 +1978,39 @@ func runLocalCapture(name string, args ...string) (string, error) {
 		return text, fmt.Errorf("%s failed: %w (%s)", name, err, text)
 	}
 	return text, nil
+}
+
+func detectRemoteGOARCH(cfg deployConfig) (string, error) {
+	out, err := runLocalCapture("ssh", sshArgs(cfg, "uname -m")...)
+	if err != nil {
+		return "", fmt.Errorf("run `uname -m` over ssh: %w", err)
+	}
+	if goarch, ok := goarchFromUnameMachine(out); ok {
+		return goarch, nil
+	}
+	return "", fmt.Errorf("unsupported remote architecture %q (set --goarch)", strings.TrimSpace(out))
+}
+
+func goarchFromUnameMachine(machine string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(machine)) {
+	case "x86_64", "amd64":
+		return "amd64", true
+	case "aarch64", "arm64":
+		return "arm64", true
+	default:
+		return "", false
+	}
+}
+
+func goarchFromHetznerArchitecture(arch string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(arch)) {
+	case "x86", "x86_64", "amd64":
+		return "amd64", true
+	case "arm", "aarch64", "arm64":
+		return "arm64", true
+	default:
+		return "", false
+	}
 }
 
 func sshArgs(cfg deployConfig, remoteCmd string) []string {
