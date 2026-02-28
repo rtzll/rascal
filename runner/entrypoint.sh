@@ -139,7 +139,7 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
 
   if command -v gh >/dev/null 2>&1; then
     set +e
-    pr_view_json="$(gh pr view "${RASCAL_HEAD_BRANCH}" --json number,url 2>/dev/null)"
+    pr_view_json="$(gh pr view "${RASCAL_HEAD_BRANCH}" --repo "${RASCAL_REPO}" --json number,url 2>/dev/null)"
     rc=$?
     set -e
     if [[ $rc -eq 0 && -n "$pr_view_json" ]]; then
@@ -147,14 +147,32 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
       pr_url="$(jq -r '.url // ""' <<<"$pr_view_json")"
     else
       log "creating pull request"
-      pr_create_json="$(gh pr create \
+      set +e
+      pr_create_output="$(gh pr create \
+        --repo "${RASCAL_REPO}" \
         --base "${RASCAL_BASE_BRANCH}" \
         --head "${RASCAL_HEAD_BRANCH}" \
         --title "rascal: ${RASCAL_TASK_ID}" \
-        --body "Automated changes from Rascal run ${RASCAL_RUN_ID}." \
-        --json number,url)"
-      pr_number="$(jq -r '.number // 0' <<<"$pr_create_json")"
-      pr_url="$(jq -r '.url // ""' <<<"$pr_create_json")"
+        --body "Automated changes from Rascal run ${RASCAL_RUN_ID}." 2>&1)"
+      rc=$?
+      set -e
+      if [[ $rc -ne 0 ]]; then
+        cleanup_and_exit 1 "gh pr create failed: ${pr_create_output}"
+      fi
+
+      set +e
+      pr_view_json="$(gh pr view "${RASCAL_HEAD_BRANCH}" --repo "${RASCAL_REPO}" --json number,url 2>/dev/null)"
+      rc=$?
+      set -e
+      if [[ $rc -eq 0 && -n "$pr_view_json" ]]; then
+        pr_number="$(jq -r '.number // 0' <<<"$pr_view_json")"
+        pr_url="$(jq -r '.url // ""' <<<"$pr_view_json")"
+      else
+        pr_url="$(printf '%s\n' "${pr_create_output}" | rg -o 'https://github.com/[^[:space:]]+/pull/[0-9]+' -m1 || true)"
+        if [[ -n "${pr_url}" ]]; then
+          pr_number="${pr_url##*/}"
+        fi
+      fi
     fi
   fi
 fi
