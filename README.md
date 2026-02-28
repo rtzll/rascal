@@ -22,27 +22,27 @@ Rascal uses three tokens for production bootstrap:
 1. `HCLOUD_TOKEN`
 - Used locally by `rascal bootstrap` to provision Hetzner hosts.
 - Use a **read/write** token (needs to create SSH keys, firewalls, and servers).
-- Create it in Hetzner Cloud Console: Project -> Security -> API Tokens.
-- Docs: https://docs.hetzner.com/cloud/api/getting-started/generating-api-token
+- Create it in [Hetzner Cloud Console](https://console.hetzner.cloud/): `Project -> Security -> API Tokens`.
+- Docs: [Generate an API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token).
 
 2. `GITHUB_ADMIN_TOKEN`
 - Local-only token for label/webhook setup.
+- Create a [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) scoped to the target repo.
 - Fine-grained PAT (single repo) recommended with:
   - `Administration`: **Read and write** (webhooks)
   - `Issues`: **Read and write** (label management)
-  - `Metadata`: **Read-only**
 
 3. `GITHUB_RUNTIME_TOKEN`
 - Stored on server; used by runner for git push + PR/comment workflows.
 - Keep this least-privilege compared to admin token.
+- Create a separate [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) scoped to the target repo.
 - Fine-grained PAT (single repo) recommended with:
   - `Contents`: **Read and write** (clone/push branch)
   - `Pull requests`: **Read and write** (open/update PR)
-  - `Issues`: **Read and write** (comments/status messaging)
-  - `Metadata`: **Read-only**
 
-For GitHub tokens, use fine-grained PATs where possible:
-https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
+For GitHub token details:
+- [Managing personal access tokens](https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+- [Fine-grained PAT permissions](https://docs.github.com/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token#permissions)
 
 Note: GitHub does not provide an API to mint user PATs from another PAT, so runtime token creation is manual.
 
