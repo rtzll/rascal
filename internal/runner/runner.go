@@ -2,17 +2,41 @@ package runner
 
 import (
 	"context"
-	"errors"
 )
+
+// Spec defines the input contract for a single run.
+type Spec struct {
+	RunID       string
+	TaskID      string
+	Repo        string
+	Task        string
+	BaseBranch  string
+	HeadBranch  string
+	Trigger     string
+	RunDir      string
+	IssueNumber int
+	PRNumber    int
+	Context     string
+}
+
+// Result captures outputs emitted by the run environment.
+type Result struct {
+	PRNumber int
+	PRURL    string
+	HeadSHA  string
+	ExitCode int
+}
 
 // Launcher starts a run inside an execution environment (Docker in v1).
 type Launcher interface {
-	Start(ctx context.Context, runID string, runDir string, env map[string]string) error
+	Start(ctx context.Context, spec Spec) (Result, error)
 }
 
-// NoopLauncher is a safe default for scaffolding and local development.
-type NoopLauncher struct{}
-
-func (NoopLauncher) Start(_ context.Context, _ string, _ string, _ map[string]string) error {
-	return errors.New("runner not configured yet")
+func NewLauncher(mode, image, githubToken string) Launcher {
+	switch mode {
+	case "docker":
+		return DockerLauncher{Image: image, GitHubToken: githubToken}
+	default:
+		return NoopLauncher{}
+	}
 }

@@ -13,7 +13,9 @@ import (
 
 type persistentState struct {
 	Runs       []Run                `json:"runs"`
+	Tasks      []Task               `json:"tasks"`
 	Deliveries map[string]time.Time `json:"deliveries"`
+	PRTaskMap  map[string]string    `json:"pr_task_map"`
 }
 
 type Store struct {
@@ -22,7 +24,9 @@ type Store struct {
 	maxRuns    int
 	runs       map[string]Run
 	order      []string
+	tasks      map[string]Task
 	deliveries map[string]time.Time
+	prTaskMap  map[string]string
 }
 
 func New(path string, maxRuns int) (*Store, error) {
@@ -34,7 +38,9 @@ func New(path string, maxRuns int) (*Store, error) {
 		path:       path,
 		maxRuns:    maxRuns,
 		runs:       make(map[string]Run),
+		tasks:      make(map[string]Task),
 		deliveries: make(map[string]time.Time),
+		prTaskMap:  make(map[string]string),
 	}
 
 	if err := s.load(); err != nil {
@@ -49,6 +55,127 @@ func NewRunID() (string, error) {
 		return "", fmt.Errorf("create run id: %w", err)
 	}
 	return "run_" + hex.EncodeToString(buf), nil
+}
+
+func (s *Store) UpsertTask(in UpsertTaskInput) (Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if in.ID == "" || in.Repo == "" {
+		return Task{}, fmt.Errorf("task id and repo are required")
+	}
+
+	now := time.Now().UTC()
+	task, exists := s.tasks[in.ID]
+	if !exists {
+		task = Task{
+			ID:          in.ID,
+			Repo:        in.Repo,
+			IssueNumber: in.IssueNumber,
+			PRNumber:    in.PRNumber,
+			Status:      TaskOpen,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+	} else {
+		if in.IssueNumber > 0 {
+			task.IssueNumber = in.IssueNumber
+		}
+		if in.PRNumber > 0 {
+			task.PRNumber = in.PRNumber
+		}
+		task.UpdatedAt = now
+	}
+
+	s.tasks[in.ID] = task
+	if task.PRNumber > 0 {
+		s.prTaskMap[prKey(task.Repo, task.PRNumber)] = task.ID
+	}
+
+	if err := s.persistLocked(); err != nil {
+		return Task{}, err
+	}
+	return task, nil
+}
+
+func (s *Store) GetTask(taskID string) (Task, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	task, ok := s.tasks[taskID]
+	return task, ok
+}
+
+func (s *Store) FindTaskByPR(repo string, prNumber int) (Task, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	taskID, ok := s.prTaskMap[prKey(repo, prNumber)]
+	if !ok {
+		return Task{}, false
+	}
+	task, ok := s.tasks[taskID]
+	return task, ok
+}
+
+func (s *Store) SetTaskPR(taskID, repo string, prNumber int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	task, ok := s.tasks[taskID]
+	if !ok {
+		return fmt.Errorf("task %q not found", taskID)
+	}
+	if prNumber <= 0 {
+		return nil
+	}
+
+	task.PRNumber = prNumber
+	task.UpdatedAt = time.Now().UTC()
+	s.tasks[taskID] = task
+	s.prTaskMap[prKey(repo, prNumber)] = taskID
+
+	return s.persistLocked()
+}
+
+func (s *Store) SetTaskPendingInput(taskID string, pending bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	task, ok := s.tasks[taskID]
+	if !ok {
+		return fmt.Errorf("task %q not found", taskID)
+	}
+	task.PendingInput = pending
+	task.UpdatedAt = time.Now().UTC()
+	s.tasks[taskID] = task
+	return s.persistLocked()
+}
+
+func (s *Store) MarkTaskCompleted(taskID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	task, ok := s.tasks[taskID]
+	if !ok {
+		return fmt.Errorf("task %q not found", taskID)
+	}
+	task.Status = TaskCompleted
+	task.PendingInput = false
+	task.UpdatedAt = time.Now().UTC()
+	s.tasks[taskID] = task
+	return s.persistLocked()
+}
+
+func (s *Store) IsTaskCompleted(taskID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	task, ok := s.tasks[taskID]
+	if !ok {
+		return false
+	}
+	return task.Status == TaskCompleted
 }
 
 func (s *Store) AddRun(in CreateRunInput) (Run, error) {
@@ -69,20 +196,49 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	}
 
 	r := Run{
-		ID:         in.ID,
-		TaskID:     in.TaskID,
-		Repo:       in.Repo,
-		Task:       in.Task,
-		BaseBranch: baseBranch,
-		HeadBranch: in.HeadBranch,
-		Trigger:    in.Trigger,
-		Status:     StatusQueued,
-		RunDir:     in.RunDir,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:          in.ID,
+		TaskID:      in.TaskID,
+		Repo:        in.Repo,
+		Task:        in.Task,
+		BaseBranch:  baseBranch,
+		HeadBranch:  in.HeadBranch,
+		Trigger:     in.Trigger,
+		Status:      StatusQueued,
+		RunDir:      in.RunDir,
+		IssueNumber: in.IssueNumber,
+		PRNumber:    in.PRNumber,
+		Context:     in.Context,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	if r.Trigger == "" {
 		r.Trigger = "cli"
+	}
+
+	task, ok := s.tasks[in.TaskID]
+	if !ok {
+		task = Task{
+			ID:          in.TaskID,
+			Repo:        in.Repo,
+			IssueNumber: in.IssueNumber,
+			PRNumber:    in.PRNumber,
+			Status:      TaskOpen,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+	} else {
+		if in.IssueNumber > 0 {
+			task.IssueNumber = in.IssueNumber
+		}
+		if in.PRNumber > 0 {
+			task.PRNumber = in.PRNumber
+		}
+		task.UpdatedAt = now
+	}
+	task.LastRunID = r.ID
+	s.tasks[task.ID] = task
+	if task.PRNumber > 0 {
+		s.prTaskMap[prKey(task.Repo, task.PRNumber)] = task.ID
 	}
 
 	s.runs[r.ID] = r
@@ -135,10 +291,84 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 	r.UpdatedAt = time.Now().UTC()
 	s.runs[id] = r
 
+	task, ok := s.tasks[r.TaskID]
+	if ok {
+		task.LastRunID = r.ID
+		task.UpdatedAt = r.UpdatedAt
+		if r.PRNumber > 0 {
+			task.PRNumber = r.PRNumber
+			s.prTaskMap[prKey(r.Repo, r.PRNumber)] = r.TaskID
+		}
+		s.tasks[r.TaskID] = task
+	}
+
 	if err := s.persistLocked(); err != nil {
 		return Run{}, err
 	}
 	return r, nil
+}
+
+func (s *Store) SetRunStatus(runID string, status RunStatus, errText string) (Run, error) {
+	return s.UpdateRun(runID, func(r *Run) error {
+		now := time.Now().UTC()
+		r.Status = status
+		if status == StatusRunning {
+			r.StartedAt = &now
+		}
+		if status == StatusSucceeded || status == StatusFailed || status == StatusCanceled || status == StatusAwaitingFeedback {
+			r.CompletedAt = &now
+		}
+		r.Error = errText
+		return nil
+	})
+}
+
+func (s *Store) ActiveRunForTask(taskID string) (Run, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, id := range s.order {
+		r, ok := s.runs[id]
+		if !ok || r.TaskID != taskID {
+			continue
+		}
+		if r.Status == StatusQueued || r.Status == StatusRunning {
+			return r, true
+		}
+	}
+	return Run{}, false
+}
+
+func (s *Store) LastRunForTask(taskID string) (Run, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, id := range s.order {
+		r, ok := s.runs[id]
+		if !ok || r.TaskID != taskID {
+			continue
+		}
+		return r, true
+	}
+	return Run{}, false
+}
+
+func (s *Store) CancelQueuedRuns(taskID, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	for id, r := range s.runs {
+		if r.TaskID != taskID || r.Status != StatusQueued {
+			continue
+		}
+		r.Status = StatusCanceled
+		r.Error = reason
+		r.UpdatedAt = now
+		r.CompletedAt = &now
+		s.runs[id] = r
+	}
+	return s.persistLocked()
 }
 
 // SeenDelivery returns true if the delivery was already processed.
@@ -187,8 +417,14 @@ func (s *Store) load() error {
 		s.runs[r.ID] = r
 		s.order = append(s.order, r.ID)
 	}
+	for _, t := range p.Tasks {
+		s.tasks[t.ID] = t
+	}
 	if p.Deliveries != nil {
 		s.deliveries = p.Deliveries
+	}
+	if p.PRTaskMap != nil {
+		s.prTaskMap = p.PRTaskMap
 	}
 
 	s.compactRunsLocked()
@@ -199,12 +435,17 @@ func (s *Store) load() error {
 func (s *Store) persistLocked() error {
 	p := persistentState{
 		Runs:       make([]Run, 0, len(s.order)),
+		Tasks:      make([]Task, 0, len(s.tasks)),
 		Deliveries: s.deliveries,
+		PRTaskMap:  s.prTaskMap,
 	}
 	for _, id := range s.order {
 		if r, ok := s.runs[id]; ok {
 			p.Runs = append(p.Runs, r)
 		}
+	}
+	for _, t := range s.tasks {
+		p.Tasks = append(p.Tasks, t)
 	}
 
 	tmpPath := s.path + ".tmp"
@@ -263,4 +504,8 @@ func (s *Store) compactDeliveriesLocked() {
 		delete(s.deliveries, items[oldest].id)
 		items = append(items[:oldest], items[oldest+1:]...)
 	}
+}
+
+func prKey(repo string, prNumber int) string {
+	return fmt.Sprintf("%s#%d", repo, prNumber)
 }
