@@ -950,6 +950,8 @@ func instructionText(run state.Run) string {
 	b.WriteString("- Do not require MCP tools.\n")
 	b.WriteString("- Keep changes minimal and scoped to the requested task.\n")
 	b.WriteString("- Run tests or explain why tests could not run.\n")
+	b.WriteString("- If you make changes, write /rascal-meta/commit_message.txt using a conventional commit title on the first line.\n")
+	b.WriteString("- Optionally add a commit body after a blank line in /rascal-meta/commit_message.txt.\n")
 	if strings.TrimSpace(run.Context) != "" {
 		b.WriteString("\n## Additional Context\n\n")
 		b.WriteString(run.Context)

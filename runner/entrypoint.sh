@@ -8,6 +8,7 @@ RUNNER_LOG="${META_DIR}/runner.log"
 GOOSE_LOG="${META_DIR}/goose.ndjson"
 META_JSON="${META_DIR}/meta.json"
 INSTRUCTIONS_FILE="${META_DIR}/instructions.md"
+COMMIT_MESSAGE_FILE="${META_DIR}/commit_message.txt"
 
 : "${RASCAL_RUN_ID:?RASCAL_RUN_ID is required}"
 : "${RASCAL_TASK_ID:?RASCAL_TASK_ID is required}"
@@ -30,10 +31,54 @@ task_subject() {
   if [[ -z "${subject}" ]]; then
     subject="${RASCAL_TASK_ID}"
   fi
-  if [[ ${#subject} -gt 72 ]]; then
-    subject="${subject:0:69}..."
+  if [[ ${#subject} -gt 58 ]]; then
+    subject="${subject:0:55}..."
   fi
   printf '%s' "${subject}"
+}
+
+is_conventional_title() {
+  local title="$1"
+  [[ "$title" =~ ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?(!)?:[[:space:]].+ ]]
+}
+
+load_agent_commit_message() {
+  local path="$1"
+  local title=""
+  local body=""
+  local line=""
+  local saw_title=0
+
+  if [[ ! -f "${path}" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ "${saw_title}" -eq 0 ]]; then
+      if [[ -z "${line//[[:space:]]/}" ]]; then
+        continue
+      fi
+      title="${line}"
+      saw_title=1
+      continue
+    fi
+    body+="${line}"$'\n'
+  done <"${path}"
+
+  if [[ -n "${title}" ]]; then
+    if is_conventional_title "${title}"; then
+      commit_title="${title}"
+    else
+      log "agent commit title is not conventional; using fallback title"
+    fi
+  fi
+
+  body="${body%$'\n'}"
+  while [[ "${body}" == $'\n'* ]]; do
+    body="${body#"$'\n'"}"
+  done
+  commit_body="${body}"
 }
 
 write_meta() {
@@ -90,7 +135,9 @@ log "run started run_id=${RASCAL_RUN_ID} repo=${RASCAL_REPO}"
 pr_number=0
 pr_url=""
 head_sha=""
-commit_title="rascal: $(task_subject)"
+commit_title="chore(rascal): $(task_subject)"
+commit_body=""
+load_agent_commit_message "${COMMIT_MESSAGE_FILE}"
 
 cleanup_and_exit() {
   local code="$1"
@@ -143,8 +190,13 @@ fi
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
   git add -A
+  final_commit_body="${commit_body}"
+  if [[ -n "${final_commit_body}" ]]; then
+    final_commit_body+=$'\n\n'
+  fi
+  final_commit_body+="Run: ${RASCAL_RUN_ID}"
   git -c user.name="rascal-bot" -c user.email="rascal-bot@users.noreply.github.com" \
-    commit -m "${commit_title}" -m "Run: ${RASCAL_RUN_ID}" || true
+    commit -m "${commit_title}" -m "${final_commit_body}" || true
 fi
 
 if [[ -n "${GH_TOKEN:-}" ]]; then
@@ -152,33 +204,25 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
   git push -u origin "${RASCAL_HEAD_BRANCH}" || cleanup_and_exit 1 "git push failed"
 
   if command -v gh >/dev/null 2>&1; then
-    set +e
-    pr_view_json="$(gh pr view "${RASCAL_HEAD_BRANCH}" --repo "${RASCAL_REPO}" --json number,url 2>/dev/null)"
-    rc=$?
-    set -e
-    if [[ $rc -eq 0 && -n "$pr_view_json" ]]; then
+    if pr_view_json="$(gh pr view "${RASCAL_HEAD_BRANCH}" --repo "${RASCAL_REPO}" --json number,url 2>/dev/null)"; then
       pr_number="$(jq -r '.number // 0' <<<"$pr_view_json")"
       pr_url="$(jq -r '.url // ""' <<<"$pr_view_json")"
     else
       log "creating pull request"
-      set +e
-      pr_create_output="$(gh pr create \
+      pr_body="Automated changes from Rascal run ${RASCAL_RUN_ID}."
+      if [[ -n "${commit_body}" ]]; then
+        pr_body="${commit_body}"$'\n\n'"${pr_body}"
+      fi
+      if ! pr_create_output="$(gh pr create \
         --repo "${RASCAL_REPO}" \
         --base "${RASCAL_BASE_BRANCH}" \
         --head "${RASCAL_HEAD_BRANCH}" \
         --title "${commit_title}" \
-        --body "Automated changes from Rascal run ${RASCAL_RUN_ID}." 2>&1)"
-      rc=$?
-      set -e
-      if [[ $rc -ne 0 ]]; then
+        --body "${pr_body}" 2>&1)"; then
         cleanup_and_exit 1 "gh pr create failed: ${pr_create_output}"
       fi
 
-      set +e
-      pr_view_json="$(gh pr view "${RASCAL_HEAD_BRANCH}" --repo "${RASCAL_REPO}" --json number,url 2>/dev/null)"
-      rc=$?
-      set -e
-      if [[ $rc -eq 0 && -n "$pr_view_json" ]]; then
+      if pr_view_json="$(gh pr view "${RASCAL_HEAD_BRANCH}" --repo "${RASCAL_REPO}" --json number,url 2>/dev/null)"; then
         pr_number="$(jq -r '.number // 0' <<<"$pr_view_json")"
         pr_url="$(jq -r '.url // ""' <<<"$pr_view_json")"
       else
