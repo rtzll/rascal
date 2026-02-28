@@ -18,13 +18,28 @@ PR on GitHub.
 
 ## Quickstart (10 Minutes)
 
-1. Build the CLI:
+2. `GITHUB_ADMIN_TOKEN`
+- Local-only token for label/webhook setup.
+- Create a [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) scoped to the target repo.
+- Fine-grained PAT (single repo) recommended with:
+  - `Webhooks`: **Read and write** (list/create/update repository webhooks)
+  - `Issues`: **Read and write** (label management)
+  - `Metadata`: **Read-only** (usually implicit)
 
-```bash
-go build -o ./bin/rascal ./cmd/rascal
-```
+3. `GITHUB_RUNTIME_TOKEN`
+- Stored on server; used by runner for git push + PR/comment workflows.
+- Keep this least-privilege compared to admin token.
+- Create a separate [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) scoped to the target repo.
+- Fine-grained PAT (single repo) recommended with:
+  - `Contents`: **Read and write** (clone/push branch)
+  - `Pull requests`: **Read and write** (open/update PR)
+  - `Issues`: **Read and write** (comments/status messaging)
 
-2. Create `./.rascal.env` with required tokens:
+For GitHub token details:
+- [Managing personal access tokens](https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+- [Fine-grained PAT permissions](https://docs.github.com/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token#permissions)
+
+You can store secrets in an env file and pass it to bootstrap:
 
 ```bash
 HCLOUD_TOKEN=...
@@ -35,6 +50,8 @@ GITHUB_RUNTIME_TOKEN=...
 Note: `rascal bootstrap` will automatically source `./.rascal.env` if present.  
 Rascal auto-loads `./.rascal.env` for all commands (as fallback).  
 You can also point to a custom file globally with `--env-file` or `RASCAL_ENV_FILE`.
+
+Note: GitHub does not provide an API to mint user PATs from another PAT, so runtime token creation is manual.
 
 ## Quickstart
 
