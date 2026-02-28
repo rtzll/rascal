@@ -584,7 +584,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		if hasLastRun && (req.Trigger == "pr_comment" || req.Trigger == "pr_review") && lastRun.HeadBranch != "" {
 			req.HeadBranch = lastRun.HeadBranch
 		} else {
-			req.HeadBranch = buildHeadBranch(req.TaskID, runID)
+			req.HeadBranch = buildHeadBranch(req.TaskID, req.Task, runID)
 		}
 	}
 
@@ -958,10 +958,24 @@ func instructionText(run state.Run) string {
 	return b.String()
 }
 
-func buildHeadBranch(taskID, runID string) string {
-	taskID = strings.ToLower(strings.TrimSpace(taskID))
+func buildHeadBranch(taskID, task, runID string) string {
+	source := strings.ToLower(strings.TrimSpace(taskID))
+	if source == "" || strings.HasPrefix(source, "run_") || strings.HasPrefix(source, "task_") {
+		lines := strings.Split(strings.TrimSpace(task), "\n")
+		for _, line := range lines {
+			line = strings.ToLower(strings.TrimSpace(line))
+			if line != "" {
+				source = line
+				break
+			}
+		}
+	}
+	if source == "" {
+		source = "task"
+	}
+
 	var cleaned strings.Builder
-	for _, r := range taskID {
+	for _, r := range source {
 		switch {
 		case r >= 'a' && r <= 'z':
 			cleaned.WriteRune(r)
@@ -979,8 +993,19 @@ func buildHeadBranch(taskID, runID string) string {
 	}
 	if len(taskPart) > 48 {
 		taskPart = taskPart[:48]
+		taskPart = strings.Trim(taskPart, "-/_")
 	}
-	return fmt.Sprintf("rascal/%s/%s", taskPart, runID)
+	runSuffix := strings.TrimSpace(strings.TrimPrefix(runID, "run_"))
+	if runSuffix == "" {
+		runSuffix = strings.TrimSpace(runID)
+	}
+	if runSuffix == "" {
+		runSuffix = "run"
+	}
+	if len(runSuffix) > 10 {
+		runSuffix = runSuffix[:10]
+	}
+	return fmt.Sprintf("rascal/%s-%s", taskPart, runSuffix)
 }
 
 func maxInt(a, b int) int {

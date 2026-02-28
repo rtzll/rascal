@@ -44,6 +44,7 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	envPairs := map[string]string{
 		"RASCAL_RUN_ID":                spec.RunID,
 		"RASCAL_TASK_ID":               spec.TaskID,
+		"RASCAL_TASK":                  spec.Task,
 		"RASCAL_REPO":                  spec.Repo,
 		"RASCAL_BASE_BRANCH":           spec.BaseBranch,
 		"RASCAL_HEAD_BRANCH":           spec.HeadBranch,

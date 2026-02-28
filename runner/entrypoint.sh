@@ -11,6 +11,7 @@ INSTRUCTIONS_FILE="${META_DIR}/instructions.md"
 
 : "${RASCAL_RUN_ID:?RASCAL_RUN_ID is required}"
 : "${RASCAL_TASK_ID:?RASCAL_TASK_ID is required}"
+: "${RASCAL_TASK:=}"
 : "${RASCAL_REPO:?RASCAL_REPO is required}"
 : "${RASCAL_BASE_BRANCH:=main}"
 : "${RASCAL_HEAD_BRANCH:=rascal/${RASCAL_RUN_ID}}"
@@ -20,7 +21,19 @@ mkdir -p "${META_DIR}" "${WORK_ROOT}" "${META_DIR}/goose" "${META_DIR}/codex"
 
 log() {
   local msg="$1"
-  printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$msg" | tee -a "${RUNNER_LOG}"
+  printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$msg"
+}
+
+task_subject() {
+  local subject
+  subject="$(printf '%s' "${RASCAL_TASK}" | tr '\r\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ +//; s/ +$//')"
+  if [[ -z "${subject}" ]]; then
+    subject="${RASCAL_TASK_ID}"
+  fi
+  if [[ ${#subject} -gt 72 ]]; then
+    subject="${subject:0:69}..."
+  fi
+  printf '%s' "${subject}"
 }
 
 write_meta() {
@@ -77,6 +90,7 @@ log "run started run_id=${RASCAL_RUN_ID} repo=${RASCAL_REPO}"
 pr_number=0
 pr_url=""
 head_sha=""
+commit_title="rascal: $(task_subject)"
 
 cleanup_and_exit() {
   local code="$1"
@@ -130,7 +144,7 @@ fi
 if ! git diff --quiet || ! git diff --cached --quiet; then
   git add -A
   git -c user.name="rascal-bot" -c user.email="rascal-bot@users.noreply.github.com" \
-    commit -m "rascal: ${RASCAL_TASK_ID} (${RASCAL_RUN_ID})" || true
+    commit -m "${commit_title}" -m "Run: ${RASCAL_RUN_ID}" || true
 fi
 
 if [[ -n "${GH_TOKEN:-}" ]]; then
@@ -152,7 +166,7 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
         --repo "${RASCAL_REPO}" \
         --base "${RASCAL_BASE_BRANCH}" \
         --head "${RASCAL_HEAD_BRANCH}" \
-        --title "rascal: ${RASCAL_TASK_ID}" \
+        --title "${commit_title}" \
         --body "Automated changes from Rascal run ${RASCAL_RUN_ID}." 2>&1)"
       rc=$?
       set -e

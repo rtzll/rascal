@@ -431,3 +431,27 @@ func TestHandleRunLogsRespectsLines(t *testing.T) {
 		t.Fatalf("expected newest lines to be present, got:\n%s", body)
 	}
 }
+
+func TestBuildHeadBranchUsesTaskSummaryForAdHocRunTaskID(t *testing.T) {
+	got := buildHeadBranch(
+		"run_97073bc1e7787f7c",
+		"When running bootstrap with --skip-deploy, preserve host/domain values.\n\nKeep it small.",
+		"run_97073bc1e7787f7c",
+	)
+	if !strings.HasPrefix(got, "rascal/when-running-bootstrap") {
+		t.Fatalf("expected summary-based branch prefix, got %q", got)
+	}
+	if !strings.HasSuffix(got, "-97073bc1e7") {
+		t.Fatalf("expected short run-id suffix, got %q", got)
+	}
+}
+
+func TestBuildHeadBranchUsesTaskIDForNamedTasks(t *testing.T) {
+	got := buildHeadBranch("owner/repo#123", "ignored task text", "run_deadbeefcafefeed")
+	if !strings.HasPrefix(got, "rascal/owner/repo-123-") {
+		t.Fatalf("expected task-id-based branch prefix, got %q", got)
+	}
+	if !strings.HasSuffix(got, "-deadbeefca") {
+		t.Fatalf("expected short run-id suffix, got %q", got)
+	}
+}
