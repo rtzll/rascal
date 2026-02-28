@@ -59,6 +59,7 @@ GITHUB_RUNTIME_TOKEN=...
 
 Rascal auto-loads `./.rascal.env` for all commands (as fallback).  
 You can also point to a custom file globally with `--env-file` or `RASCAL_ENV_FILE`.
+The CLI respects `NO_COLOR` to disable ANSI colors.
 
 ## Quickstart
 
