@@ -100,3 +100,24 @@ Domain notes:
 - For GitHub webhook triggers, a stable public URL is recommended.
 - Without a domain, Rascal can use `http://<server_ip>:8080` if reachable from GitHub.
 - Flags still override values from `--env-file`.
+
+Cloudflare + webhook notes:
+- During first setup/debug, `DNS only` is simplest (bypasses Cloudflare edge rules/caching).
+- If using Cloudflare proxy (orange cloud), set SSL/TLS mode to **Full (strict)**.
+- Avoid redirect rules that send `https://rascal.your-domain/...` back to itself.
+- Webhook URL must not redirect for `POST` requests:
+  - `https://YOUR_DOMAIN/v1/webhooks/github`
+- Quick checks:
+
+```bash
+# health endpoint (GET)
+curl -fsS https://YOUR_DOMAIN/healthz
+
+# webhook endpoint should NOT return 3xx on POST
+# (401/403/405 is fine without a valid signature payload)
+curl -i -X POST https://YOUR_DOMAIN/v1/webhooks/github
+```
+
+Troubleshooting:
+- `curl -I` uses `HEAD`; `/healthz` may return `405` for `HEAD` even when `GET` is healthy.
+- Browser redirect loops can be stale cache; verify with `curl` or a private window.
