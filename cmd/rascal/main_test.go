@@ -115,6 +115,11 @@ func TestRootFlagsDoNotExposeDeadFlags(t *testing.T) {
 	if f := root.PersistentFlags().Lookup("no-color"); f == nil {
 		t.Fatal("expected no-color flag to exist")
 	}
+	for _, name := range []string{"transport", "client-ssh-host", "client-ssh-user", "client-ssh-key", "client-ssh-port"} {
+		if f := root.PersistentFlags().Lookup(name); f == nil {
+			t.Fatalf("expected %s flag to exist", name)
+		}
+	}
 }
 
 func TestRootHasRepoAndInfraCommands(t *testing.T) {
@@ -253,6 +258,68 @@ func TestGoarchFromHetznerArchitecture(t *testing.T) {
 		got, ok := goarchFromHetznerArchitecture(tc.input)
 		if got != tc.want || ok != tc.ok {
 			t.Fatalf("goarchFromHetznerArchitecture(%q) = (%q, %t), want (%q, %t)", tc.input, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestResolveTransport(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		configured string
+		serverURL  string
+		sshHost    string
+		want       string
+	}{
+		{
+			name:       "explicit http",
+			configured: "http",
+			serverURL:  "http://127.0.0.1:8080",
+			sshHost:    "203.0.113.10",
+			want:       "http",
+		},
+		{
+			name:       "explicit ssh",
+			configured: "ssh",
+			serverURL:  "https://rascal.example.com",
+			sshHost:    "203.0.113.10",
+			want:       "ssh",
+		},
+		{
+			name:       "auto localhost prefers ssh",
+			configured: "auto",
+			serverURL:  "http://127.0.0.1:8080",
+			sshHost:    "203.0.113.10",
+			want:       "ssh",
+		},
+		{
+			name:       "auto remote 8080 prefers ssh",
+			configured: "auto",
+			serverURL:  "http://49.13.1.31:8080",
+			sshHost:    "49.13.1.31",
+			want:       "ssh",
+		},
+		{
+			name:       "auto https prefers http",
+			configured: "auto",
+			serverURL:  "https://rascal.example.com",
+			sshHost:    "203.0.113.10",
+			want:       "http",
+		},
+		{
+			name:       "auto without ssh host is http",
+			configured: "auto",
+			serverURL:  "http://127.0.0.1:8080",
+			sshHost:    "",
+			want:       "http",
+		},
+	}
+
+	for _, tc := range cases {
+		got := resolveTransport(tc.configured, tc.serverURL, tc.sshHost)
+		if got != tc.want {
+			t.Fatalf("%s: resolveTransport(%q, %q, %q) = %q, want %q", tc.name, tc.configured, tc.serverURL, tc.sshHost, got, tc.want)
 		}
 	}
 }

@@ -33,6 +33,11 @@ type ClientConfig struct {
 	DefaultRepo string
 	Host        string
 	Domain      string
+	Transport   string
+	SSHHost     string
+	SSHUser     string
+	SSHKey      string
+	SSHPort     int
 }
 
 func LoadServerConfig() ServerConfig {
@@ -116,10 +121,24 @@ func LoadClientConfigAtPath(path string) (ClientConfig, error) {
 		DefaultRepo: strings.TrimSpace(v.GetString("default_repo")),
 		Host:        strings.TrimSpace(v.GetString("host")),
 		Domain:      strings.TrimSpace(v.GetString("domain")),
+		Transport:   strings.TrimSpace(v.GetString("transport")),
+		SSHHost:     strings.TrimSpace(v.GetString("ssh_host")),
+		SSHUser:     strings.TrimSpace(v.GetString("ssh_user")),
+		SSHKey:      strings.TrimSpace(v.GetString("ssh_key")),
+		SSHPort:     v.GetInt("ssh_port"),
 	}
 	cfg.ServerURL = strings.TrimRight(cfg.ServerURL, "/")
 	if cfg.ServerURL == "" {
 		cfg.ServerURL = "http://127.0.0.1:8080"
+	}
+	if cfg.Transport == "" {
+		cfg.Transport = "auto"
+	}
+	if cfg.SSHUser == "" {
+		cfg.SSHUser = "root"
+	}
+	if cfg.SSHPort <= 0 {
+		cfg.SSHPort = 22
 	}
 	return cfg, nil
 }
@@ -139,6 +158,11 @@ func SaveClientConfig(path string, cfg ClientConfig) error {
 	v.Set("default_repo", strings.TrimSpace(cfg.DefaultRepo))
 	v.Set("host", strings.TrimSpace(cfg.Host))
 	v.Set("domain", strings.TrimSpace(cfg.Domain))
+	v.Set("transport", strings.TrimSpace(cfg.Transport))
+	v.Set("ssh_host", strings.TrimSpace(cfg.SSHHost))
+	v.Set("ssh_user", strings.TrimSpace(cfg.SSHUser))
+	v.Set("ssh_key", strings.TrimSpace(cfg.SSHKey))
+	v.Set("ssh_port", cfg.SSHPort)
 
 	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("write client config: %w", err)

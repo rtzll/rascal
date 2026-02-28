@@ -19,6 +19,11 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 		DefaultRepo: "owner/repo",
 		Host:        "203.0.113.10",
 		Domain:      "rascal.example.com",
+		Transport:   "ssh",
+		SSHHost:     "203.0.113.10",
+		SSHUser:     "root",
+		SSHKey:      "~/.ssh/id_ed25519",
+		SSHPort:     22,
 	}
 	if err := SaveClientConfig(path, in); err != nil {
 		t.Fatalf("save client config: %v", err)
@@ -43,6 +48,21 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 	if out.Domain != in.Domain {
 		t.Fatalf("domain mismatch: got %s want %s", out.Domain, in.Domain)
 	}
+	if out.Transport != in.Transport {
+		t.Fatalf("transport mismatch: got %s want %s", out.Transport, in.Transport)
+	}
+	if out.SSHHost != in.SSHHost {
+		t.Fatalf("ssh host mismatch: got %s want %s", out.SSHHost, in.SSHHost)
+	}
+	if out.SSHUser != in.SSHUser {
+		t.Fatalf("ssh user mismatch: got %s want %s", out.SSHUser, in.SSHUser)
+	}
+	if out.SSHKey != in.SSHKey {
+		t.Fatalf("ssh key mismatch: got %s want %s", out.SSHKey, in.SSHKey)
+	}
+	if out.SSHPort != in.SSHPort {
+		t.Fatalf("ssh port mismatch: got %d want %d", out.SSHPort, in.SSHPort)
+	}
 
 	st, err := os.Stat(path)
 	if err != nil {
@@ -55,7 +75,7 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 
 func TestLoadClientConfigEnvOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte("server_url = \"https://rascal.example.com\"\napi_token = \"from_file\"\ndefault_repo = \"owner/repo\"\nhost = \"203.0.113.10\"\ndomain = \"rascal.example.com\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("server_url = \"https://rascal.example.com\"\napi_token = \"from_file\"\ndefault_repo = \"owner/repo\"\nhost = \"203.0.113.10\"\ndomain = \"rascal.example.com\"\ntransport = \"ssh\"\nssh_host = \"203.0.113.10\"\nssh_user = \"root\"\nssh_key = \"~/.ssh/id_ed25519\"\nssh_port = 22\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -76,5 +96,20 @@ func TestLoadClientConfigEnvOverride(t *testing.T) {
 	}
 	if cfg.Domain != "rascal.example.com" {
 		t.Fatalf("expected domain from file, got %s", cfg.Domain)
+	}
+	if cfg.Transport != "ssh" {
+		t.Fatalf("expected transport from file, got %s", cfg.Transport)
+	}
+	if cfg.SSHHost != "203.0.113.10" {
+		t.Fatalf("expected ssh host from file, got %s", cfg.SSHHost)
+	}
+	if cfg.SSHUser != "root" {
+		t.Fatalf("expected ssh user from file, got %s", cfg.SSHUser)
+	}
+	if cfg.SSHKey != "~/.ssh/id_ed25519" {
+		t.Fatalf("expected ssh key from file, got %s", cfg.SSHKey)
+	}
+	if cfg.SSHPort != 22 {
+		t.Fatalf("expected ssh port from file, got %d", cfg.SSHPort)
 	}
 }

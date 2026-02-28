@@ -31,9 +31,14 @@ import (
 )
 
 type apiClient struct {
-	baseURL string
-	token   string
-	http    *http.Client
+	baseURL   string
+	token     string
+	http      *http.Client
+	transport string
+	sshHost   string
+	sshUser   string
+	sshKey    string
+	sshPort   int
 }
 
 type app struct {
@@ -42,6 +47,11 @@ type app struct {
 	serverURLFlag   string
 	apiTokenFlag    string
 	defaultRepoFlag string
+	transportFlag   string
+	sshHostFlag     string
+	sshUserFlag     string
+	sshKeyFlag      string
+	sshPortFlag     int
 	output          string
 	noColor         bool
 	quiet           bool
@@ -50,6 +60,7 @@ type app struct {
 	serverSource    string
 	tokenSource     string
 	repoSource      string
+	transportSource string
 }
 
 type cliError struct {
@@ -115,6 +126,11 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().StringVar(&a.serverURLFlag, "server-url", "", "orchestrator base URL")
 	root.PersistentFlags().StringVar(&a.apiTokenFlag, "api-token", "", "orchestrator API token")
 	root.PersistentFlags().StringVar(&a.defaultRepoFlag, "default-repo", "", "default repository in OWNER/REPO form")
+	root.PersistentFlags().StringVar(&a.transportFlag, "transport", "", "API transport: auto|http|ssh")
+	root.PersistentFlags().StringVar(&a.sshHostFlag, "client-ssh-host", "", "SSH host for API transport=ssh/auto")
+	root.PersistentFlags().StringVar(&a.sshUserFlag, "client-ssh-user", "", "SSH user for API transport=ssh/auto")
+	root.PersistentFlags().StringVar(&a.sshKeyFlag, "client-ssh-key", "", "SSH private key path for API transport=ssh/auto")
+	root.PersistentFlags().IntVar(&a.sshPortFlag, "client-ssh-port", 0, "SSH port for API transport=ssh/auto")
 	root.PersistentFlags().StringVar(&a.output, "output", "table", "output format: table|json|toml")
 	root.PersistentFlags().BoolVar(&a.noColor, "no-color", false, "disable ANSI color/style output (also set by NO_COLOR)")
 	root.PersistentFlags().BoolVarP(&a.quiet, "quiet", "q", false, "reduce non-essential output")
@@ -165,6 +181,11 @@ func (a *app) initConfig() error {
 		DefaultRepo: strings.TrimSpace(v.GetString("default_repo")),
 		Host:        strings.TrimSpace(v.GetString("host")),
 		Domain:      strings.TrimSpace(v.GetString("domain")),
+		Transport:   strings.TrimSpace(v.GetString("transport")),
+		SSHHost:     strings.TrimSpace(v.GetString("ssh_host")),
+		SSHUser:     strings.TrimSpace(v.GetString("ssh_user")),
+		SSHKey:      strings.TrimSpace(v.GetString("ssh_key")),
+		SSHPort:     v.GetInt("ssh_port"),
 	}
 
 	if strings.TrimSpace(a.serverURLFlag) != "" {
@@ -197,16 +218,59 @@ func (a *app) initConfig() error {
 	} else {
 		a.repoSource = "unset"
 	}
+	if strings.TrimSpace(a.transportFlag) != "" {
+		a.cfg.Transport = strings.ToLower(strings.TrimSpace(a.transportFlag))
+		a.transportSource = "flag"
+	} else if strings.TrimSpace(os.Getenv("RASCAL_TRANSPORT")) != "" {
+		a.transportSource = "env"
+	} else if v.InConfig("transport") {
+		a.transportSource = "config"
+	} else {
+		a.transportSource = "default"
+	}
+	if strings.TrimSpace(a.sshHostFlag) != "" {
+		a.cfg.SSHHost = strings.TrimSpace(a.sshHostFlag)
+	}
+	if strings.TrimSpace(a.sshUserFlag) != "" {
+		a.cfg.SSHUser = strings.TrimSpace(a.sshUserFlag)
+	}
+	if strings.TrimSpace(a.sshKeyFlag) != "" {
+		a.cfg.SSHKey = strings.TrimSpace(a.sshKeyFlag)
+	}
+	if a.sshPortFlag > 0 {
+		a.cfg.SSHPort = a.sshPortFlag
+	}
 
 	a.cfg.ServerURL = strings.TrimRight(a.cfg.ServerURL, "/")
 	if a.cfg.ServerURL == "" {
 		a.cfg.ServerURL = "http://127.0.0.1:8080"
 	}
+	if a.cfg.Transport == "" {
+		a.cfg.Transport = "auto"
+	}
+	if a.cfg.SSHHost == "" {
+		a.cfg.SSHHost = strings.TrimSpace(a.cfg.Host)
+	}
+	if a.cfg.SSHUser == "" {
+		a.cfg.SSHUser = "root"
+	}
+	if a.cfg.SSHPort <= 0 {
+		a.cfg.SSHPort = 22
+	}
+	resolvedTransport := resolveTransport(a.cfg.Transport, a.cfg.ServerURL, a.cfg.SSHHost)
 
 	a.client = apiClient{
-		baseURL: a.cfg.ServerURL,
-		token:   a.cfg.APIToken,
-		http:    &http.Client{Timeout: 30 * time.Second},
+		baseURL:   a.cfg.ServerURL,
+		token:     a.cfg.APIToken,
+		http:      &http.Client{Timeout: 30 * time.Second},
+		transport: resolvedTransport,
+		sshHost:   strings.TrimSpace(a.cfg.SSHHost),
+		sshUser:   strings.TrimSpace(a.cfg.SSHUser),
+		sshKey:    strings.TrimSpace(a.cfg.SSHKey),
+		sshPort:   a.cfg.SSHPort,
+	}
+	if a.transportSource == "default" {
+		a.transportSource = "resolved"
 	}
 
 	switch strings.ToLower(strings.TrimSpace(a.output)) {
@@ -218,6 +282,15 @@ func (a *app) initConfig() error {
 			Code:    exitInput,
 			Message: fmt.Sprintf("unsupported --output value %q", a.output),
 			Hint:    "use --output table|json|toml",
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(a.cfg.Transport)) {
+	case "", "auto", "http", "ssh":
+	default:
+		return &cliError{
+			Code:    exitInput,
+			Message: fmt.Sprintf("unsupported transport %q", a.cfg.Transport),
+			Hint:    "use --transport auto|http|ssh",
 		}
 	}
 
@@ -290,6 +363,11 @@ func (a *app) newInitCmd() *cobra.Command {
 		defaultRepo    string
 		host           string
 		domain         string
+		transport      string
+		sshHost        string
+		sshUser        string
+		sshKey         string
+		sshPort        int
 		nonInteractive bool
 	)
 
@@ -303,6 +381,16 @@ func (a *app) newInitCmd() *cobra.Command {
 			defaultRepo = firstNonEmpty(strings.TrimSpace(defaultRepo), a.cfg.DefaultRepo)
 			host = firstNonEmpty(strings.TrimSpace(host), a.cfg.Host)
 			domain = firstNonEmpty(strings.TrimSpace(domain), a.cfg.Domain)
+			transport = firstNonEmpty(strings.ToLower(strings.TrimSpace(transport)), a.cfg.Transport)
+			sshHost = firstNonEmpty(strings.TrimSpace(sshHost), a.cfg.SSHHost, host)
+			sshUser = firstNonEmpty(strings.TrimSpace(sshUser), a.cfg.SSHUser, "root")
+			sshKey = firstNonEmpty(strings.TrimSpace(sshKey), a.cfg.SSHKey)
+			if sshPort <= 0 {
+				sshPort = a.cfg.SSHPort
+			}
+			if sshPort <= 0 {
+				sshPort = 22
+			}
 
 			if !nonInteractive && a.isTTY() {
 				reader := bufio.NewReader(os.Stdin)
@@ -311,10 +399,23 @@ func (a *app) newInitCmd() *cobra.Command {
 				defaultRepo = promptString(reader, "Default Repo (optional)", defaultRepo)
 				host = promptString(reader, "Host (optional)", host)
 				domain = promptString(reader, "Domain (optional)", domain)
+				transport = promptString(reader, "Transport (auto|http|ssh)", transport)
+				sshHost = promptString(reader, "SSH Host (optional)", sshHost)
+				sshUser = promptString(reader, "SSH User (optional)", sshUser)
+				sshKey = promptString(reader, "SSH Key (optional)", sshKey)
 			}
 
 			if strings.TrimSpace(serverURL) == "" {
 				return &cliError{Code: exitInput, Message: "server URL is required", Hint: "pass --server-url or run interactively"}
+			}
+			transport = strings.ToLower(strings.TrimSpace(transport))
+			if transport == "" {
+				transport = "auto"
+			}
+			switch transport {
+			case "auto", "http", "ssh":
+			default:
+				return &cliError{Code: exitInput, Message: "invalid transport", Hint: "transport must be one of: auto|http|ssh"}
 			}
 
 			cfg := config.ClientConfig{
@@ -323,6 +424,11 @@ func (a *app) newInitCmd() *cobra.Command {
 				DefaultRepo: strings.TrimSpace(defaultRepo),
 				Host:        strings.TrimSpace(host),
 				Domain:      strings.TrimSpace(domain),
+				Transport:   transport,
+				SSHHost:     strings.TrimSpace(sshHost),
+				SSHUser:     firstNonEmpty(strings.TrimSpace(sshUser), "root"),
+				SSHKey:      strings.TrimSpace(sshKey),
+				SSHPort:     sshPort,
 			}
 			if err := config.SaveClientConfig(a.configPath, cfg); err != nil {
 				return &cliError{Code: exitConfig, Message: "failed to write config", Hint: "check file permissions", Cause: err}
@@ -336,6 +442,11 @@ func (a *app) newInitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&defaultRepo, "default-repo", "", "default repository OWNER/REPO")
 	cmd.Flags().StringVar(&host, "host", "", "default server host/IP for bootstrap/deploy")
 	cmd.Flags().StringVar(&domain, "domain", "", "default domain for server URL and Caddy")
+	cmd.Flags().StringVar(&transport, "transport", "", "default transport: auto|http|ssh")
+	cmd.Flags().StringVar(&sshHost, "ssh-host", "", "default SSH host for transport=ssh/auto")
+	cmd.Flags().StringVar(&sshUser, "ssh-user", "", "default SSH user for transport=ssh/auto")
+	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "default SSH private key path for transport=ssh/auto")
+	cmd.Flags().IntVar(&sshPort, "ssh-port", 0, "default SSH port for transport=ssh/auto")
 	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "disable prompts and rely on flags")
 	return cmd
 }
@@ -607,9 +718,22 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				save.DefaultRepo = repo
 				if host != "" {
 					save.Host = host
+					save.SSHHost = host
 				}
 				if domain != "" {
 					save.Domain = domain
+				}
+				if strings.TrimSpace(sshUser) != "" {
+					save.SSHUser = strings.TrimSpace(sshUser)
+				}
+				if strings.TrimSpace(sshKey) != "" {
+					save.SSHKey = strings.TrimSpace(sshKey)
+				}
+				if sshPort > 0 {
+					save.SSHPort = sshPort
+				}
+				if strings.TrimSpace(save.Transport) == "" {
+					save.Transport = "auto"
 				}
 				if err := config.SaveClientConfig(a.configPath, save); err != nil {
 					return err
@@ -945,7 +1069,23 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				cfgExists = true
 			}
 
-			healthOK, healthErr := checkServerHealth(a.cfg.ServerURL)
+			resolvedTransport := a.client.transport
+			healthOK, healthErr := false, ""
+			if resolvedTransport == "ssh" {
+				targetHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
+				if targetHost == "" {
+					healthErr = "ssh transport selected but no ssh host is configured"
+				} else {
+					healthOK, healthErr = checkServerHealthSSH(deployConfig{
+						Host:       targetHost,
+						SSHUser:    firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root"),
+						SSHKeyPath: firstNonEmpty(strings.TrimSpace(sshKey), strings.TrimSpace(a.cfg.SSHKey)),
+						SSHPort:    firstPositive(sshPort, a.cfg.SSHPort, 22),
+					})
+				}
+			} else {
+				healthOK, healthErr = checkServerHealth(a.cfg.ServerURL)
+			}
 			healthMessage := ""
 			if !healthOK {
 				healthMessage = healthErr
@@ -983,6 +1123,12 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				"server_url":          a.cfg.ServerURL,
 				"host":                a.cfg.Host,
 				"domain":              a.cfg.Domain,
+				"transport":           a.cfg.Transport,
+				"resolved_transport":  resolvedTransport,
+				"ssh_host":            a.cfg.SSHHost,
+				"ssh_user":            a.cfg.SSHUser,
+				"ssh_key":             a.cfg.SSHKey,
+				"ssh_port":            a.cfg.SSHPort,
 				"server_source":       a.serverSource,
 				"api_token_set":       strings.TrimSpace(a.cfg.APIToken) != "",
 				"api_token_source":    a.tokenSource,
@@ -997,6 +1143,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				diagnostics["remote"] = remote
 			}
 			return a.emit(diagnostics, func() error {
+				a.println("local config")
 				a.println("config path: %s", a.configPath)
 				if cfgExists {
 					a.println("config file: present")
@@ -1004,6 +1151,10 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					a.println("config file: missing")
 				}
 				a.println("server: %s (%s)", a.cfg.ServerURL, a.serverSource)
+				a.println("transport: %s (resolved=%s)", a.cfg.Transport, resolvedTransport)
+				if strings.TrimSpace(a.cfg.SSHHost) != "" {
+					a.println("ssh target: %s@%s:%d", firstNonEmpty(strings.TrimSpace(a.cfg.SSHUser), "root"), a.cfg.SSHHost, firstPositive(a.cfg.SSHPort, 22))
+				}
 				if strings.TrimSpace(a.cfg.Host) != "" {
 					a.println("host: %s", a.cfg.Host)
 				}
@@ -1011,9 +1162,9 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					a.println("domain: %s", a.cfg.Domain)
 				}
 				if a.cfg.APIToken == "" {
-					a.println("api token: missing")
+					a.println("local rascal api token: missing")
 				} else {
-					a.println("api token: set (%s)", a.tokenSource)
+					a.println("local rascal api token: set (%s)", a.tokenSource)
 				}
 				if a.cfg.DefaultRepo == "" {
 					a.println("default repo: not set")
@@ -1026,12 +1177,22 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					a.println("server health: failed (%s)", healthMessage)
 				}
 				if remote != nil {
+					a.println("remote server")
 					if errText, ok := remote["error"].(string); ok && strings.TrimSpace(errText) != "" {
 						a.println("remote (%s): error: %s", strings.TrimSpace(host), errText)
 					} else {
 						a.println("remote (%s): rascal=%v docker=%v caddy=%v env=%v codex_auth=%v runner_image=%v",
 							remote["host"], remote["rascal_service"], remote["docker_installed"], remote["caddy_installed"], remote["env_file_present"], remote["codex_auth_present"], remote["runner_image_present"])
 					}
+				}
+				if !cfgExists {
+					a.println("hint: local config missing; run `rascal init` or rerun `rascal bootstrap`")
+				}
+				if strings.TrimSpace(a.cfg.DefaultRepo) == "" {
+					a.println("hint: set default repo: `rascal config set default_repo OWNER/REPO`")
+				}
+				if strings.TrimSpace(a.cfg.APIToken) == "" {
+					a.println("hint: set local API token: `rascal config set api_token <token>`")
 				}
 				return nil
 			})
@@ -1200,12 +1361,19 @@ func (a *app) newConfigCmd() *cobra.Command {
 				"default_repo":        a.cfg.DefaultRepo,
 				"host":                a.cfg.Host,
 				"domain":              a.cfg.Domain,
+				"transport":           a.cfg.Transport,
+				"ssh_host":            a.cfg.SSHHost,
+				"ssh_user":            a.cfg.SSHUser,
+				"ssh_key":             a.cfg.SSHKey,
+				"ssh_port":            a.cfg.SSHPort,
 				"server_source":       a.serverSource,
 				"api_token_source":    a.tokenSource,
 				"default_repo_source": a.repoSource,
+				"transport_source":    a.transportSource,
+				"resolved_transport":  a.client.transport,
 			}
 			return a.emit(view, func() error {
-				for _, key := range []string{"config_path", "server_url", "api_token", "default_repo", "host", "domain", "server_source", "api_token_source", "default_repo_source"} {
+				for _, key := range []string{"config_path", "server_url", "api_token", "default_repo", "host", "domain", "transport", "ssh_host", "ssh_user", "ssh_key", "ssh_port", "server_source", "api_token_source", "default_repo_source", "transport_source", "resolved_transport"} {
 					a.println("%s: %v", key, view[key])
 				}
 				return nil
@@ -1233,8 +1401,18 @@ func (a *app) newConfigCmd() *cobra.Command {
 				a.println(cfg.Host)
 			case "domain":
 				a.println(cfg.Domain)
+			case "transport":
+				a.println(cfg.Transport)
+			case "ssh_host":
+				a.println(cfg.SSHHost)
+			case "ssh_user":
+				a.println(cfg.SSHUser)
+			case "ssh_key":
+				a.println(cfg.SSHKey)
+			case "ssh_port":
+				a.println("%d", cfg.SSHPort)
 			default:
-				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo|host|domain"}
+				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo|host|domain|transport|ssh_host|ssh_user|ssh_key|ssh_port"}
 			}
 			return nil
 		},
@@ -1260,8 +1438,28 @@ func (a *app) newConfigCmd() *cobra.Command {
 				cfg.Host = val
 			case "domain":
 				cfg.Domain = val
+			case "transport":
+				transport := strings.ToLower(val)
+				switch transport {
+				case "auto", "http", "ssh":
+					cfg.Transport = transport
+				default:
+					return &cliError{Code: exitInput, Message: "invalid transport", Hint: "transport must be one of: auto|http|ssh"}
+				}
+			case "ssh_host":
+				cfg.SSHHost = val
+			case "ssh_user":
+				cfg.SSHUser = val
+			case "ssh_key":
+				cfg.SSHKey = val
+			case "ssh_port":
+				var port int
+				if _, err := fmt.Sscanf(val, "%d", &port); err != nil || port <= 0 {
+					return &cliError{Code: exitInput, Message: "invalid ssh_port", Hint: "ssh_port must be a positive integer"}
+				}
+				cfg.SSHPort = port
 			default:
-				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo|host|domain"}
+				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo|host|domain|transport|ssh_host|ssh_user|ssh_key|ssh_port"}
 			}
 			if err := config.SaveClientConfig(a.configPath, cfg); err != nil {
 				return &cliError{Code: exitConfig, Message: "failed to write config", Cause: err}
@@ -1622,6 +1820,11 @@ func loadFileConfig(path string) (config.ClientConfig, error) {
 		DefaultRepo: strings.TrimSpace(v.GetString("default_repo")),
 		Host:        strings.TrimSpace(v.GetString("host")),
 		Domain:      strings.TrimSpace(v.GetString("domain")),
+		Transport:   strings.TrimSpace(v.GetString("transport")),
+		SSHHost:     strings.TrimSpace(v.GetString("ssh_host")),
+		SSHUser:     strings.TrimSpace(v.GetString("ssh_user")),
+		SSHKey:      strings.TrimSpace(v.GetString("ssh_key")),
+		SSHPort:     v.GetInt("ssh_port"),
 	}, nil
 }
 
@@ -1804,6 +2007,13 @@ func (c apiClient) doJSON(method, path string, payload any) (*http.Response, err
 }
 
 func (c apiClient) do(method, path string, body io.Reader) (*http.Response, error) {
+	if strings.EqualFold(c.transport, "ssh") {
+		return c.doOverSSH(method, path, body)
+	}
+	return c.doOverHTTP(method, path, body)
+}
+
+func (c apiClient) doOverHTTP(method, path string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequest(method, c.baseURL+path, body)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -1820,6 +2030,91 @@ func (c apiClient) do(method, path string, body io.Reader) (*http.Response, erro
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	return resp, nil
+}
+
+func (c apiClient) doOverSSH(method, path string, body io.Reader) (*http.Response, error) {
+	sshHost := strings.TrimSpace(c.sshHost)
+	if sshHost == "" {
+		return nil, fmt.Errorf("ssh transport selected but ssh host is missing")
+	}
+	sshUser := firstNonEmpty(strings.TrimSpace(c.sshUser), "root")
+	sshPort := c.sshPort
+	if sshPort <= 0 {
+		sshPort = 22
+	}
+	sshKey := strings.TrimSpace(c.sshKey)
+
+	var payload []byte
+	if body != nil {
+		data, err := io.ReadAll(body)
+		if err != nil {
+			return nil, fmt.Errorf("read request body: %w", err)
+		}
+		payload = data
+	}
+
+	curlArgs := []string{
+		"curl", "-sS", "-i",
+		"-X", shellSingleQuote(strings.TrimSpace(method)),
+		"-H", shellSingleQuote("Accept: application/json"),
+	}
+	if c.token != "" {
+		curlArgs = append(curlArgs, "-H", shellSingleQuote("Authorization: Bearer "+c.token))
+	}
+	if len(payload) > 0 {
+		curlArgs = append(curlArgs, "-H", shellSingleQuote("Content-Type: application/json"), "--data-binary", "@-")
+	}
+	curlArgs = append(curlArgs, shellSingleQuote("http://127.0.0.1:8080"+path))
+	remoteCmd := strings.Join(curlArgs, " ")
+
+	cfg := deployConfig{
+		Host:       sshHost,
+		SSHUser:    sshUser,
+		SSHKeyPath: sshKey,
+		SSHPort:    sshPort,
+	}
+	cmd := exec.Command("ssh", sshArgs(cfg, remoteCmd)...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if len(payload) > 0 {
+		cmd.Stdin = bytes.NewReader(payload)
+	}
+	if err := cmd.Run(); err != nil {
+		errOut := strings.TrimSpace(stderr.String())
+		if errOut == "" {
+			errOut = strings.TrimSpace(stdout.String())
+		}
+		if errOut == "" {
+			return nil, fmt.Errorf("ssh request failed: %w", err)
+		}
+		return nil, fmt.Errorf("ssh request failed: %w (%s)", err, errOut)
+	}
+
+	raw := stdout.Bytes()
+	resp, err := parseRawHTTPResponse(raw, method)
+	if err != nil {
+		errOut := strings.TrimSpace(stderr.String())
+		if errOut != "" {
+			return nil, fmt.Errorf("parse ssh response: %w (%s)", err, errOut)
+		}
+		return nil, fmt.Errorf("parse ssh response: %w", err)
+	}
+	return resp, nil
+}
+
+func parseRawHTTPResponse(raw []byte, method string) (*http.Response, error) {
+	reader := bufio.NewReader(bytes.NewReader(raw))
+	req := &http.Request{Method: method}
+	resp, err := http.ReadResponse(reader, req)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
 func randomToken(numBytes int) (string, error) {
@@ -2020,8 +2315,8 @@ func goarchFromHetznerArchitecture(arch string) (string, bool) {
 
 func sshArgs(cfg deployConfig, remoteCmd string) []string {
 	args := []string{"-p", fmt.Sprintf("%d", cfg.SSHPort), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"}
-	if cfg.SSHKeyPath != "" {
-		args = append(args, "-i", cfg.SSHKeyPath)
+	if keyPath := normalizedSSHKeyPath(cfg.SSHKeyPath); keyPath != "" {
+		args = append(args, "-i", keyPath)
 	}
 	args = append(args, fmt.Sprintf("%s@%s", cfg.SSHUser, cfg.Host), remoteCmd)
 	return args
@@ -2029,11 +2324,23 @@ func sshArgs(cfg deployConfig, remoteCmd string) []string {
 
 func scpArgs(cfg deployConfig, source, target string) []string {
 	args := []string{"-P", fmt.Sprintf("%d", cfg.SSHPort), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"}
-	if cfg.SSHKeyPath != "" {
-		args = append(args, "-i", cfg.SSHKeyPath)
+	if keyPath := normalizedSSHKeyPath(cfg.SSHKeyPath); keyPath != "" {
+		args = append(args, "-i", keyPath)
 	}
 	args = append(args, source, target)
 	return args
+}
+
+func normalizedSSHKeyPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	expanded, err := expandPath(path)
+	if err != nil {
+		return path
+	}
+	return expanded
 }
 
 func remoteTarget(cfg deployConfig, path string) string {
@@ -2147,6 +2454,39 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstPositive(values ...int) int {
+	for _, v := range values {
+		if v > 0 {
+			return v
+		}
+	}
+	return 0
+}
+
+func resolveTransport(configured, serverURL, sshHost string) string {
+	mode := strings.ToLower(strings.TrimSpace(configured))
+	switch mode {
+	case "http", "ssh":
+		return mode
+	}
+	if strings.TrimSpace(sshHost) == "" {
+		return "http"
+	}
+	u, err := url.Parse(strings.TrimSpace(serverURL))
+	if err != nil {
+		return "ssh"
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	port := strings.TrimSpace(u.Port())
+	if host == "" || host == "127.0.0.1" || host == "localhost" {
+		return "ssh"
+	}
+	if strings.EqualFold(u.Scheme, "http") && port == "8080" {
+		return "ssh"
+	}
+	return "http"
 }
 
 func validateDistinctGitHubTokens(adminToken, runtimeToken string, enforce bool) error {
