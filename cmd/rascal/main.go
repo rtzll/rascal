@@ -2248,6 +2248,7 @@ func deployToExistingHost(cfg deployConfig) error {
 		"if [ -f /tmp/rascal-bootstrap/Caddyfile ]; then install -m 0644 /tmp/rascal-bootstrap/Caddyfile /etc/caddy/Caddyfile && systemctl enable caddy --now && (systemctl reload caddy || systemctl restart caddy); fi",
 		"systemctl daemon-reload",
 		"systemctl enable rascal --now",
+		"systemctl restart rascal",
 	}, " && ")
 	if err := runLocal("ssh", sshArgs(cfg, remoteInstall)...); err != nil {
 		return err
