@@ -137,7 +137,6 @@ pr_url=""
 head_sha=""
 commit_title="chore(rascal): $(task_subject)"
 commit_body=""
-load_agent_commit_message "${COMMIT_MESSAGE_FILE}"
 
 cleanup_and_exit() {
   local code="$1"
@@ -187,6 +186,8 @@ if [[ -f Makefile ]]; then
   log "running lightweight verify: make -n test"
   make -n test >/dev/null 2>&1 || true
 fi
+
+load_agent_commit_message "${COMMIT_MESSAGE_FILE}"
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
   git add -A
