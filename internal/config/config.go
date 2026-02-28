@@ -21,6 +21,7 @@ type ServerConfig struct {
 	BotLogin            string
 	RunnerMode          string
 	RunnerImage         string
+	RunnerMaxAttempts   int
 	CodexAuthPath       string
 	MaxRuns             int
 }
@@ -46,6 +47,7 @@ func LoadServerConfig() ServerConfig {
 		BotLogin:            strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
 		RunnerMode:          envOrDefault("RASCAL_RUNNER_MODE", "noop"),
 		RunnerImage:         envOrDefault("RASCAL_RUNNER_IMAGE", "rascal-runner:latest"),
+		RunnerMaxAttempts:   envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
 		CodexAuthPath:       envOrDefault("RASCAL_CODEX_AUTH_PATH", "/etc/rascal/codex_auth.json"),
 		MaxRuns:             200,
 	}
@@ -147,4 +149,16 @@ func envOrDefault(key, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func envIntOrDefault(key string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	var out int
+	if _, err := fmt.Sscanf(v, "%d", &out); err != nil || out <= 0 {
+		return fallback
+	}
+	return out
 }

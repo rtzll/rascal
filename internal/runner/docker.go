@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -67,7 +68,13 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	}
 
 	args := []string{"run", "--rm", "--name", sanitizeContainerName("rascal-" + spec.RunID)}
-	for k, v := range envPairs {
+	envKeys := make([]string, 0, len(envPairs))
+	for k := range envPairs {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	for _, k := range envKeys {
+		v := envPairs[k]
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 	args = append(args,

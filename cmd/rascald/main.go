@@ -630,7 +630,7 @@ func (s *server) executeRun(runID string) {
 		PRNumber:    run.PRNumber,
 		Context:     run.Context,
 	}
-	result, err := s.launcher.Start(context.Background(), spec)
+	result, err := s.runLauncherWithRetry(context.Background(), spec)
 	if err != nil {
 		updated, _ := s.store.SetRunStatus(run.ID, state.StatusFailed, err.Error())
 		s.finishRun(updated)
@@ -818,6 +818,31 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (s *server) runLauncherWithRetry(ctx context.Context, spec runner.Spec) (runner.Result, error) {
+	maxAttempts := s.cfg.RunnerMaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+
+	var (
+		res runner.Result
+		err error
+	)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		res, err = s.launcher.Start(ctx, spec)
+		if err == nil {
+			return res, nil
+		}
+		if attempt == maxAttempts {
+			break
+		}
+		backoff := time.Duration(attempt) * time.Second
+		log.Printf("run %s attempt %d/%d failed: %v (retrying in %s)", spec.RunID, attempt, maxAttempts, err, backoff)
+		time.Sleep(backoff)
+	}
+	return res, err
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {

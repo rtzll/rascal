@@ -91,3 +91,4 @@ RASCAL_RUNNER_IMAGE=rascal-runner:latest
 - `RASCAL_RUNNER_MODE` defaults to `noop` for safe local scaffolding.
 - Set `RASCAL_API_TOKEN` on server and client for authenticated API access.
 - Set `RASCAL_GITHUB_WEBHOOK_SECRET` to enforce webhook signature validation.
+- Optionally set `RASCAL_RUNNER_MAX_ATTEMPTS` to retry transient runner failures.
