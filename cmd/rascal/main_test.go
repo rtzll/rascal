@@ -103,13 +103,43 @@ func TestRetryCommandAliasesRerun(t *testing.T) {
 
 func TestRootFlagsDoNotExposeDeadFlags(t *testing.T) {
 	root := newRootCmd()
-	for _, name := range []string{"no-color", "verbose", "yes", "debug"} {
+	for _, name := range []string{"verbose", "yes", "debug"} {
 		if f := root.PersistentFlags().Lookup(name); f != nil {
 			t.Fatalf("unexpected flag %q", name)
 		}
 	}
 	if f := root.PersistentFlags().Lookup("quiet"); f == nil {
 		t.Fatal("expected quiet flag to exist")
+	}
+	if f := root.PersistentFlags().Lookup("no-color"); f == nil {
+		t.Fatal("expected no-color flag to exist")
+	}
+}
+
+func TestNoColorRequested(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	if !noColorRequested(false) {
+		t.Fatal("expected NO_COLOR env to disable color/styling")
+	}
+	if !noColorRequested(true) {
+		t.Fatal("expected --no-color flag to disable color/styling")
+	}
+}
+
+func TestNoColorRequestedUnset(t *testing.T) {
+	old, had := os.LookupEnv("NO_COLOR")
+	if err := os.Unsetenv("NO_COLOR"); err != nil {
+		t.Fatalf("unset NO_COLOR: %v", err)
+	}
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv("NO_COLOR", old)
+			return
+		}
+		_ = os.Unsetenv("NO_COLOR")
+	})
+	if noColorRequested(false) {
+		t.Fatal("expected color/styling enabled when NO_COLOR is unset and flag is false")
 	}
 }
 

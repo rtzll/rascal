@@ -41,6 +41,7 @@ type app struct {
 	apiTokenFlag    string
 	defaultRepoFlag string
 	output          string
+	noColor         bool
 	quiet           bool
 	cfg             config.ClientConfig
 	client          apiClient
@@ -109,6 +110,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().StringVar(&a.apiTokenFlag, "api-token", "", "orchestrator API token")
 	root.PersistentFlags().StringVar(&a.defaultRepoFlag, "default-repo", "", "default repository in OWNER/REPO form")
 	root.PersistentFlags().StringVar(&a.output, "output", "table", "output format: table|json|yaml")
+	root.PersistentFlags().BoolVar(&a.noColor, "no-color", false, "disable ANSI color/style output (also set by NO_COLOR)")
 	root.PersistentFlags().BoolVarP(&a.quiet, "quiet", "q", false, "reduce non-essential output")
 
 	root.AddCommand(a.newInitCmd())
@@ -124,9 +126,9 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(a.newTaskCmd())
 	root.AddCommand(a.newConfigCmd())
 	root.AddCommand(a.newAuthCmd())
+	root.AddCommand(a.newRepoCmd())
+	root.AddCommand(a.newInfraCmd())
 	root.AddCommand(newCompletionCmd(root))
-	root.AddCommand(&cobra.Command{Use: "repo", Short: "Advanced repository operations", Hidden: true})
-	root.AddCommand(&cobra.Command{Use: "infra", Short: "Advanced infrastructure operations", Hidden: true})
 
 	return root
 }
@@ -222,6 +224,16 @@ func (a *app) isTTY() bool {
 	return (st.Mode() & os.ModeCharDevice) != 0
 }
 
+func (a *app) ansiEnabled() bool {
+	if noColorRequested(a.noColor) {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb") {
+		return false
+	}
+	return a.isTTY()
+}
+
 func (a *app) println(msg string, args ...any) {
 	if a.quiet {
 		return
@@ -312,22 +324,31 @@ func (a *app) newInitCmd() *cobra.Command {
 
 func (a *app) newBootstrapCmd() *cobra.Command {
 	var (
-		repo           string
-		domain         string
-		serverURL      string
-		apiToken       string
-		githubToken    string
-		webhookSecret  string
-		skipWebhook    bool
-		writeConfig    bool
-		host           string
-		sshUser        string
-		sshKey         string
-		sshPort        int
-		goarch         string
-		deployExisting bool
-		codexAuthPath  string
-		hcloudToken    string
+		repo               string
+		domain             string
+		serverURL          string
+		apiToken           string
+		githubToken        string
+		webhookSecret      string
+		skipWebhook        bool
+		writeConfig        bool
+		host               string
+		sshUser            string
+		sshKey             string
+		sshPort            int
+		goarch             string
+		deployExisting     bool
+		codexAuthPath      string
+		hcloudToken        string
+		hcloudServerName   string
+		hcloudServerType   string
+		hcloudLocation     string
+		hcloudImage        string
+		hcloudSSHKeyName   string
+		hcloudSSHPublicKey string
+		hcloudFirewallName string
+		hcloudApplyFW      bool
+		hcloudTimeout      time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -345,13 +366,57 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			sshKey = strings.TrimSpace(sshKey)
 			goarch = strings.TrimSpace(goarch)
 			codexAuthPath = strings.TrimSpace(codexAuthPath)
-			hcloudToken = strings.TrimSpace(hcloudToken)
+			hcloudToken = firstNonEmpty(strings.TrimSpace(hcloudToken), strings.TrimSpace(os.Getenv("HCLOUD_TOKEN")))
+			hcloudServerName = strings.TrimSpace(hcloudServerName)
+			hcloudServerType = strings.TrimSpace(hcloudServerType)
+			hcloudLocation = strings.TrimSpace(hcloudLocation)
+			hcloudImage = strings.TrimSpace(hcloudImage)
+			hcloudSSHKeyName = strings.TrimSpace(hcloudSSHKeyName)
+			hcloudSSHPublicKey = strings.TrimSpace(hcloudSSHPublicKey)
+			hcloudFirewallName = strings.TrimSpace(hcloudFirewallName)
+
+			var provisionOut *hcloudProvisionResult
+			if hcloudToken != "" && host == "" {
+				if hcloudTimeout <= 0 {
+					hcloudTimeout = 8 * time.Minute
+				}
+				publicKeyPath, err := expandPath(firstNonEmpty(hcloudSSHPublicKey, "~/.ssh/id_ed25519.pub"))
+				if err != nil {
+					return fmt.Errorf("expand --hcloud-ssh-public-key path: %w", err)
+				}
+				if hcloudServerName == "" {
+					hcloudServerName = fmt.Sprintf("rascal-%d", time.Now().UTC().Unix())
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), hcloudTimeout)
+				defer cancel()
+				out, err := provisionHetznerServer(ctx, hcloudProvisionConfig{
+					Token:         hcloudToken,
+					ServerName:    hcloudServerName,
+					ServerType:    firstNonEmpty(hcloudServerType, "cax11"),
+					Location:      firstNonEmpty(hcloudLocation, "fsn1"),
+					Image:         firstNonEmpty(hcloudImage, "ubuntu-24.04"),
+					SSHKeyName:    firstNonEmpty(hcloudSSHKeyName, "rascal"),
+					SSHPublicPath: publicKeyPath,
+					FirewallName:  firstNonEmpty(hcloudFirewallName, "rascal-fw"),
+					ApplyFirewall: hcloudApplyFW,
+				})
+				if err != nil {
+					return fmt.Errorf("hcloud provision: %w", err)
+				}
+				host = strings.TrimSpace(out.Host)
+				deployExisting = true
+				provisionOut = &out
+			}
 
 			if serverURL == "" {
-				if domain == "" {
-					return fmt.Errorf("either --server-url or --domain is required")
+				switch {
+				case domain != "":
+					serverURL = "https://" + domain
+				case host != "":
+					serverURL = "http://" + host + ":8080"
+				default:
+					return fmt.Errorf("either --server-url, --domain, or a provisioned/explicit --host is required")
 				}
-				serverURL = "https://" + domain
 			}
 			serverURL = strings.TrimRight(serverURL, "/")
 
@@ -416,14 +481,15 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("expand codex auth path: %w", err)
 				}
-				deployCfg := deployConfig{
-					Host:               host,
-					SSHUser:            sshUser,
-					SSHKeyPath:         sshKey,
-					SSHPort:            sshPort,
-					APIToken:           apiToken,
-					WebhookSecret:      webhookSecret,
-					GitHubToken:        githubToken,
+					deployCfg := deployConfig{
+						Host:               host,
+						SSHUser:            sshUser,
+						SSHKeyPath:         sshKey,
+						SSHPort:            sshPort,
+						Domain:             domain,
+						APIToken:           apiToken,
+						WebhookSecret:      webhookSecret,
+						GitHubToken:        githubToken,
 					CodexAuthPath:      expandedAuthPath,
 					RunnerMode:         "docker",
 					RunnerImage:        "rascal-runner:latest",
@@ -448,11 +514,12 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			if writeConfig {
 				out["config_path"] = a.configPath
 			}
-			if hcloudToken != "" {
-				out["note"] = "hcloud provisioning path is not automated yet; deploy to an existing host for now"
-			}
-			return a.emit(out, func() error {
-				a.println("bootstrap complete")
+				if provisionOut != nil {
+					out["provisioned_server"] = provisionOut
+					out["host"] = host
+				}
+				return a.emit(out, func() error {
+					a.println("bootstrap complete")
 				a.println("server_url: %s", serverURL)
 				a.println("api_token: %s", maskSecret(apiToken))
 				a.println("default_repo: %s", repo)
@@ -460,11 +527,11 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				if writeConfig {
 					a.println("config_path: %s", a.configPath)
 				}
-				if hcloudToken != "" {
-					a.println("hcloud provisioning path is not automated yet; deploy to an existing host for now.")
-				}
-				return nil
-			})
+					if provisionOut != nil {
+						a.println("provisioned host: %s", host)
+					}
+					return nil
+				})
 		},
 	}
 
@@ -483,7 +550,16 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&goarch, "goarch", "amd64", "GOARCH for rascald binary when deploying to existing host")
 	cmd.Flags().BoolVar(&deployExisting, "deploy-existing", false, "deploy rascald to --host over SSH")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path copied to the server")
-	cmd.Flags().StringVar(&hcloudToken, "hcloud-token", "", "Hetzner Cloud token (provisioning placeholder)")
+	cmd.Flags().StringVar(&hcloudToken, "hcloud-token", "", "Hetzner Cloud token (provisions host when set and --host is empty)")
+	cmd.Flags().StringVar(&hcloudServerName, "hcloud-server-name", "", "Hetzner server name")
+	cmd.Flags().StringVar(&hcloudServerType, "hcloud-server-type", "cax11", "Hetzner server type")
+	cmd.Flags().StringVar(&hcloudLocation, "hcloud-location", "fsn1", "Hetzner location")
+	cmd.Flags().StringVar(&hcloudImage, "hcloud-image", "ubuntu-24.04", "Hetzner image")
+	cmd.Flags().StringVar(&hcloudSSHKeyName, "hcloud-ssh-key-name", "rascal", "Hetzner SSH key resource name")
+	cmd.Flags().StringVar(&hcloudSSHPublicKey, "hcloud-ssh-public-key", "~/.ssh/id_ed25519.pub", "local SSH public key path for Hetzner")
+	cmd.Flags().StringVar(&hcloudFirewallName, "hcloud-firewall-name", "rascal-fw", "Hetzner firewall resource name")
+	cmd.Flags().BoolVar(&hcloudApplyFW, "hcloud-apply-firewall", true, "create/update and attach firewall (22,80,443)")
+	cmd.Flags().DurationVar(&hcloudTimeout, "hcloud-timeout", 8*time.Minute, "Hetzner provisioning timeout")
 
 	return cmd
 }
@@ -619,7 +695,7 @@ func (a *app) newPSCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if a.isTTY() {
+				if a.ansiEnabled() {
 					_, _ = fmt.Fprint(os.Stdout, "\033[H\033[2J")
 				}
 				_ = render(runs)
@@ -747,6 +823,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				"default_repo":        a.cfg.DefaultRepo,
 				"default_repo_source": a.repoSource,
 				"output_format":       a.output,
+				"no_color":            noColorRequested(a.noColor),
 			}
 			return a.emit(diagnostics, func() error {
 				a.println("config path: %s", a.configPath)
@@ -1226,6 +1303,14 @@ func loadFileConfig(path string) (config.ClientConfig, error) {
 	}, nil
 }
 
+func noColorRequested(flagValue bool) bool {
+	if flagValue {
+		return true
+	}
+	_, set := os.LookupEnv("NO_COLOR")
+	return set
+}
+
 func promptString(r *bufio.Reader, label, def string) string {
 	if strings.TrimSpace(def) != "" {
 		fmt.Printf("%s [%s]: ", label, def)
@@ -1327,6 +1412,7 @@ type deployConfig struct {
 	SSHUser            string
 	SSHKeyPath         string
 	SSHPort            int
+	Domain             string
 	APIToken           string
 	WebhookSecret      string
 	GitHubToken        string
@@ -1341,6 +1427,13 @@ type deployConfig struct {
 }
 
 func deployToExistingHost(cfg deployConfig) error {
+	if strings.TrimSpace(cfg.CodexAuthPath) == "" {
+		return fmt.Errorf("codex auth path is required")
+	}
+	if _, err := os.Stat(cfg.CodexAuthPath); err != nil {
+		return fmt.Errorf("codex auth file is required at %s: %w", cfg.CodexAuthPath, err)
+	}
+
 	tmpDir, err := os.MkdirTemp("", "rascal-bootstrap-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
@@ -1362,7 +1455,25 @@ func deployToExistingHost(cfg deployConfig) error {
 		return fmt.Errorf("write systemd service: %w", err)
 	}
 
-	if err := runLocal("ssh", sshArgs(cfg, "mkdir -p /opt/rascal /etc/rascal /var/lib/rascal /tmp/rascal-bootstrap")...); err != nil {
+	runnerArchivePath := filepath.Join(tmpDir, "runner.tgz")
+	if err := runLocal("tar", "-C", repoRootPath(), "-czf", runnerArchivePath, "runner"); err != nil {
+		return fmt.Errorf("package runner assets: %w", err)
+	}
+
+	installDockerPath := deployAssetPath(filepath.Join("deploy", "scripts", "install_docker.sh"))
+	if _, err := os.Stat(installDockerPath); err != nil {
+		return fmt.Errorf("missing deploy script %s: %w", installDockerPath, err)
+	}
+
+	caddyPath := ""
+	if strings.TrimSpace(cfg.Domain) != "" {
+		caddyPath = filepath.Join(tmpDir, "Caddyfile")
+		if err := os.WriteFile(caddyPath, []byte(renderCaddyfile(cfg.Domain)), 0o644); err != nil {
+			return fmt.Errorf("write caddyfile: %w", err)
+		}
+	}
+
+	if err := runLocal("ssh", sshArgs(cfg, "mkdir -p /opt/rascal /etc/rascal /var/lib/rascal /tmp/rascal-bootstrap /etc/caddy")...); err != nil {
 		return err
 	}
 	if err := runLocal("scp", scpArgs(cfg, binaryPath, remoteTarget(cfg, "/tmp/rascal-bootstrap/rascald"))...); err != nil {
@@ -1374,18 +1485,34 @@ func deployToExistingHost(cfg deployConfig) error {
 	if err := runLocal("scp", scpArgs(cfg, servicePath, remoteTarget(cfg, "/tmp/rascal-bootstrap/rascal.service"))...); err != nil {
 		return err
 	}
-	if _, err := os.Stat(cfg.CodexAuthPath); err == nil {
-		if err := runLocal("scp", scpArgs(cfg, cfg.CodexAuthPath, remoteTarget(cfg, "/tmp/rascal-bootstrap/auth.json"))...); err != nil {
+	if err := runLocal("scp", scpArgs(cfg, cfg.CodexAuthPath, remoteTarget(cfg, "/tmp/rascal-bootstrap/auth.json"))...); err != nil {
+		return err
+	}
+	if err := runLocal("scp", scpArgs(cfg, installDockerPath, remoteTarget(cfg, "/tmp/rascal-bootstrap/install_docker.sh"))...); err != nil {
+		return err
+	}
+	if err := runLocal("scp", scpArgs(cfg, runnerArchivePath, remoteTarget(cfg, "/tmp/rascal-bootstrap/runner.tgz"))...); err != nil {
+		return err
+	}
+	if caddyPath != "" {
+		if err := runLocal("scp", scpArgs(cfg, caddyPath, remoteTarget(cfg, "/tmp/rascal-bootstrap/Caddyfile"))...); err != nil {
 			return err
 		}
 	}
 
 	remoteInstall := strings.Join([]string{
 		"set -euo pipefail",
+		"chmod +x /tmp/rascal-bootstrap/install_docker.sh",
+		"/tmp/rascal-bootstrap/install_docker.sh",
+		"if ! command -v caddy >/dev/null 2>&1; then apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y caddy; fi",
+		"mkdir -p /opt/rascal",
+		"tar -xzf /tmp/rascal-bootstrap/runner.tgz -C /opt/rascal",
+		fmt.Sprintf("docker build -t %s /opt/rascal/runner", cfg.RunnerImage),
 		"install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald",
 		"install -m 0600 /tmp/rascal-bootstrap/rascal.env /etc/rascal/rascal.env",
 		"install -m 0644 /tmp/rascal-bootstrap/rascal.service /etc/systemd/system/rascal.service",
-		fmt.Sprintf("if [ -f /tmp/rascal-bootstrap/auth.json ]; then install -m 0600 /tmp/rascal-bootstrap/auth.json %s; fi", cfg.ServerCodexAuthDst),
+		fmt.Sprintf("install -m 0600 /tmp/rascal-bootstrap/auth.json %s", cfg.ServerCodexAuthDst),
+		"if [ -f /tmp/rascal-bootstrap/Caddyfile ]; then install -m 0644 /tmp/rascal-bootstrap/Caddyfile /etc/caddy/Caddyfile && systemctl enable caddy --now; fi",
 		"systemctl daemon-reload",
 		"systemctl enable rascal --now",
 	}, " && ")
@@ -1485,6 +1612,28 @@ WorkingDirectory=/opt/rascal
 [Install]
 WantedBy=multi-user.target
 `) + "\n"
+}
+
+func renderCaddyfile(domain string) string {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return ""
+	}
+	templatePath := deployAssetPath(filepath.Join("deploy", "caddy", "Caddyfile.tmpl"))
+	data, err := os.ReadFile(templatePath)
+	if err == nil {
+		return strings.ReplaceAll(string(data), "{{DOMAIN}}", domain)
+	}
+	return strings.TrimSpace(fmt.Sprintf(`
+%s {
+  encode gzip zstd
+  reverse_proxy 127.0.0.1:8080
+  log {
+    output file /var/log/caddy/rascal-access.log
+    format json
+  }
+}
+`, domain)) + "\n"
 }
 
 func expandPath(path string) (string, error) {
