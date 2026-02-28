@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rtzll/rascal/internal/state"
 )
 
 func TestMaskSecret(t *testing.T) {
@@ -415,4 +417,61 @@ func captureStdout(fn func() error) (string, error) {
 	data, _ := io.ReadAll(r)
 	_ = r.Close()
 	return string(data), err
+}
+
+func TestRenderStatusChangeLineInitial(t *testing.T) {
+	t.Parallel()
+
+	line, updated := renderStatusChangeLine("", state.StatusQueued)
+	if line == "" {
+		t.Fatal("expected status line for initial status")
+	}
+	if !strings.Contains(line, "queued") {
+		t.Fatalf("expected status line to include queued, got %q", line)
+	}
+	if !strings.HasSuffix(line, "\n") {
+		t.Fatalf("expected status line to end with newline, got %q", line)
+	}
+	if updated != state.StatusQueued {
+		t.Fatalf("expected updated status queued, got %q", updated)
+	}
+}
+
+func TestRenderStatusChangeLineNoChange(t *testing.T) {
+	t.Parallel()
+
+	line, updated := renderStatusChangeLine(state.StatusRunning, state.StatusRunning)
+	if line != "" {
+		t.Fatalf("expected no line for unchanged status, got %q", line)
+	}
+	if updated != state.StatusRunning {
+		t.Fatalf("expected updated status to remain running, got %q", updated)
+	}
+}
+
+func TestRenderStatusChangeLineTransition(t *testing.T) {
+	t.Parallel()
+
+	line, updated := renderStatusChangeLine(state.StatusQueued, state.StatusRunning)
+	if line == "" {
+		t.Fatal("expected status line for transition")
+	}
+	if !strings.Contains(line, "running") {
+		t.Fatalf("expected status line to include running, got %q", line)
+	}
+	if updated != state.StatusRunning {
+		t.Fatalf("expected updated status running, got %q", updated)
+	}
+}
+
+func TestRenderStatusChangeLineEmptyCurrent(t *testing.T) {
+	t.Parallel()
+
+	line, updated := renderStatusChangeLine(state.StatusRunning, "")
+	if line != "" {
+		t.Fatalf("expected no line for empty current status, got %q", line)
+	}
+	if updated != state.StatusRunning {
+		t.Fatalf("expected updated status to remain running, got %q", updated)
+	}
 }

@@ -1025,6 +1025,7 @@ func (a *app) newLogsCmd() *cobra.Command {
 			sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 			last := ""
+			lastStatus := state.RunStatus("")
 			for {
 				body, err := fetch()
 				if err != nil {
@@ -1033,6 +1034,15 @@ func (a *app) newLogsCmd() *cobra.Command {
 				if since > 0 {
 					body = filterLogsSince(body, time.Now().Add(-since))
 				}
+				run, err := a.fetchRun(args[0])
+				if err != nil {
+					return err
+				}
+				statusLine, updatedStatus := renderStatusChangeLine(lastStatus, run.Status)
+				if statusLine != "" {
+					_, _ = io.WriteString(os.Stdout, statusLine)
+				}
+				lastStatus = updatedStatus
 				if strings.HasPrefix(body, last) {
 					diff := strings.TrimPrefix(body, last)
 					if diff != "" {
@@ -1998,6 +2008,16 @@ func filterLogsSince(input string, since time.Time) string {
 		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
+}
+
+func renderStatusChangeLine(previous, current state.RunStatus) (string, state.RunStatus) {
+	if current == "" {
+		return "", previous
+	}
+	if current == previous {
+		return "", previous
+	}
+	return fmt.Sprintf("== status: %s ==\n", current), current
 }
 
 func parseIssueRef(input string) (string, int, error) {
