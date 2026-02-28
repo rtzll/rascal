@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"os"
@@ -293,9 +294,22 @@ func provisionHetznerServer(ctx context.Context, cfg hcloudProvisionConfig) (hcl
 			PublicKey: sshPublic,
 		})
 		if err != nil {
-			return hcloudProvisionResult{}, fmt.Errorf("create ssh key: %w", err)
+			if hcloud.IsError(err, hcloud.ErrorCodeUniquenessError) {
+				existing, lookupErr := findSSHKeyByPublicKey(ctx, client, sshPublic)
+				if lookupErr != nil {
+					return hcloudProvisionResult{}, fmt.Errorf("create ssh key: %w (lookup existing key failed: %v)", err, lookupErr)
+				}
+				if existing != nil {
+					sshKey = existing
+				} else {
+					return hcloudProvisionResult{}, fmt.Errorf("create ssh key: %w", err)
+				}
+			} else {
+				return hcloudProvisionResult{}, fmt.Errorf("create ssh key: %w", err)
+			}
+		} else {
+			sshKey = created
 		}
-		sshKey = created
 	}
 
 	serverType, _, err := client.ServerType.GetByName(ctx, cfg.ServerType)
@@ -484,4 +498,52 @@ func repoRootPath() string {
 
 func deployAssetPath(rel string) string {
 	return filepath.Join(repoRootPath(), rel)
+}
+
+func findSSHKeyByPublicKey(ctx context.Context, client *hcloud.Client, publicKey string) (*hcloud.SSHKey, error) {
+	want := normalizeAuthorizedPublicKey(publicKey)
+	if want == "" {
+		return nil, fmt.Errorf("invalid ssh public key")
+	}
+	keys, err := client.SSHKey.All(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list ssh keys: %w", err)
+	}
+	for _, key := range keys {
+		if normalizeAuthorizedPublicKey(key.PublicKey) == want {
+			return key, nil
+		}
+	}
+	return nil, nil
+}
+
+func normalizeAuthorizedPublicKey(raw string) string {
+	fields := strings.Fields(strings.TrimSpace(raw))
+	for i := 0; i+1 < len(fields); i++ {
+		if !looksLikeSSHKeyType(fields[i]) {
+			continue
+		}
+		if !looksLikeSSHKeyMaterial(fields[i+1]) {
+			continue
+		}
+		return fields[i] + " " + fields[i+1]
+	}
+	return ""
+}
+
+func looksLikeSSHKeyType(s string) bool {
+	return strings.HasPrefix(s, "ssh-") || strings.HasPrefix(s, "ecdsa-") || strings.HasPrefix(s, "sk-")
+}
+
+func looksLikeSSHKeyMaterial(s string) bool {
+	if s == "" {
+		return false
+	}
+	if _, err := base64.RawStdEncoding.DecodeString(s); err == nil {
+		return true
+	}
+	if _, err := base64.StdEncoding.DecodeString(s); err == nil {
+		return true
+	}
+	return false
 }
