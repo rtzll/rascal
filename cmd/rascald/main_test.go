@@ -6,10 +6,12 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -319,6 +321,32 @@ func TestHandleTaskSubresourcesGet(t *testing.T) {
 	s.handleTaskSubresources(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestHandleCreateTaskRespectsProvidedTaskID(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/tasks",
+		strings.NewReader(`{"task_id":"owner/repo#99","repo":"owner/repo","task":"follow-up","base_branch":"main"}`),
+	)
+	rec := httptest.NewRecorder()
+	s.handleCreateTask(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var out struct {
+		Run state.Run `json:"run"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Run.TaskID != "owner/repo#99" {
+		t.Fatalf("expected task id owner/repo#99, got %q", out.Run.TaskID)
 	}
 }
 

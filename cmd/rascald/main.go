@@ -53,6 +53,7 @@ type runRequest struct {
 }
 
 type createTaskRequest struct {
+	TaskID     string `json:"task_id"`
 	Repo       string `json:"repo"`
 	Task       string `json:"task"`
 	BaseBranch string `json:"base_branch"`
@@ -180,6 +181,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
+	req.TaskID = strings.TrimSpace(req.TaskID)
 	req.Repo = strings.TrimSpace(req.Repo)
 	req.Task = strings.TrimSpace(req.Task)
 	req.BaseBranch = strings.TrimSpace(req.BaseBranch)
@@ -189,6 +191,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run, err := s.createAndQueueRun(runRequest{
+		TaskID:     req.TaskID,
 		Repo:       req.Repo,
 		Task:       req.Task,
 		BaseBranch: req.BaseBranch,

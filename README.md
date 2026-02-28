@@ -7,10 +7,12 @@ Rascal is a self-hosted coding-agent orchestrator.
 - `cmd/rascald`: Orchestrator API server
   - `GET /healthz`
   - `POST /v1/tasks`
+  - `GET /v1/tasks/{id}`
   - `POST /v1/tasks/issue`
   - `GET /v1/runs`
   - `GET /v1/runs/{id}`
   - `GET /v1/runs/{id}/logs`
+  - `POST /v1/runs/{id}/cancel`
   - `POST /v1/webhooks/github`
 - `cmd/rascal`: CLI
   - `bootstrap`
@@ -20,8 +22,7 @@ Rascal is a self-hosted coding-agent orchestrator.
   - `ps`
   - `logs`
   - `open`
-  - `rerun`
-  - `retry`
+  - `retry` (alias: `rerun`)
   - `cancel`
   - `task`
   - `config`
@@ -53,7 +54,7 @@ go run ./cmd/rascal logs <run_id>
 Global UX flags:
 
 - `--output table|json|yaml`
-- `--verbose`, `--quiet`, `--debug`
+- `--quiet`
 - `--config <path>`
 
 ## Bootstrap

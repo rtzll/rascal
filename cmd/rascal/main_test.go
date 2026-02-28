@@ -90,6 +90,29 @@ func TestCompletionHelpContainsInstall(t *testing.T) {
 	}
 }
 
+func TestRetryCommandAliasesRerun(t *testing.T) {
+	root := newRootCmd()
+	cmd, _, err := root.Find([]string{"rerun"})
+	if err != nil {
+		t.Fatalf("find rerun: %v", err)
+	}
+	if cmd.Name() != "retry" {
+		t.Fatalf("expected rerun alias to resolve to retry, got %q", cmd.Name())
+	}
+}
+
+func TestRootFlagsDoNotExposeDeadFlags(t *testing.T) {
+	root := newRootCmd()
+	for _, name := range []string{"no-color", "verbose", "yes", "debug"} {
+		if f := root.PersistentFlags().Lookup(name); f != nil {
+			t.Fatalf("unexpected flag %q", name)
+		}
+	}
+	if f := root.PersistentFlags().Lookup("quiet"); f == nil {
+		t.Fatal("expected quiet flag to exist")
+	}
+}
+
 func captureStdout(fn func() error) (string, error) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()

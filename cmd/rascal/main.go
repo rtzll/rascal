@@ -41,12 +41,7 @@ type app struct {
 	apiTokenFlag    string
 	defaultRepoFlag string
 	output          string
-	noColor         bool
-	verbose         bool
 	quiet           bool
-	yes             bool
-	debug           bool
-	v               *viper.Viper
 	cfg             config.ClientConfig
 	client          apiClient
 	serverSource    string
@@ -114,11 +109,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().StringVar(&a.apiTokenFlag, "api-token", "", "orchestrator API token")
 	root.PersistentFlags().StringVar(&a.defaultRepoFlag, "default-repo", "", "default repository in OWNER/REPO form")
 	root.PersistentFlags().StringVar(&a.output, "output", "table", "output format: table|json|yaml")
-	root.PersistentFlags().BoolVar(&a.noColor, "no-color", false, "disable ANSI colors")
-	root.PersistentFlags().BoolVarP(&a.verbose, "verbose", "v", false, "enable verbose logs")
 	root.PersistentFlags().BoolVarP(&a.quiet, "quiet", "q", false, "reduce non-essential output")
-	root.PersistentFlags().BoolVar(&a.yes, "yes", false, "assume yes for interactive confirmations")
-	root.PersistentFlags().BoolVar(&a.debug, "debug", false, "print debug diagnostics")
 
 	root.AddCommand(a.newInitCmd())
 	root.AddCommand(a.newBootstrapCmd())
@@ -128,7 +119,6 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(a.newLogsCmd())
 	root.AddCommand(a.newDoctorCmd())
 	root.AddCommand(a.newOpenCmd())
-	root.AddCommand(a.newRerunCmd())
 	root.AddCommand(a.newRetryCmd())
 	root.AddCommand(a.newCancelCmd())
 	root.AddCommand(a.newTaskCmd())
@@ -161,8 +151,6 @@ func (a *app) initConfig() error {
 			}
 		}
 	}
-	a.v = v
-
 	a.cfg = config.ClientConfig{
 		ServerURL:   strings.TrimSpace(v.GetString("server_url")),
 		APIToken:    strings.TrimSpace(v.GetString("api_token")),
@@ -239,18 +227,6 @@ func (a *app) println(msg string, args ...any) {
 		return
 	}
 	fmt.Printf(msg+"\n", args...)
-}
-
-func (a *app) vprintln(msg string, args ...any) {
-	if a.verbose {
-		fmt.Printf(msg+"\n", args...)
-	}
-}
-
-func (a *app) dprintln(msg string, args ...any) {
-	if a.debug {
-		fmt.Printf("[debug] "+msg+"\n", args...)
-	}
 }
 
 func (a *app) emit(v any, tableFn func() error) error {
@@ -460,21 +436,35 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				if err := deployToExistingHost(deployCfg); err != nil {
 					return err
 				}
-				fmt.Printf("deployed rascald to %s\n", host)
+				a.println("deployed rascald to %s", host)
 			}
-
-			fmt.Printf("bootstrap complete\n")
-			fmt.Printf("server_url: %s\n", serverURL)
-			fmt.Printf("api_token: %s\n", maskSecret(apiToken))
-			fmt.Printf("default_repo: %s\n", repo)
-			fmt.Printf("webhook_secret: %s\n", maskSecret(webhookSecret))
+			out := map[string]any{
+				"status":         "bootstrap_complete",
+				"server_url":     serverURL,
+				"api_token":      maskSecret(apiToken),
+				"default_repo":   repo,
+				"webhook_secret": maskSecret(webhookSecret),
+			}
 			if writeConfig {
-				fmt.Printf("config_path: %s\n", a.configPath)
+				out["config_path"] = a.configPath
 			}
 			if hcloudToken != "" {
-				fmt.Println("hcloud provisioning path is not automated yet; deploy to an existing host for now.")
+				out["note"] = "hcloud provisioning path is not automated yet; deploy to an existing host for now"
 			}
-			return nil
+			return a.emit(out, func() error {
+				a.println("bootstrap complete")
+				a.println("server_url: %s", serverURL)
+				a.println("api_token: %s", maskSecret(apiToken))
+				a.println("default_repo: %s", repo)
+				a.println("webhook_secret: %s", maskSecret(webhookSecret))
+				if writeConfig {
+					a.println("config_path: %s", a.configPath)
+				}
+				if hcloudToken != "" {
+					a.println("hcloud provisioning path is not automated yet; deploy to an existing host for now.")
+				}
+				return nil
+			})
 		},
 	}
 
@@ -748,15 +738,15 @@ func (a *app) newDoctorCmd() *cobra.Command {
 			}
 
 			diagnostics := map[string]any{
-				"config_path":      a.configPath,
-				"config_exists":    cfgExists,
-				"server_url":       a.cfg.ServerURL,
-				"server_source":    a.serverSource,
-				"api_token_set":    strings.TrimSpace(a.cfg.APIToken) != "",
-				"api_token_source": a.tokenSource,
-				"default_repo":     a.cfg.DefaultRepo,
-				"default_source":   a.repoSource,
-				"output_format":    a.output,
+				"config_path":         a.configPath,
+				"config_exists":       cfgExists,
+				"server_url":          a.cfg.ServerURL,
+				"server_source":       a.serverSource,
+				"api_token_set":       strings.TrimSpace(a.cfg.APIToken) != "",
+				"api_token_source":    a.tokenSource,
+				"default_repo":        a.cfg.DefaultRepo,
+				"default_repo_source": a.repoSource,
+				"output_format":       a.output,
 			}
 			return a.emit(diagnostics, func() error {
 				a.println("config path: %s", a.configPath)
@@ -808,52 +798,11 @@ func (a *app) newOpenCmd() *cobra.Command {
 	return cmd
 }
 
-func (a *app) newRerunCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:               "rerun <run_id>",
-		Short:             "Create a new run from an existing run's task context",
-		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: a.runIDCompletion,
-		RunE: func(_ *cobra.Command, args []string) error {
-			if err := a.requireServerAuth(); err != nil {
-				return err
-			}
-			src, err := a.fetchRun(args[0])
-			if err != nil {
-				return err
-			}
-			payload := map[string]any{
-				"repo":        src.Repo,
-				"task":        src.Task,
-				"base_branch": src.BaseBranch,
-			}
-			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
-			if err != nil {
-				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode >= 300 {
-				return decodeServerError(resp)
-			}
-			var out struct {
-				Run state.Run `json:"run"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
-			}
-			return a.emit(map[string]any{"run": out.Run}, func() error {
-				a.println("rerun created: %s (%s)", out.Run.ID, out.Run.Status)
-				return nil
-			})
-		},
-	}
-	return cmd
-}
-
 func (a *app) newRetryCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "retry <run_id>",
-		Short:             "Retry a failed or canceled run",
+		Aliases:           []string{"rerun"},
+		Short:             "Create a new run from an existing run",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -868,6 +817,7 @@ func (a *app) newRetryCmd() *cobra.Command {
 				return &cliError{Code: exitInput, Message: "retry only supports failed or canceled runs"}
 			}
 			payload := map[string]any{
+				"task_id":     run.TaskID,
 				"repo":        run.Repo,
 				"task":        run.Task,
 				"base_branch": run.BaseBranch,
@@ -953,26 +903,26 @@ func (a *app) newTaskCmd() *cobra.Command {
 func (a *app) newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Manage local config values",
+		Short: "Inspect effective config and manage local file values",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "view",
-		Short: "View effective config",
+		Short: "View effective config (flags/env/file)",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			view := map[string]any{
-				"config_path":      a.configPath,
-				"server_url":       a.cfg.ServerURL,
-				"api_token":        maskSecret(a.cfg.APIToken),
-				"default_repo":     a.cfg.DefaultRepo,
-				"server_source":    a.serverSource,
-				"api_token_source": a.tokenSource,
-				"default_source":   a.repoSource,
+				"config_path":         a.configPath,
+				"server_url":          a.cfg.ServerURL,
+				"api_token":           maskSecret(a.cfg.APIToken),
+				"default_repo":        a.cfg.DefaultRepo,
+				"server_source":       a.serverSource,
+				"api_token_source":    a.tokenSource,
+				"default_repo_source": a.repoSource,
 			}
 			return a.emit(view, func() error {
-				for _, key := range []string{"config_path", "server_url", "api_token", "default_repo", "server_source", "api_token_source", "default_source"} {
+				for _, key := range []string{"config_path", "server_url", "api_token", "default_repo", "server_source", "api_token_source", "default_repo_source"} {
 					a.println("%s: %v", key, view[key])
 				}
 				return nil
@@ -981,7 +931,7 @@ func (a *app) newConfigCmd() *cobra.Command {
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "get <key>",
-		Short: "Get a config key from local file",
+		Short: "Get a config key from the local config file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := loadFileConfig(a.configPath)
@@ -1004,7 +954,7 @@ func (a *app) newConfigCmd() *cobra.Command {
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "set <key> <value>",
-		Short: "Set a config key in local file",
+		Short: "Set a config key in the local config file",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := loadFileConfig(a.configPath)
