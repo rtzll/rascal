@@ -6,27 +6,6 @@ import (
 	"testing"
 )
 
-func TestParseSimpleYAML(t *testing.T) {
-	t.Parallel()
-
-	cfg := parseSimpleYAML([]byte(`
-# comment
-server_url: https://rascal.example.com
-api_token: abc123
-default_repo: owner/repo
-`))
-
-	if cfg.ServerURL != "https://rascal.example.com" {
-		t.Fatalf("unexpected server url: %s", cfg.ServerURL)
-	}
-	if cfg.APIToken != "abc123" {
-		t.Fatalf("unexpected api token: %s", cfg.APIToken)
-	}
-	if cfg.DefaultRepo != "owner/repo" {
-		t.Fatalf("unexpected default repo: %s", cfg.DefaultRepo)
-	}
-}
-
 func TestSaveAndLoadClientConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("RASCAL_CONFIG_PATH", path)
@@ -43,7 +22,10 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 		t.Fatalf("save client config: %v", err)
 	}
 
-	out := LoadClientConfig()
+	out, err := LoadClientConfigAtPath(path)
+	if err != nil {
+		t.Fatalf("load client config: %v", err)
+	}
 	if out.ServerURL != in.ServerURL {
 		t.Fatalf("server url mismatch: got %s want %s", out.ServerURL, in.ServerURL)
 	}
@@ -60,5 +42,25 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 	}
 	if st.Mode().Perm() != 0o600 {
 		t.Fatalf("unexpected file mode: %o", st.Mode().Perm())
+	}
+}
+
+func TestLoadClientConfigEnvOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("server_url: https://rascal.example.com\napi_token: from_file\ndefault_repo: owner/repo\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("RASCAL_SERVER_URL", "https://from-env.example.com")
+	cfg, err := LoadClientConfigAtPath(path)
+	if err != nil {
+		t.Fatalf("load client config: %v", err)
+	}
+
+	if cfg.ServerURL != "https://from-env.example.com" {
+		t.Fatalf("expected env override, got %s", cfg.ServerURL)
+	}
+	if cfg.APIToken != "from_file" {
+		t.Fatalf("expected api token from file, got %s", cfg.APIToken)
 	}
 }

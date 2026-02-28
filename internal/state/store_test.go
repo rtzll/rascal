@@ -75,19 +75,16 @@ func TestStoreSeenDelivery(t *testing.T) {
 		t.Fatalf("new store: %v", err)
 	}
 
-	seen, err := store.SeenDelivery("delivery-1")
-	if err != nil {
-		t.Fatalf("seen delivery first call: %v", err)
-	}
-	if seen {
+	if store.DeliverySeen("delivery-1") {
 		t.Fatal("expected first delivery to be unseen")
 	}
-
-	seen, err = store.SeenDelivery("delivery-1")
-	if err != nil {
-		t.Fatalf("seen delivery second call: %v", err)
+	if err := store.RecordDelivery("delivery-1"); err != nil {
+		t.Fatalf("record delivery first call: %v", err)
 	}
-	if !seen {
-		t.Fatal("expected second delivery to be seen")
+	if !store.DeliverySeen("delivery-1") {
+		t.Fatal("expected delivery to be seen after record")
+	}
+	if err := store.RecordDelivery("delivery-1"); err != nil {
+		t.Fatalf("record delivery second call: %v", err)
 	}
 }

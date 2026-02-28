@@ -19,6 +19,7 @@ Rascal is a self-hosted coding-agent orchestrator.
   - `ps`
   - `logs`
   - `doctor`
+  - `completion`
 - Per-run artifact layout under `RASCAL_DATA_DIR/runs/<run_id>/`
 - File-backed state store with atomic writes and webhook delivery idempotency
 - Task-level run serialization (one active run per task)
@@ -61,6 +62,13 @@ go run ./cmd/rascal bootstrap \
   --github-token "$GITHUB_TOKEN" \
   --host YOUR_SERVER_IP \
   --deploy-existing
+```
+
+Generate shell completion scripts:
+
+```bash
+go run ./cmd/rascal completion zsh
+go run ./cmd/rascal completion bash
 ```
 
 ## Runner image

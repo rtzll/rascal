@@ -263,10 +263,7 @@ func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deliveryID := ghapi.DeliveryID(r.Header)
-	if seen, err := s.store.SeenDelivery(deliveryID); err != nil {
-		http.Error(w, "failed to persist delivery id", http.StatusInternalServerError)
-		return
-	} else if seen {
+	if s.store.DeliverySeen(deliveryID) {
 		writeJSON(w, http.StatusOK, map[string]any{"duplicate": true})
 		return
 	}
@@ -274,6 +271,10 @@ func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	eventType := ghapi.EventType(r.Header)
 	if err := s.processWebhookEvent(r.Context(), eventType, payload); err != nil {
 		http.Error(w, "webhook processing failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.RecordDelivery(deliveryID); err != nil {
+		http.Error(w, "failed to persist delivery id", http.StatusInternalServerError)
 		return
 	}
 
@@ -288,6 +289,9 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			return fmt.Errorf("decode issues event: %w", err)
 		}
 		if ev.Action != "labeled" || !strings.EqualFold(ev.Label.Name, "rascal") {
+			return nil
+		}
+		if ev.Issue.PullRequest != nil {
 			return nil
 		}
 		if s.isBotActor(ev.Sender.Login) {

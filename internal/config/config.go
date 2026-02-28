@@ -1,12 +1,13 @@
 package config
 
 import (
-	"bufio"
-	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/spf13/viper"
 )
 
 // ServerConfig controls rascald runtime behavior.
@@ -79,26 +80,42 @@ func DefaultClientConfigPath() string {
 }
 
 func LoadClientConfig() ClientConfig {
-	cfg := ClientConfig{ServerURL: "http://127.0.0.1:8080"}
+	cfg, err := LoadClientConfigAtPath(DefaultClientConfigPath())
+	if err != nil {
+		return ClientConfig{ServerURL: "http://127.0.0.1:8080"}
+	}
+	return cfg
+}
 
-	path := DefaultClientConfigPath()
-	data, err := os.ReadFile(path)
-	if err == nil {
-		mergeClient(&cfg, parseSimpleYAML(data))
+func LoadClientConfigAtPath(path string) (ClientConfig, error) {
+	v := viper.New()
+	if strings.TrimSpace(path) == "" {
+		path = DefaultClientConfigPath()
+	}
+	v.SetConfigFile(path)
+	v.SetConfigType("yaml")
+	v.SetDefault("server_url", "http://127.0.0.1:8080")
+	v.SetEnvPrefix("RASCAL")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	if err := v.ReadInConfig(); err != nil {
+		var notFound viper.ConfigFileNotFoundError
+		if !errors.As(err, &notFound) && !os.IsNotExist(err) {
+			return ClientConfig{}, fmt.Errorf("read client config: %w", err)
+		}
 	}
 
-	fromEnv := ClientConfig{
-		ServerURL:   strings.TrimSpace(os.Getenv("RASCAL_SERVER_URL")),
-		APIToken:    strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")),
-		DefaultRepo: strings.TrimSpace(os.Getenv("RASCAL_DEFAULT_REPO")),
+	cfg := ClientConfig{
+		ServerURL:   strings.TrimSpace(v.GetString("server_url")),
+		APIToken:    strings.TrimSpace(v.GetString("api_token")),
+		DefaultRepo: strings.TrimSpace(v.GetString("default_repo")),
 	}
-	mergeClient(&cfg, fromEnv)
-
 	cfg.ServerURL = strings.TrimRight(cfg.ServerURL, "/")
 	if cfg.ServerURL == "" {
 		cfg.ServerURL = "http://127.0.0.1:8080"
 	}
-	return cfg
+	return cfg, nil
 }
 
 func SaveClientConfig(path string, cfg ClientConfig) error {
@@ -108,50 +125,20 @@ func SaveClientConfig(path string, cfg ClientConfig) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
-	content := fmt.Sprintf("server_url: %s\napi_token: %s\ndefault_repo: %s\n", cfg.ServerURL, cfg.APIToken, cfg.DefaultRepo)
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+
+	v := viper.New()
+	v.SetConfigType("yaml")
+	v.Set("server_url", strings.TrimRight(strings.TrimSpace(cfg.ServerURL), "/"))
+	v.Set("api_token", strings.TrimSpace(cfg.APIToken))
+	v.Set("default_repo", strings.TrimSpace(cfg.DefaultRepo))
+
+	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("write client config: %w", err)
 	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("chmod client config: %w", err)
+	}
 	return nil
-}
-
-func parseSimpleYAML(data []byte) ClientConfig {
-	var out ClientConfig
-	s := bufio.NewScanner(bytes.NewReader(data))
-	for s.Scan() {
-		line := strings.TrimSpace(s.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		val := strings.TrimSpace(parts[1])
-		val = strings.Trim(val, `"'`)
-		switch key {
-		case "server_url":
-			out.ServerURL = val
-		case "api_token":
-			out.APIToken = val
-		case "default_repo":
-			out.DefaultRepo = val
-		}
-	}
-	return out
-}
-
-func mergeClient(dst *ClientConfig, src ClientConfig) {
-	if strings.TrimSpace(src.ServerURL) != "" {
-		dst.ServerURL = strings.TrimSpace(src.ServerURL)
-	}
-	if strings.TrimSpace(src.APIToken) != "" {
-		dst.APIToken = strings.TrimSpace(src.APIToken)
-	}
-	if strings.TrimSpace(src.DefaultRepo) != "" {
-		dst.DefaultRepo = strings.TrimSpace(src.DefaultRepo)
-	}
 }
 
 func envOrDefault(key, fallback string) string {

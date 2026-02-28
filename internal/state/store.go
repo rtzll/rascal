@@ -371,24 +371,33 @@ func (s *Store) CancelQueuedRuns(taskID, reason string) error {
 	return s.persistLocked()
 }
 
-// SeenDelivery returns true if the delivery was already processed.
-func (s *Store) SeenDelivery(deliveryID string) (bool, error) {
+// DeliverySeen returns true if the delivery was already processed.
+func (s *Store) DeliverySeen(deliveryID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if deliveryID == "" {
+		return false
+	}
+	_, ok := s.deliveries[deliveryID]
+	return ok
+}
+
+// RecordDelivery stores a processed delivery id.
+func (s *Store) RecordDelivery(deliveryID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if deliveryID == "" {
-		return false, nil
+		return nil
 	}
 	if _, ok := s.deliveries[deliveryID]; ok {
-		return true, nil
+		return nil
 	}
 
 	s.deliveries[deliveryID] = time.Now().UTC()
 	s.compactDeliveriesLocked()
-	if err := s.persistLocked(); err != nil {
-		return false, err
-	}
-	return false, nil
+	return s.persistLocked()
 }
 
 func (s *Store) load() error {
