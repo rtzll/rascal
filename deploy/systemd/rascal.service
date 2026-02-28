@@ -1,0 +1,16 @@
+[Unit]
+Description=Rascal orchestrator service
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/rascal/rascal.env
+ExecStart=/opt/rascal/rascald
+Restart=always
+RestartSec=3
+User=root
+WorkingDirectory=/opt/rascal
+
+[Install]
+WantedBy=multi-user.target
