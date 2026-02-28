@@ -1069,15 +1069,15 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				cfgExists = true
 			}
 
-			resolvedTransport := a.client.transport
+			effectiveSSHHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
+			resolvedTransport := resolveTransport(a.cfg.Transport, a.cfg.ServerURL, effectiveSSHHost)
 			healthOK, healthErr := false, ""
 			if resolvedTransport == "ssh" {
-				targetHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
-				if targetHost == "" {
+				if effectiveSSHHost == "" {
 					healthErr = "ssh transport selected but no ssh host is configured"
 				} else {
 					healthOK, healthErr = checkServerHealthSSH(deployConfig{
-						Host:       targetHost,
+						Host:       effectiveSSHHost,
 						SSHUser:    firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root"),
 						SSHKeyPath: firstNonEmpty(strings.TrimSpace(sshKey), strings.TrimSpace(a.cfg.SSHKey)),
 						SSHPort:    firstPositive(sshPort, a.cfg.SSHPort, 22),
@@ -1126,6 +1126,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				"transport":           a.cfg.Transport,
 				"resolved_transport":  resolvedTransport,
 				"ssh_host":            a.cfg.SSHHost,
+				"effective_ssh_host":  effectiveSSHHost,
 				"ssh_user":            a.cfg.SSHUser,
 				"ssh_key":             a.cfg.SSHKey,
 				"ssh_port":            a.cfg.SSHPort,
@@ -1152,8 +1153,8 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				}
 				a.println("server: %s (%s)", a.cfg.ServerURL, a.serverSource)
 				a.println("transport: %s (resolved=%s)", a.cfg.Transport, resolvedTransport)
-				if strings.TrimSpace(a.cfg.SSHHost) != "" {
-					a.println("ssh target: %s@%s:%d", firstNonEmpty(strings.TrimSpace(a.cfg.SSHUser), "root"), a.cfg.SSHHost, firstPositive(a.cfg.SSHPort, 22))
+				if strings.TrimSpace(effectiveSSHHost) != "" {
+					a.println("ssh target: %s@%s:%d", firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root"), effectiveSSHHost, firstPositive(sshPort, a.cfg.SSHPort, 22))
 				}
 				if strings.TrimSpace(a.cfg.Host) != "" {
 					a.println("host: %s", a.cfg.Host)
