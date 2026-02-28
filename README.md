@@ -29,8 +29,9 @@ Rascal uses three tokens for production bootstrap:
 - Local-only token for label/webhook setup.
 - Create a [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) scoped to the target repo.
 - Fine-grained PAT (single repo) recommended with:
-  - `Administration`: **Read and write** (webhooks)
+  - `Webhooks`: **Read and write** (list/create/update repository webhooks)
   - `Issues`: **Read and write** (label management)
+  - `Metadata`: **Read-only** (usually implicit)
 
 3. `GITHUB_RUNTIME_TOKEN`
 - Stored on server; used by runner for git push + PR/comment workflows.
