@@ -31,6 +31,7 @@ This document is scoped to the “few potent commands” UX so someone can be pr
   - push credentials from laptop to server
   - enable a repo webhook
   - start runs and inspect status/logs
+  - implemented with **Cobra + Viper** for maintainable command UX
 
 ### Explicitly not in scope (v1)
 
@@ -71,6 +72,18 @@ These defaults are chosen so headless automation works reliably and does not han
 - Use a token (fine-grained PAT preferred) stored server-side.
 - Inject into containers as `GH_TOKEN` environment variable.
 - Never require browser auth inside containers.
+
+### CLI defaults
+
+- Use `cobra` for command structure, help text, and shell completions.
+- Use `viper` for config loading + env overrides.
+- Config source precedence:
+  1) explicit CLI flags
+  2) environment variables (`RASCAL_*`)
+  3) config file (`~/.rascal/config.yaml`)
+  4) built-in defaults
+- Provide built-in completion generation:
+  - `rascal completion bash|zsh|fish|powershell`
 
 ## UX: a few potent commands
 
@@ -116,6 +129,9 @@ Top-level commands users should actually need:
 
 - `rascal doctor`  
   Validates local + remote setup and prints actionable errors.
+
+- `rascal completion <shell>`  
+  Generates shell completion scripts (`bash`, `zsh`, `fish`, `powershell`).
 
 Everything else exists but is “advanced / internal”:
 
@@ -531,12 +547,14 @@ This is ordered so a coding agent can start building immediately.
 
 ### Milestone 4: CLI UX
 
+- Build CLI with Cobra command tree and Viper-backed config loading.
 - `rascal bootstrap` (initially “deploy to existing server”)
 - `rascal run`, `rascal issue`, `rascal ps`, `rascal logs`
 - Config file in `~/.rascal/config.yaml`:
   - server URL
   - api token
   - default repo
+- Add `rascal completion <shell>` and verify completion generation in tests.
 
 ### Milestone 5: Hetzner provisioning (optional but desired in v1)
 
