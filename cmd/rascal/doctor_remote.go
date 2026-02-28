@@ -80,3 +80,41 @@ func waitForServerHealth(baseURL string, timeout time.Duration) error {
 	}
 	return fmt.Errorf("%s", lastErr)
 }
+
+func checkServerHealthSSH(cfg deployConfig) (bool, string) {
+	checkCmd := strings.Join([]string{
+		"set -euo pipefail",
+		"if command -v curl >/dev/null 2>&1; then",
+		"  curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null && echo ok",
+		"elif command -v wget >/dev/null 2>&1; then",
+		"  wget -q -T 5 -O - http://127.0.0.1:8080/healthz >/dev/null && echo ok",
+		"else",
+		"  systemctl is-active --quiet rascal && echo ok",
+		"fi",
+	}, " ")
+	out, err := runLocalCapture("ssh", sshArgs(cfg, checkCmd)...)
+	if err != nil {
+		return false, err.Error()
+	}
+	return strings.TrimSpace(out) == "ok", ""
+}
+
+func waitForServerHealthSSH(cfg deployConfig, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	var lastErr string
+	for time.Now().Before(deadline) {
+		ok, errText := checkServerHealthSSH(cfg)
+		if ok {
+			return nil
+		}
+		lastErr = errText
+		time.Sleep(2 * time.Second)
+	}
+	if strings.TrimSpace(lastErr) == "" {
+		lastErr = "timed out waiting for server health check"
+	}
+	return fmt.Errorf("%s", lastErr)
+}

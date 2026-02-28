@@ -560,7 +560,12 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				} else {
 					a.println("existing deployment detected on %s; skipping deploy", host)
 				}
-				if err := waitForServerHealth("http://"+host+":8080", 90*time.Second); err != nil {
+				if err := waitForServerHealthSSH(deployConfig{
+					Host:       deployCfg.Host,
+					SSHUser:    deployCfg.SSHUser,
+					SSHKeyPath: deployCfg.SSHKeyPath,
+					SSHPort:    deployCfg.SSHPort,
+				}, 90*time.Second); err != nil {
 					return fmt.Errorf("server health check failed after bootstrap deploy stage: %w", err)
 				}
 				if deployPerformed {
