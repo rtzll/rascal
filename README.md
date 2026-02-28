@@ -39,6 +39,7 @@ Rascal uses three tokens for production bootstrap:
 - Fine-grained PAT (single repo) recommended with:
   - `Contents`: **Read and write** (clone/push branch)
   - `Pull requests`: **Read and write** (open/update PR)
+  - `Issues`: **Read and write** (comments/status messaging)
 
 For GitHub token details:
 - [Managing personal access tokens](https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
@@ -46,19 +47,22 @@ For GitHub token details:
 
 Note: GitHub does not provide an API to mint user PATs from another PAT, so runtime token creation is manual.
 
+You can store secrets in an env file and pass it to bootstrap:
+
+```bash
+# .rascal.env
+HCLOUD_TOKEN=...
+GITHUB_ADMIN_TOKEN=...
+GITHUB_RUNTIME_TOKEN=...
+```
+
 ## Quickstart
 
 ```bash
-export HCLOUD_TOKEN=...
-export GITHUB_ADMIN_TOKEN=...
-export GITHUB_RUNTIME_TOKEN=...
-
 go run ./cmd/rascal bootstrap \
+  --env-file .rascal.env \
   --repo OWNER/REPO \
-  --hcloud-token "$HCLOUD_TOKEN" \
-  --domain rascal.example.com \
-  --github-admin-token "$GITHUB_ADMIN_TOKEN" \
-  --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
+  --domain rascal.example.com
 ```
 
 This writes local config to `~/.rascal/config.toml` (server URL, API token, repo, host/domain).
@@ -84,9 +88,14 @@ go run ./cmd/rascal completion zsh
 
 ```bash
 go run ./cmd/rascal bootstrap \
+  --env-file .rascal.env \
   --repo OWNER/REPO \
   --host YOUR_SERVER_IP \
-  --domain rascal.example.com \
-  --github-admin-token "$GITHUB_ADMIN_TOKEN" \
-  --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
+  --domain rascal.example.com
 ```
+
+Domain notes:
+- Domain is optional for CLI-triggered runs.
+- For GitHub webhook triggers, a stable public URL is recommended.
+- Without a domain, Rascal can use `http://<server_ip>:8080` if reachable from GitHub.
+- Flags still override values from `--env-file`.

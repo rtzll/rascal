@@ -364,25 +364,30 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 		hcloudFirewallName string
 		hcloudApplyFW      bool
 		hcloudTimeout      time.Duration
+		envFile            string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Configure client, provision (optional), and deploy orchestrator",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			fileEnv, err := loadEnvFile(envFile)
+			if err != nil {
+				return fmt.Errorf("load --env-file: %w", err)
+			}
 			repo = firstNonEmpty(strings.TrimSpace(repo), a.cfg.DefaultRepo)
 			domain = firstNonEmpty(strings.TrimSpace(domain), strings.TrimSpace(a.cfg.Domain))
 			serverURL = strings.TrimSpace(serverURL)
-			apiToken = strings.TrimSpace(apiToken)
-			githubAdminToken = firstNonEmpty(strings.TrimSpace(githubAdminToken), strings.TrimSpace(os.Getenv("GITHUB_ADMIN_TOKEN")), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
-			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
-			webhookSecret = strings.TrimSpace(webhookSecret)
+			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), envFirst(fileEnv, "RASCAL_API_TOKEN"))
+			githubAdminToken = firstNonEmpty(strings.TrimSpace(githubAdminToken), envFirst(fileEnv, "GITHUB_ADMIN_TOKEN", "GITHUB_TOKEN"))
+			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), envFirst(fileEnv, "GITHUB_RUNTIME_TOKEN", "RASCAL_GITHUB_RUNTIME_TOKEN"))
+			webhookSecret = firstNonEmpty(strings.TrimSpace(webhookSecret), envFirst(fileEnv, "RASCAL_GITHUB_WEBHOOK_SECRET", "GITHUB_WEBHOOK_SECRET"))
 			host = firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.Host))
 			sshUser = strings.TrimSpace(sshUser)
 			sshKey = strings.TrimSpace(sshKey)
 			goarch = strings.TrimSpace(goarch)
 			codexAuthPath = strings.TrimSpace(codexAuthPath)
-			hcloudToken = firstNonEmpty(strings.TrimSpace(hcloudToken), strings.TrimSpace(os.Getenv("HCLOUD_TOKEN")))
+			hcloudToken = firstNonEmpty(strings.TrimSpace(hcloudToken), envFirst(fileEnv, "HCLOUD_TOKEN"))
 			hcloudServerName = strings.TrimSpace(hcloudServerName)
 			hcloudServerType = strings.TrimSpace(hcloudServerType)
 			hcloudLocation = strings.TrimSpace(hcloudLocation)
@@ -634,6 +639,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&hcloudFirewallName, "hcloud-firewall-name", "rascal-fw", "Hetzner firewall resource name")
 	cmd.Flags().BoolVar(&hcloudApplyFW, "hcloud-apply-firewall", true, "create/update and attach firewall (22,80,443)")
 	cmd.Flags().DurationVar(&hcloudTimeout, "hcloud-timeout", 8*time.Minute, "Hetzner provisioning timeout")
+	cmd.Flags().StringVar(&envFile, "env-file", "", "optional env file with bootstrap secrets (KEY=VALUE)")
 
 	return cmd
 }
@@ -1577,6 +1583,69 @@ func loadFileConfig(path string) (config.ClientConfig, error) {
 		Host:        strings.TrimSpace(v.GetString("host")),
 		Domain:      strings.TrimSpace(v.GetString("domain")),
 	}, nil
+}
+
+func envFirst(fileEnv map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(fileEnv[key]); v != "" {
+			return v
+		}
+	}
+	for _, key := range keys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func loadEnvFile(path string) (map[string]string, error) {
+	out := map[string]string{}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return out, nil
+	}
+	expanded, err := expandPath(path)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(expanded)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+		idx := strings.IndexRune(line, '=')
+		if idx <= 0 {
+			return nil, fmt.Errorf("invalid line %d: expected KEY=VALUE", lineNo)
+		}
+		key := strings.TrimSpace(line[:idx])
+		value := strings.TrimSpace(line[idx+1:])
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+		if key == "" {
+			return nil, fmt.Errorf("invalid line %d: empty key", lineNo)
+		}
+		out[key] = value
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func noColorRequested(flagValue bool) bool {

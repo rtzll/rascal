@@ -179,6 +179,43 @@ func TestValidateDistinctGitHubTokens(t *testing.T) {
 	}
 }
 
+func TestLoadEnvFile(t *testing.T) {
+	path := t.TempDir() + "/.env"
+	content := `
+# comment
+HCLOUD_TOKEN=abc
+export GITHUB_ADMIN_TOKEN=admin_token
+GITHUB_RUNTIME_TOKEN="runtime_token"
+EMPTY=
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+	got, err := loadEnvFile(path)
+	if err != nil {
+		t.Fatalf("load env file: %v", err)
+	}
+	if got["HCLOUD_TOKEN"] != "abc" {
+		t.Fatalf("unexpected HCLOUD_TOKEN: %q", got["HCLOUD_TOKEN"])
+	}
+	if got["GITHUB_ADMIN_TOKEN"] != "admin_token" {
+		t.Fatalf("unexpected GITHUB_ADMIN_TOKEN: %q", got["GITHUB_ADMIN_TOKEN"])
+	}
+	if got["GITHUB_RUNTIME_TOKEN"] != "runtime_token" {
+		t.Fatalf("unexpected GITHUB_RUNTIME_TOKEN: %q", got["GITHUB_RUNTIME_TOKEN"])
+	}
+}
+
+func TestLoadEnvFileInvalidLine(t *testing.T) {
+	path := t.TempDir() + "/.env"
+	if err := os.WriteFile(path, []byte("NOT_VALID\n"), 0o600); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+	if _, err := loadEnvFile(path); err == nil {
+		t.Fatal("expected parse error for invalid env line")
+	}
+}
+
 func captureStdout(fn func() error) (string, error) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
