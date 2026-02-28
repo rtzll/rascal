@@ -69,8 +69,11 @@ These defaults are chosen so headless automation works reliably and does not han
 
 ### GitHub auth defaults
 
-- Use a token (fine-grained PAT preferred) stored server-side.
-- Inject into containers as `GH_TOKEN` environment variable.
+- Use strict token separation:
+  - `GITHUB_ADMIN_TOKEN` (local bootstrap only): repo admin rights for labels/webhooks.
+  - `GITHUB_RUNTIME_TOKEN` (server-side): least-privilege token for push/PR/comment operations.
+- GitHub does not expose a PAT-creation API for user tokens; runtime token is created manually.
+- Inject runtime token into containers as `GH_TOKEN`.
 - Never require browser auth inside containers.
 
 ### CLI defaults
@@ -96,7 +99,8 @@ The CLI will have many internal subcommands, but v1 should strongly steer users 
     rascal bootstrap \
       --repo OWNER/REPO \
       --hcloud-token $HCLOUD_TOKEN \
-      --github-token $GITHUB_TOKEN \
+      --github-admin-token $GITHUB_ADMIN_TOKEN \
+      --github-runtime-token $GITHUB_RUNTIME_TOKEN \
       --domain rascal.example.com
 
 2) Add label `rascal` to any issue in that repo, or:
@@ -427,7 +431,7 @@ Minimum permissions (conceptual):
   - comment on PR / issue
   - create repo webhooks (for bootstrap)
 
-Prefer separate tokens later; v1 can use one.
+Use strict separation from day one: admin token for setup, runtime token on server.
 
 ### Codex credentials
 

@@ -69,18 +69,23 @@ go run ./cmd/rascal bootstrap \
   --repo OWNER/REPO \
   --hcloud-token "$HCLOUD_TOKEN" \
   --domain rascal.example.com \
-  --github-token "$GITHUB_TOKEN"
+  --github-admin-token "$GITHUB_ADMIN_TOKEN" \
+  --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
 ```
 
-Deploy to an existing server over SSH:
+Token model:
+- `GITHUB_ADMIN_TOKEN`: local-only setup token for label/webhook management.
+- `GITHUB_RUNTIME_TOKEN`: least-privilege token stored on server for runner git/PR operations.
+
+Reuse configured host from `~/.rascal/config.toml` or deploy to an explicit host:
 
 ```bash
 go run ./cmd/rascal bootstrap \
   --repo OWNER/REPO \
   --domain rascal.example.com \
-  --github-token "$GITHUB_TOKEN" \
   --host YOUR_SERVER_IP \
-  --deploy-existing
+  --github-admin-token "$GITHUB_ADMIN_TOKEN" \
+  --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
 ```
 
 Provision only (advanced):
@@ -96,8 +101,8 @@ go run ./cmd/rascal infra provision-hetzner \
 Repo webhook/label management (advanced):
 
 ```bash
-go run ./cmd/rascal repo status OWNER/REPO --github-token "$GITHUB_TOKEN"
-go run ./cmd/rascal repo enable OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET"
+go run ./cmd/rascal repo status OWNER/REPO --github-token "$GITHUB_ADMIN_TOKEN"
+go run ./cmd/rascal repo enable OWNER/REPO --github-token "$GITHUB_ADMIN_TOKEN" --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET"
 ```
 
 Remote auth sync (advanced):
@@ -106,7 +111,7 @@ Remote auth sync (advanced):
 go run ./cmd/rascal auth sync \
   --host YOUR_SERVER_IP \
   --api-token "$RASCAL_API_TOKEN" \
-  --github-token "$GITHUB_TOKEN" \
+  --github-runtime-token "$GITHUB_RUNTIME_TOKEN" \
   --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET"
 ```
 
@@ -138,4 +143,4 @@ RASCAL_RUNNER_IMAGE=rascal-runner:latest
 - Set `RASCAL_API_TOKEN` on server and client for authenticated API access.
 - Set `RASCAL_GITHUB_WEBHOOK_SECRET` to enforce webhook signature validation.
 - Optionally set `RASCAL_RUNNER_MAX_ATTEMPTS` to retry transient runner failures.
-- The runner exits with an explicit error if `goose` is missing in the image.
+- The runner image installs a pinned Goose CLI release (`GOOSE_VERSION`, default `1.26.1`).

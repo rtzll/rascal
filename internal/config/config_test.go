@@ -17,6 +17,8 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 		ServerURL:   "https://rascal.example.com",
 		APIToken:    "token-xyz",
 		DefaultRepo: "owner/repo",
+		Host:        "203.0.113.10",
+		Domain:      "rascal.example.com",
 	}
 	if err := SaveClientConfig(path, in); err != nil {
 		t.Fatalf("save client config: %v", err)
@@ -35,6 +37,12 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 	if out.DefaultRepo != in.DefaultRepo {
 		t.Fatalf("default repo mismatch: got %s want %s", out.DefaultRepo, in.DefaultRepo)
 	}
+	if out.Host != in.Host {
+		t.Fatalf("host mismatch: got %s want %s", out.Host, in.Host)
+	}
+	if out.Domain != in.Domain {
+		t.Fatalf("domain mismatch: got %s want %s", out.Domain, in.Domain)
+	}
 
 	st, err := os.Stat(path)
 	if err != nil {
@@ -47,7 +55,7 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 
 func TestLoadClientConfigEnvOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte("server_url = \"https://rascal.example.com\"\napi_token = \"from_file\"\ndefault_repo = \"owner/repo\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("server_url = \"https://rascal.example.com\"\napi_token = \"from_file\"\ndefault_repo = \"owner/repo\"\nhost = \"203.0.113.10\"\ndomain = \"rascal.example.com\"\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -62,5 +70,11 @@ func TestLoadClientConfigEnvOverride(t *testing.T) {
 	}
 	if cfg.APIToken != "from_file" {
 		t.Fatalf("expected api token from file, got %s", cfg.APIToken)
+	}
+	if cfg.Host != "203.0.113.10" {
+		t.Fatalf("expected host from file, got %s", cfg.Host)
+	}
+	if cfg.Domain != "rascal.example.com" {
+		t.Fatalf("expected domain from file, got %s", cfg.Domain)
 	}
 }

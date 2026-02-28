@@ -31,6 +31,8 @@ type ClientConfig struct {
 	ServerURL   string
 	APIToken    string
 	DefaultRepo string
+	Host        string
+	Domain      string
 }
 
 func LoadServerConfig() ServerConfig {
@@ -112,6 +114,8 @@ func LoadClientConfigAtPath(path string) (ClientConfig, error) {
 		ServerURL:   strings.TrimSpace(v.GetString("server_url")),
 		APIToken:    strings.TrimSpace(v.GetString("api_token")),
 		DefaultRepo: strings.TrimSpace(v.GetString("default_repo")),
+		Host:        strings.TrimSpace(v.GetString("host")),
+		Domain:      strings.TrimSpace(v.GetString("domain")),
 	}
 	cfg.ServerURL = strings.TrimRight(cfg.ServerURL, "/")
 	if cfg.ServerURL == "" {
@@ -133,6 +137,8 @@ func SaveClientConfig(path string, cfg ClientConfig) error {
 	v.Set("server_url", strings.TrimRight(strings.TrimSpace(cfg.ServerURL), "/"))
 	v.Set("api_token", strings.TrimSpace(cfg.APIToken))
 	v.Set("default_repo", strings.TrimSpace(cfg.DefaultRepo))
+	v.Set("host", strings.TrimSpace(cfg.Host))
+	v.Set("domain", strings.TrimSpace(cfg.Domain))
 
 	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("write client config: %w", err)

@@ -134,16 +134,16 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 
 func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 	var (
-		host          string
-		sshUser       string
-		sshKey        string
-		sshPort       int
-		goarch        string
-		apiToken      string
-		githubToken   string
-		webhookSecret string
-		codexAuthPath string
-		domain        string
+		host               string
+		sshUser            string
+		sshKey             string
+		sshPort            int
+		goarch             string
+		apiToken           string
+		githubRuntimeToken string
+		webhookSecret      string
+		codexAuthPath      string
+		domain             string
 	)
 
 	cmd := &cobra.Command{
@@ -180,8 +180,9 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 				}
 				apiToken = created
 			}
-			if githubToken == "" {
-				return &cliError{Code: exitInput, Message: "--github-token is required"}
+			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
+			if githubRuntimeToken == "" {
+				return &cliError{Code: exitInput, Message: "--github-runtime-token is required"}
 			}
 			if webhookSecret == "" {
 				created, err := randomToken(32)
@@ -198,7 +199,7 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 				SSHPort:            sshPort,
 				APIToken:           apiToken,
 				WebhookSecret:      webhookSecret,
-				GitHubToken:        githubToken,
+				GitHubRuntimeToken: githubRuntimeToken,
 				CodexAuthPath:      expandedAuthPath,
 				RunnerMode:         "docker",
 				RunnerImage:        "rascal-runner:latest",
@@ -235,7 +236,7 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH port")
 	cmd.Flags().StringVar(&goarch, "goarch", "amd64", "GOARCH for rascald binary")
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token")
-	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token")
+	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")

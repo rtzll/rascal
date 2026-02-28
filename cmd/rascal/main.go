@@ -158,6 +158,8 @@ func (a *app) initConfig() error {
 		ServerURL:   strings.TrimSpace(v.GetString("server_url")),
 		APIToken:    strings.TrimSpace(v.GetString("api_token")),
 		DefaultRepo: strings.TrimSpace(v.GetString("default_repo")),
+		Host:        strings.TrimSpace(v.GetString("host")),
+		Domain:      strings.TrimSpace(v.GetString("domain")),
 	}
 
 	if strings.TrimSpace(a.serverURLFlag) != "" {
@@ -281,6 +283,8 @@ func (a *app) newInitCmd() *cobra.Command {
 		serverURL      string
 		apiToken       string
 		defaultRepo    string
+		host           string
+		domain         string
 		nonInteractive bool
 	)
 
@@ -292,12 +296,16 @@ func (a *app) newInitCmd() *cobra.Command {
 			serverURL = firstNonEmpty(strings.TrimSpace(serverURL), a.cfg.ServerURL)
 			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), a.cfg.APIToken)
 			defaultRepo = firstNonEmpty(strings.TrimSpace(defaultRepo), a.cfg.DefaultRepo)
+			host = firstNonEmpty(strings.TrimSpace(host), a.cfg.Host)
+			domain = firstNonEmpty(strings.TrimSpace(domain), a.cfg.Domain)
 
 			if !nonInteractive && a.isTTY() {
 				reader := bufio.NewReader(os.Stdin)
 				serverURL = promptString(reader, "Server URL", serverURL)
 				apiToken = promptString(reader, "API Token", apiToken)
 				defaultRepo = promptString(reader, "Default Repo (optional)", defaultRepo)
+				host = promptString(reader, "Host (optional)", host)
+				domain = promptString(reader, "Domain (optional)", domain)
 			}
 
 			if strings.TrimSpace(serverURL) == "" {
@@ -308,6 +316,8 @@ func (a *app) newInitCmd() *cobra.Command {
 				ServerURL:   strings.TrimRight(serverURL, "/"),
 				APIToken:    strings.TrimSpace(apiToken),
 				DefaultRepo: strings.TrimSpace(defaultRepo),
+				Host:        strings.TrimSpace(host),
+				Domain:      strings.TrimSpace(domain),
 			}
 			if err := config.SaveClientConfig(a.configPath, cfg); err != nil {
 				return &cliError{Code: exitConfig, Message: "failed to write config", Hint: "check file permissions", Cause: err}
@@ -319,6 +329,8 @@ func (a *app) newInitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&serverURL, "server-url", "", "orchestrator base URL")
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token")
 	cmd.Flags().StringVar(&defaultRepo, "default-repo", "", "default repository OWNER/REPO")
+	cmd.Flags().StringVar(&host, "host", "", "default server host/IP for bootstrap/deploy")
+	cmd.Flags().StringVar(&domain, "domain", "", "default domain for server URL and Caddy")
 	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "disable prompts and rely on flags")
 	return cmd
 }
@@ -329,7 +341,8 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 		domain             string
 		serverURL          string
 		apiToken           string
-		githubToken        string
+		githubAdminToken   string
+		githubRuntimeToken string
 		webhookSecret      string
 		skipWebhook        bool
 		writeConfig        bool
@@ -338,7 +351,8 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 		sshKey             string
 		sshPort            int
 		goarch             string
-		deployExisting     bool
+		skipDeploy         bool
+		provisionNew       bool
 		codexAuthPath      string
 		hcloudToken        string
 		hcloudServerName   string
@@ -357,12 +371,13 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 		Short: "Configure client, provision (optional), and deploy orchestrator",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			repo = firstNonEmpty(strings.TrimSpace(repo), a.cfg.DefaultRepo)
-			domain = strings.TrimSpace(domain)
+			domain = firstNonEmpty(strings.TrimSpace(domain), strings.TrimSpace(a.cfg.Domain))
 			serverURL = strings.TrimSpace(serverURL)
 			apiToken = strings.TrimSpace(apiToken)
-			githubToken = strings.TrimSpace(githubToken)
+			githubAdminToken = firstNonEmpty(strings.TrimSpace(githubAdminToken), strings.TrimSpace(os.Getenv("GITHUB_ADMIN_TOKEN")), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
+			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
 			webhookSecret = strings.TrimSpace(webhookSecret)
-			host = strings.TrimSpace(host)
+			host = firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.Host))
 			sshUser = strings.TrimSpace(sshUser)
 			sshKey = strings.TrimSpace(sshKey)
 			goarch = strings.TrimSpace(goarch)
@@ -376,8 +391,49 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			hcloudSSHPublicKey = strings.TrimSpace(hcloudSSHPublicKey)
 			hcloudFirewallName = strings.TrimSpace(hcloudFirewallName)
 
+			if provisionNew {
+				host = ""
+				if hcloudToken == "" {
+					return fmt.Errorf("--hcloud-token is required when --provision-new is set")
+				}
+			}
+			shouldDeploy := !skipDeploy && (host != "" || hcloudToken != "")
+			if shouldDeploy && sshPort <= 0 {
+				return fmt.Errorf("--ssh-port must be positive")
+			}
+			if !skipWebhook && repo == "" {
+				return fmt.Errorf("--repo is required when webhook setup is enabled")
+			}
+			if !skipWebhook && githubAdminToken == "" {
+				return fmt.Errorf("--github-admin-token is required when webhook setup is enabled")
+			}
+			if shouldDeploy && githubRuntimeToken == "" {
+				return fmt.Errorf("--github-runtime-token is required when deployment is enabled")
+			}
+			if err := validateDistinctGitHubTokens(githubAdminToken, githubRuntimeToken, !skipWebhook && shouldDeploy); err != nil {
+				return err
+			}
+
+			var expandedAuthPath string
+			if shouldDeploy {
+				if codexAuthPath == "" {
+					return fmt.Errorf("--codex-auth must be set when deployment is enabled")
+				}
+				var err error
+				expandedAuthPath, err = expandPath(codexAuthPath)
+				if err != nil {
+					return fmt.Errorf("expand codex auth path: %w", err)
+				}
+				if _, err := os.Stat(expandedAuthPath); err != nil {
+					return fmt.Errorf("codex auth file is required at %s: %w", expandedAuthPath, err)
+				}
+			}
+
 			var provisionOut *hcloudProvisionResult
-			if hcloudToken != "" && host == "" {
+			if shouldDeploy && host == "" {
+				if hcloudToken == "" {
+					return fmt.Errorf("no host configured: pass --host, configure `host` in config, or set --hcloud-token")
+				}
 				if hcloudTimeout <= 0 {
 					hcloudTimeout = 8 * time.Minute
 				}
@@ -405,21 +461,8 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 					return fmt.Errorf("hcloud provision: %w", err)
 				}
 				host = strings.TrimSpace(out.Host)
-				deployExisting = true
 				provisionOut = &out
 			}
-
-			if serverURL == "" {
-				switch {
-				case domain != "":
-					serverURL = "https://" + domain
-				case host != "":
-					serverURL = "http://" + host + ":8080"
-				default:
-					return fmt.Errorf("either --server-url, --domain, or a provisioned/explicit --host is required")
-				}
-			}
-			serverURL = strings.TrimRight(serverURL, "/")
 
 			if apiToken == "" {
 				tok, err := randomToken(32)
@@ -436,24 +479,70 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				webhookSecret = secret
 			}
 
-			if writeConfig {
-				if err := config.SaveClientConfig(a.configPath, config.ClientConfig{
-					ServerURL:   serverURL,
-					APIToken:    apiToken,
-					DefaultRepo: repo,
-				}); err != nil {
-					return err
+			deployPerformed := false
+			if shouldDeploy {
+				deployCfg := deployConfig{
+					Host:               host,
+					SSHUser:            firstNonEmpty(sshUser, "root"),
+					SSHKeyPath:         sshKey,
+					SSHPort:            sshPort,
+					Domain:             domain,
+					APIToken:           apiToken,
+					WebhookSecret:      webhookSecret,
+					GitHubRuntimeToken: githubRuntimeToken,
+					CodexAuthPath:      expandedAuthPath,
+					RunnerMode:         "docker",
+					RunnerImage:        "rascal-runner:latest",
+					ServerListenAddr:   ":8080",
+					ServerDataDir:      "/var/lib/rascal",
+					ServerStatePath:    "/var/lib/rascal/state.json",
+					ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
+					GOARCH:             firstNonEmpty(goarch, "amd64"),
+				}
+				healthyExisting := false
+				if provisionOut == nil {
+					if st, err := runRemoteDoctor(deployConfig{
+						Host:       deployCfg.Host,
+						SSHUser:    deployCfg.SSHUser,
+						SSHKeyPath: deployCfg.SSHKeyPath,
+						SSHPort:    deployCfg.SSHPort,
+					}); err == nil {
+						caddyOK := st.CaddyInstalled || strings.TrimSpace(domain) == ""
+						healthyExisting = st.RascalService && st.DockerInstalled && caddyOK && st.EnvFilePresent && st.CodexAuthPresent && st.RunnerImagePresent
+					}
+				}
+				if !healthyExisting {
+					if err := deployToExistingHost(deployCfg); err != nil {
+						return err
+					}
+					deployPerformed = true
+				} else {
+					a.println("existing deployment detected on %s; skipping deploy", host)
+				}
+				if err := waitForServerHealth("http://"+host+":8080", 90*time.Second); err != nil {
+					return fmt.Errorf("server health check failed after bootstrap deploy stage: %w", err)
+				}
+				if deployPerformed {
+					a.println("deployed rascald to %s", host)
 				}
 			}
 
+			if serverURL == "" {
+				switch {
+				case domain != "":
+					serverURL = "https://" + domain
+				case host != "":
+					serverURL = "http://" + host + ":8080"
+				case strings.TrimSpace(a.cfg.ServerURL) != "" && strings.TrimSpace(a.cfg.ServerURL) != "http://127.0.0.1:8080":
+					serverURL = strings.TrimSpace(a.cfg.ServerURL)
+				default:
+					return fmt.Errorf("either --server-url, --domain, or a provisioned/explicit --host is required")
+				}
+			}
+			serverURL = strings.TrimRight(serverURL, "/")
+
 			if !skipWebhook {
-				if repo == "" {
-					return fmt.Errorf("--repo is required when webhook setup is enabled")
-				}
-				if githubToken == "" {
-					return fmt.Errorf("--github-token is required when webhook setup is enabled")
-				}
-				gh := ghapi.NewAPIClient(githubToken)
+				gh := ghapi.NewAPIClient(githubAdminToken)
 				ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 				defer cancel()
 
@@ -465,52 +554,30 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				}
 			}
 
-			if deployExisting {
-				if host == "" {
-					return fmt.Errorf("--host is required when --deploy-existing is set")
+			if writeConfig {
+				save := a.cfg
+				save.ServerURL = serverURL
+				save.APIToken = apiToken
+				save.DefaultRepo = repo
+				if host != "" {
+					save.Host = host
 				}
-				if githubToken == "" {
-					return fmt.Errorf("--github-token is required when --deploy-existing is set")
+				if domain != "" {
+					save.Domain = domain
 				}
-				if sshPort <= 0 {
-					return fmt.Errorf("--ssh-port must be positive")
-				}
-				if codexAuthPath == "" {
-					return fmt.Errorf("--codex-auth must be set")
-				}
-				expandedAuthPath, err := expandPath(codexAuthPath)
-				if err != nil {
-					return fmt.Errorf("expand codex auth path: %w", err)
-				}
-				deployCfg := deployConfig{
-					Host:               host,
-					SSHUser:            sshUser,
-					SSHKeyPath:         sshKey,
-					SSHPort:            sshPort,
-					Domain:             domain,
-					APIToken:           apiToken,
-					WebhookSecret:      webhookSecret,
-					GitHubToken:        githubToken,
-					CodexAuthPath:      expandedAuthPath,
-					RunnerMode:         "docker",
-					RunnerImage:        "rascal-runner:latest",
-					ServerListenAddr:   ":8080",
-					ServerDataDir:      "/var/lib/rascal",
-					ServerStatePath:    "/var/lib/rascal/state.json",
-					ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
-					GOARCH:             goarch,
-				}
-				if err := deployToExistingHost(deployCfg); err != nil {
+				if err := config.SaveClientConfig(a.configPath, save); err != nil {
 					return err
 				}
-				a.println("deployed rascald to %s", host)
 			}
+
 			out := map[string]any{
 				"status":         "bootstrap_complete",
 				"server_url":     serverURL,
 				"api_token":      maskSecret(apiToken),
 				"default_repo":   repo,
 				"webhook_secret": maskSecret(webhookSecret),
+				"host":           host,
+				"domain":         domain,
 			}
 			if writeConfig {
 				out["config_path"] = a.configPath
@@ -524,6 +591,10 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				a.println("server_url: %s", serverURL)
 				a.println("api_token: %s", maskSecret(apiToken))
 				a.println("default_repo: %s", repo)
+				a.println("host: %s", host)
+				if domain != "" {
+					a.println("domain: %s", domain)
+				}
 				a.println("webhook_secret: %s", maskSecret(webhookSecret))
 				if writeConfig {
 					a.println("config_path: %s", a.configPath)
@@ -540,18 +611,20 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&domain, "domain", "", "orchestrator domain (e.g. rascal.example.com)")
 	cmd.Flags().StringVar(&serverURL, "server-url", "", "orchestrator base URL (overrides --domain)")
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "API token for orchestrator (auto-generated if empty)")
-	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token for label/webhook setup")
+	cmd.Flags().StringVar(&githubAdminToken, "github-admin-token", "", "GitHub token with repo admin rights for label/webhook setup")
+	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub token for remote runner operations (push/PR)")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret (auto-generated if empty)")
 	cmd.Flags().BoolVar(&skipWebhook, "skip-webhook", false, "skip GitHub webhook setup")
 	cmd.Flags().BoolVar(&writeConfig, "write-config", true, "write config file")
-	cmd.Flags().StringVar(&host, "host", "", "existing server host")
+	cmd.Flags().StringVar(&host, "host", "", "existing server host (defaults to config `host` if set)")
 	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH user for existing host deployment")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path for existing host deployment")
 	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH port for existing host deployment")
 	cmd.Flags().StringVar(&goarch, "goarch", "amd64", "GOARCH for rascald binary when deploying to existing host")
-	cmd.Flags().BoolVar(&deployExisting, "deploy-existing", false, "deploy rascald to --host over SSH")
+	cmd.Flags().BoolVar(&skipDeploy, "skip-deploy", false, "skip remote deployment")
+	cmd.Flags().BoolVar(&provisionNew, "provision-new", false, "force provisioning a new host when --hcloud-token is set")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path copied to the server")
-	cmd.Flags().StringVar(&hcloudToken, "hcloud-token", "", "Hetzner Cloud token (provisions host when set and --host is empty)")
+	cmd.Flags().StringVar(&hcloudToken, "hcloud-token", "", "Hetzner Cloud token (used to provision a host when needed)")
 	cmd.Flags().StringVar(&hcloudServerName, "hcloud-server-name", "", "Hetzner server name")
 	cmd.Flags().StringVar(&hcloudServerType, "hcloud-server-type", "cax11", "Hetzner server type")
 	cmd.Flags().StringVar(&hcloudLocation, "hcloud-location", "fsn1", "Hetzner location")
@@ -862,6 +935,8 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				"config_path":         a.configPath,
 				"config_exists":       cfgExists,
 				"server_url":          a.cfg.ServerURL,
+				"host":                a.cfg.Host,
+				"domain":              a.cfg.Domain,
 				"server_source":       a.serverSource,
 				"api_token_set":       strings.TrimSpace(a.cfg.APIToken) != "",
 				"api_token_source":    a.tokenSource,
@@ -883,6 +958,12 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					a.println("config file: missing")
 				}
 				a.println("server: %s (%s)", a.cfg.ServerURL, a.serverSource)
+				if strings.TrimSpace(a.cfg.Host) != "" {
+					a.println("host: %s", a.cfg.Host)
+				}
+				if strings.TrimSpace(a.cfg.Domain) != "" {
+					a.println("domain: %s", a.cfg.Domain)
+				}
 				if a.cfg.APIToken == "" {
 					a.println("api token: missing")
 				} else {
@@ -1071,12 +1152,14 @@ func (a *app) newConfigCmd() *cobra.Command {
 				"server_url":          a.cfg.ServerURL,
 				"api_token":           maskSecret(a.cfg.APIToken),
 				"default_repo":        a.cfg.DefaultRepo,
+				"host":                a.cfg.Host,
+				"domain":              a.cfg.Domain,
 				"server_source":       a.serverSource,
 				"api_token_source":    a.tokenSource,
 				"default_repo_source": a.repoSource,
 			}
 			return a.emit(view, func() error {
-				for _, key := range []string{"config_path", "server_url", "api_token", "default_repo", "server_source", "api_token_source", "default_repo_source"} {
+				for _, key := range []string{"config_path", "server_url", "api_token", "default_repo", "host", "domain", "server_source", "api_token_source", "default_repo_source"} {
 					a.println("%s: %v", key, view[key])
 				}
 				return nil
@@ -1100,8 +1183,12 @@ func (a *app) newConfigCmd() *cobra.Command {
 				a.println(maskSecret(cfg.APIToken))
 			case "default_repo":
 				a.println(cfg.DefaultRepo)
+			case "host":
+				a.println(cfg.Host)
+			case "domain":
+				a.println(cfg.Domain)
 			default:
-				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo"}
+				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo|host|domain"}
 			}
 			return nil
 		},
@@ -1123,8 +1210,12 @@ func (a *app) newConfigCmd() *cobra.Command {
 				cfg.APIToken = val
 			case "default_repo":
 				cfg.DefaultRepo = val
+			case "host":
+				cfg.Host = val
+			case "domain":
+				cfg.Domain = val
 			default:
-				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo"}
+				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo|host|domain"}
 			}
 			if err := config.SaveClientConfig(a.configPath, cfg); err != nil {
 				return &cliError{Code: exitConfig, Message: "failed to write config", Cause: err}
@@ -1138,14 +1229,14 @@ func (a *app) newConfigCmd() *cobra.Command {
 
 func (a *app) newAuthCmd() *cobra.Command {
 	var (
-		writeConfig bool
-		showRaw     bool
-		host        string
-		sshUser     string
-		sshKey      string
-		sshPort     int
-		githubToken string
-		restartSvc  bool
+		writeConfig        bool
+		showRaw            bool
+		host               string
+		sshUser            string
+		sshKey             string
+		sshPort            int
+		githubRuntimeToken string
+		restartSvc         bool
 	)
 	cmd := &cobra.Command{
 		Use:   "auth",
@@ -1177,9 +1268,9 @@ func (a *app) newAuthCmd() *cobra.Command {
 				}
 			}
 			if strings.TrimSpace(host) != "" {
-				githubToken = firstNonEmpty(strings.TrimSpace(githubToken), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
-				if githubToken == "" {
-					return &cliError{Code: exitInput, Message: "--github-token is required when --host is set"}
+				githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
+				if githubRuntimeToken == "" {
+					return &cliError{Code: exitInput, Message: "--github-runtime-token is required when --host is set"}
 				}
 				if err := syncRemoteAuth(syncRemoteAuthConfig{
 					Host:          strings.TrimSpace(host),
@@ -1187,7 +1278,7 @@ func (a *app) newAuthCmd() *cobra.Command {
 					SSHKeyPath:    strings.TrimSpace(sshKey),
 					SSHPort:       sshPort,
 					APIToken:      apiToken,
-					GitHubToken:   githubToken,
+					GitHubRuntime: githubRuntimeToken,
 					WebhookSecret: webhookSecret,
 					Restart:       restartSvc,
 				}); err != nil {
@@ -1226,21 +1317,21 @@ func (a *app) newAuthCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&sshUser, "ssh-user", "root", "SSH user for remote auth sync")
 	cmd.PersistentFlags().StringVar(&sshKey, "ssh-key", "", "SSH private key path for remote auth sync")
 	cmd.PersistentFlags().IntVar(&sshPort, "ssh-port", 22, "SSH port for remote auth sync")
-	cmd.PersistentFlags().StringVar(&githubToken, "github-token", "", "GitHub token for remote auth sync")
+	cmd.PersistentFlags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token for remote auth sync")
 	cmd.PersistentFlags().BoolVar(&restartSvc, "restart-service", true, "restart rascal service after remote auth sync")
 	return cmd
 }
 
 func (a *app) newAuthSyncCmd() *cobra.Command {
 	var (
-		host          string
-		sshUser       string
-		sshKey        string
-		sshPort       int
-		apiToken      string
-		githubToken   string
-		webhookSecret string
-		restartSvc    bool
+		host               string
+		sshUser            string
+		sshKey             string
+		sshPort            int
+		apiToken           string
+		githubRuntimeToken string
+		webhookSecret      string
+		restartSvc         bool
 	)
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -1257,9 +1348,9 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 			if apiToken == "" {
 				return &cliError{Code: exitInput, Message: "missing API token", Hint: "pass --api-token or set local config"}
 			}
-			githubToken = firstNonEmpty(strings.TrimSpace(githubToken), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
-			if githubToken == "" {
-				return &cliError{Code: exitInput, Message: "missing GitHub token", Hint: "pass --github-token or set GITHUB_TOKEN"}
+			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
+			if githubRuntimeToken == "" {
+				return &cliError{Code: exitInput, Message: "missing GitHub runtime token", Hint: "pass --github-runtime-token or set GITHUB_RUNTIME_TOKEN"}
 			}
 			webhookSecret = strings.TrimSpace(webhookSecret)
 			if webhookSecret == "" {
@@ -1271,7 +1362,7 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 				SSHKeyPath:    strings.TrimSpace(sshKey),
 				SSHPort:       sshPort,
 				APIToken:      apiToken,
-				GitHubToken:   githubToken,
+				GitHubRuntime: githubRuntimeToken,
 				WebhookSecret: webhookSecret,
 				Restart:       restartSvc,
 			}); err != nil {
@@ -1296,7 +1387,7 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path")
 	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH port")
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token (defaults to current config)")
-	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token (or GITHUB_TOKEN)")
+	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token (or GITHUB_RUNTIME_TOKEN)")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
 	cmd.Flags().BoolVar(&restartSvc, "restart-service", true, "restart rascal service after updating env")
 	return cmd
@@ -1483,6 +1574,8 @@ func loadFileConfig(path string) (config.ClientConfig, error) {
 		ServerURL:   strings.TrimRight(strings.TrimSpace(v.GetString("server_url")), "/"),
 		APIToken:    strings.TrimSpace(v.GetString("api_token")),
 		DefaultRepo: strings.TrimSpace(v.GetString("default_repo")),
+		Host:        strings.TrimSpace(v.GetString("host")),
+		Domain:      strings.TrimSpace(v.GetString("domain")),
 	}, nil
 }
 
@@ -1598,7 +1691,7 @@ type deployConfig struct {
 	Domain             string
 	APIToken           string
 	WebhookSecret      string
-	GitHubToken        string
+	GitHubRuntimeToken string
 	CodexAuthPath      string
 	RunnerMode         string
 	RunnerImage        string
@@ -1781,7 +1874,7 @@ RASCAL_CODEX_AUTH_PATH=%s
 		cfg.ServerDataDir,
 		cfg.ServerStatePath,
 		cfg.APIToken,
-		cfg.GitHubToken,
+		cfg.GitHubRuntimeToken,
 		cfg.WebhookSecret,
 		cfg.RunnerMode,
 		cfg.RunnerImage,
@@ -1871,6 +1964,19 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func validateDistinctGitHubTokens(adminToken, runtimeToken string, enforce bool) error {
+	if !enforce {
+		return nil
+	}
+	if strings.TrimSpace(adminToken) == "" || strings.TrimSpace(runtimeToken) == "" {
+		return nil
+	}
+	if strings.TrimSpace(adminToken) == strings.TrimSpace(runtimeToken) {
+		return fmt.Errorf("strict token separation required: --github-admin-token and --github-runtime-token must differ")
+	}
+	return nil
 }
 
 func maskSecret(value string) string {

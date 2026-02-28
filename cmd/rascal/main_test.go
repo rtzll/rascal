@@ -167,6 +167,18 @@ func TestNoColorRequestedUnset(t *testing.T) {
 	}
 }
 
+func TestValidateDistinctGitHubTokens(t *testing.T) {
+	if err := validateDistinctGitHubTokens("admin", "runtime", true); err != nil {
+		t.Fatalf("expected distinct tokens to pass: %v", err)
+	}
+	if err := validateDistinctGitHubTokens("same", "same", true); err == nil {
+		t.Fatal("expected equal tokens to fail when strict separation is enforced")
+	}
+	if err := validateDistinctGitHubTokens("same", "same", false); err != nil {
+		t.Fatalf("expected no error when strict separation is disabled: %v", err)
+	}
+}
+
 func captureStdout(fn func() error) (string, error) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()

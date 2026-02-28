@@ -12,7 +12,7 @@ type syncRemoteAuthConfig struct {
 	SSHKeyPath    string
 	SSHPort       int
 	APIToken      string
-	GitHubToken   string
+	GitHubRuntime string
 	WebhookSecret string
 	Restart       bool
 }
@@ -25,16 +25,16 @@ func syncRemoteAuth(cfg syncRemoteAuthConfig) error {
 		cfg.SSHPort = 22
 	}
 	cfg.APIToken = strings.TrimSpace(cfg.APIToken)
-	cfg.GitHubToken = strings.TrimSpace(cfg.GitHubToken)
+	cfg.GitHubRuntime = strings.TrimSpace(cfg.GitHubRuntime)
 	cfg.WebhookSecret = strings.TrimSpace(cfg.WebhookSecret)
 
 	if cfg.Host == "" {
 		return fmt.Errorf("host is required")
 	}
-	if cfg.APIToken == "" || cfg.GitHubToken == "" || cfg.WebhookSecret == "" {
-		return fmt.Errorf("api token, github token, and webhook secret are required")
+	if cfg.APIToken == "" || cfg.GitHubRuntime == "" || cfg.WebhookSecret == "" {
+		return fmt.Errorf("api token, github runtime token, and webhook secret are required")
 	}
-	for _, value := range []string{cfg.APIToken, cfg.GitHubToken, cfg.WebhookSecret} {
+	for _, value := range []string{cfg.APIToken, cfg.GitHubRuntime, cfg.WebhookSecret} {
 		if strings.Contains(value, "\n") || strings.Contains(value, "\r") {
 			return fmt.Errorf("auth values must not contain newlines")
 		}
@@ -49,7 +49,7 @@ func syncRemoteAuth(cfg syncRemoteAuthConfig) error {
 	content := fmt.Sprintf(
 		"RASCAL_API_TOKEN=%s\nRASCAL_GITHUB_TOKEN=%s\nRASCAL_GITHUB_WEBHOOK_SECRET=%s\n",
 		cfg.APIToken,
-		cfg.GitHubToken,
+		cfg.GitHubRuntime,
 		cfg.WebhookSecret,
 	)
 	if _, err := tmpFile.WriteString(content); err != nil {
