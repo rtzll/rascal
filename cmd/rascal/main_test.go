@@ -116,6 +116,30 @@ func TestRootFlagsDoNotExposeDeadFlags(t *testing.T) {
 	}
 }
 
+func TestRootHasRepoAndInfraCommands(t *testing.T) {
+	root := newRootCmd()
+	if _, _, err := root.Find([]string{"repo"}); err != nil {
+		t.Fatalf("repo command missing: %v", err)
+	}
+	if _, _, err := root.Find([]string{"infra"}); err != nil {
+		t.Fatalf("infra command missing: %v", err)
+	}
+}
+
+func TestAuthHelpContainsSync(t *testing.T) {
+	root := newRootCmd()
+	var stdout bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stdout)
+	root.SetArgs([]string{"auth", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "sync") {
+		t.Fatalf("expected auth help to include sync command\n%s", stdout.String())
+	}
+}
+
 func TestNoColorRequested(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	if !noColorRequested(false) {

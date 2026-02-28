@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -481,15 +482,15 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("expand codex auth path: %w", err)
 				}
-					deployCfg := deployConfig{
-						Host:               host,
-						SSHUser:            sshUser,
-						SSHKeyPath:         sshKey,
-						SSHPort:            sshPort,
-						Domain:             domain,
-						APIToken:           apiToken,
-						WebhookSecret:      webhookSecret,
-						GitHubToken:        githubToken,
+				deployCfg := deployConfig{
+					Host:               host,
+					SSHUser:            sshUser,
+					SSHKeyPath:         sshKey,
+					SSHPort:            sshPort,
+					Domain:             domain,
+					APIToken:           apiToken,
+					WebhookSecret:      webhookSecret,
+					GitHubToken:        githubToken,
 					CodexAuthPath:      expandedAuthPath,
 					RunnerMode:         "docker",
 					RunnerImage:        "rascal-runner:latest",
@@ -514,12 +515,12 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			if writeConfig {
 				out["config_path"] = a.configPath
 			}
-				if provisionOut != nil {
-					out["provisioned_server"] = provisionOut
-					out["host"] = host
-				}
-				return a.emit(out, func() error {
-					a.println("bootstrap complete")
+			if provisionOut != nil {
+				out["provisioned_server"] = provisionOut
+				out["host"] = host
+			}
+			return a.emit(out, func() error {
+				a.println("bootstrap complete")
 				a.println("server_url: %s", serverURL)
 				a.println("api_token: %s", maskSecret(apiToken))
 				a.println("default_repo: %s", repo)
@@ -527,11 +528,11 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				if writeConfig {
 					a.println("config_path: %s", a.configPath)
 				}
-					if provisionOut != nil {
-						a.println("provisioned host: %s", host)
-					}
-					return nil
-				})
+				if provisionOut != nil {
+					a.println("provisioned host: %s", host)
+				}
+				return nil
+			})
 		},
 	}
 
@@ -718,6 +719,7 @@ func (a *app) newLogsCmd() *cobra.Command {
 		follow   bool
 		interval time.Duration
 		since    time.Duration
+		lines    int
 	)
 	cmd := &cobra.Command{
 		Use:               "logs <run_id>",
@@ -730,12 +732,16 @@ func (a *app) newLogsCmd() *cobra.Command {
 			if err := a.requireServerAuth(); err != nil {
 				return err
 			}
+			if lines <= 0 {
+				lines = 200
+			}
 			if interval <= 0 {
 				interval = 2 * time.Second
 			}
 
 			fetch := func() (string, error) {
-				resp, err := a.client.do(http.MethodGet, "/v1/runs/"+args[0]+"/logs", nil)
+				path := fmt.Sprintf("/v1/runs/%s/logs?lines=%d", url.PathEscape(args[0]), lines)
+				resp, err := a.client.do(http.MethodGet, path, nil)
 				if err != nil {
 					return "", &cliError{Code: exitServer, Message: "request failed", Cause: err}
 				}
@@ -793,15 +799,22 @@ func (a *app) newLogsCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&follow, "follow", false, "stream logs by polling")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "polling interval when --follow is enabled")
 	cmd.Flags().DurationVar(&since, "since", 0, "show logs since duration ago (best effort)")
+	cmd.Flags().IntVar(&lines, "lines", 200, "max log lines to fetch")
 	return cmd
 }
 
 func (a *app) newDoctorCmd() *cobra.Command {
-	var fix bool
+	var (
+		fix     bool
+		host    string
+		sshUser string
+		sshKey  string
+		sshPort int
+	)
 	cmd := &cobra.Command{
 		Use:     "doctor",
-		Short:   "Inspect local CLI configuration",
-		Example: "  rascal doctor\n  rascal doctor --fix",
+		Short:   "Inspect local config and optional remote server readiness",
+		Example: "  rascal doctor\n  rascal doctor --fix\n  rascal doctor --host 203.0.113.10",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			_, statErr := os.Stat(a.configPath)
 			cfgExists := statErr == nil
@@ -811,6 +824,38 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					return &cliError{Code: exitConfig, Message: "failed to auto-fix config", Cause: err}
 				}
 				cfgExists = true
+			}
+
+			healthOK, healthErr := checkServerHealth(a.cfg.ServerURL)
+			healthMessage := ""
+			if !healthOK {
+				healthMessage = healthErr
+			}
+
+			var remote map[string]any
+			if strings.TrimSpace(host) != "" {
+				remoteStatus, err := runRemoteDoctor(deployConfig{
+					Host:       strings.TrimSpace(host),
+					SSHUser:    firstNonEmpty(strings.TrimSpace(sshUser), "root"),
+					SSHKeyPath: strings.TrimSpace(sshKey),
+					SSHPort:    sshPort,
+				})
+				if err != nil {
+					remote = map[string]any{
+						"host":  strings.TrimSpace(host),
+						"error": err.Error(),
+					}
+				} else {
+					remote = map[string]any{
+						"host":                 remoteStatus.Host,
+						"rascal_service":       remoteStatus.RascalService,
+						"docker_installed":     remoteStatus.DockerInstalled,
+						"caddy_installed":      remoteStatus.CaddyInstalled,
+						"env_file_present":     remoteStatus.EnvFilePresent,
+						"codex_auth_present":   remoteStatus.CodexAuthPresent,
+						"runner_image_present": remoteStatus.RunnerImagePresent,
+					}
+				}
 			}
 
 			diagnostics := map[string]any{
@@ -824,6 +869,11 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				"default_repo_source": a.repoSource,
 				"output_format":       a.output,
 				"no_color":            noColorRequested(a.noColor),
+				"server_health_ok":    healthOK,
+				"server_health_error": healthMessage,
+			}
+			if remote != nil {
+				diagnostics["remote"] = remote
 			}
 			return a.emit(diagnostics, func() error {
 				a.println("config path: %s", a.configPath)
@@ -843,18 +893,36 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				} else {
 					a.println("default repo: %s (%s)", a.cfg.DefaultRepo, a.repoSource)
 				}
+				if healthOK {
+					a.println("server health: ok")
+				} else {
+					a.println("server health: failed (%s)", healthMessage)
+				}
+				if remote != nil {
+					if errText, ok := remote["error"].(string); ok && strings.TrimSpace(errText) != "" {
+						a.println("remote (%s): error: %s", strings.TrimSpace(host), errText)
+					} else {
+						a.println("remote (%s): rascal=%v docker=%v caddy=%v env=%v codex_auth=%v runner_image=%v",
+							remote["host"], remote["rascal_service"], remote["docker_installed"], remote["caddy_installed"], remote["env_file_present"], remote["codex_auth_present"], remote["runner_image_present"])
+					}
+				}
 				return nil
 			})
 		},
 	}
 	cmd.Flags().BoolVar(&fix, "fix", false, "attempt safe auto-fixes (create config file)")
+	cmd.Flags().StringVar(&host, "host", "", "optional remote host to validate over SSH")
+	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH user for remote checks")
+	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path for remote checks")
+	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH port for remote checks")
 	return cmd
 }
 
 func (a *app) newOpenCmd() *cobra.Command {
+	var printOnly bool
 	cmd := &cobra.Command{
 		Use:               "open <run_id>",
-		Short:             "Print PR URL for a run",
+		Short:             "Open PR URL for a run in your browser",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -868,10 +936,19 @@ func (a *app) newOpenCmd() *cobra.Command {
 			if strings.TrimSpace(run.PRURL) == "" {
 				return &cliError{Code: exitRuntime, Message: "run has no PR URL yet", Hint: "wait for run completion and PR creation"}
 			}
-			a.println(run.PRURL)
+			if printOnly {
+				a.println(run.PRURL)
+				return nil
+			}
+			if err := openURLInBrowser(run.PRURL); err != nil {
+				a.println(run.PRURL)
+				return &cliError{Code: exitRuntime, Message: "failed to open browser", Hint: "use --print to only print URL", Cause: err}
+			}
+			a.println("opened: %s", run.PRURL)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&printOnly, "print", false, "print URL instead of opening browser")
 	return cmd
 }
 
@@ -1063,6 +1140,12 @@ func (a *app) newAuthCmd() *cobra.Command {
 	var (
 		writeConfig bool
 		showRaw     bool
+		host        string
+		sshUser     string
+		sshKey      string
+		sshPort     int
+		githubToken string
+		restartSvc  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "auth",
@@ -1073,7 +1156,7 @@ func (a *app) newAuthCmd() *cobra.Command {
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "rotate",
-		Short: "Generate fresh API and webhook tokens",
+		Short: "Generate fresh API/webhook tokens and optionally sync remote server",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			apiToken, err := randomToken(32)
 			if err != nil {
@@ -1093,6 +1176,24 @@ func (a *app) newAuthCmd() *cobra.Command {
 					return &cliError{Code: exitConfig, Message: "failed to write config", Cause: err}
 				}
 			}
+			if strings.TrimSpace(host) != "" {
+				githubToken = firstNonEmpty(strings.TrimSpace(githubToken), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
+				if githubToken == "" {
+					return &cliError{Code: exitInput, Message: "--github-token is required when --host is set"}
+				}
+				if err := syncRemoteAuth(syncRemoteAuthConfig{
+					Host:          strings.TrimSpace(host),
+					SSHUser:       firstNonEmpty(strings.TrimSpace(sshUser), "root"),
+					SSHKeyPath:    strings.TrimSpace(sshKey),
+					SSHPort:       sshPort,
+					APIToken:      apiToken,
+					GitHubToken:   githubToken,
+					WebhookSecret: webhookSecret,
+					Restart:       restartSvc,
+				}); err != nil {
+					return &cliError{Code: exitRuntime, Message: "failed to sync remote auth", Cause: err}
+				}
+			}
 			displayAPI := maskSecret(apiToken)
 			displayWebhook := maskSecret(webhookSecret)
 			if showRaw {
@@ -1103,10 +1204,14 @@ func (a *app) newAuthCmd() *cobra.Command {
 				"api_token":      displayAPI,
 				"webhook_secret": displayWebhook,
 				"write_config":   writeConfig,
+				"synced_remote":  strings.TrimSpace(host) != "",
 			}
 			return a.emit(out, func() error {
 				a.println("api_token: %s", displayAPI)
 				a.println("webhook_secret: %s", displayWebhook)
+				if strings.TrimSpace(host) != "" {
+					a.println("synced remote auth on host: %s", strings.TrimSpace(host))
+				}
 				if !showRaw {
 					a.println("use --show to print raw values")
 				}
@@ -1114,8 +1219,86 @@ func (a *app) newAuthCmd() *cobra.Command {
 			})
 		},
 	})
+	cmd.AddCommand(a.newAuthSyncCmd())
 	cmd.PersistentFlags().BoolVar(&writeConfig, "write-config", false, "write generated API token to local config")
 	cmd.PersistentFlags().BoolVar(&showRaw, "show", false, "print raw token values")
+	cmd.PersistentFlags().StringVar(&host, "host", "", "existing server host for remote auth sync")
+	cmd.PersistentFlags().StringVar(&sshUser, "ssh-user", "root", "SSH user for remote auth sync")
+	cmd.PersistentFlags().StringVar(&sshKey, "ssh-key", "", "SSH private key path for remote auth sync")
+	cmd.PersistentFlags().IntVar(&sshPort, "ssh-port", 22, "SSH port for remote auth sync")
+	cmd.PersistentFlags().StringVar(&githubToken, "github-token", "", "GitHub token for remote auth sync")
+	cmd.PersistentFlags().BoolVar(&restartSvc, "restart-service", true, "restart rascal service after remote auth sync")
+	return cmd
+}
+
+func (a *app) newAuthSyncCmd() *cobra.Command {
+	var (
+		host          string
+		sshUser       string
+		sshKey        string
+		sshPort       int
+		apiToken      string
+		githubToken   string
+		webhookSecret string
+		restartSvc    bool
+	)
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Push auth tokens to remote /etc/rascal/rascal.env over SSH",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			host = strings.TrimSpace(host)
+			if host == "" {
+				return &cliError{Code: exitInput, Message: "--host is required"}
+			}
+			if sshPort <= 0 {
+				return &cliError{Code: exitInput, Message: "--ssh-port must be positive"}
+			}
+			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), strings.TrimSpace(a.cfg.APIToken))
+			if apiToken == "" {
+				return &cliError{Code: exitInput, Message: "missing API token", Hint: "pass --api-token or set local config"}
+			}
+			githubToken = firstNonEmpty(strings.TrimSpace(githubToken), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
+			if githubToken == "" {
+				return &cliError{Code: exitInput, Message: "missing GitHub token", Hint: "pass --github-token or set GITHUB_TOKEN"}
+			}
+			webhookSecret = strings.TrimSpace(webhookSecret)
+			if webhookSecret == "" {
+				return &cliError{Code: exitInput, Message: "missing webhook secret", Hint: "pass --webhook-secret"}
+			}
+			if err := syncRemoteAuth(syncRemoteAuthConfig{
+				Host:          host,
+				SSHUser:       firstNonEmpty(strings.TrimSpace(sshUser), "root"),
+				SSHKeyPath:    strings.TrimSpace(sshKey),
+				SSHPort:       sshPort,
+				APIToken:      apiToken,
+				GitHubToken:   githubToken,
+				WebhookSecret: webhookSecret,
+				Restart:       restartSvc,
+			}); err != nil {
+				return &cliError{Code: exitRuntime, Message: "failed to sync auth", Cause: err}
+			}
+			return a.emit(map[string]any{
+				"host":           host,
+				"api_token":      maskSecret(apiToken),
+				"webhook_secret": maskSecret(webhookSecret),
+				"restarted":      restartSvc,
+			}, func() error {
+				a.println("synced auth on %s", host)
+				if restartSvc {
+					a.println("rascal service restarted")
+				}
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringVar(&host, "host", "", "existing server host")
+	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH user")
+	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path")
+	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH port")
+	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token (defaults to current config)")
+	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token (or GITHUB_TOKEN)")
+	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
+	cmd.Flags().BoolVar(&restartSvc, "restart-service", true, "restart rascal service after updating env")
 	return cmd
 }
 
@@ -1546,6 +1729,19 @@ func runLocal(name string, args ...string) error {
 	return nil
 }
 
+func runLocalCapture(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	out, err := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err != nil {
+		if text == "" {
+			return "", fmt.Errorf("%s failed: %w", name, err)
+		}
+		return text, fmt.Errorf("%s failed: %w (%s)", name, err, text)
+	}
+	return text, nil
+}
+
 func sshArgs(cfg deployConfig, remoteCmd string) []string {
 	args := []string{"-p", fmt.Sprintf("%d", cfg.SSHPort), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"}
 	if cfg.SSHKeyPath != "" {
@@ -1649,6 +1845,23 @@ func expandPath(path string) (string, error) {
 		return filepath.Join(home, path[2:]), nil
 	}
 	return path, nil
+}
+
+func openURLInBrowser(rawURL string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return fmt.Errorf("url is empty")
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", rawURL)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
+	default:
+		cmd = exec.Command("xdg-open", rawURL)
+	}
+	return cmd.Run()
 }
 
 func firstNonEmpty(values ...string) string {

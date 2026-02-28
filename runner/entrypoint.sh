@@ -117,8 +117,9 @@ if command -v goose >/dev/null 2>&1; then
   log "running goose"
   goose run --no-session -i "${INSTRUCTIONS_FILE}" --output-format stream-json >"${GOOSE_LOG}"
 else
-  log "goose not found, writing placeholder goose log"
-  printf '{"event":"warning","message":"goose binary not installed"}\n' >"${GOOSE_LOG}"
+  log "goose binary is required but was not found in PATH"
+  printf '{"event":"error","message":"goose binary not installed"}\n' >"${GOOSE_LOG}"
+  cleanup_and_exit 1 "goose binary not installed"
 fi
 
 if [[ -f Makefile ]]; then

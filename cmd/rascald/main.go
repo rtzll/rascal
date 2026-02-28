@@ -442,7 +442,7 @@ func (s *server) handleRunSubresources(w http.ResponseWriter, r *http.Request) {
 		}
 		runID := strings.TrimSuffix(path, "/logs")
 		runID = strings.Trim(runID, "/")
-		s.handleRunLogs(w, runID)
+		s.handleRunLogs(w, r, runID)
 		return
 	case strings.HasSuffix(path, "/cancel"):
 		if r.Method != http.MethodPost {
@@ -505,19 +505,32 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"run_id": runID, "cancel_requested": true})
 }
 
-func (s *server) handleRunLogs(w http.ResponseWriter, runID string) {
+func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID string) {
 	run, ok := s.store.GetRun(runID)
 	if !ok {
 		http.Error(w, "run not found", http.StatusNotFound)
 		return
 	}
 
-	runnerLines, err := logs.Tail(filepath.Join(run.RunDir, "runner.log"), 200)
+	lines := 200
+	if raw := strings.TrimSpace(r.URL.Query().Get("lines")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			http.Error(w, "invalid lines", http.StatusBadRequest)
+			return
+		}
+		if parsed > 5000 {
+			parsed = 5000
+		}
+		lines = parsed
+	}
+
+	runnerLines, err := logs.Tail(filepath.Join(run.RunDir, "runner.log"), lines)
 	if err != nil && !os.IsNotExist(err) {
 		http.Error(w, "failed to read runner logs", http.StatusInternalServerError)
 		return
 	}
-	gooseLines, err := logs.Tail(filepath.Join(run.RunDir, "goose.ndjson"), 200)
+	gooseLines, err := logs.Tail(filepath.Join(run.RunDir, "goose.ndjson"), lines)
 	if err != nil && !os.IsNotExist(err) {
 		http.Error(w, "failed to read goose logs", http.StatusInternalServerError)
 		return

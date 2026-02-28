@@ -16,6 +16,7 @@ Rascal is a self-hosted coding-agent orchestrator.
   - `POST /v1/webhooks/github`
 - `cmd/rascal`: CLI
   - `bootstrap`
+  - `infra`
   - `init`
   - `run`
   - `issue`
@@ -27,6 +28,7 @@ Rascal is a self-hosted coding-agent orchestrator.
   - `task`
   - `config`
   - `auth`
+  - `repo`
   - `doctor`
   - `completion`
 - Per-run artifact layout under `RASCAL_DATA_DIR/runs/<run_id>/`
@@ -60,11 +62,12 @@ Global UX flags:
 
 ## Bootstrap
 
-Configure local CLI and GitHub webhook:
+Provision on Hetzner + deploy + configure webhook:
 
 ```bash
 go run ./cmd/rascal bootstrap \
   --repo OWNER/REPO \
+  --hcloud-token "$HCLOUD_TOKEN" \
   --domain rascal.example.com \
   --github-token "$GITHUB_TOKEN"
 ```
@@ -78,6 +81,33 @@ go run ./cmd/rascal bootstrap \
   --github-token "$GITHUB_TOKEN" \
   --host YOUR_SERVER_IP \
   --deploy-existing
+```
+
+Provision only (advanced):
+
+```bash
+go run ./cmd/rascal infra provision-hetzner \
+  --token "$HCLOUD_TOKEN" \
+  --server-type cax11 \
+  --location fsn1 \
+  --image ubuntu-24.04
+```
+
+Repo webhook/label management (advanced):
+
+```bash
+go run ./cmd/rascal repo status OWNER/REPO --github-token "$GITHUB_TOKEN"
+go run ./cmd/rascal repo enable OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET"
+```
+
+Remote auth sync (advanced):
+
+```bash
+go run ./cmd/rascal auth sync \
+  --host YOUR_SERVER_IP \
+  --api-token "$RASCAL_API_TOKEN" \
+  --github-token "$GITHUB_TOKEN" \
+  --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET"
 ```
 
 Generate shell completion scripts:
@@ -108,3 +138,4 @@ RASCAL_RUNNER_IMAGE=rascal-runner:latest
 - Set `RASCAL_API_TOKEN` on server and client for authenticated API access.
 - Set `RASCAL_GITHUB_WEBHOOK_SECRET` to enforce webhook signature validation.
 - Optionally set `RASCAL_RUNNER_MAX_ATTEMPTS` to retry transient runner failures.
+- The runner exits with an explicit error if `goose` is missing in the image.

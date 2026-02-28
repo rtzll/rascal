@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -384,4 +386,48 @@ func TestHandleCancelRunQueued(t *testing.T) {
 	}
 
 	_ = first
+}
+
+func TestHandleRunLogsRespectsLines(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	runDir := t.TempDir()
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_logs",
+		TaskID:     "task_logs",
+		Repo:       "owner/repo",
+		Task:       "show logs",
+		BaseBranch: "main",
+		RunDir:     runDir,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	var runnerLog strings.Builder
+	var gooseLog strings.Builder
+	for i := 1; i <= 5; i++ {
+		_, _ = fmt.Fprintf(&runnerLog, "runner-%d\n", i)
+		_, _ = fmt.Fprintf(&gooseLog, "goose-%d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, "runner.log"), []byte(runnerLog.String()), 0o644); err != nil {
+		t.Fatalf("write runner log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(gooseLog.String()), 0o644); err != nil {
+		t.Fatalf("write goose log: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/logs?lines=2", nil)
+	rec := httptest.NewRecorder()
+	s.handleRunSubresources(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "runner-1") || strings.Contains(body, "goose-1") {
+		t.Fatalf("expected oldest lines to be omitted, got:\n%s", body)
+	}
+	if !strings.Contains(body, "runner-5") || !strings.Contains(body, "goose-5") {
+		t.Fatalf("expected newest lines to be present, got:\n%s", body)
+	}
 }
