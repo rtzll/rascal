@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -120,5 +121,17 @@ func TestDeleteWebhookByURL(t *testing.T) {
 	}
 	if !deleted {
 		t.Fatal("expected delete endpoint to be called")
+	}
+}
+
+func TestDescribeWebhookAuthFailure(t *testing.T) {
+	msg := describeWebhookAuthFailure(http.StatusForbidden, []byte(`{"message":"Resource not accessible by personal access token"}`))
+	if !strings.Contains(msg, "Webhooks: Read and write") {
+		t.Fatalf("expected webhook permission hint, got: %s", msg)
+	}
+
+	plain := describeWebhookAuthFailure(http.StatusBadRequest, []byte(`oops`))
+	if plain != "oops" {
+		t.Fatalf("unexpected message passthrough: %s", plain)
 	}
 }

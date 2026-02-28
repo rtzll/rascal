@@ -792,7 +792,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&domain, "domain", "", "orchestrator domain (e.g. rascal.example.com)")
 	cmd.Flags().StringVar(&serverURL, "server-url", "", "orchestrator base URL (overrides --domain)")
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "API token for orchestrator (auto-generated if empty)")
-	cmd.Flags().StringVar(&githubAdminToken, "github-admin-token", "", "GitHub token with repo admin rights for label/webhook setup")
+	cmd.Flags().StringVar(&githubAdminToken, "github-admin-token", "", "GitHub token with repo Webhooks (rw) and Issues (rw) for label/webhook setup")
 	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub token for remote runner operations (push/PR)")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret (auto-generated if empty)")
 	cmd.Flags().BoolVar(&skipWebhook, "skip-webhook", false, "skip GitHub webhook setup")

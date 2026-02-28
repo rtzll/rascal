@@ -162,7 +162,7 @@ func (c *APIClient) UpsertWebhook(ctx context.Context, repo, webhookURL, secret 
 	defer listResp.Body.Close()
 	if listResp.StatusCode >= 300 {
 		body, _ := io.ReadAll(listResp.Body)
-		return fmt.Errorf("github list hooks failed (%d): %s", listResp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("github list hooks failed (%d): %s", listResp.StatusCode, describeWebhookAuthFailure(listResp.StatusCode, body))
 	}
 
 	var hooks []struct {
@@ -267,7 +267,7 @@ func (c *APIClient) listWebhooks(ctx context.Context, repo string) ([]WebhookDat
 	defer listResp.Body.Close()
 	if listResp.StatusCode >= 300 {
 		body, _ := io.ReadAll(listResp.Body)
-		return nil, fmt.Errorf("github list hooks failed (%d): %s", listResp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("github list hooks failed (%d): %s", listResp.StatusCode, describeWebhookAuthFailure(listResp.StatusCode, body))
 	}
 	var hooks []struct {
 		ID     int      `json:"id"`
@@ -328,4 +328,15 @@ func splitRepo(repo string) (owner, name string, err error) {
 		return "", "", fmt.Errorf("invalid repo %q, expected OWNER/REPO", repo)
 	}
 	return parts[0], parts[1], nil
+}
+
+func describeWebhookAuthFailure(status int, body []byte) string {
+	msg := strings.TrimSpace(string(body))
+	if status != http.StatusForbidden {
+		return msg
+	}
+	if !strings.Contains(strings.ToLower(msg), "resource not accessible by personal access token") {
+		return msg
+	}
+	return msg + " (for fine-grained PATs, grant repository `Webhooks: Read and write`, plus `Issues: Read and write`, and ensure the target repo is selected)"
 }
