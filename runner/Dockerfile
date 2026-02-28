@@ -5,7 +5,7 @@ ARG NODE_MAJOR=22
 ARG GOOSE_VERSION=1.26.1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git gh bash jq ripgrep make gcc g++ openssl bzip2 \
+    ca-certificates curl git gh bash jq ripgrep make gcc g++ openssl bzip2 libxcb1 \
     python3 python3-pip nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
