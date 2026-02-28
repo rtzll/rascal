@@ -83,7 +83,7 @@ func waitForServerHealth(baseURL string, timeout time.Duration) error {
 
 func checkServerHealthSSH(cfg deployConfig) (bool, string) {
 	checkCmd := strings.Join([]string{
-		"set -euo pipefail",
+		"set -eu",
 		"if command -v curl >/dev/null 2>&1; then",
 		"  curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null && echo ok",
 		"elif command -v wget >/dev/null 2>&1; then",
@@ -91,7 +91,7 @@ func checkServerHealthSSH(cfg deployConfig) (bool, string) {
 		"else",
 		"  systemctl is-active --quiet rascal && echo ok",
 		"fi",
-	}, " ")
+	}, "\n")
 	out, err := runLocalCapture("ssh", sshArgs(cfg, checkCmd)...)
 	if err != nil {
 		return false, err.Error()
