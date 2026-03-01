@@ -81,13 +81,14 @@ func newTestServer(t *testing.T, launcher runner.Launcher) *server {
 		t.Fatalf("new state store: %v", err)
 	}
 	return &server{
-		cfg:        cfg,
-		store:      store,
-		launcher:   launcher,
-		gh:         ghapi.NewAPIClient(""),
-		activeRuns: make(map[string]string),
-		queuedRuns: make(map[string][]string),
-		runCancels: make(map[string]context.CancelFunc),
+		cfg:           cfg,
+		store:         store,
+		launcher:      launcher,
+		gh:            ghapi.NewAPIClient(""),
+		activeRuns:    make(map[string]string),
+		queuedRuns:    make(map[string][]string),
+		runCancels:    make(map[string]context.CancelFunc),
+		maxConcurrent: defaultMaxConcurrent(),
 	}
 }
 
@@ -241,6 +242,41 @@ func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
 	waitFor(t, 2*time.Second, func() bool {
 		return launcher.Calls() == 2
 	}, "second run to start after first completes")
+	waitFor(t, 2*time.Second, func() bool {
+		r, ok := s.store.GetRun(second.ID)
+		return ok && r.Status == state.StatusSucceeded
+	}, "second run to complete")
+}
+
+func TestCreateAndQueueRunRespectsGlobalConcurrencyLimit(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	s.maxConcurrent = 1
+	defer waitForServerIdle(t, s)
+
+	_, err := s.createAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Task: "first"})
+	if err != nil {
+		t.Fatalf("create first run: %v", err)
+	}
+	second, err := s.createAndQueueRun(runRequest{TaskID: "task-2", Repo: "owner/repo", Task: "second"})
+	if err != nil {
+		t.Fatalf("create second run: %v", err)
+	}
+
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "only one run starts while at concurrency limit")
+	r2, ok := s.store.GetRun(second.ID)
+	if !ok {
+		t.Fatalf("missing second run %s", second.ID)
+	}
+	if r2.Status != state.StatusQueued {
+		t.Fatalf("expected second run queued, got %s", r2.Status)
+	}
+
+	close(waitCh)
+	waitFor(t, 2*time.Second, func() bool {
+		return launcher.Calls() == 2
+	}, "second run to start after slot is available")
 	waitFor(t, 2*time.Second, func() bool {
 		r, ok := s.store.GetRun(second.ID)
 		return ok && r.Status == state.StatusSucceeded
