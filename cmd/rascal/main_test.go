@@ -130,6 +130,21 @@ func TestRootHasRepoAndInfraCommands(t *testing.T) {
 	if _, _, err := root.Find([]string{"infra"}); err != nil {
 		t.Fatalf("infra command missing: %v", err)
 	}
+	if _, _, err := root.Find([]string{"logs", "run"}); err != nil {
+		t.Fatalf("logs run command missing: %v", err)
+	}
+	if _, _, err := root.Find([]string{"logs", "job"}); err != nil {
+		t.Fatalf("logs job alias missing: %v", err)
+	}
+	if _, _, err := root.Find([]string{"logs", "rascald"}); err != nil {
+		t.Fatalf("logs rascald command missing: %v", err)
+	}
+	if _, _, err := root.Find([]string{"logs", "caddy"}); err != nil {
+		t.Fatalf("logs caddy command missing: %v", err)
+	}
+	if _, _, err := root.Find([]string{"logs", "caddy-access"}); err != nil {
+		t.Fatalf("logs caddy-access command missing: %v", err)
+	}
 }
 
 func TestBootstrapAndInfraDefaults(t *testing.T) {
