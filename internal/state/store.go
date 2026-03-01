@@ -50,6 +50,10 @@ func New(path string, maxRuns int) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+	// Use a single shared SQLite connection so pragmas apply consistently and
+	// writes don't contend across pooled connections in tests/CI.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("enable sqlite WAL mode: %w", err)
