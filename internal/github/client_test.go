@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -134,4 +135,53 @@ func TestDescribeWebhookAuthFailure(t *testing.T) {
 	if plain != "oops" {
 		t.Fatalf("unexpected message passthrough: %s", plain)
 	}
+}
+
+func TestAddIssueReaction(t *testing.T) {
+	t.Run("posts reaction", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			if r.URL.Path != "/repos/owner/repo/issues/42/reactions" {
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+			var in map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			if in["content"] != ReactionEyes {
+				t.Fatalf("unexpected reaction payload: %v", in)
+			}
+			w.WriteHeader(http.StatusCreated)
+		}))
+		defer srv.Close()
+
+		client := newTestAPIClient(srv.URL)
+		if err := client.AddIssueReaction(context.Background(), "owner/repo", 42, ReactionEyes); err != nil {
+			t.Fatalf("AddIssueReaction returned error: %v", err)
+		}
+	})
+
+	t.Run("rejects unsupported reaction", func(t *testing.T) {
+		client := NewAPIClient("token")
+		err := client.AddIssueReaction(context.Background(), "owner/repo", 42, "check")
+		if err == nil || !strings.Contains(err.Error(), "unsupported reaction content") {
+			t.Fatalf("expected unsupported content error, got: %v", err)
+		}
+	})
+
+	t.Run("surfaces github error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"message":"forbidden"}`)
+		}))
+		defer srv.Close()
+
+		client := newTestAPIClient(srv.URL)
+		err := client.AddIssueReaction(context.Background(), "owner/repo", 42, ReactionRocket)
+		if err == nil || !strings.Contains(err.Error(), "github add issue reaction failed") {
+			t.Fatalf("expected github error, got: %v", err)
+		}
+	})
 }

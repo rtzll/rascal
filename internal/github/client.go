@@ -27,6 +27,17 @@ type IssueData struct {
 	HTMLURL string
 }
 
+const (
+	ReactionPlusOne  = "+1"
+	ReactionMinusOne = "-1"
+	ReactionLaugh    = "laugh"
+	ReactionConfused = "confused"
+	ReactionHeart    = "heart"
+	ReactionHooray   = "hooray"
+	ReactionRocket   = "rocket"
+	ReactionEyes     = "eyes"
+)
+
 type WebhookData struct {
 	ID     int      `json:"id"`
 	URL    string   `json:"url"`
@@ -143,6 +154,34 @@ func (c *APIClient) LabelExists(ctx context.Context, repo, name string) (bool, e
 		body, _ := io.ReadAll(resp.Body)
 		return false, fmt.Errorf("github get label failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
+}
+
+func (c *APIClient) AddIssueReaction(ctx context.Context, repo string, issueNumber int, content string) error {
+	if issueNumber <= 0 {
+		return fmt.Errorf("issue number must be positive")
+	}
+	content = strings.TrimSpace(content)
+	switch content {
+	case ReactionPlusOne, ReactionMinusOne, ReactionLaugh, ReactionConfused, ReactionHeart, ReactionHooray, ReactionRocket, ReactionEyes:
+	default:
+		return fmt.Errorf("unsupported reaction content %q", content)
+	}
+
+	owner, repoName, err := splitRepo(repo)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/reactions", owner, repoName, issueNumber)
+	resp, err := c.do(ctx, http.MethodPost, path, map[string]string{"content": content})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github add issue reaction failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
 }
 
 func (c *APIClient) UpsertWebhook(ctx context.Context, repo, webhookURL, secret string, events []string) error {

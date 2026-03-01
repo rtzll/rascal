@@ -726,6 +726,7 @@ func (s *server) executeRun(runID string) {
 	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
 		log.Printf("failed to transition run to running: %s: %v", run.ID, err)
 	}
+	s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionEyes)
 
 	spec := runner.Spec{
 		RunID:       run.ID,
@@ -760,6 +761,9 @@ func (s *server) executeRun(runID string) {
 			errText = "canceled by user"
 		}
 		updated, _ := s.store.SetRunStatus(run.ID, status, errText)
+		if updated.Status == state.StatusFailed {
+			s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionConfused)
+		}
 		s.finishRun(updated)
 		return
 	}
@@ -785,6 +789,12 @@ func (s *server) executeRun(runID string) {
 	if uErr != nil {
 		log.Printf("failed to persist run result for %s: %v", run.ID, uErr)
 		updated, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, uErr.Error())
+	}
+	switch updated.Status {
+	case state.StatusSucceeded, state.StatusAwaitingFeedback:
+		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionRocket)
+	case state.StatusFailed:
+		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionConfused)
 	}
 	if updated.PRNumber > 0 {
 		_ = s.store.SetTaskPR(updated.TaskID, updated.Repo, updated.PRNumber)
@@ -1034,6 +1044,20 @@ func maxInt(a, b int) int {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func (s *server) addIssueReactionBestEffort(repo string, issueNumber int, reaction string) {
+	if issueNumber <= 0 || strings.TrimSpace(repo) == "" {
+		return
+	}
+	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := s.gh.AddIssueReaction(ctx, repo, issueNumber, reaction); err != nil {
+		log.Printf("failed to add %q reaction for %s#%d: %v", reaction, repo, issueNumber, err)
+	}
 }
 
 func (s *server) runLauncherWithRetry(ctx context.Context, spec runner.Spec) (runner.Result, error) {
