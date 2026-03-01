@@ -181,18 +181,15 @@ func Execute(cfg Config) error {
 	}
 	if err := runRemoteScript(cfg, strings.TrimSpace(`
 set -eu
-if ! command -v sqlite3 >/dev/null 2>&1; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y sqlite3
-fi
-if ! command -v caddy >/dev/null 2>&1; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y caddy
-fi
-if ! command -v curl >/dev/null 2>&1; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y curl
-fi
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y sqlite3 curl gpg debian-keyring debian-archive-keyring apt-transport-https ca-certificates
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' -o /etc/apt/sources.list.d/caddy-stable.list
+chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+chmod o+r /etc/apt/sources.list.d/caddy-stable.list
+apt-get update
+apt-get install -y caddy
 `)+"\n"); err != nil {
 		return err
 	}
