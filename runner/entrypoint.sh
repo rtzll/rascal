@@ -77,7 +77,7 @@ load_agent_commit_message() {
 
   body="${body%$'\n'}"
   while [[ "${body}" == $'\n'* ]]; do
-    body="${body#"$'\n'"}"
+    body="${body#$'\n'}"
   done
   commit_body="${body}"
 }
