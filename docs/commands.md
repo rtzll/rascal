@@ -4,6 +4,7 @@
 
 ```bash
 ./bin/rascal bootstrap --repo OWNER/REPO --domain rascal.example.com
+./bin/rascal deploy --host YOUR_SERVER_IP --skip-env-upload --skip-auth-upload
 ./bin/rascal doctor --host YOUR_SERVER_IP
 ./bin/rascal config view
 ```
@@ -45,7 +46,7 @@ Issue-driven task:
 
 ```bash
 ./bin/rascal infra provision-hetzner
-./bin/rascal infra deploy-existing --host YOUR_SERVER_IP --repo OWNER/REPO
+./bin/rascal infra deploy-existing --host YOUR_SERVER_IP
 ```
 
 ## Shell Completions

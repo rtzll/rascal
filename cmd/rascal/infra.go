@@ -142,6 +142,10 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 }
 
 func (a *app) newInfraDeployExistingCmd() *cobra.Command {
+	return a.newDeployExistingCmd("deploy-existing", "Deploy rascald to an existing Linux host over SSH")
+}
+
+func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	var (
 		host               string
 		sshUser            string
@@ -159,8 +163,8 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "deploy-existing",
-		Short: "Deploy rascald to an existing Linux host over SSH",
+		Use:   use,
+		Short: short,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			host = strings.TrimSpace(host)
 			sshUser = strings.TrimSpace(sshUser)

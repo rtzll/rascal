@@ -8,6 +8,7 @@ Setup:
   auth        Authentication helpers
   bootstrap   Configure client, provision (optional), and deploy orchestrator
   config      Inspect effective config and manage local file values
+  deploy      Deploy rascald to an existing host
   init        Initialize local Rascal CLI config
 
 Runs:

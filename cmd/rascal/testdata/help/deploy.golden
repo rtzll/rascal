@@ -1,0 +1,38 @@
+Deploy or redeploy rascald to an existing Linux host over SSH without running provisioning or webhook setup.
+
+Usage:
+  rascal deploy [flags]
+
+Examples:
+rascal deploy --host 203.0.113.10 --codex-auth ~/.codex/auth.json --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
+rascal deploy --host 203.0.113.10 --skip-env-upload --skip-auth-upload
+
+Flags:
+      --api-token string              orchestrator API token
+      --codex-auth string             local Codex auth.json path (default "~/.codex/auth.json")
+      --domain string                 public domain for TLS/Caddy
+      --github-runtime-token string   GitHub runtime token
+      --goarch string                 GOARCH for rascald binary (auto-detected when empty)
+  -h, --help                          help for deploy
+      --host string                   existing server host
+      --runner-image string           runner docker image tag (default "rascal-runner:latest")
+      --skip-auth-upload              keep existing codex auth file on server
+      --skip-env-upload               keep existing /etc/rascal/rascal.env on server
+      --ssh-key string                SSH private key path
+      --ssh-port int                  SSH target port (default 22)
+      --ssh-user string               SSH target user (default "root")
+      --webhook-secret string         GitHub webhook secret
+
+Global Flags:
+      --client-ssh-host string   SSH target host for API transport=ssh/auto
+      --client-ssh-key string    SSH private key path for API transport=ssh/auto
+      --client-ssh-port int      SSH target port for API transport=ssh/auto
+      --client-ssh-user string   SSH target user for API transport=ssh/auto
+      --config string            config file path (default "$HOME/.rascal/config.toml")
+      --default-repo string      default repository in OWNER/REPO form
+      --env-file string          env file path (fallback: ./.rascal.env if present)
+      --no-color                 disable ANSI color/style output (also set by NO_COLOR)
+      --output string            output format: table|json|toml (default "table")
+  -q, --quiet                    reduce non-essential output
+      --server-url string        orchestrator URL
+      --transport string         API transport: auto|http|ssh

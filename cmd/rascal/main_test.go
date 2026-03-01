@@ -124,6 +124,9 @@ func TestRootFlagsDoNotExposeDeadFlags(t *testing.T) {
 
 func TestRootHasRepoAndInfraCommands(t *testing.T) {
 	root := newRootCmd()
+	if _, _, err := root.Find([]string{"deploy"}); err != nil {
+		t.Fatalf("deploy command missing: %v", err)
+	}
 	if _, _, err := root.Find([]string{"repo"}); err != nil {
 		t.Fatalf("repo command missing: %v", err)
 	}
@@ -181,6 +184,23 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 		t.Fatalf("bootstrap default goarch = %q, want empty for auto-detect", got)
 	}
 
+	deployCmd, _, err := root.Find([]string{"deploy"})
+	if err != nil {
+		t.Fatalf("deploy command missing: %v", err)
+	}
+	if got := deployCmd.Flags().Lookup("goarch").DefValue; got != "" {
+		t.Fatalf("deploy default goarch = %q, want empty for auto-detect", got)
+	}
+	if got := deployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner:latest" {
+		t.Fatalf("deploy default runner-image = %q, want rascal-runner:latest", got)
+	}
+	if got := deployCmd.Flags().Lookup("skip-env-upload").DefValue; got != "false" {
+		t.Fatalf("deploy default skip-env-upload = %q, want false", got)
+	}
+	if got := deployCmd.Flags().Lookup("skip-auth-upload").DefValue; got != "false" {
+		t.Fatalf("deploy default skip-auth-upload = %q, want false", got)
+	}
+
 	provisionCmd, _, err := root.Find([]string{"infra", "provision-hetzner"})
 	if err != nil {
 		t.Fatalf("infra provision-hetzner command missing: %v", err)
@@ -189,20 +209,20 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 		t.Fatalf("infra provision default server type = %q, want cx23", got)
 	}
 
-	deployCmd, _, err := root.Find([]string{"infra", "deploy-existing"})
+	infraDeployCmd, _, err := root.Find([]string{"infra", "deploy-existing"})
 	if err != nil {
 		t.Fatalf("infra deploy-existing command missing: %v", err)
 	}
-	if got := deployCmd.Flags().Lookup("goarch").DefValue; got != "" {
+	if got := infraDeployCmd.Flags().Lookup("goarch").DefValue; got != "" {
 		t.Fatalf("infra deploy-existing default goarch = %q, want empty for auto-detect", got)
 	}
-	if got := deployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner:latest" {
+	if got := infraDeployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner:latest" {
 		t.Fatalf("infra deploy-existing default runner-image = %q, want rascal-runner:latest", got)
 	}
-	if got := deployCmd.Flags().Lookup("skip-env-upload").DefValue; got != "false" {
+	if got := infraDeployCmd.Flags().Lookup("skip-env-upload").DefValue; got != "false" {
 		t.Fatalf("infra deploy-existing default skip-env-upload = %q, want false", got)
 	}
-	if got := deployCmd.Flags().Lookup("skip-auth-upload").DefValue; got != "false" {
+	if got := infraDeployCmd.Flags().Lookup("skip-auth-upload").DefValue; got != "false" {
 		t.Fatalf("infra deploy-existing default skip-auth-upload = %q, want false", got)
 	}
 }
@@ -258,6 +278,7 @@ func TestHelpGoldenSnapshots(t *testing.T) {
 		{name: "run", args: []string{"run"}},
 		{name: "logs", args: []string{"logs"}},
 		{name: "bootstrap", args: []string{"bootstrap"}},
+		{name: "deploy", args: []string{"deploy"}},
 		{name: "auth", args: []string{"auth"}},
 		{name: "repo", args: []string{"repo"}},
 		{name: "infra", args: []string{"infra"}},

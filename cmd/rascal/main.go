@@ -148,6 +148,8 @@ func newRootCmd() *cobra.Command {
 	initCmd.GroupID = "setup"
 	bootstrapCmd := a.newBootstrapCmd()
 	bootstrapCmd.GroupID = "setup"
+	deployCmd := a.newDeployCmd()
+	deployCmd.GroupID = "setup"
 	configCmd := a.newConfigCmd()
 	configCmd.GroupID = "setup"
 	authCmd := a.newAuthCmd()
@@ -183,6 +185,7 @@ func newRootCmd() *cobra.Command {
 
 	root.AddCommand(initCmd)
 	root.AddCommand(bootstrapCmd)
+	root.AddCommand(deployCmd)
 	root.AddCommand(configCmd)
 	root.AddCommand(authCmd)
 	root.AddCommand(runCmd)
@@ -864,6 +867,16 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&hcloudApplyFW, "hcloud-apply-firewall", true, "create/update and attach firewall (22,80,443)")
 	cmd.Flags().DurationVar(&hcloudTimeout, "hcloud-timeout", 8*time.Minute, "Hetzner provisioning timeout")
 
+	return cmd
+}
+
+func (a *app) newDeployCmd() *cobra.Command {
+	cmd := a.newDeployExistingCmd("deploy", "Deploy rascald to an existing host")
+	cmd.Long = "Deploy or redeploy rascald to an existing Linux host over SSH without running provisioning or webhook setup."
+	cmd.Example = strings.TrimSpace(`
+rascal deploy --host 203.0.113.10 --codex-auth ~/.codex/auth.json --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
+rascal deploy --host 203.0.113.10 --skip-env-upload --skip-auth-upload
+`)
 	return cmd
 }
 
