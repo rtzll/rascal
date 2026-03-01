@@ -225,7 +225,7 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 				RunnerImage:        "rascal-runner:latest",
 				ServerListenAddr:   ":8080",
 				ServerDataDir:      "/var/lib/rascal",
-				ServerStatePath:    "/var/lib/rascal/state.json",
+				ServerStatePath:    "/var/lib/rascal/state.db",
 				ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
 				GOARCH:             resolvedGoarch,
 				Domain:             domain,

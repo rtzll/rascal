@@ -1,13 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+have_docker=0
+have_sqlite=0
 if command -v docker >/dev/null 2>&1; then
-  echo "docker already installed"
+  have_docker=1
+fi
+if command -v sqlite3 >/dev/null 2>&1; then
+  have_sqlite=1
+fi
+
+if [[ "$have_docker" -eq 1 && "$have_sqlite" -eq 1 ]]; then
+  echo "docker and sqlite3 already installed"
   exit 0
 fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
+
+if [[ "$have_sqlite" -eq 0 ]]; then
+  apt-get install -y sqlite3
+fi
+
+if [[ "$have_docker" -eq 1 ]]; then
+  echo "docker already installed"
+  exit 0
+fi
+
 apt-get install -y ca-certificates curl gnupg lsb-release
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg

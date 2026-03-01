@@ -11,6 +11,7 @@ type remoteDoctorStatus struct {
 	Host               string `json:"host"`
 	RascalService      bool   `json:"rascal_service"`
 	DockerInstalled    bool   `json:"docker_installed"`
+	SQLiteInstalled    bool   `json:"sqlite_installed"`
 	CaddyInstalled     bool   `json:"caddy_installed"`
 	EnvFilePresent     bool   `json:"env_file_present"`
 	AuthRuntimeSynced  bool   `json:"auth_runtime_synced"`
@@ -34,6 +35,7 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 
 	status.RascalService = check("systemctl is-active --quiet rascal && echo ok")
 	status.DockerInstalled = check("command -v docker >/dev/null 2>&1 && echo ok")
+	status.SQLiteInstalled = check("command -v sqlite3 >/dev/null 2>&1 && echo ok")
 	status.CaddyInstalled = check("command -v caddy >/dev/null 2>&1 && echo ok")
 	status.EnvFilePresent = check("[ -f /etc/rascal/rascal.env ] && echo ok")
 	status.AuthRuntimeSynced = check(strings.Join([]string{

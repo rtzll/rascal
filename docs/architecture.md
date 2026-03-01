@@ -31,8 +31,8 @@ Rascal has three runtime parts.
 
 ## State
 
-Persistent state is stored on the server in a JSON state file under Rascal data
-dir.
+Persistent state is stored on the server in a SQLite database file under Rascal
+data dir.
 
 Each run stores:
 

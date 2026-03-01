@@ -1,50 +1,111 @@
 package state
 
 import (
+	"context"
 	"crypto/rand"
+	"database/sql"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/pressly/goose/v3"
+	"github.com/rtzll/rascal/internal/state/sqlitegen"
+	_ "modernc.org/sqlite"
 )
 
-type persistentState struct {
+const (
+	sqliteDriverName = "sqlite"
+	maxDeliveries    = 1000
+)
+
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
+
+type legacyPersistentState struct {
 	Runs       []Run                `json:"runs"`
 	Tasks      []Task               `json:"tasks"`
 	Deliveries map[string]time.Time `json:"deliveries"`
-	PRTaskMap  map[string]string    `json:"pr_task_map"`
 }
 
 type Store struct {
-	mu         sync.RWMutex
-	path       string
-	maxRuns    int
-	runs       map[string]Run
-	order      []string
-	tasks      map[string]Task
-	deliveries map[string]time.Time
-	prTaskMap  map[string]string
+	mu      sync.RWMutex
+	path    string
+	maxRuns int
+	db      *sql.DB
+	q       *sqlitegen.Queries
 }
 
 func New(path string, maxRuns int) (*Store, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("state path is required")
+	}
 	if maxRuns <= 0 {
 		maxRuns = 200
 	}
-
-	s := &Store{
-		path:       path,
-		maxRuns:    maxRuns,
-		runs:       make(map[string]Run),
-		tasks:      make(map[string]Task),
-		deliveries: make(map[string]time.Time),
-		prTaskMap:  make(map[string]string),
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("create state directory: %w", err)
 	}
 
-	if err := s.load(); err != nil {
+	legacy, hasLegacy, err := detectLegacyState(path)
+	if err != nil {
 		return nil, err
+	}
+	if hasLegacy {
+		backup := path + ".legacy.json"
+		if _, statErr := os.Stat(backup); statErr == nil {
+			backup = fmt.Sprintf("%s.%d", backup, time.Now().UTC().Unix())
+		}
+		if err := os.Rename(path, backup); err != nil {
+			return nil, fmt.Errorf("backup legacy state: %w", err)
+		}
+	}
+
+	db, err := sql.Open(sqliteDriverName, path)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable sqlite WAL mode: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set sqlite busy_timeout: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys=ON;"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable sqlite foreign_keys: %w", err)
+	}
+
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("configure goose sqlite dialect: %w", err)
+	}
+	goose.SetBaseFS(migrationsFS)
+	if err := goose.Up(db, "migrations"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("run migrations: %w", err)
+	}
+
+	s := &Store{
+		path:    path,
+		maxRuns: maxRuns,
+		db:      db,
+		q:       sqlitegen.New(db),
+	}
+	if hasLegacy {
+		if err := s.importLegacy(legacy); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("import legacy state: %w", err)
+		}
 	}
 	return s, nil
 }
@@ -58,226 +119,237 @@ func NewRunID() (string, error) {
 }
 
 func (s *Store) UpsertTask(in UpsertTaskInput) (Task, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	in.ID = strings.TrimSpace(in.ID)
+	in.Repo = strings.TrimSpace(in.Repo)
 	if in.ID == "" || in.Repo == "" {
 		return Task{}, fmt.Errorf("task id and repo are required")
 	}
-
-	now := time.Now().UTC()
-	task, exists := s.tasks[in.ID]
-	if !exists {
-		task = Task{
-			ID:          in.ID,
-			Repo:        in.Repo,
-			IssueNumber: in.IssueNumber,
-			PRNumber:    in.PRNumber,
-			Status:      TaskOpen,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-	} else {
-		if in.IssueNumber > 0 {
-			task.IssueNumber = in.IssueNumber
-		}
-		if in.PRNumber > 0 {
-			task.PRNumber = in.PRNumber
-		}
-		task.UpdatedAt = now
-	}
-
-	s.tasks[in.ID] = task
-	if task.PRNumber > 0 {
-		s.prTaskMap[prKey(task.Repo, task.PRNumber)] = task.ID
-	}
-
-	if err := s.persistLocked(); err != nil {
+	now := time.Now().UTC().UnixNano()
+	row, err := s.q.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
+		ID:           in.ID,
+		Repo:         in.Repo,
+		IssueNumber:  int64(in.IssueNumber),
+		PrNumber:     int64(in.PRNumber),
+		Status:       string(TaskOpen),
+		PendingInput: false,
+		LastRunID:    "",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	})
+	if err != nil {
 		return Task{}, err
 	}
-	return task, nil
+	return fromDBTask(row), nil
 }
 
 func (s *Store) GetTask(taskID string) (Task, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	task, ok := s.tasks[taskID]
-	return task, ok
+	row, err := s.q.GetTask(context.Background(), strings.TrimSpace(taskID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Task{}, false
+		}
+		return Task{}, false
+	}
+	return fromDBTask(row), true
 }
 
 func (s *Store) FindTaskByPR(repo string, prNumber int) (Task, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	taskID, ok := s.prTaskMap[prKey(repo, prNumber)]
-	if !ok {
+	row, err := s.q.FindTaskByPR(context.Background(), sqlitegen.FindTaskByPRParams{
+		Repo:     strings.TrimSpace(repo),
+		PrNumber: int64(prNumber),
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Task{}, false
+		}
 		return Task{}, false
 	}
-	task, ok := s.tasks[taskID]
-	return task, ok
+	return fromDBTask(row), true
 }
 
-func (s *Store) SetTaskPR(taskID, repo string, prNumber int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	task, ok := s.tasks[taskID]
-	if !ok {
-		return fmt.Errorf("task %q not found", taskID)
+func (s *Store) SetTaskPR(taskID, _ string, prNumber int) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("task id is required")
 	}
 	if prNumber <= 0 {
 		return nil
 	}
-
-	task.PRNumber = prNumber
-	task.UpdatedAt = time.Now().UTC()
-	s.tasks[taskID] = task
-	s.prTaskMap[prKey(repo, prNumber)] = taskID
-
-	return s.persistLocked()
+	rows, err := s.q.SetTaskPR(context.Background(), sqlitegen.SetTaskPRParams{
+		PrNumber:  int64(prNumber),
+		UpdatedAt: time.Now().UTC().UnixNano(),
+		ID:        taskID,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("task %q not found", taskID)
+	}
+	return nil
 }
 
 func (s *Store) SetTaskPendingInput(taskID string, pending bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	task, ok := s.tasks[taskID]
-	if !ok {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("task id is required")
+	}
+	rows, err := s.q.SetTaskPendingInput(context.Background(), sqlitegen.SetTaskPendingInputParams{
+		PendingInput: pending,
+		UpdatedAt:    time.Now().UTC().UnixNano(),
+		ID:           taskID,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
 		return fmt.Errorf("task %q not found", taskID)
 	}
-	task.PendingInput = pending
-	task.UpdatedAt = time.Now().UTC()
-	s.tasks[taskID] = task
-	return s.persistLocked()
+	return nil
 }
 
 func (s *Store) MarkTaskCompleted(taskID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	task, ok := s.tasks[taskID]
-	if !ok {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("task id is required")
+	}
+	rows, err := s.q.MarkTaskCompleted(context.Background(), sqlitegen.MarkTaskCompletedParams{
+		UpdatedAt: time.Now().UTC().UnixNano(),
+		ID:        taskID,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
 		return fmt.Errorf("task %q not found", taskID)
 	}
-	task.Status = TaskCompleted
-	task.PendingInput = false
-	task.UpdatedAt = time.Now().UTC()
-	s.tasks[taskID] = task
-	return s.persistLocked()
+	return nil
 }
 
 func (s *Store) IsTaskCompleted(taskID string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	task, ok := s.tasks[taskID]
-	if !ok {
+	ok, err := s.q.IsTaskCompleted(context.Background(), strings.TrimSpace(taskID))
+	if err != nil {
 		return false
 	}
-	return task.Status == TaskCompleted
+	return ok
 }
 
 func (s *Store) AddRun(in CreateRunInput) (Run, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	in.ID = strings.TrimSpace(in.ID)
+	in.TaskID = strings.TrimSpace(in.TaskID)
+	in.Repo = strings.TrimSpace(in.Repo)
 	if in.ID == "" || in.TaskID == "" || in.Repo == "" {
 		return Run{}, fmt.Errorf("id, task_id and repo are required")
 	}
-	if _, exists := s.runs[in.ID]; exists {
-		return Run{}, fmt.Errorf("run %q already exists", in.ID)
-	}
 
 	now := time.Now().UTC()
-	baseBranch := in.BaseBranch
+	baseBranch := strings.TrimSpace(in.BaseBranch)
 	if baseBranch == "" {
 		baseBranch = "main"
+	}
+	trigger := strings.TrimSpace(in.Trigger)
+	if trigger == "" {
+		trigger = "cli"
 	}
 	debugEnabled := true
 	if in.Debug != nil {
 		debugEnabled = *in.Debug
 	}
 
-	r := Run{
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return Run{}, err
+	}
+	defer tx.Rollback()
+	qtx := s.q.WithTx(tx)
+
+	if _, err := qtx.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
+		ID:           in.TaskID,
+		Repo:         in.Repo,
+		IssueNumber:  int64(in.IssueNumber),
+		PrNumber:     int64(in.PRNumber),
+		Status:       string(TaskOpen),
+		PendingInput: false,
+		LastRunID:    "",
+		CreatedAt:    now.UnixNano(),
+		UpdatedAt:    now.UnixNano(),
+	}); err != nil {
+		return Run{}, err
+	}
+
+	row, err := qtx.InsertRun(context.Background(), sqlitegen.InsertRunParams{
 		ID:          in.ID,
 		TaskID:      in.TaskID,
 		Repo:        in.Repo,
 		Task:        in.Task,
 		BaseBranch:  baseBranch,
 		HeadBranch:  in.HeadBranch,
-		Trigger:     in.Trigger,
+		Trigger:     trigger,
 		Debug:       debugEnabled,
-		Status:      StatusQueued,
+		Status:      string(StatusQueued),
 		RunDir:      in.RunDir,
-		IssueNumber: in.IssueNumber,
-		PRNumber:    in.PRNumber,
+		IssueNumber: int64(in.IssueNumber),
+		PrNumber:    int64(in.PRNumber),
+		PrUrl:       "",
+		HeadSha:     "",
 		Context:     in.Context,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	if r.Trigger == "" {
-		r.Trigger = "cli"
-	}
-
-	task, ok := s.tasks[in.TaskID]
-	if !ok {
-		task = Task{
-			ID:          in.TaskID,
-			Repo:        in.Repo,
-			IssueNumber: in.IssueNumber,
-			PRNumber:    in.PRNumber,
-			Status:      TaskOpen,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+		Error:       "",
+		CreatedAt:   now.UnixNano(),
+		UpdatedAt:   now.UnixNano(),
+		StartedAt:   sql.NullInt64{},
+		CompletedAt: sql.NullInt64{},
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: runs.id") {
+			return Run{}, fmt.Errorf("run %q already exists", in.ID)
 		}
-	} else {
-		if in.IssueNumber > 0 {
-			task.IssueNumber = in.IssueNumber
-		}
-		if in.PRNumber > 0 {
-			task.PRNumber = in.PRNumber
-		}
-		task.UpdatedAt = now
-	}
-	task.LastRunID = r.ID
-	s.tasks[task.ID] = task
-	if task.PRNumber > 0 {
-		s.prTaskMap[prKey(task.Repo, task.PRNumber)] = task.ID
-	}
-
-	s.runs[r.ID] = r
-	s.order = append([]string{r.ID}, s.order...)
-	s.compactRunsLocked()
-
-	if err := s.persistLocked(); err != nil {
 		return Run{}, err
 	}
-	return r, nil
+
+	if _, err := qtx.SetTaskLastRun(context.Background(), sqlitegen.SetTaskLastRunParams{
+		LastRunID:   row.ID,
+		UpdatedAt:   now.UnixNano(),
+		IssueNumber: int64(in.IssueNumber),
+		PrNumber:    int64(in.PRNumber),
+		ID:          in.TaskID,
+	}); err != nil {
+		return Run{}, err
+	}
+	if err := qtx.TrimOldRuns(context.Background(), int64(s.maxRuns)); err != nil {
+		return Run{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Run{}, err
+	}
+	return fromDBRun(row), nil
 }
 
 func (s *Store) GetRun(id string) (Run, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	r, ok := s.runs[id]
-	return r, ok
+	row, err := s.q.GetRun(context.Background(), strings.TrimSpace(id))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Run{}, false
+		}
+		return Run{}, false
+	}
+	return fromDBRun(row), true
 }
 
 func (s *Store) ListRuns(limit int) []Run {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if limit <= 0 || limit > len(s.order) {
-		limit = len(s.order)
+	if limit <= 0 {
+		limit = s.maxRuns
 	}
-
-	out := make([]Run, 0, limit)
-	for i := 0; i < limit; i++ {
-		id := s.order[i]
-		if r, ok := s.runs[id]; ok {
-			out = append(out, r)
-		}
+	rows, err := s.q.ListRuns(context.Background(), int64(limit))
+	if err != nil {
+		return nil
+	}
+	out := make([]Run, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, fromDBRun(r))
 	}
 	return out
 }
@@ -286,28 +358,55 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	r, ok := s.runs[id]
-	if !ok {
-		return Run{}, fmt.Errorf("run %q not found", id)
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return Run{}, err
 	}
+	defer tx.Rollback()
+	qtx := s.q.WithTx(tx)
+
+	row, err := qtx.GetRun(context.Background(), strings.TrimSpace(id))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Run{}, fmt.Errorf("run %q not found", id)
+		}
+		return Run{}, err
+	}
+	r := fromDBRun(row)
 	if err := fn(&r); err != nil {
 		return Run{}, err
 	}
 	r.UpdatedAt = time.Now().UTC()
-	s.runs[id] = r
 
-	task, ok := s.tasks[r.TaskID]
-	if ok {
-		task.LastRunID = r.ID
-		task.UpdatedAt = r.UpdatedAt
-		if r.PRNumber > 0 {
-			task.PRNumber = r.PRNumber
-			s.prTaskMap[prKey(r.Repo, r.PRNumber)] = r.TaskID
-		}
-		s.tasks[r.TaskID] = task
+	rows, err := qtx.UpdateRun(context.Background(), toDBUpdateRunParams(r))
+	if err != nil {
+		return Run{}, err
+	}
+	if rows == 0 {
+		return Run{}, fmt.Errorf("run %q not found", id)
 	}
 
-	if err := s.persistLocked(); err != nil {
+	if _, err := qtx.SetTaskLastRun(context.Background(), sqlitegen.SetTaskLastRunParams{
+		LastRunID:   r.ID,
+		UpdatedAt:   r.UpdatedAt.UnixNano(),
+		IssueNumber: int64(r.IssueNumber),
+		PrNumber:    int64(r.PRNumber),
+		ID:          r.TaskID,
+	}); err != nil {
+		return Run{}, err
+	}
+	if r.PRNumber > 0 {
+		_, err = qtx.SetTaskPR(context.Background(), sqlitegen.SetTaskPRParams{
+			PrNumber:  int64(r.PRNumber),
+			UpdatedAt: r.UpdatedAt.UnixNano(),
+			ID:        r.TaskID,
+		})
+		if err != nil {
+			return Run{}, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
 		return Run{}, err
 	}
 	return r, nil
@@ -329,197 +428,320 @@ func (s *Store) SetRunStatus(runID string, status RunStatus, errText string) (Ru
 }
 
 func (s *Store) ActiveRunForTask(taskID string) (Run, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	for _, id := range s.order {
-		r, ok := s.runs[id]
-		if !ok || r.TaskID != taskID {
-			continue
+	row, err := s.q.ActiveRunForTask(context.Background(), strings.TrimSpace(taskID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Run{}, false
 		}
-		if r.Status == StatusQueued || r.Status == StatusRunning {
-			return r, true
-		}
+		return Run{}, false
 	}
-	return Run{}, false
+	return fromDBRun(row), true
 }
 
 func (s *Store) LastRunForTask(taskID string) (Run, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	for _, id := range s.order {
-		r, ok := s.runs[id]
-		if !ok || r.TaskID != taskID {
-			continue
+	row, err := s.q.LastRunForTask(context.Background(), strings.TrimSpace(taskID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Run{}, false
 		}
-		return r, true
+		return Run{}, false
 	}
-	return Run{}, false
+	return fromDBRun(row), true
 }
 
 func (s *Store) CancelQueuedRuns(taskID, reason string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now := time.Now().UTC()
-	for id, r := range s.runs {
-		if r.TaskID != taskID || r.Status != StatusQueued {
-			continue
-		}
-		r.Status = StatusCanceled
-		r.Error = reason
-		r.UpdatedAt = now
-		r.CompletedAt = &now
-		s.runs[id] = r
-	}
-	return s.persistLocked()
+	now := time.Now().UTC().UnixNano()
+	return s.q.CancelQueuedRuns(context.Background(), sqlitegen.CancelQueuedRunsParams{
+		Error:       reason,
+		UpdatedAt:   now,
+		CompletedAt: sql.NullInt64{Int64: now, Valid: true},
+		TaskID:      strings.TrimSpace(taskID),
+	})
 }
 
 // DeliverySeen returns true if the delivery was already processed.
 func (s *Store) DeliverySeen(deliveryID string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+	deliveryID = strings.TrimSpace(deliveryID)
 	if deliveryID == "" {
 		return false
 	}
-	_, ok := s.deliveries[deliveryID]
-	return ok
+	exists, err := s.q.DeliverySeen(context.Background(), deliveryID)
+	if err != nil {
+		return false
+	}
+	return exists > 0
 }
 
 // RecordDelivery stores a processed delivery id.
 func (s *Store) RecordDelivery(deliveryID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	deliveryID = strings.TrimSpace(deliveryID)
 	if deliveryID == "" {
 		return nil
 	}
-	if _, ok := s.deliveries[deliveryID]; ok {
+	if err := s.q.RecordDelivery(context.Background(), sqlitegen.RecordDeliveryParams{
+		ID:     deliveryID,
+		SeenAt: time.Now().UTC().UnixNano(),
+	}); err != nil {
+		return err
+	}
+	count, err := s.q.CountDeliveries(context.Background())
+	if err != nil {
+		return err
+	}
+	if count <= maxDeliveries {
 		return nil
 	}
-
-	s.deliveries[deliveryID] = time.Now().UTC()
-	s.compactDeliveriesLocked()
-	return s.persistLocked()
+	return s.q.DeleteOldestDeliveries(context.Background(), count-maxDeliveries)
 }
 
-func (s *Store) load() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return fmt.Errorf("create state directory: %w", err)
-	}
-
-	f, err := os.Open(s.path)
+func detectLegacyState(path string) (*legacyPersistentState, bool, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil, false, nil
 		}
-		return fmt.Errorf("open state file: %w", err)
+		return nil, false, fmt.Errorf("open state file: %w", err)
 	}
 	defer f.Close()
 
-	var p persistentState
-	if err := json.NewDecoder(f).Decode(&p); err != nil {
-		return fmt.Errorf("decode state file: %w", err)
+	sample := make([]byte, 512)
+	n, _ := f.Read(sample)
+	head := strings.TrimSpace(string(sample[:n]))
+	if head == "" {
+		return nil, false, nil
 	}
-
-	for _, r := range p.Runs {
-		s.runs[r.ID] = r
-		s.order = append(s.order, r.ID)
+	if !strings.HasPrefix(head, "{") {
+		return nil, false, nil
 	}
-	for _, t := range p.Tasks {
-		s.tasks[t.ID] = t
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, false, fmt.Errorf("seek state file: %w", err)
 	}
-	if p.Deliveries != nil {
-		s.deliveries = p.Deliveries
+	var legacy legacyPersistentState
+	if err := json.NewDecoder(f).Decode(&legacy); err != nil {
+		return nil, false, fmt.Errorf("decode legacy state file: %w", err)
 	}
-	if p.PRTaskMap != nil {
-		s.prTaskMap = p.PRTaskMap
-	}
-
-	s.compactRunsLocked()
-	s.compactDeliveriesLocked()
-	return nil
+	return &legacy, true, nil
 }
 
-func (s *Store) persistLocked() error {
-	p := persistentState{
-		Runs:       make([]Run, 0, len(s.order)),
-		Tasks:      make([]Task, 0, len(s.tasks)),
-		Deliveries: s.deliveries,
-		PRTaskMap:  s.prTaskMap,
+func (s *Store) importLegacy(legacy *legacyPersistentState) error {
+	if legacy == nil {
+		return nil
 	}
-	for _, id := range s.order {
-		if r, ok := s.runs[id]; ok {
-			p.Runs = append(p.Runs, r)
-		}
-	}
-	for _, t := range s.tasks {
-		p.Tasks = append(p.Tasks, t)
-	}
-
-	tmpPath := s.path + ".tmp"
-	f, err := os.Create(tmpPath)
+	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
-		return fmt.Errorf("create temp state file: %w", err)
+		return err
 	}
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(p); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("encode state file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close temp state file: %w", err)
-	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
-		return fmt.Errorf("replace state file: %w", err)
-	}
-	return nil
-}
+	defer tx.Rollback()
+	qtx := s.q.WithTx(tx)
 
-func (s *Store) compactRunsLocked() {
-	if len(s.order) <= s.maxRuns {
-		return
-	}
-	cut := s.order[s.maxRuns:]
-	for _, id := range cut {
-		delete(s.runs, id)
-	}
-	s.order = s.order[:s.maxRuns]
-}
-
-func (s *Store) compactDeliveriesLocked() {
-	const maxDeliveries = 1000
-	if len(s.deliveries) <= maxDeliveries {
-		return
-	}
-
-	type delivery struct {
-		id string
-		ts time.Time
-	}
-	items := make([]delivery, 0, len(s.deliveries))
-	for id, ts := range s.deliveries {
-		items = append(items, delivery{id: id, ts: ts})
-	}
-
-	for len(items) > maxDeliveries {
-		oldest := 0
-		for i := 1; i < len(items); i++ {
-			if items[i].ts.Before(items[oldest].ts) {
-				oldest = i
+	for _, t := range legacy.Tasks {
+		created := t.CreatedAt.UnixNano()
+		if t.CreatedAt.IsZero() {
+			created = time.Now().UTC().UnixNano()
+		}
+		updated := t.UpdatedAt.UnixNano()
+		if t.UpdatedAt.IsZero() {
+			updated = created
+		}
+		if _, err := qtx.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
+			ID:           t.ID,
+			Repo:         t.Repo,
+			IssueNumber:  int64(t.IssueNumber),
+			PrNumber:     int64(t.PRNumber),
+			Status:       string(TaskOpen),
+			PendingInput: false,
+			LastRunID:    "",
+			CreatedAt:    created,
+			UpdatedAt:    updated,
+		}); err != nil {
+			return err
+		}
+		if _, err := qtx.SetTaskPendingInput(context.Background(), sqlitegen.SetTaskPendingInputParams{
+			PendingInput: t.PendingInput,
+			UpdatedAt:    updated,
+			ID:           t.ID,
+		}); err != nil {
+			return err
+		}
+		if _, err := qtx.SetTaskLastRun(context.Background(), sqlitegen.SetTaskLastRunParams{
+			LastRunID:   t.LastRunID,
+			UpdatedAt:   updated,
+			IssueNumber: int64(t.IssueNumber),
+			PrNumber:    int64(t.PRNumber),
+			ID:          t.ID,
+		}); err != nil {
+			return err
+		}
+		if t.Status == TaskCompleted {
+			if _, err := qtx.MarkTaskCompleted(context.Background(), sqlitegen.MarkTaskCompletedParams{UpdatedAt: updated, ID: t.ID}); err != nil {
+				return err
 			}
 		}
-		delete(s.deliveries, items[oldest].id)
-		items = append(items[:oldest], items[oldest+1:]...)
+	}
+
+	for i := len(legacy.Runs) - 1; i >= 0; i-- {
+		r := legacy.Runs[i]
+		if _, err := qtx.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
+			ID:           r.TaskID,
+			Repo:         r.Repo,
+			IssueNumber:  int64(r.IssueNumber),
+			PrNumber:     int64(r.PRNumber),
+			Status:       string(TaskOpen),
+			PendingInput: false,
+			LastRunID:    "",
+			CreatedAt:    fallbackUnixNano(r.CreatedAt, time.Now().UTC()),
+			UpdatedAt:    fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
+		}); err != nil {
+			return err
+		}
+		if _, err := qtx.InsertRun(context.Background(), sqlitegen.InsertRunParams{
+			ID:          r.ID,
+			TaskID:      r.TaskID,
+			Repo:        r.Repo,
+			Task:        r.Task,
+			BaseBranch:  r.BaseBranch,
+			HeadBranch:  r.HeadBranch,
+			Trigger:     r.Trigger,
+			Debug:       r.Debug,
+			Status:      string(r.Status),
+			RunDir:      r.RunDir,
+			IssueNumber: int64(r.IssueNumber),
+			PrNumber:    int64(r.PRNumber),
+			PrUrl:       r.PRURL,
+			HeadSha:     r.HeadSHA,
+			Context:     r.Context,
+			Error:       r.Error,
+			CreatedAt:   fallbackUnixNano(r.CreatedAt, time.Now().UTC()),
+			UpdatedAt:   fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
+			StartedAt:   toNullInt64(r.StartedAt),
+			CompletedAt: toNullInt64(r.CompletedAt),
+		}); err != nil {
+			if strings.Contains(err.Error(), "UNIQUE constraint failed: runs.id") {
+				continue
+			}
+			return err
+		}
+		if _, err := qtx.SetTaskLastRun(context.Background(), sqlitegen.SetTaskLastRunParams{
+			LastRunID:   r.ID,
+			UpdatedAt:   fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
+			IssueNumber: int64(r.IssueNumber),
+			PrNumber:    int64(r.PRNumber),
+			ID:          r.TaskID,
+		}); err != nil {
+			return err
+		}
+	}
+
+	for id, ts := range legacy.Deliveries {
+		if err := qtx.RecordDelivery(context.Background(), sqlitegen.RecordDeliveryParams{
+			ID:     id,
+			SeenAt: fallbackUnixNano(ts, time.Now().UTC()),
+		}); err != nil {
+			return err
+		}
+	}
+
+	if err := qtx.TrimOldRuns(context.Background(), int64(s.maxRuns)); err != nil {
+		return err
+	}
+
+	count, err := qtx.CountDeliveries(context.Background())
+	if err != nil {
+		return err
+	}
+	if count > maxDeliveries {
+		if err := qtx.DeleteOldestDeliveries(context.Background(), count-maxDeliveries); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func fromDBTask(t sqlitegen.Task) Task {
+	return Task{
+		ID:           t.ID,
+		Repo:         t.Repo,
+		IssueNumber:  int(t.IssueNumber),
+		PRNumber:     int(t.PrNumber),
+		Status:       TaskStatus(t.Status),
+		PendingInput: t.PendingInput,
+		LastRunID:    t.LastRunID,
+		CreatedAt:    time.Unix(0, t.CreatedAt).UTC(),
+		UpdatedAt:    time.Unix(0, t.UpdatedAt).UTC(),
 	}
 }
 
-func prKey(repo string, prNumber int) string {
-	return fmt.Sprintf("%s#%d", repo, prNumber)
+func fromDBRun(r sqlitegen.Run) Run {
+	out := Run{
+		ID:          r.ID,
+		TaskID:      r.TaskID,
+		Repo:        r.Repo,
+		Task:        r.Task,
+		BaseBranch:  r.BaseBranch,
+		HeadBranch:  r.HeadBranch,
+		Trigger:     r.Trigger,
+		Debug:       r.Debug,
+		Status:      RunStatus(r.Status),
+		RunDir:      r.RunDir,
+		IssueNumber: int(r.IssueNumber),
+		PRNumber:    int(r.PrNumber),
+		PRURL:       r.PrUrl,
+		HeadSHA:     r.HeadSha,
+		Context:     r.Context,
+		Error:       r.Error,
+		CreatedAt:   time.Unix(0, r.CreatedAt).UTC(),
+		UpdatedAt:   time.Unix(0, r.UpdatedAt).UTC(),
+	}
+	if r.StartedAt.Valid {
+		t := time.Unix(0, r.StartedAt.Int64).UTC()
+		out.StartedAt = &t
+	}
+	if r.CompletedAt.Valid {
+		t := time.Unix(0, r.CompletedAt.Int64).UTC()
+		out.CompletedAt = &t
+	}
+	return out
+}
+
+func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
+	return sqlitegen.UpdateRunParams{
+		TaskID:      r.TaskID,
+		Repo:        r.Repo,
+		Task:        r.Task,
+		BaseBranch:  r.BaseBranch,
+		HeadBranch:  r.HeadBranch,
+		Trigger:     r.Trigger,
+		Debug:       r.Debug,
+		Status:      string(r.Status),
+		RunDir:      r.RunDir,
+		IssueNumber: int64(r.IssueNumber),
+		PrNumber:    int64(r.PRNumber),
+		PrUrl:       r.PRURL,
+		HeadSha:     r.HeadSHA,
+		Context:     r.Context,
+		Error:       r.Error,
+		CreatedAt:   fallbackUnixNano(r.CreatedAt, time.Now().UTC()),
+		UpdatedAt:   fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
+		StartedAt:   toNullInt64(r.StartedAt),
+		CompletedAt: toNullInt64(r.CompletedAt),
+		ID:          r.ID,
+	}
+}
+
+func toNullInt64(t *time.Time) sql.NullInt64 {
+	if t == nil || t.IsZero() {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: t.UTC().UnixNano(), Valid: true}
+}
+
+func fallbackUnixNano(t time.Time, fallback time.Time) int64 {
+	if !t.IsZero() {
+		return t.UTC().UnixNano()
+	}
+	if !fallback.IsZero() {
+		return fallback.UTC().UnixNano()
+	}
+	return time.Now().UTC().UnixNano()
 }

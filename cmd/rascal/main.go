@@ -647,7 +647,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 					RunnerImage:        "rascal-runner:latest",
 					ServerListenAddr:   ":8080",
 					ServerDataDir:      "/var/lib/rascal",
-					ServerStatePath:    "/var/lib/rascal/state.json",
+					ServerStatePath:    "/var/lib/rascal/state.db",
 					ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
 					GOARCH:             resolvedGoarch,
 				}
@@ -671,7 +671,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 								caddyOK = false
 							}
 						}
-						healthyExisting = st.RascalService && st.DockerInstalled && caddyOK && st.EnvFilePresent && st.AuthRuntimeSynced && st.CodexAuthPresent && st.RunnerImagePresent
+						healthyExisting = st.RascalService && st.DockerInstalled && st.SQLiteInstalled && caddyOK && st.EnvFilePresent && st.AuthRuntimeSynced && st.CodexAuthPresent && st.RunnerImagePresent
 					}
 				}
 				if !healthyExisting {
@@ -1133,6 +1133,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 						"host":                 remoteStatus.Host,
 						"rascal_service":       remoteStatus.RascalService,
 						"docker_installed":     remoteStatus.DockerInstalled,
+						"sqlite_installed":     remoteStatus.SQLiteInstalled,
 						"caddy_installed":      remoteStatus.CaddyInstalled,
 						"env_file_present":     remoteStatus.EnvFilePresent,
 						"auth_runtime_synced":  remoteStatus.AuthRuntimeSynced,
@@ -1207,8 +1208,8 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					if errText, ok := remote["error"].(string); ok && strings.TrimSpace(errText) != "" {
 						a.println("remote (%s): error: %s", strings.TrimSpace(host), errText)
 					} else {
-						a.println("remote (%s): rascal=%v docker=%v caddy=%v env=%v auth_synced=%v codex_auth=%v runner_image=%v",
-							remote["host"], remote["rascal_service"], remote["docker_installed"], remote["caddy_installed"], remote["env_file_present"], remote["auth_runtime_synced"], remote["codex_auth_present"], remote["runner_image_present"])
+						a.println("remote (%s): rascal=%v docker=%v sqlite=%v caddy=%v env=%v auth_synced=%v codex_auth=%v runner_image=%v",
+							remote["host"], remote["rascal_service"], remote["docker_installed"], remote["sqlite_installed"], remote["caddy_installed"], remote["env_file_present"], remote["auth_runtime_synced"], remote["codex_auth_present"], remote["runner_image_present"])
 					}
 				}
 				if !cfgExists {

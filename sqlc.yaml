@@ -1,0 +1,11 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    schema: "internal/state/sql/schema.sql"
+    queries: "internal/state/sql/queries.sql"
+    gen:
+      go:
+        package: "sqlitegen"
+        out: "internal/state/sqlitegen"
+        emit_json_tags: true
+        emit_empty_slices: true

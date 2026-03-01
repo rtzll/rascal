@@ -1,6 +1,6 @@
-.PHONY: test build build-cli build-daemon run-daemon run-cli fmt
+.PHONY: test build build-cli build-daemon run-daemon run-cli fmt codegen
 
-test:
+test: codegen
 	go test ./...
 
 fmt:
@@ -8,10 +8,13 @@ fmt:
 
 build: build-cli build-daemon
 
-build-cli:
+codegen:
+	go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
+
+build-cli: codegen
 	go build -o bin/rascal ./cmd/rascal
 
-build-daemon:
+build-daemon: codegen
 	go build -o bin/rascald ./cmd/rascald
 
 run-daemon:

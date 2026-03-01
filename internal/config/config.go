@@ -42,7 +42,7 @@ type ClientConfig struct {
 
 func LoadServerConfig() ServerConfig {
 	dataDir := envOrDefault("RASCAL_DATA_DIR", "./var/lib/rascal")
-	statePath := envOrDefault("RASCAL_STATE_PATH", filepath.Join(dataDir, "state.json"))
+	statePath := envOrDefault("RASCAL_STATE_PATH", filepath.Join(dataDir, "state.db"))
 
 	return ServerConfig{
 		ListenAddr:          envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
