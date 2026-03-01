@@ -157,8 +157,6 @@ func newRootCmd() *cobra.Command {
 
 	runCmd := a.newRunCmd()
 	runCmd.GroupID = "runs"
-	issueCmd := a.newIssueCmd()
-	issueCmd.GroupID = "runs"
 	psCmd := a.newPSCmd()
 	psCmd.GroupID = "runs"
 	openCmd := a.newOpenCmd()
@@ -189,7 +187,6 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(configCmd)
 	root.AddCommand(authCmd)
 	root.AddCommand(runCmd)
-	root.AddCommand(issueCmd)
 	root.AddCommand(psCmd)
 	root.AddCommand(openCmd)
 	root.AddCommand(retryCmd)
@@ -881,19 +878,53 @@ rascal deploy --host 203.0.113.10 --skip-env-upload --skip-auth-upload
 }
 
 func (a *app) newRunCmd() *cobra.Command {
-	var repo, task, baseBranch string
+	var repo, task, baseBranch, issueRef string
 	var debug bool
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "Start an ad-hoc run",
-		Long:  "Start a run for a repository/task pair. The repository must be in OWNER/REPO form.",
+		Short: "Start a run",
+		Long:  "Start a run for a repository/task pair, or create a run from an issue reference. The repository must be in OWNER/REPO form.",
 		Example: strings.TrimSpace(`
 rascal run -R OWNER/REPO -t "Fix flaky tests"
 rascal run --repo OWNER/REPO --task "Refactor parser" --output json
+rascal run --issue OWNER/REPO#123
 `),
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := a.requireServerAuth(); err != nil {
 				return err
+			}
+			issueRef = strings.TrimSpace(issueRef)
+			if issueRef != "" {
+				if cmd.Flags().Changed("repo") || cmd.Flags().Changed("task") || cmd.Flags().Changed("base-branch") {
+					return &cliError{Code: exitInput, Message: "--issue cannot be combined with --repo, --task, or --base-branch"}
+				}
+				repo, issueNumber, err := parseIssueRef(issueRef)
+				if err != nil {
+					return &cliError{Code: exitInput, Message: err.Error()}
+				}
+				payload := map[string]any{
+					"repo":         repo,
+					"issue_number": issueNumber,
+					"debug":        debug,
+				}
+				resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks/issue", payload)
+				if err != nil {
+					return &cliError{Code: exitServer, Message: "request failed", Cause: err}
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode >= 300 {
+					return decodeServerError(resp)
+				}
+				var out struct {
+					Run state.Run `json:"run"`
+				}
+				if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+					return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+				}
+				return a.emit(map[string]any{"run": out.Run}, func() error {
+					a.println("issue run created: %s (%s)", out.Run.ID, out.Run.Status)
+					return nil
+				})
 			}
 			repo = firstNonEmpty(strings.TrimSpace(repo), a.cfg.DefaultRepo)
 			task = strings.TrimSpace(task)
@@ -931,54 +962,7 @@ rascal run --repo OWNER/REPO --task "Refactor parser" --output json
 	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository in OWNER/REPO form")
 	cmd.Flags().StringVarP(&task, "task", "t", "", "task text")
 	cmd.Flags().StringVarP(&baseBranch, "base-branch", "b", "main", "base branch")
-	cmd.Flags().BoolVar(&debug, "debug", true, "stream detailed agent execution logs (use --debug=false to reduce verbosity)")
-	return cmd
-}
-
-func (a *app) newIssueCmd() *cobra.Command {
-	var debug bool
-	cmd := &cobra.Command{
-		Use:   "issue OWNER/REPO#123",
-		Short: "Start a run from an issue",
-		Long:  "Create a run using an issue reference in OWNER/REPO#NUMBER form.",
-		Example: strings.TrimSpace(`
-rascal issue OWNER/REPO#123
-rascal issue OWNER/REPO#123 --output json
-`),
-		Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			if err := a.requireServerAuth(); err != nil {
-				return err
-			}
-			repo, issueNumber, err := parseIssueRef(args[0])
-			if err != nil {
-				return &cliError{Code: exitInput, Message: err.Error()}
-			}
-			payload := map[string]any{
-				"repo":         repo,
-				"issue_number": issueNumber,
-				"debug":        debug,
-			}
-			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks/issue", payload)
-			if err != nil {
-				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode >= 300 {
-				return decodeServerError(resp)
-			}
-			var out struct {
-				Run state.Run `json:"run"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
-			}
-			return a.emit(map[string]any{"run": out.Run}, func() error {
-				a.println("issue run created: %s (%s)", out.Run.ID, out.Run.Status)
-				return nil
-			})
-		},
-	}
+	cmd.Flags().StringVar(&issueRef, "issue", "", "issue reference in OWNER/REPO#NUMBER form")
 	cmd.Flags().BoolVar(&debug, "debug", true, "stream detailed agent execution logs (use --debug=false to reduce verbosity)")
 	return cmd
 }

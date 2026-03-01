@@ -56,7 +56,7 @@ GITHUB_RUNTIME_TOKEN=...
 
 ```bash
 ./bin/rascal run -t "..."
-./bin/rascal issue OWNER/REPO#123
+./bin/rascal run --issue OWNER/REPO#123
 ./bin/rascal ps
 ./bin/rascal logs <run_id> --follow
 ./bin/rascal open <run_id>

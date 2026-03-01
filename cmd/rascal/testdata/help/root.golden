@@ -13,11 +13,10 @@ Setup:
 
 Runs:
   cancel      Cancel a queued or running run
-  issue       Start a run from an issue
   open        Open PR URL for a run in your browser
   ps          List recent runs
   retry       Create a new run from an existing run
-  run         Start an ad-hoc run
+  run         Start a run
   task        Show task status/details
 
 Logs:

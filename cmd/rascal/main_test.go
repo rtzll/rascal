@@ -232,7 +232,7 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	}
 }
 
-func TestRunIssueRetryDebugDefaults(t *testing.T) {
+func TestRunRetryDebugDefaults(t *testing.T) {
 	root := newRootCmd()
 
 	runCmd, _, err := root.Find([]string{"run"})
@@ -243,20 +243,110 @@ func TestRunIssueRetryDebugDefaults(t *testing.T) {
 		t.Fatalf("run default debug = %q, want true", got)
 	}
 
-	issueCmd, _, err := root.Find([]string{"issue"})
-	if err != nil {
-		t.Fatalf("issue command missing: %v", err)
-	}
-	if got := issueCmd.Flags().Lookup("debug").DefValue; got != "true" {
-		t.Fatalf("issue default debug = %q, want true", got)
-	}
-
 	retryCmd, _, err := root.Find([]string{"retry"})
 	if err != nil {
 		t.Fatalf("retry command missing: %v", err)
 	}
 	if got := retryCmd.Flags().Lookup("debug").DefValue; got != "true" {
 		t.Fatalf("retry default debug = %q, want true", got)
+	}
+}
+
+func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/v1/tasks/issue" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"run": map[string]any{
+				"id":     "run_issue",
+				"status": "queued",
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "json",
+	}
+
+	cmd := a.newRunCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--issue", "owner/repo#123"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("run --issue: %v", err)
+	}
+
+	if payload["repo"] != "owner/repo" {
+		t.Fatalf("unexpected repo payload: %v", payload["repo"])
+	}
+	if payload["issue_number"] != float64(123) {
+		t.Fatalf("unexpected issue number payload: %v", payload["issue_number"])
+	}
+	if payload["debug"] != true {
+		t.Fatalf("unexpected debug payload: %v", payload["debug"])
+	}
+}
+
+func TestRunIssueInvalidFormat(t *testing.T) {
+	a := &app{
+		cfg: config.ClientConfig{
+			APIToken: "test-token",
+		},
+	}
+	cmd := a.newRunCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--issue", "owner/repo"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid issue ref")
+	}
+	if !strings.Contains(err.Error(), "invalid issue ref") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunIssueMutualExclusion(t *testing.T) {
+	a := &app{
+		cfg: config.ClientConfig{
+			APIToken: "test-token",
+		},
+	}
+	cmd := a.newRunCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--issue", "owner/repo#42", "--task", "Fix it"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for mutually exclusive flags")
+	}
+	if !strings.Contains(err.Error(), "--issue cannot be combined") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

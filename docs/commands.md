@@ -20,7 +20,7 @@ Ad-hoc task:
 Issue-driven task:
 
 ```bash
-./bin/rascal issue OWNER/REPO#123
+./bin/rascal run --issue OWNER/REPO#123
 ```
 
 ## Monitor Runs
