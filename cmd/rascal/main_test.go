@@ -489,6 +489,110 @@ func TestGoarchFromHetznerArchitecture(t *testing.T) {
 	}
 }
 
+func TestResolveRepoPrecedence(t *testing.T) {
+	t.Parallel()
+
+	t.Run("explicit wins", func(t *testing.T) {
+		t.Parallel()
+		called := false
+		repo, inferred := resolveRepo("explicit/repo", "default/repo", func() string {
+			called = true
+			return "git/repo"
+		})
+		if called {
+			t.Fatal("expected infer not called for explicit repo")
+		}
+		if inferred {
+			t.Fatal("expected inferred=false for explicit repo")
+		}
+		if repo != "explicit/repo" {
+			t.Fatalf("unexpected repo: %q", repo)
+		}
+	})
+
+	t.Run("default wins", func(t *testing.T) {
+		t.Parallel()
+		called := false
+		repo, inferred := resolveRepo("", "default/repo", func() string {
+			called = true
+			return "git/repo"
+		})
+		if called {
+			t.Fatal("expected infer not called for default repo")
+		}
+		if inferred {
+			t.Fatal("expected inferred=false for default repo")
+		}
+		if repo != "default/repo" {
+			t.Fatalf("unexpected repo: %q", repo)
+		}
+	})
+
+	t.Run("git inference used", func(t *testing.T) {
+		t.Parallel()
+		called := false
+		repo, inferred := resolveRepo("", "", func() string {
+			called = true
+			return "git/repo"
+		})
+		if !called {
+			t.Fatal("expected infer called when explicit/default missing")
+		}
+		if !inferred {
+			t.Fatal("expected inferred=true for git repo")
+		}
+		if repo != "git/repo" {
+			t.Fatalf("unexpected repo: %q", repo)
+		}
+	})
+
+	t.Run("empty inference ignored", func(t *testing.T) {
+		t.Parallel()
+		repo, inferred := resolveRepo("", "", func() string { return "" })
+		if inferred {
+			t.Fatal("expected inferred=false when inference is empty")
+		}
+		if repo != "" {
+			t.Fatalf("expected empty repo, got %q", repo)
+		}
+	})
+}
+
+func TestParseGitHubRepoFromRemote(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		input  string
+		want   string
+		expect bool
+	}{
+		{name: "ssh git suffix", input: "git@github.com:owner/repo.git", want: "owner/repo", expect: true},
+		{name: "ssh no suffix", input: "git@github.com:owner/repo", want: "owner/repo", expect: true},
+		{name: "https git suffix", input: "https://github.com/owner/repo.git", want: "owner/repo", expect: true},
+		{name: "https no suffix", input: "https://github.com/owner/repo", want: "owner/repo", expect: true},
+		{name: "https trailing slash", input: "https://github.com/owner/repo/", want: "owner/repo", expect: true},
+		{name: "non github", input: "https://gitlab.com/owner/repo.git", want: "", expect: false},
+		{name: "missing repo", input: "git@github.com:owner", want: "", expect: false},
+		{name: "extra path", input: "git@github.com:owner/repo/extra", want: "", expect: false},
+		{name: "empty", input: "", want: "", expect: false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := parseGitHubRepoFromRemote(tc.input)
+			if ok != tc.expect {
+				t.Fatalf("parseGitHubRepoFromRemote(%q) ok=%t want %t", tc.input, ok, tc.expect)
+			}
+			if got != tc.want {
+				t.Fatalf("parseGitHubRepoFromRemote(%q) = %q want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveTransport(t *testing.T) {
 	t.Parallel()
 

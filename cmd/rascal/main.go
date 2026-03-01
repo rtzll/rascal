@@ -929,7 +929,8 @@ rascal run --issue OWNER/REPO#123
 					return nil
 				})
 			}
-			repo = firstNonEmpty(strings.TrimSpace(repo), a.cfg.DefaultRepo)
+			var inferredRepo bool
+			repo, inferredRepo = resolveRepo(strings.TrimSpace(repo), a.cfg.DefaultRepo, inferRepoFromGitRemote)
 			task = strings.TrimSpace(task)
 			baseBranch = firstNonEmpty(strings.TrimSpace(baseBranch), "main")
 			if repo == "" || task == "" {
@@ -957,6 +958,9 @@ rascal run --issue OWNER/REPO#123
 				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 			}
 			return a.emit(map[string]any{"run": out.Run}, func() error {
+				if inferredRepo {
+					a.println("hint: using repo from git remote: %s", repo)
+				}
 				a.println("run created: %s (%s)", out.Run.ID, out.Run.Status)
 				return nil
 			})
@@ -2635,6 +2639,74 @@ func openURLInBrowser(rawURL string) error {
 		cmd = exec.Command("xdg-open", rawURL)
 	}
 	return cmd.Run()
+}
+
+func resolveRepo(explicit, defaultRepo string, infer func() string) (string, bool) {
+	explicit = strings.TrimSpace(explicit)
+	if explicit != "" {
+		return explicit, false
+	}
+	defaultRepo = strings.TrimSpace(defaultRepo)
+	if defaultRepo != "" {
+		return defaultRepo, false
+	}
+	if infer == nil {
+		return "", false
+	}
+	inferred := strings.TrimSpace(infer())
+	if inferred == "" {
+		return "", false
+	}
+	return inferred, true
+}
+
+func inferRepoFromGitRemote() string {
+	remote, err := gitRemoteOrigin()
+	if err != nil {
+		return ""
+	}
+	repo, ok := parseGitHubRepoFromRemote(remote)
+	if !ok {
+		return ""
+	}
+	return repo
+}
+
+func gitRemoteOrigin() (string, error) {
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func parseGitHubRepoFromRemote(remote string) (string, bool) {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return "", false
+	}
+	var path string
+	switch {
+	case strings.HasPrefix(remote, "git@github.com:"):
+		path = strings.TrimPrefix(remote, "git@github.com:")
+	case strings.HasPrefix(remote, "https://github.com/"):
+		path = strings.TrimPrefix(remote, "https://github.com/")
+	case strings.HasPrefix(remote, "http://github.com/"):
+		path = strings.TrimPrefix(remote, "http://github.com/")
+	default:
+		return "", false
+	}
+	path = strings.TrimSuffix(path, ".git")
+	path = strings.TrimSuffix(path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 {
+		return "", false
+	}
+	if strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", false
+	}
+	return parts[0] + "/" + parts[1], true
 }
 
 func firstNonEmpty(values ...string) string {
