@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/config"
-	"github.com/rtzll/rascal/internal/state"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestMaskSecret(t *testing.T) {
@@ -749,6 +749,99 @@ func TestAuthHelpContainsSync(t *testing.T) {
 	}
 }
 
+func TestConfigUnsetRemovesKeyAndReportsEffectiveValue(t *testing.T) {
+	clearEnvKeys(t,
+		"RASCAL_SERVER_URL",
+		"RASCAL_API_TOKEN",
+		"RASCAL_DEFAULT_REPO",
+		"RASCAL_HOST",
+		"RASCAL_DOMAIN",
+		"RASCAL_TRANSPORT",
+		"RASCAL_SSH_HOST",
+		"RASCAL_SSH_USER",
+		"RASCAL_SSH_KEY",
+		"RASCAL_SSH_PORT",
+	)
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.toml")
+
+	root := newRootCmd()
+	root.SetArgs([]string{"--config", cfgPath, "config", "set", "server_url", "https://example.com"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("config set: %v", err)
+	}
+	if _, ok := readConfigMap(t, cfgPath)["server_url"]; !ok {
+		t.Fatal("expected server_url to exist in config file after set")
+	}
+
+	stdout, err := captureStdout(func() error {
+		root := newRootCmd()
+		root.SetArgs([]string{"--config", cfgPath, "--output", "json", "config", "unset", "server_url"})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatalf("config unset: %v", err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("invalid json output: %v", err)
+	}
+	if out["status"] != "removed" {
+		t.Fatalf("expected status removed, got %v", out["status"])
+	}
+	if out["source"] != "default" {
+		t.Fatalf("expected source default, got %v", out["source"])
+	}
+	if out["value"] != "http://127.0.0.1:8080" {
+		t.Fatalf("expected default server_url, got %v", out["value"])
+	}
+	if _, ok := readConfigMap(t, cfgPath)["server_url"]; ok {
+		t.Fatal("expected server_url to be removed from config file after unset")
+	}
+}
+
+func TestConfigUnsetIdempotent(t *testing.T) {
+	clearEnvKeys(t,
+		"RASCAL_SERVER_URL",
+		"RASCAL_API_TOKEN",
+		"RASCAL_DEFAULT_REPO",
+		"RASCAL_HOST",
+		"RASCAL_DOMAIN",
+		"RASCAL_TRANSPORT",
+		"RASCAL_SSH_HOST",
+		"RASCAL_SSH_USER",
+		"RASCAL_SSH_KEY",
+		"RASCAL_SSH_PORT",
+	)
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.toml")
+
+	for i := 0; i < 2; i++ {
+		stdout, err := captureStdout(func() error {
+			root := newRootCmd()
+			root.SetArgs([]string{"--config", cfgPath, "--output", "json", "config", "unset", "default_repo"})
+			return root.Execute()
+		})
+		if err != nil {
+			t.Fatalf("config unset attempt %d: %v", i+1, err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+			t.Fatalf("invalid json output attempt %d: %v", i+1, err)
+		}
+		if out["status"] != "absent" {
+			t.Fatalf("expected status absent attempt %d, got %v", i+1, out["status"])
+		}
+		if msg, ok := out["message"].(string); !ok || strings.TrimSpace(msg) == "" {
+			t.Fatalf("expected message to be set attempt %d, got %v", i+1, out["message"])
+		}
+	}
+	if _, err := os.Stat(cfgPath); err == nil || !os.IsNotExist(err) {
+		t.Fatalf("expected config file to remain absent, got err=%v", err)
+	}
+}
+
 func TestHelpGoldenSnapshots(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1301,34 +1394,34 @@ func normalizeHelpOutput(s string) string {
 	return strings.TrimSpace(s) + "\n"
 }
 
-func anySliceToStrings(v any) []string {
-	raw, ok := v.([]any)
-	if !ok {
-		return nil
+func readConfigMap(t *testing.T, path string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config file: %v", err)
 	}
-	out := make([]string, 0, len(raw))
-	for _, item := range raw {
-		if s, ok := item.(string); ok {
-			out = append(out, s)
-		}
+	var out map[string]any
+	if err := toml.Unmarshal(data, &out); err != nil {
+		t.Fatalf("parse config file: %v", err)
+	}
+	if out == nil {
+		out = map[string]any{}
 	}
 	return out
 }
 
-func containsSubstring(items []string, needle string) bool {
-	for _, item := range items {
-		if strings.Contains(item, needle) {
-			return true
-		}
+func clearEnvKeys(t *testing.T, keys ...string) {
+	t.Helper()
+	for _, key := range keys {
+		key := key
+		val, had := os.LookupEnv(key)
+		_ = os.Unsetenv(key)
+		t.Cleanup(func() {
+			if had {
+				_ = os.Setenv(key, val)
+				return
+			}
+			_ = os.Unsetenv(key)
+		})
 	}
-	return false
-}
-
-func containsExact(items []string, needle string) bool {
-	for _, item := range items {
-		if item == needle {
-			return true
-		}
-	}
-	return false
 }

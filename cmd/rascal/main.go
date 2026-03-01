@@ -1888,6 +1888,61 @@ rascal config set transport ssh
 			return nil
 		},
 	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "unset <key>",
+		Short: "Unset a config key in the local config file",
+		Long: "Remove one key from the local config file.\n\n" +
+			"Supported keys:\n" + keys,
+		Example: strings.TrimSpace(`
+rascal config unset server_url
+rascal config unset default_repo
+`),
+		Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			key := strings.TrimSpace(args[0])
+			if !isSupportedConfigKey(key) {
+				return &cliError{Code: exitInput, Message: "invalid key", Hint: configKeysHint()}
+			}
+			settings, exists, err := loadFileConfigMap(a.configPath)
+			if err != nil {
+				return err
+			}
+			_, hadKey := settings[key]
+			status := "absent"
+			message := ""
+			if hadKey {
+				delete(settings, key)
+				if err := saveClientConfigMap(a.configPath, settings); err != nil {
+					return err
+				}
+				status = "removed"
+				message = fmt.Sprintf("removed %s from %s", key, a.configPath)
+			} else if exists {
+				message = fmt.Sprintf("%s already absent in %s", key, a.configPath)
+			} else {
+				message = fmt.Sprintf("%s already absent (config file missing)", key)
+			}
+			if err := a.initConfig(); err != nil {
+				return err
+			}
+			value, source := a.effectiveConfigValue(key, settings)
+			out := map[string]any{
+				"key":         key,
+				"value":       value,
+				"source":      source,
+				"status":      status,
+				"message":     message,
+				"config_path": a.configPath,
+			}
+			return a.emit(out, func() error {
+				if message != "" {
+					a.println(message)
+				}
+				a.println("effective %s: %v (%s)", key, value, source)
+				return nil
+			})
+		},
+	})
 	return cmd
 }
 
@@ -2313,6 +2368,47 @@ func loadFileConfig(path string) (config.ClientConfig, error) {
 		SSHKey:      strings.TrimSpace(v.GetString("ssh_key")),
 		SSHPort:     v.GetInt("ssh_port"),
 	}, nil
+}
+
+func loadFileConfigMap(path string) (map[string]any, bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{}, false, nil
+		}
+		return nil, false, &cliError{Code: exitConfig, Message: "failed to read config file", Cause: err}
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return map[string]any{}, true, nil
+	}
+	var out map[string]any
+	if err := toml.Unmarshal(data, &out); err != nil {
+		return nil, true, &cliError{Code: exitConfig, Message: "failed to parse config file", Cause: err}
+	}
+	if out == nil {
+		out = map[string]any{}
+	}
+	return out, true, nil
+}
+
+func saveClientConfigMap(path string, settings map[string]any) error {
+	if path == "" {
+		path = config.DefaultClientConfigPath()
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return &cliError{Code: exitConfig, Message: "failed to create config directory", Cause: err}
+	}
+	data, err := toml.Marshal(settings)
+	if err != nil {
+		return &cliError{Code: exitConfig, Message: "failed to serialize config file", Cause: err}
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return &cliError{Code: exitConfig, Message: "failed to write config file", Cause: err}
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return &cliError{Code: exitConfig, Message: "failed to chmod config file", Cause: err}
+	}
+	return nil
 }
 
 func loadEnvFile(path string) (map[string]string, error) {
@@ -2859,12 +2955,85 @@ func supportedConfigKeys() []string {
 	}
 }
 
+func isSupportedConfigKey(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	for _, supported := range supportedConfigKeys() {
+		if key == supported {
+			return true
+		}
+	}
+	return false
+}
+
 func configKeysHint() string {
 	return "use " + strings.Join(supportedConfigKeys(), "|")
 }
 
 func configKeysHelpText() string {
 	return strings.Join(supportedConfigKeys(), "\n")
+}
+
+func configSourceFromEnvConfig(envKey, configKey string, settings map[string]any, fallback string) string {
+	if strings.TrimSpace(os.Getenv(envKey)) != "" {
+		return "env"
+	}
+	if _, ok := settings[configKey]; ok {
+		return "config"
+	}
+	return fallback
+}
+
+func (a *app) configSourceFromFlagEnvConfig(flagSet bool, envKey, configKey string, settings map[string]any, fallback string) string {
+	if flagSet {
+		return "flag"
+	}
+	return configSourceFromEnvConfig(envKey, configKey, settings, fallback)
+}
+
+func (a *app) sshHostSource(settings map[string]any) string {
+	if strings.TrimSpace(a.sshHostFlag) != "" {
+		return "flag"
+	}
+	if strings.TrimSpace(os.Getenv("RASCAL_SSH_HOST")) != "" {
+		return "env"
+	}
+	if _, ok := settings["ssh_host"]; ok {
+		return "config"
+	}
+	if strings.TrimSpace(a.cfg.Host) != "" {
+		return "derived"
+	}
+	return "unset"
+}
+
+func (a *app) effectiveConfigValue(key string, settings map[string]any) (any, string) {
+	switch key {
+	case "server_url":
+		return a.cfg.ServerURL, a.serverSource
+	case "api_token":
+		return maskSecret(a.cfg.APIToken), a.tokenSource
+	case "default_repo":
+		return a.cfg.DefaultRepo, a.repoSource
+	case "host":
+		return a.cfg.Host, configSourceFromEnvConfig("RASCAL_HOST", "host", settings, "unset")
+	case "domain":
+		return a.cfg.Domain, configSourceFromEnvConfig("RASCAL_DOMAIN", "domain", settings, "unset")
+	case "transport":
+		return a.cfg.Transport, a.transportSource
+	case "ssh_host":
+		return a.cfg.SSHHost, a.sshHostSource(settings)
+	case "ssh_user":
+		return a.cfg.SSHUser, a.configSourceFromFlagEnvConfig(strings.TrimSpace(a.sshUserFlag) != "", "RASCAL_SSH_USER", "ssh_user", settings, "default")
+	case "ssh_key":
+		return a.cfg.SSHKey, a.configSourceFromFlagEnvConfig(strings.TrimSpace(a.sshKeyFlag) != "", "RASCAL_SSH_KEY", "ssh_key", settings, "unset")
+	case "ssh_port":
+		return a.cfg.SSHPort, a.configSourceFromFlagEnvConfig(a.sshPortFlag > 0, "RASCAL_SSH_PORT", "ssh_port", settings, "default")
+	default:
+		return "", "unset"
+	}
 }
 
 func resolveTransport(configured, serverURL, sshHost string) string {
