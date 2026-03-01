@@ -3,3 +3,5 @@
 *.log
 .DS_Store
 .rascal.env
+coverage.out
+coverage.html
