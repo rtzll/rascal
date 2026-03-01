@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,11 +38,12 @@ type server struct {
 	launcher runner.Launcher
 	gh       *ghapi.APIClient
 
-	mu         sync.Mutex
-	activeRuns map[string]string
-	queuedRuns map[string][]string
-	runCancels map[string]context.CancelFunc
-	draining   bool
+	mu            sync.Mutex
+	activeRuns    map[string]string
+	queuedRuns    map[string][]string
+	runCancels    map[string]context.CancelFunc
+	maxConcurrent int
+	draining      bool
 }
 
 type runRequest struct {
@@ -85,13 +87,14 @@ func main() {
 	}
 
 	s := &server{
-		cfg:        cfg,
-		store:      store,
-		launcher:   runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken),
-		gh:         ghapi.NewAPIClient(cfg.GitHubToken),
-		activeRuns: make(map[string]string),
-		queuedRuns: make(map[string][]string),
-		runCancels: make(map[string]context.CancelFunc),
+		cfg:           cfg,
+		store:         store,
+		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken),
+		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
+		activeRuns:    make(map[string]string),
+		queuedRuns:    make(map[string][]string),
+		runCancels:    make(map[string]context.CancelFunc),
+		maxConcurrent: defaultMaxConcurrent(),
 	}
 	s.recoverQueueState()
 
@@ -791,7 +794,7 @@ func (s *server) enqueueExistingRun(run state.Run) {
 		_ = s.store.SetTaskPendingInput(run.TaskID, false)
 		return
 	}
-	if activeID, ok := s.activeRuns[run.TaskID]; ok && activeID != "" {
+	if activeID, ok := s.activeRuns[run.TaskID]; (ok && activeID != "") || len(s.queuedRuns[run.TaskID]) > 0 || len(s.activeRuns) >= s.concurrencyLimit() {
 		s.queuedRuns[run.TaskID] = append(s.queuedRuns[run.TaskID], run.ID)
 		pending = true
 	} else {
@@ -925,47 +928,98 @@ func (s *server) finishRun(run state.Run) {
 	}
 
 	taskCompleted := s.store.IsTaskCompleted(run.TaskID)
-	var nextRunID string
-	var remaining int
+	var (
+		nextRunID     string
+		nextTaskID    string
+		pendingByTask = make(map[string]bool)
+	)
 
 	s.mu.Lock()
 	if current, ok := s.activeRuns[run.TaskID]; ok && current == run.ID {
 		delete(s.activeRuns, run.TaskID)
 	}
-
-	queue := s.queuedRuns[run.TaskID]
 	if taskCompleted {
 		delete(s.queuedRuns, run.TaskID)
-	} else if len(queue) > 0 {
-		nextRunID = queue[0]
-		queue = queue[1:]
-		if len(queue) == 0 {
-			delete(s.queuedRuns, run.TaskID)
-		} else {
-			s.queuedRuns[run.TaskID] = queue
+		pendingByTask[run.TaskID] = false
+	}
+
+	preferredTaskID := ""
+	if !taskCompleted {
+		preferredTaskID = run.TaskID
+	}
+	if !s.draining && len(s.activeRuns) < s.concurrencyLimit() {
+		taskID, runID, remaining, ok := s.popNextQueuedRunLocked(preferredTaskID)
+		if ok {
+			nextTaskID = taskID
+			nextRunID = runID
+			s.activeRuns[taskID] = runID
+			pendingByTask[taskID] = remaining > 0
 		}
-		remaining = len(queue)
-		s.activeRuns[run.TaskID] = nextRunID
-	} else {
-		delete(s.queuedRuns, run.TaskID)
+	}
+	if !taskCompleted {
+		if _, ok := pendingByTask[run.TaskID]; !ok {
+			pendingByTask[run.TaskID] = len(s.queuedRuns[run.TaskID]) > 0
+		}
 	}
 	s.mu.Unlock()
 
 	if taskCompleted {
 		_ = s.store.CancelQueuedRuns(run.TaskID, "task completed; canceled pending runs")
-		_ = s.store.SetTaskPendingInput(run.TaskID, false)
-		return
 	}
 
-	_ = s.store.SetTaskPendingInput(run.TaskID, remaining > 0)
+	for taskID, pending := range pendingByTask {
+		_ = s.store.SetTaskPendingInput(taskID, pending)
+	}
+
 	if nextRunID != "" {
 		if s.isDraining() {
 			_, _ = s.store.SetRunStatus(nextRunID, state.StatusCanceled, "orchestrator shutting down")
-			_ = s.store.SetTaskPendingInput(run.TaskID, false)
+			s.mu.Lock()
+			if activeID, ok := s.activeRuns[nextTaskID]; ok && activeID == nextRunID {
+				delete(s.activeRuns, nextTaskID)
+			}
+			s.mu.Unlock()
+			_ = s.store.SetTaskPendingInput(nextTaskID, s.taskHasQueuedRuns(nextTaskID))
 			return
 		}
 		go s.executeRun(nextRunID)
 	}
+}
+
+func (s *server) popNextQueuedRunLocked(preferredTaskID string) (taskID, runID string, remaining int, ok bool) {
+	if preferredTaskID != "" {
+		if runID, remaining, ok = s.popQueuedRunForTaskLocked(preferredTaskID); ok {
+			return preferredTaskID, runID, remaining, true
+		}
+	}
+	for candidateTaskID := range s.queuedRuns {
+		if candidateTaskID == preferredTaskID {
+			continue
+		}
+		if runID, remaining, ok = s.popQueuedRunForTaskLocked(candidateTaskID); ok {
+			return candidateTaskID, runID, remaining, true
+		}
+	}
+	return "", "", 0, false
+}
+
+func (s *server) popQueuedRunForTaskLocked(taskID string) (runID string, remaining int, ok bool) {
+	if _, busy := s.activeRuns[taskID]; busy {
+		return "", 0, false
+	}
+	queue := s.queuedRuns[taskID]
+	if len(queue) == 0 {
+		delete(s.queuedRuns, taskID)
+		return "", 0, false
+	}
+	runID = queue[0]
+	queue = queue[1:]
+	if len(queue) == 0 {
+		delete(s.queuedRuns, taskID)
+	} else {
+		s.queuedRuns[taskID] = queue
+	}
+	return runID, len(queue), true
 }
 
 func (s *server) removeQueuedRunLocked(taskID, runID string) bool {
@@ -1170,6 +1224,21 @@ func maxInt(a, b int) int {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func defaultMaxConcurrent() int {
+	n := runtime.NumCPU()
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+func (s *server) concurrencyLimit() int {
+	if s.maxConcurrent > 0 {
+		return s.maxConcurrent
+	}
+	return 1
 }
 
 func (s *server) isDraining() bool {
