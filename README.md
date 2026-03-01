@@ -74,3 +74,4 @@ GITHUB_RUNTIME_TOKEN=...
 - Webhooks and Cloudflare notes: [docs/webhooks.md](docs/webhooks.md)
 - Operations and troubleshooting: [docs/operations.md](docs/operations.md)
 - Architecture overview: [docs/architecture.md](docs/architecture.md)
+- Deployment flow (blue/green + drain): [docs/deployment.md](docs/deployment.md)
