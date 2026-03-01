@@ -138,11 +138,11 @@ fi
 check_http() {
   local url="$1"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsS --max-time 5 "$url" >/dev/null
+    curl -fsS --max-time 5 "$url" >/dev/null 2>&1
     return $?
   fi
   if command -v wget >/dev/null 2>&1; then
-    wget -q -T 5 -O - "$url" >/dev/null
+    wget -q -T 5 -O - "$url" >/dev/null 2>&1
     return $?
   fi
   return 1
@@ -283,23 +283,27 @@ EOF_ROLLBACK
     fi
   fi
 else
-  healthy=0
-  for _ in $(seq 1 30); do
-    if check_http "http://127.0.0.1:8080/readyz"; then
-      healthy=1
-      break
-    fi
-    sleep 1
-  done
-  if [ "$healthy" -ne 1 ]; then
-    echo "proxy readiness check failed on caddy; rolling back" >&2
-    cat >/etc/caddy/rascal-upstream.caddy <<EOF_ROLLBACK
+  if grep -Fq ':8080 {' /etc/caddy/Caddyfile 2>/dev/null; then
+    healthy=0
+    for _ in $(seq 1 30); do
+      if check_http "http://127.0.0.1:8080/readyz"; then
+        healthy=1
+        break
+      fi
+      sleep 1
+    done
+    if [ "$healthy" -ne 1 ]; then
+      echo "proxy readiness check failed on caddy; rolling back" >&2
+      cat >/etc/caddy/rascal-upstream.caddy <<EOF_ROLLBACK
 reverse_proxy 127.0.0.1:${active_port}
 EOF_ROLLBACK
-    (systemctl reload caddy || systemctl restart caddy) || true
-    systemctl stop "rascal@${inactive_slot}" || true
-    systemctl restart "rascal@${active_slot}" || true
-    exit 1
+      (systemctl reload caddy || systemctl restart caddy) || true
+      systemctl stop "rascal@${inactive_slot}" || true
+      systemctl restart "rascal@${active_slot}" || true
+      exit 1
+    fi
+  else
+    echo "caddy has no :8080 site; skipping local proxy probe" >&2
   fi
 fi
 
@@ -317,7 +321,7 @@ fi
 systemctl enable "rascal@${inactive_slot}" >/dev/null 2>&1 || true
 systemctl is-active --quiet "rascal@${inactive_slot}"
 
-if [ -z "${DEPLOY_DOMAIN:-}" ] && (command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1); then
+if [ -z "${DEPLOY_DOMAIN:-}" ] && (command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1) && grep -Fq ':8080 {' /etc/caddy/Caddyfile 2>/dev/null; then
   healthy=0
   for _ in $(seq 1 20); do
     if check_http "http://127.0.0.1:8080/readyz"; then

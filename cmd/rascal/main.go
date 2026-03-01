@@ -2340,7 +2340,7 @@ func remoteBlueGreenDeployScript(cfg deployConfig) string {
 		installCaddy = "install -m 0644 /tmp/rascal-bootstrap/Caddyfile /etc/caddy/Caddyfile"
 	}
 	preCaddySwitch := ""
-	postSwitchHealthCheck := fmt.Sprintf("healthy=0\nfor _ in $(seq 1 30); do\n  if check_http \"http://127.0.0.1:%d/readyz\"; then\n    healthy=1\n    break\n  fi\n  sleep 1\ndone\nif [ \"$healthy\" -ne 1 ]; then\n  echo \"proxy readiness check failed on caddy; rolling back\" >&2\n  cat >/etc/caddy/rascal-upstream.caddy <<EOF_ROLLBACK\nreverse_proxy 127.0.0.1:${active_port}\nEOF_ROLLBACK\n  (systemctl reload caddy || systemctl restart caddy) || true\n  systemctl stop \"rascal@${inactive_slot}\" || true\n  systemctl restart \"rascal@${active_slot}\" || true\n  exit 1\nfi", rascalProxyPort)
+	postSwitchHealthCheck := fmt.Sprintf("if grep -Fq ':%d {' /etc/caddy/Caddyfile 2>/dev/null; then\n  healthy=0\n  for _ in $(seq 1 30); do\n    if check_http \"http://127.0.0.1:%d/readyz\"; then\n      healthy=1\n      break\n    fi\n    sleep 1\n  done\n  if [ \"$healthy\" -ne 1 ]; then\n    echo \"proxy readiness check failed on caddy; rolling back\" >&2\n    cat >/etc/caddy/rascal-upstream.caddy <<EOF_ROLLBACK\nreverse_proxy 127.0.0.1:${active_port}\nEOF_ROLLBACK\n    (systemctl reload caddy || systemctl restart caddy) || true\n    systemctl stop \"rascal@${inactive_slot}\" || true\n    systemctl restart \"rascal@${active_slot}\" || true\n    exit 1\n  fi\nelse\n  echo \"caddy has no :%d site; skipping local proxy probe\" >&2\nfi", rascalProxyPort, rascalProxyPort, rascalProxyPort)
 	if domain == "" {
 		preCaddySwitch = strings.TrimSpace(`
 if systemctl is-active --quiet rascal; then
@@ -2384,11 +2384,11 @@ fi
 check_http() {
   local url="$1"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsS --max-time 5 "$url" >/dev/null
+    curl -fsS --max-time 5 "$url" >/dev/null 2>&1
     return $?
   fi
   if command -v wget >/dev/null 2>&1; then
-    wget -q -T 5 -O - "$url" >/dev/null
+    wget -q -T 5 -O - "$url" >/dev/null 2>&1
     return $?
   fi
   return 1
