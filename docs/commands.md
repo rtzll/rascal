@@ -27,6 +27,10 @@ Issue-driven task:
 ```bash
 ./bin/rascal ps
 ./bin/rascal logs <run_id> --follow
+./bin/rascal logs run <run_id> --follow
+./bin/rascal logs rascald --follow
+./bin/rascal logs caddy --follow
+./bin/rascal logs caddy-access --follow
 ./bin/rascal open <run_id>
 ```
 

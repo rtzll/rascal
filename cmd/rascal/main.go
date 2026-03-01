@@ -989,85 +989,265 @@ func (a *app) newLogsCmd() *cobra.Command {
 		lines    int
 	)
 	cmd := &cobra.Command{
-		Use:               "logs <run_id>",
+		Use:               "logs [run_id]",
 		Aliases:           []string{"tail"},
-		Short:             "Fetch logs for a run",
-		Example:           "  rascal logs run_abc123\n  rascal logs run_abc123 --follow --interval 2s",
-		Args:              cobra.ExactArgs(1),
+		Short:             "Fetch run/service logs",
+		Example:           "  rascal logs run_abc123\n  rascal logs run run_abc123 --follow\n  rascal logs rascald --follow\n  rascal logs caddy-access --follow",
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
-		RunE: func(_ *cobra.Command, args []string) error {
-			if err := a.requireServerAuth(); err != nil {
-				return err
+		RunE: func(c *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return c.Help()
 			}
-			if lines <= 0 {
-				lines = 200
-			}
-			if interval <= 0 {
-				interval = 2 * time.Second
-			}
-
-			fetch := func() (string, error) {
-				path := fmt.Sprintf("/v1/runs/%s/logs?lines=%d", url.PathEscape(args[0]), lines)
-				resp, err := a.client.do(http.MethodGet, path, nil)
-				if err != nil {
-					return "", &cliError{Code: exitServer, Message: "request failed", Cause: err}
-				}
-				defer resp.Body.Close()
-				if resp.StatusCode >= 300 {
-					return "", decodeServerError(resp)
-				}
-				body, err := io.ReadAll(resp.Body)
-				if err != nil {
-					return "", err
-				}
-				return string(body), nil
-			}
-
-			if !follow {
-				body, err := fetch()
-				if err != nil {
-					return err
-				}
-				if since > 0 {
-					body = filterLogsSince(body, time.Now().Add(-since))
-				}
-				_, err = io.WriteString(os.Stdout, body)
-				return err
-			}
-
-			sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-			defer stop()
-			last := ""
-			for {
-				body, err := fetch()
-				if err != nil {
-					return err
-				}
-				if since > 0 {
-					body = filterLogsSince(body, time.Now().Add(-since))
-				}
-				if strings.HasPrefix(body, last) {
-					diff := strings.TrimPrefix(body, last)
-					if diff != "" {
-						_, _ = io.WriteString(os.Stdout, diff)
-					}
-				} else if body != last {
-					_, _ = io.WriteString(os.Stdout, body)
-				}
-				last = body
-				select {
-				case <-sigCtx.Done():
-					return nil
-				case <-time.After(interval):
-				}
-			}
+			return a.streamRunLogs(args[0], follow, interval, since, lines)
 		},
 	}
 	cmd.Flags().BoolVar(&follow, "follow", false, "stream logs by polling")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "polling interval when --follow is enabled")
 	cmd.Flags().DurationVar(&since, "since", 0, "show logs since duration ago (best effort)")
 	cmd.Flags().IntVar(&lines, "lines", 200, "max log lines to fetch")
+
+	runCmd := &cobra.Command{
+		Use:               "run <run_id>",
+		Aliases:           []string{"job"},
+		Short:             "Fetch logs for a run",
+		Example:           "  rascal logs run run_abc123\n  rascal logs run run_abc123 --follow --interval 2s",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.runIDCompletion,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runFollow, _ := cmd.Flags().GetBool("follow")
+			runInterval, _ := cmd.Flags().GetDuration("interval")
+			runSince, _ := cmd.Flags().GetDuration("since")
+			runLines, _ := cmd.Flags().GetInt("lines")
+			return a.streamRunLogs(args[0], runFollow, runInterval, runSince, runLines)
+		},
+	}
+	runCmd.Flags().Bool("follow", false, "stream logs by polling")
+	runCmd.Flags().Duration("interval", 2*time.Second, "polling interval when --follow is enabled")
+	runCmd.Flags().Duration("since", 0, "show logs since duration ago (best effort)")
+	runCmd.Flags().Int("lines", 200, "max log lines to fetch")
+
+	rascaldCmd := &cobra.Command{
+		Use:   "rascald",
+		Short: "Fetch rascald system logs over SSH",
+		Example: "  rascal logs rascald\n" +
+			"  rascal logs rascald --follow\n" +
+			"  rascal logs rascald --host rascal-server",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			host, _ := cmd.Flags().GetString("host")
+			sshUser, _ := cmd.Flags().GetString("ssh-user")
+			sshKey, _ := cmd.Flags().GetString("ssh-key")
+			sshPort, _ := cmd.Flags().GetInt("ssh-port")
+			serviceFollow, _ := cmd.Flags().GetBool("follow")
+			serviceLines, _ := cmd.Flags().GetInt("lines")
+			return a.streamRascaldServiceLogs(host, sshUser, sshKey, sshPort, serviceFollow, serviceLines)
+		},
+	}
+
+	caddyCmd := &cobra.Command{
+		Use:   "caddy",
+		Short: "Fetch Caddy system logs over SSH",
+		Example: "  rascal logs caddy\n" +
+			"  rascal logs caddy --follow",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			host, _ := cmd.Flags().GetString("host")
+			sshUser, _ := cmd.Flags().GetString("ssh-user")
+			sshKey, _ := cmd.Flags().GetString("ssh-key")
+			sshPort, _ := cmd.Flags().GetInt("ssh-port")
+			serviceFollow, _ := cmd.Flags().GetBool("follow")
+			serviceLines, _ := cmd.Flags().GetInt("lines")
+			return a.streamSystemdUnitLogs("caddy", host, sshUser, sshKey, sshPort, serviceFollow, serviceLines)
+		},
+	}
+
+	caddyAccessCmd := &cobra.Command{
+		Use:     "caddy-access",
+		Aliases: []string{"caddy-access-log"},
+		Short:   "Fetch Caddy access log file over SSH",
+		Example: "  rascal logs caddy-access\n" +
+			"  rascal logs caddy-access --follow",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			host, _ := cmd.Flags().GetString("host")
+			sshUser, _ := cmd.Flags().GetString("ssh-user")
+			sshKey, _ := cmd.Flags().GetString("ssh-key")
+			sshPort, _ := cmd.Flags().GetInt("ssh-port")
+			serviceFollow, _ := cmd.Flags().GetBool("follow")
+			serviceLines, _ := cmd.Flags().GetInt("lines")
+			return a.streamRemoteFileLogs("/var/log/caddy/rascal-access.log", host, sshUser, sshKey, sshPort, serviceFollow, serviceLines)
+		},
+	}
+
+	addServiceFlags := func(sub *cobra.Command) {
+		sub.Flags().String("host", "", "remote host (default: ssh_host/host from config)")
+		sub.Flags().String("ssh-user", "", "SSH user (default: configured ssh_user or root)")
+		sub.Flags().String("ssh-key", "", "SSH private key path")
+		sub.Flags().Int("ssh-port", 0, "SSH port (default: configured ssh_port or 22)")
+		sub.Flags().Bool("follow", false, "follow logs continuously")
+		sub.Flags().Int("lines", 200, "number of recent lines to show first")
+	}
+	addServiceFlags(rascaldCmd)
+	addServiceFlags(caddyCmd)
+	addServiceFlags(caddyAccessCmd)
+
+	cmd.AddCommand(runCmd)
+	cmd.AddCommand(rascaldCmd)
+	cmd.AddCommand(caddyCmd)
+	cmd.AddCommand(caddyAccessCmd)
 	return cmd
+}
+
+func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Duration, lines int) error {
+	if err := a.requireServerAuth(); err != nil {
+		return err
+	}
+	if lines <= 0 {
+		lines = 200
+	}
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+
+	fetch := func() (string, error) {
+		path := fmt.Sprintf("/v1/runs/%s/logs?lines=%d", url.PathEscape(strings.TrimSpace(runID)), lines)
+		resp, err := a.client.do(http.MethodGet, path, nil)
+		if err != nil {
+			return "", &cliError{Code: exitServer, Message: "request failed", Cause: err}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 300 {
+			return "", decodeServerError(resp)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", err
+		}
+		return string(body), nil
+	}
+
+	if !follow {
+		body, err := fetch()
+		if err != nil {
+			return err
+		}
+		if since > 0 {
+			body = filterLogsSince(body, time.Now().Add(-since))
+		}
+		_, err = io.WriteString(os.Stdout, body)
+		return err
+	}
+
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	last := ""
+	for {
+		body, err := fetch()
+		if err != nil {
+			return err
+		}
+		if since > 0 {
+			body = filterLogsSince(body, time.Now().Add(-since))
+		}
+		if strings.HasPrefix(body, last) {
+			diff := strings.TrimPrefix(body, last)
+			if diff != "" {
+				_, _ = io.WriteString(os.Stdout, diff)
+			}
+		} else if body != last {
+			_, _ = io.WriteString(os.Stdout, body)
+		}
+		last = body
+		select {
+		case <-sigCtx.Done():
+			return nil
+		case <-time.After(interval):
+		}
+	}
+}
+
+func (a *app) resolveSSHLogConfig(host, sshUser, sshKey string, sshPort int) (deployConfig, error) {
+	resolvedHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
+	if resolvedHost == "" {
+		return deployConfig{}, &cliError{Code: exitInput, Message: "missing SSH host", Hint: "set --host or configure ssh_host/host"}
+	}
+	return deployConfig{
+		Host:       resolvedHost,
+		SSHUser:    firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root"),
+		SSHKeyPath: firstNonEmpty(strings.TrimSpace(sshKey), strings.TrimSpace(a.cfg.SSHKey)),
+		SSHPort:    firstPositive(sshPort, a.cfg.SSHPort, 22),
+	}, nil
+}
+
+func (a *app) streamSystemdUnitLogs(unit, host, sshUser, sshKey string, sshPort int, follow bool, lines int) error {
+	cfg, err := a.resolveSSHLogConfig(host, sshUser, sshKey, sshPort)
+	if err != nil {
+		return err
+	}
+	if lines <= 0 {
+		lines = 200
+	}
+	args := []string{"journalctl", "-u", shellSingleQuote(strings.TrimSpace(unit)), "--no-pager", "-n", fmt.Sprintf("%d", lines)}
+	if follow {
+		args = append(args, "-f")
+	}
+	return runLocal("ssh", sshArgs(cfg, strings.Join(args, " "))...)
+}
+
+func (a *app) streamRascaldServiceLogs(host, sshUser, sshKey string, sshPort int, follow bool, lines int) error {
+	cfg, err := a.resolveSSHLogConfig(host, sshUser, sshKey, sshPort)
+	if err != nil {
+		return err
+	}
+	if lines <= 0 {
+		lines = 200
+	}
+	remoteCmd := fmt.Sprintf(strings.Join([]string{
+		"set -euo pipefail",
+		`slot=""`,
+		`if [ -f /etc/rascal/active_slot ]; then slot=$(tr -d '[:space:]' </etc/rascal/active_slot); fi`,
+		`case "$slot" in`,
+		`  blue|green) unit="rascal@$slot" ;;`,
+		`  *)`,
+		`    if systemctl is-active --quiet rascal@green; then`,
+		`      unit=rascal@green`,
+		`    elif systemctl is-active --quiet rascal@blue; then`,
+		`      unit=rascal@blue`,
+		`    elif systemctl is-active --quiet rascal; then`,
+		`      unit=rascal`,
+		`    else`,
+		`      unit=rascal@green`,
+		`    fi ;;`,
+		`esac`,
+		"journalctl -u \"$unit\" --no-pager -n %d%s",
+	}, "; "), lines, ternary(follow, " -f", ""))
+	return runLocal("ssh", sshArgs(cfg, remoteCmd)...)
+}
+
+func (a *app) streamRemoteFileLogs(path, host, sshUser, sshKey string, sshPort int, follow bool, lines int) error {
+	cfg, err := a.resolveSSHLogConfig(host, sshUser, sshKey, sshPort)
+	if err != nil {
+		return err
+	}
+	if lines <= 0 {
+		lines = 200
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return &cliError{Code: exitInput, Message: "log path is required"}
+	}
+	var remoteCmd string
+	if follow {
+		remoteCmd = fmt.Sprintf("set -euo pipefail; test -f %s; tail -n %d -F %s", shellSingleQuote(path), lines, shellSingleQuote(path))
+	} else {
+		remoteCmd = fmt.Sprintf("set -euo pipefail; test -f %s; tail -n %d %s", shellSingleQuote(path), lines, shellSingleQuote(path))
+	}
+	return runLocal("ssh", sshArgs(cfg, remoteCmd)...)
+}
+
+func ternary[T any](cond bool, a, b T) T {
+	if cond {
+		return a
+	}
+	return b
 }
 
 func (a *app) newDoctorCmd() *cobra.Command {
