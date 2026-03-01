@@ -718,14 +718,12 @@ func (s *server) executeRun(runID string) {
 	}
 
 	if s.store.IsTaskCompleted(run.TaskID) {
-		updated, _ := s.store.SetRunStatus(run.ID, state.StatusCanceled, "task is already completed")
+		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, "task is already completed")
 		s.finishRun(updated)
 		return
 	}
 
-	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
-		log.Printf("failed to transition run to running: %s: %v", run.ID, err)
-	}
+	run = s.setRunStatusWithFallback(run, state.StatusRunning, "")
 	s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionEyes)
 
 	spec := runner.Spec{
@@ -760,7 +758,7 @@ func (s *server) executeRun(runID string) {
 			status = state.StatusCanceled
 			errText = "canceled by user"
 		}
-		updated, _ := s.store.SetRunStatus(run.ID, status, errText)
+		updated := s.setRunStatusWithFallback(run, status, errText)
 		if updated.Status == state.StatusFailed {
 			s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionConfused)
 		}
@@ -788,7 +786,7 @@ func (s *server) executeRun(runID string) {
 	})
 	if uErr != nil {
 		log.Printf("failed to persist run result for %s: %v", run.ID, uErr)
-		updated, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, uErr.Error())
+		updated = s.setRunStatusWithFallback(run, state.StatusFailed, uErr.Error())
 	}
 	switch updated.Status {
 	case state.StatusSucceeded, state.StatusAwaitingFeedback:
@@ -800,6 +798,26 @@ func (s *server) executeRun(runID string) {
 		_ = s.store.SetTaskPR(updated.TaskID, updated.Repo, updated.PRNumber)
 	}
 	s.finishRun(updated)
+}
+
+func (s *server) setRunStatusWithFallback(run state.Run, status state.RunStatus, errText string) state.Run {
+	updated, err := s.store.SetRunStatus(run.ID, status, errText)
+	if err == nil {
+		return updated
+	}
+
+	log.Printf("failed to set run status %q for %s: %v", status, run.ID, err)
+	now := time.Now().UTC()
+	run.Status = status
+	run.Error = errText
+	run.UpdatedAt = now
+	if status == state.StatusRunning {
+		run.StartedAt = &now
+	}
+	if status == state.StatusSucceeded || status == state.StatusFailed || status == state.StatusCanceled || status == state.StatusAwaitingFeedback {
+		run.CompletedAt = &now
+	}
+	return run
 }
 
 func (s *server) finishRun(run state.Run) {
