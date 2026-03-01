@@ -102,7 +102,6 @@ func newTestServer(t *testing.T, launcher runner.Launcher) *server {
 		store:         store,
 		launcher:      launcher,
 		gh:            ghapi.NewAPIClient(""),
-		activeRuns:    make(map[string]string),
 		runCancels:    make(map[string]context.CancelFunc),
 		runCancelNote: make(map[string]string),
 		maxConcurrent: defaultMaxConcurrent(),
@@ -139,9 +138,7 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 func waitForServerIdle(t *testing.T, s *server) {
 	t.Helper()
 	waitFor(t, 2*time.Second, func() bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return len(s.activeRuns) == 0
+		return s.activeRunCount() == 0
 	}, "server idle")
 }
 
@@ -612,10 +609,6 @@ func TestExecuteRunHonorsPersistedCancelBeforeStart(t *testing.T) {
 	if err := s.store.RequestRunCancel(run.ID, "persisted cancel", "user"); err != nil {
 		t.Fatalf("request run cancel: %v", err)
 	}
-
-	s.mu.Lock()
-	s.activeRuns[run.TaskID] = run.ID
-	s.mu.Unlock()
 
 	s.executeRun(run.ID)
 

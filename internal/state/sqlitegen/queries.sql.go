@@ -395,6 +395,19 @@ func (q *Queries) CountDeliveries(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countRunLeasesByOwner = `-- name: CountRunLeasesByOwner :one
+SELECT COUNT(*)
+FROM run_leases
+WHERE owner_id = ?
+`
+
+func (q *Queries) CountRunLeasesByOwner(ctx context.Context, ownerID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRunLeasesByOwner, ownerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteOldestDeliveries = `-- name: DeleteOldestDeliveries :exec
 DELETE FROM deliveries
 WHERE id IN (

@@ -277,6 +277,9 @@ func TestStoreRunLeaseLifecycle(t *testing.T) {
 	if err := store.UpsertRunLease("run_lease_1", "instance-a", 2*time.Minute); err != nil {
 		t.Fatalf("upsert run lease: %v", err)
 	}
+	if got := store.CountRunLeasesByOwner("instance-a"); got != 1 {
+		t.Fatalf("expected owner lease count 1, got %d", got)
+	}
 	lease, ok := store.GetRunLease("run_lease_1")
 	if !ok {
 		t.Fatal("expected run lease to exist")
@@ -299,6 +302,9 @@ func TestStoreRunLeaseLifecycle(t *testing.T) {
 
 	if err := store.DeleteRunLease("run_lease_1"); err != nil {
 		t.Fatalf("delete run lease: %v", err)
+	}
+	if got := store.CountRunLeasesByOwner("instance-a"); got != 0 {
+		t.Fatalf("expected owner lease count 0 after delete, got %d", got)
 	}
 	if _, ok := store.GetRunLease("run_lease_1"); ok {
 		t.Fatal("expected run lease to be deleted")

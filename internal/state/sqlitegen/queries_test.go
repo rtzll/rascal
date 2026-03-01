@@ -419,6 +419,13 @@ func TestQueriesCoverage(t *testing.T) {
 	if leaseRow.OwnerID != "instance-a" {
 		t.Fatalf("unexpected run lease owner: %s", leaseRow.OwnerID)
 	}
+	leaseCount, err := q.CountRunLeasesByOwner(ctx, "instance-a")
+	if err != nil {
+		t.Fatalf("CountRunLeasesByOwner: %v", err)
+	}
+	if leaseCount != 1 {
+		t.Fatalf("expected lease count 1 for instance-a, got %d", leaseCount)
+	}
 	if rows, err := q.DeleteRunLease(ctx, "run_lease_1"); err != nil {
 		t.Fatalf("DeleteRunLease: %v", err)
 	} else if rows != 1 {

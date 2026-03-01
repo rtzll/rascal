@@ -296,6 +296,11 @@ SELECT run_id, owner_id, heartbeat_at, lease_expires_at
 FROM run_leases
 WHERE run_id = ?;
 
+-- name: CountRunLeasesByOwner :one
+SELECT COUNT(*)
+FROM run_leases
+WHERE owner_id = ?;
+
 -- name: UpsertRunCancel :exec
 INSERT INTO run_cancels (run_id, reason, source, requested_at)
 VALUES (?, ?, ?, ?)

@@ -42,7 +42,6 @@ type server struct {
 	gh       *ghapi.APIClient
 
 	mu            sync.Mutex
-	activeRuns    map[string]string
 	runCancels    map[string]context.CancelFunc
 	runCancelNote map[string]string
 	scheduleMu    sync.Mutex
@@ -96,7 +95,6 @@ func main() {
 		store:         store,
 		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
-		activeRuns:    make(map[string]string),
 		runCancels:    make(map[string]context.CancelFunc),
 		runCancelNote: make(map[string]string),
 		maxConcurrent: defaultMaxConcurrent(),
@@ -874,6 +872,9 @@ func (s *server) executeRun(runID string) {
 		if err := s.store.DeleteRunLease(run.ID); err != nil {
 			log.Printf("failed to delete run lease for %s: %v", run.ID, err)
 		}
+		if !s.isDraining() {
+			s.scheduleRuns(run.TaskID)
+		}
 	}()
 	if reason, ok := s.pendingRunCancelReason(runID); ok {
 		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, reason)
@@ -1058,12 +1059,6 @@ func (s *server) finishRun(run state.Run) {
 	}
 	taskCompleted := s.store.IsTaskCompleted(run.TaskID)
 
-	s.mu.Lock()
-	if current, ok := s.activeRuns[run.TaskID]; ok && current == run.ID {
-		delete(s.activeRuns, run.TaskID)
-	}
-	s.mu.Unlock()
-
 	if taskCompleted {
 		_ = s.store.CancelQueuedRuns(run.TaskID, "task completed; canceled pending runs")
 		_ = s.store.SetTaskPendingInput(run.TaskID, false)
@@ -1086,10 +1081,8 @@ func (s *server) scheduleRuns(preferredTaskID string) {
 	defer s.scheduleMu.Unlock()
 
 	for {
-		s.mu.Lock()
-		atCapacity := len(s.activeRuns) >= s.concurrencyLimit()
-		draining := s.draining
-		s.mu.Unlock()
+		atCapacity := s.activeRunCount() >= s.concurrencyLimit()
+		draining := s.isDraining()
 		if draining || atCapacity {
 			return
 		}
@@ -1111,15 +1104,16 @@ func (s *server) scheduleRuns(preferredTaskID string) {
 			continue
 		}
 
-		s.mu.Lock()
-		if s.draining {
-			s.mu.Unlock()
+		if s.isDraining() {
 			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, "orchestrator shutting down")
 			_ = s.syncTaskPendingInput(run.TaskID)
 			return
 		}
-		s.activeRuns[run.TaskID] = run.ID
-		s.mu.Unlock()
+		if err := s.store.UpsertRunLease(run.ID, s.instanceID, runLeaseTTL); err != nil {
+			_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, fmt.Sprintf("claim run lease: %v", err))
+			_ = s.syncTaskPendingInput(run.TaskID)
+			continue
+		}
 
 		_ = s.syncTaskPendingInput(run.TaskID)
 		go s.executeRun(run.ID)
@@ -1347,15 +1341,17 @@ func (s *server) waitForNoActiveRuns(timeout time.Duration) error {
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		s.mu.Lock()
-		active := len(s.activeRuns)
-		s.mu.Unlock()
+		active := s.activeRunCount()
 		if active == 0 {
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for active runs to finish")
+}
+
+func (s *server) activeRunCount() int {
+	return s.store.CountRunLeasesByOwner(s.instanceID)
 }
 
 func (s *server) cancelActiveRuns(reason string) {

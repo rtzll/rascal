@@ -536,6 +536,18 @@ func (s *Store) GetRunLease(runID string) (RunLease, bool) {
 	}, true
 }
 
+func (s *Store) CountRunLeasesByOwner(ownerID string) int {
+	ownerID = strings.TrimSpace(ownerID)
+	if ownerID == "" {
+		return 0
+	}
+	count, err := s.q.CountRunLeasesByOwner(context.Background(), ownerID)
+	if err != nil {
+		return 0
+	}
+	return int(count)
+}
+
 func (s *Store) RequestRunCancel(runID, reason, source string) error {
 	runID = strings.TrimSpace(runID)
 	reason = strings.TrimSpace(reason)
