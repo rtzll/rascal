@@ -16,6 +16,16 @@ func EventType(h http.Header) string {
 	return strings.TrimSpace(h.Get("X-GitHub-Event"))
 }
 
+// SignatureSHA256 returns a GitHub-style X-Hub-Signature-256 header value.
+func SignatureSHA256(secret, payload []byte) string {
+	if len(secret) == 0 {
+		return ""
+	}
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write(payload)
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
 // VerifySignatureSHA256 validates GitHub's X-Hub-Signature-256 header.
 func VerifySignatureSHA256(secret, payload []byte, signatureHeader string) bool {
 	if len(secret) == 0 {

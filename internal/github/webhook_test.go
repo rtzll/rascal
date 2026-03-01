@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +24,20 @@ func TestVerifySignatureSHA256(t *testing.T) {
 	}
 	if VerifySignatureSHA256(secret, payload, fmt.Sprintf("sha256=%s", stringsRepeat("0", 64))) {
 		t.Fatal("expected invalid signature to fail")
+	}
+}
+
+func TestSignatureSHA256MatchesVerify(t *testing.T) {
+	t.Parallel()
+
+	secret := []byte("top-secret")
+	payload := []byte(`{"hello":"world"}`)
+	sig := SignatureSHA256(secret, payload)
+	if !strings.HasPrefix(sig, "sha256=") {
+		t.Fatalf("expected sha256 prefix, got %q", sig)
+	}
+	if !VerifySignatureSHA256(secret, payload, sig) {
+		t.Fatal("expected signature to verify")
 	}
 }
 
