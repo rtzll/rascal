@@ -324,6 +324,39 @@ func TestCreateAndQueueRunRespectsGlobalConcurrencyLimit(t *testing.T) {
 	}, "second run to complete")
 }
 
+func TestSchedulerProcessesRunEndToEnd(t *testing.T) {
+	launcher := &fakeLauncher{}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "task-e2e", Repo: "owner/repo", Task: "end-to-end"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		current, ok := s.store.GetRun(run.ID)
+		return ok && current.Status == state.StatusSucceeded
+	}, "run to complete")
+
+	if calls := launcher.Calls(); calls != 1 {
+		t.Fatalf("expected one launcher call, got %d", calls)
+	}
+	current, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if current.StartedAt == nil || current.CompletedAt == nil {
+		t.Fatalf("expected started/completed timestamps to be set")
+	}
+	s.mu.Lock()
+	_, active := s.activeRuns[run.TaskID]
+	s.mu.Unlock()
+	if active {
+		t.Fatalf("expected run to be removed from active runs")
+	}
+}
+
 func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
