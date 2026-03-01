@@ -182,9 +182,39 @@ if ! command -v sqlite3 >/dev/null 2>&1; then
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y sqlite3
 fi
-if ! command -v caddy >/dev/null 2>&1; then
+
+ensure_caddy_repo() {
+  if [ -f /etc/apt/sources.list.d/caddy-stable.list ]; then
+    return
+  fi
   apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y caddy
+  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg
+  install -m 0755 -d /etc/apt/keyrings
+  curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+    | gpg --dearmor -o /etc/apt/keyrings/caddy-stable-archive-keyring.gpg
+  chmod a+r /etc/apt/keyrings/caddy-stable-archive-keyring.gpg
+  curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
+    | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
+}
+
+installed_caddy_version() {
+  if ! command -v caddy >/dev/null 2>&1; then
+    return 0
+  fi
+  caddy version 2>/dev/null | awk 'NR==1{print $1}' | sed 's/^v//'
+}
+
+caddy_target_version="2.11.1"
+current_caddy_version="$(installed_caddy_version)"
+if [ "$current_caddy_version" != "$caddy_target_version" ]; then
+  ensure_caddy_repo
+  apt-get update
+  caddy_pkg_version="$(apt-cache madison caddy | awk -v v="$caddy_target_version" '$3 ~ ("^" v) {print $3; exit}')"
+  if [ -z "$caddy_pkg_version" ]; then
+    echo "Could not find Caddy package version $caddy_target_version in apt sources." >&2
+    exit 1
+  fi
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "caddy=$caddy_pkg_version"
 fi
 
 mkdir -p /opt/rascal

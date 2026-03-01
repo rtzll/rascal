@@ -89,3 +89,15 @@ You can run Rascal over host IP without a domain.
 ./bin/rascal doctor --host YOUR_SERVER_IP
 ./bin/rascal config view
 ```
+
+## Caddy Source + Version Check
+
+Rascal installs Caddy from the official Caddy stable APT repository (Cloudsmith)
+so Ubuntu 24.04 hosts get the pinned version used by deploy.
+
+Verify Caddy after deploy:
+
+```bash
+ssh root@YOUR_SERVER_IP 'caddy version'
+ssh root@YOUR_SERVER_IP 'systemctl is-active caddy'
+```
