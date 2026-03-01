@@ -263,7 +263,15 @@ fi
 
 if [ -n "${DEPLOY_DOMAIN:-}" ]; then
   if command -v curl >/dev/null 2>&1; then
-    if ! curl -fsS --resolve "${DEPLOY_DOMAIN}:443:127.0.0.1" "https://${DEPLOY_DOMAIN}/readyz" >/dev/null; then
+    healthy=0
+    for _ in $(seq 1 30); do
+      if curl -fsS --resolve "${DEPLOY_DOMAIN}:443:127.0.0.1" "https://${DEPLOY_DOMAIN}/readyz" >/dev/null; then
+        healthy=1
+        break
+      fi
+      sleep 1
+    done
+    if [ "$healthy" -ne 1 ]; then
       echo "proxy readiness check failed on caddy; rolling back" >&2
       cat >/etc/caddy/rascal-upstream.caddy <<EOF_ROLLBACK
 reverse_proxy 127.0.0.1:${active_port}
