@@ -494,3 +494,66 @@ func TestBuildHeadBranchUsesTaskIDForNamedTasks(t *testing.T) {
 		t.Fatalf("expected short run-id suffix, got %q", got)
 	}
 }
+
+func TestHandleReadyReflectsDrainingState(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	readyReq := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	readyRec := httptest.NewRecorder()
+	s.handleReady(readyRec, readyReq)
+	if readyRec.Code != http.StatusOK {
+		t.Fatalf("expected ready 200 before drain, got %d", readyRec.Code)
+	}
+
+	s.beginDrain()
+
+	notReadyReq := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	notReadyRec := httptest.NewRecorder()
+	s.handleReady(notReadyRec, notReadyReq)
+	if notReadyRec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected ready 503 during drain, got %d", notReadyRec.Code)
+	}
+}
+
+func TestCreateAndQueueRunRejectedWhenDraining(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	s.beginDrain()
+	_, err := s.createAndQueueRun(runRequest{
+		TaskID: "owner/repo#1",
+		Repo:   "owner/repo",
+		Task:   "should be rejected",
+	})
+	if !errors.Is(err, errServerDraining) {
+		t.Fatalf("expected errServerDraining, got %v", err)
+	}
+}
+
+func TestBeginDrainCancelsQueuedRuns(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer func() {
+		close(waitCh)
+		waitForServerIdle(t, s)
+	}()
+
+	_, err := s.createAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Task: "first"})
+	if err != nil {
+		t.Fatalf("create first run: %v", err)
+	}
+	queued, err := s.createAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Task: "queued"})
+	if err != nil {
+		t.Fatalf("create queued run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to be active")
+
+	s.beginDrain()
+
+	waitFor(t, time.Second, func() bool {
+		r, ok := s.store.GetRun(queued.ID)
+		return ok && r.Status == state.StatusCanceled
+	}, "queued run canceled by drain")
+}

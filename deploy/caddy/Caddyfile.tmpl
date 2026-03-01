@@ -1,10 +1,12 @@
-{{DOMAIN}} {
+(rascal_common) {
   encode gzip zstd
-
-  reverse_proxy 127.0.0.1:8080
+  import /etc/caddy/rascal-upstream.caddy
 
   log {
     output file /var/log/caddy/rascal-access.log
     format json
   }
 }
+
+{{LOCAL_PROXY_BLOCK}}
+{{DOMAIN_BLOCK}}

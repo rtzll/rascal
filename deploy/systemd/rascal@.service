@@ -1,5 +1,5 @@
 [Unit]
-Description=Rascal orchestrator service
+Description=Rascal orchestrator service (%i)
 After=network-online.target docker.service
 Wants=network-online.target
 

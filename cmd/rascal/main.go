@@ -1132,6 +1132,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					remote = map[string]any{
 						"host":                 remoteStatus.Host,
 						"rascal_service":       remoteStatus.RascalService,
+						"active_slot":          remoteStatus.ActiveSlot,
 						"docker_installed":     remoteStatus.DockerInstalled,
 						"sqlite_installed":     remoteStatus.SQLiteInstalled,
 						"caddy_installed":      remoteStatus.CaddyInstalled,
@@ -1208,8 +1209,12 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					if errText, ok := remote["error"].(string); ok && strings.TrimSpace(errText) != "" {
 						a.println("remote (%s): error: %s", strings.TrimSpace(host), errText)
 					} else {
-						a.println("remote (%s): rascal=%v docker=%v sqlite=%v caddy=%v env=%v auth_synced=%v codex_auth=%v runner_image=%v",
-							remote["host"], remote["rascal_service"], remote["docker_installed"], remote["sqlite_installed"], remote["caddy_installed"], remote["env_file_present"], remote["auth_runtime_synced"], remote["codex_auth_present"], remote["runner_image_present"])
+						activeSlot := strings.TrimSpace(fmt.Sprintf("%v", remote["active_slot"]))
+						if activeSlot == "" || activeSlot == "<nil>" {
+							activeSlot = "unknown"
+						}
+						a.println("remote (%s): rascal=%v slot=%v docker=%v sqlite=%v caddy=%v env=%v auth_synced=%v codex_auth=%v runner_image=%v",
+							remote["host"], remote["rascal_service"], activeSlot, remote["docker_installed"], remote["sqlite_installed"], remote["caddy_installed"], remote["env_file_present"], remote["auth_runtime_synced"], remote["codex_auth_present"], remote["runner_image_present"])
 					}
 				}
 				if !cfgExists {
@@ -1223,7 +1228,14 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				}
 				if remote != nil {
 					if synced, ok := remote["auth_runtime_synced"].(bool); ok && !synced {
-						a.println("hint: remote rascal.env changed after service start; restart rascal: `ssh %s@%s 'systemctl restart rascal'`", firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root"), firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host)))
+						activeSlot := strings.TrimSpace(fmt.Sprintf("%v", remote["active_slot"]))
+						targetUser := firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root")
+						targetHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
+						if activeSlot == "legacy" {
+							a.println("hint: remote rascal.env changed after service start; restart service: `ssh %s@%s 'systemctl restart rascal'`", targetUser, targetHost)
+						} else {
+							a.println("hint: remote rascal.env changed after service start; restart active slot: `ssh %s@%s 'slot=$(cat /etc/rascal/active_slot 2>/dev/null || echo blue); systemctl restart rascal@$slot'`", targetUser, targetHost)
+						}
 					}
 				}
 				return nil
@@ -1597,7 +1609,7 @@ func (a *app) newAuthCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&sshKey, "ssh-key", "", "SSH private key path for remote auth sync")
 	cmd.PersistentFlags().IntVar(&sshPort, "ssh-port", 22, "SSH port for remote auth sync")
 	cmd.PersistentFlags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token for remote auth sync")
-	cmd.PersistentFlags().BoolVar(&restartSvc, "restart-service", true, "restart rascal service after remote auth sync")
+	cmd.PersistentFlags().BoolVar(&restartSvc, "restart-service", true, "restart active rascal slot after remote auth sync")
 	return cmd
 }
 
@@ -1655,7 +1667,7 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 			}, func() error {
 				a.println("synced auth on %s", host)
 				if restartSvc {
-					a.println("rascal service restarted")
+					a.println("active rascal slot restarted")
 				}
 				return nil
 			})
@@ -1668,7 +1680,7 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token (defaults to current config)")
 	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token (or GITHUB_RUNTIME_TOKEN)")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
-	cmd.Flags().BoolVar(&restartSvc, "restart-service", true, "restart rascal service after updating env")
+	cmd.Flags().BoolVar(&restartSvc, "restart-service", true, "restart active rascal slot after updating env")
 	return cmd
 }
 
@@ -2099,8 +2111,19 @@ func (c apiClient) doOverSSH(method, path string, body io.Reader) (*http.Respons
 	if len(payload) > 0 {
 		curlArgs = append(curlArgs, "-H", shellSingleQuote("Content-Type: application/json"), "--data-binary", "@-")
 	}
-	curlArgs = append(curlArgs, shellSingleQuote("http://127.0.0.1:8080"+path))
-	remoteCmd := strings.Join(curlArgs, " ")
+	curlCmd := strings.Join(curlArgs, " ")
+	remoteCmd := strings.Join([]string{
+		"set -eu",
+		"slot=''",
+		"if [ -f /etc/rascal/active_slot ]; then slot=$(tr -d '[:space:]' </etc/rascal/active_slot); fi",
+		"case \"$slot\" in",
+		fmt.Sprintf("  %s) port=%d ;;", rascalSlotBlue, rascalSlotBluePort),
+		fmt.Sprintf("  %s) port=%d ;;", rascalSlotGreen, rascalSlotGreenPort),
+		fmt.Sprintf("  *) if systemctl is-active --quiet rascal; then port=%d; else port=%d; fi ;;", rascalProxyPort, rascalSlotBluePort),
+		"esac",
+		"url=$(printf 'http://127.0.0.1:%s%s' \"$port\" " + shellSingleQuote(path) + ")",
+		curlCmd + " \"$url\"",
+	}, "\n")
 
 	cfg := deployConfig{
 		Host:       sshHost,
@@ -2182,6 +2205,14 @@ type deployConfig struct {
 	GOARCH             string
 }
 
+const (
+	rascalSlotBlue      = "blue"
+	rascalSlotGreen     = "green"
+	rascalSlotBluePort  = 18080
+	rascalSlotGreenPort = 18081
+	rascalProxyPort     = 8080
+)
+
 func deployToExistingHost(cfg deployConfig) error {
 	if strings.TrimSpace(cfg.CodexAuthPath) == "" {
 		return fmt.Errorf("codex auth path is required")
@@ -2206,7 +2237,7 @@ func deployToExistingHost(cfg deployConfig) error {
 		return fmt.Errorf("write env file: %w", err)
 	}
 
-	servicePath := filepath.Join(tmpDir, "rascal.service")
+	servicePath := filepath.Join(tmpDir, "rascal@.service")
 	if err := os.WriteFile(servicePath, []byte(systemdServiceContent()), 0o644); err != nil {
 		return fmt.Errorf("write systemd service: %w", err)
 	}
@@ -2221,12 +2252,14 @@ func deployToExistingHost(cfg deployConfig) error {
 		return fmt.Errorf("missing deploy script %s: %w", installDockerPath, err)
 	}
 
-	caddyPath := ""
-	if strings.TrimSpace(cfg.Domain) != "" {
-		caddyPath = filepath.Join(tmpDir, "Caddyfile")
-		if err := os.WriteFile(caddyPath, []byte(renderCaddyfile(cfg.Domain)), 0o644); err != nil {
-			return fmt.Errorf("write caddyfile: %w", err)
-		}
+	caddyPath := filepath.Join(tmpDir, "Caddyfile")
+	if err := os.WriteFile(caddyPath, []byte(renderCaddyfile(cfg.Domain)), 0o644); err != nil {
+		return fmt.Errorf("write caddyfile: %w", err)
+	}
+
+	deployScriptPath := filepath.Join(tmpDir, "deploy.sh")
+	if err := os.WriteFile(deployScriptPath, []byte(remoteBlueGreenDeployScript(cfg)), 0o700); err != nil {
+		return fmt.Errorf("write remote deploy script: %w", err)
 	}
 
 	if err := runLocal("ssh", sshArgs(cfg, "mkdir -p /opt/rascal /etc/rascal /var/lib/rascal /tmp/rascal-bootstrap /etc/caddy")...); err != nil {
@@ -2238,7 +2271,7 @@ func deployToExistingHost(cfg deployConfig) error {
 	if err := runLocal("scp", scpArgs(cfg, envPath, remoteTarget(cfg, "/tmp/rascal-bootstrap/rascal.env"))...); err != nil {
 		return err
 	}
-	if err := runLocal("scp", scpArgs(cfg, servicePath, remoteTarget(cfg, "/tmp/rascal-bootstrap/rascal.service"))...); err != nil {
+	if err := runLocal("scp", scpArgs(cfg, servicePath, remoteTarget(cfg, "/tmp/rascal-bootstrap/rascal@.service"))...); err != nil {
 		return err
 	}
 	if err := runLocal("scp", scpArgs(cfg, cfg.CodexAuthPath, remoteTarget(cfg, "/tmp/rascal-bootstrap/auth.json"))...); err != nil {
@@ -2250,30 +2283,14 @@ func deployToExistingHost(cfg deployConfig) error {
 	if err := runLocal("scp", scpArgs(cfg, runnerArchivePath, remoteTarget(cfg, "/tmp/rascal-bootstrap/runner.tgz"))...); err != nil {
 		return err
 	}
-	if caddyPath != "" {
-		if err := runLocal("scp", scpArgs(cfg, caddyPath, remoteTarget(cfg, "/tmp/rascal-bootstrap/Caddyfile"))...); err != nil {
-			return err
-		}
+	if err := runLocal("scp", scpArgs(cfg, caddyPath, remoteTarget(cfg, "/tmp/rascal-bootstrap/Caddyfile"))...); err != nil {
+		return err
+	}
+	if err := runLocal("scp", scpArgs(cfg, deployScriptPath, remoteTarget(cfg, "/tmp/rascal-bootstrap/deploy.sh"))...); err != nil {
+		return err
 	}
 
-	remoteInstall := strings.Join([]string{
-		"set -euo pipefail",
-		"chmod +x /tmp/rascal-bootstrap/install_docker.sh",
-		"/tmp/rascal-bootstrap/install_docker.sh",
-		"if ! command -v caddy >/dev/null 2>&1; then apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y caddy; fi",
-		"mkdir -p /opt/rascal",
-		"tar -xzf /tmp/rascal-bootstrap/runner.tgz -C /opt/rascal",
-		fmt.Sprintf("docker build -t %s /opt/rascal/runner", cfg.RunnerImage),
-		"install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald",
-		"install -m 0600 /tmp/rascal-bootstrap/rascal.env /etc/rascal/rascal.env",
-		"install -m 0644 /tmp/rascal-bootstrap/rascal.service /etc/systemd/system/rascal.service",
-		fmt.Sprintf("install -m 0600 /tmp/rascal-bootstrap/auth.json %s", cfg.ServerCodexAuthDst),
-		"if [ -f /tmp/rascal-bootstrap/Caddyfile ]; then install -m 0644 /tmp/rascal-bootstrap/Caddyfile /etc/caddy/Caddyfile && systemctl enable caddy --now && (systemctl reload caddy || systemctl restart caddy); fi",
-		"systemctl daemon-reload",
-		"systemctl enable rascal --now",
-		"systemctl restart rascal",
-	}, " && ")
-	if err := runLocal("ssh", sshArgs(cfg, remoteInstall)...); err != nil {
+	if err := runLocal("ssh", sshArgs(cfg, "bash /tmp/rascal-bootstrap/deploy.sh")...); err != nil {
 		return err
 	}
 	return nil
@@ -2314,6 +2331,192 @@ func runLocalCapture(name string, args ...string) (string, error) {
 		return text, fmt.Errorf("%s failed: %w (%s)", name, err, text)
 	}
 	return text, nil
+}
+
+func remoteBlueGreenDeployScript(cfg deployConfig) string {
+	domain := strings.TrimSpace(cfg.Domain)
+	installCaddy := "if [ ! -f /etc/caddy/Caddyfile ]; then install -m 0644 /tmp/rascal-bootstrap/Caddyfile /etc/caddy/Caddyfile; fi"
+	if domain != "" {
+		installCaddy = "install -m 0644 /tmp/rascal-bootstrap/Caddyfile /etc/caddy/Caddyfile"
+	}
+	preCaddySwitch := ""
+	postSwitchHealthCheck := fmt.Sprintf("if ! check_http \"http://127.0.0.1:%d/readyz\"; then\n  echo \"proxy readiness check failed on caddy; rolling back\" >&2\n  cat >/etc/caddy/rascal-upstream.caddy <<EOF_ROLLBACK\nreverse_proxy 127.0.0.1:${active_port}\nEOF_ROLLBACK\n  (systemctl reload caddy || systemctl restart caddy) || true\n  systemctl stop \"rascal@${inactive_slot}\" || true\n  systemctl restart \"rascal@${active_slot}\" || true\n  exit 1\nfi", rascalProxyPort)
+	if domain == "" {
+		preCaddySwitch = strings.TrimSpace(`
+if systemctl is-active --quiet rascal; then
+  systemctl stop rascal || true
+  systemctl disable rascal >/dev/null 2>&1 || true
+fi
+`) + "\n"
+	} else {
+		postSwitchHealthCheck = fmt.Sprintf(`if command -v curl >/dev/null 2>&1; then
+  if ! curl -fsS --resolve %s:443:127.0.0.1 https://%s/readyz >/dev/null; then
+    echo "proxy readiness check failed on caddy; rolling back" >&2
+    cat >/etc/caddy/rascal-upstream.caddy <<EOF_ROLLBACK
+reverse_proxy 127.0.0.1:${active_port}
+EOF_ROLLBACK
+    (systemctl reload caddy || systemctl restart caddy) || true
+    systemctl stop "rascal@${inactive_slot}" || true
+    systemctl restart "rascal@${active_slot}" || true
+    exit 1
+  fi
+fi`, shellSingleQuote(domain), shellSingleQuote(domain))
+	}
+
+	return strings.TrimSpace(fmt.Sprintf(`
+#!/usr/bin/env bash
+set -euo pipefail
+DOMAIN=%s
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Remote deploy must run as root (or a user with equivalent privileges)." >&2
+  exit 1
+fi
+
+check_http() {
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 5 "$url" >/dev/null
+    return $?
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -q -T 5 -O - "$url" >/dev/null
+    return $?
+  fi
+  return 1
+}
+
+slot_port() {
+  case "$1" in
+    blue) echo %d ;;
+    green) echo %d ;;
+    *) return 1 ;;
+  esac
+}
+
+detect_active_slot() {
+  local slot=""
+  if [ -f /etc/rascal/active_slot ]; then
+    slot="$(tr -d '[:space:]' </etc/rascal/active_slot || true)"
+  fi
+  case "$slot" in
+    blue|green) echo "$slot"; return ;;
+  esac
+  if systemctl is-active --quiet "rascal@blue"; then
+    echo blue
+    return
+  fi
+  if systemctl is-active --quiet "rascal@green"; then
+    echo green
+    return
+  fi
+  echo blue
+}
+
+chmod +x /tmp/rascal-bootstrap/install_docker.sh
+/tmp/rascal-bootstrap/install_docker.sh
+
+if ! command -v sqlite3 >/dev/null 2>&1; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y sqlite3
+fi
+if ! command -v caddy >/dev/null 2>&1; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y caddy
+fi
+
+mkdir -p /opt/rascal
+tar -xzf /tmp/rascal-bootstrap/runner.tgz -C /opt/rascal
+docker build -t %s /opt/rascal/runner
+
+install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald
+install -m 0600 /tmp/rascal-bootstrap/rascal.env /etc/rascal/rascal.env
+install -m 0644 /tmp/rascal-bootstrap/rascal@.service /etc/systemd/system/rascal@.service
+install -m 0600 /tmp/rascal-bootstrap/auth.json %s
+
+cat >/etc/rascal/rascal-blue.env <<'EOF_BLUE'
+RASCAL_LISTEN_ADDR=127.0.0.1:%d
+RASCAL_SLOT=blue
+EOF_BLUE
+
+cat >/etc/rascal/rascal-green.env <<'EOF_GREEN'
+RASCAL_LISTEN_ADDR=127.0.0.1:%d
+RASCAL_SLOT=green
+EOF_GREEN
+
+systemctl daemon-reload
+
+active_slot="$(detect_active_slot)"
+if [ "$active_slot" = "blue" ]; then
+  inactive_slot="green"
+else
+  inactive_slot="blue"
+fi
+active_port="$(slot_port "$active_slot")"
+inactive_port="$(slot_port "$inactive_slot")"
+
+if ! systemctl is-active --quiet "rascal@$active_slot"; then
+  systemctl enable "rascal@$active_slot" >/dev/null 2>&1 || true
+  systemctl restart "rascal@$active_slot"
+fi
+
+systemctl enable "rascal@$inactive_slot" >/dev/null 2>&1 || true
+systemctl restart "rascal@$inactive_slot"
+
+ready=0
+for _ in $(seq 1 45); do
+  if check_http "http://127.0.0.1:${inactive_port}/readyz"; then
+    ready=1
+    break
+  fi
+  sleep 2
+done
+if [ "$ready" -ne 1 ]; then
+  echo "inactive slot ${inactive_slot} failed readiness checks" >&2
+  systemctl status "rascal@${inactive_slot}" --no-pager || true
+  journalctl -u "rascal@${inactive_slot}" -n 80 --no-pager || true
+  systemctl stop "rascal@${inactive_slot}" || true
+  exit 1
+fi
+
+%s
+cat >/etc/caddy/rascal-upstream.caddy <<EOF_UPSTREAM
+reverse_proxy 127.0.0.1:${inactive_port}
+EOF_UPSTREAM
+
+%s
+
+systemctl enable caddy --now
+if ! (systemctl reload caddy || systemctl restart caddy); then
+  echo "failed to reload caddy with new upstream; rolling back" >&2
+  cat >/etc/caddy/rascal-upstream.caddy <<EOF_ROLLBACK
+reverse_proxy 127.0.0.1:${active_port}
+EOF_ROLLBACK
+  (systemctl reload caddy || systemctl restart caddy) || true
+  systemctl stop "rascal@${inactive_slot}" || true
+  exit 1
+fi
+
+%s
+
+echo "$inactive_slot" >/etc/rascal/active_slot
+sync
+sleep 3
+
+if systemctl is-active --quiet rascal; then
+  systemctl stop rascal || true
+  systemctl disable rascal >/dev/null 2>&1 || true
+fi
+
+if [ "$active_slot" != "$inactive_slot" ]; then
+  systemctl stop "rascal@${active_slot}" || true
+  systemctl disable "rascal@${active_slot}" >/dev/null 2>&1 || true
+fi
+systemctl enable "rascal@${inactive_slot}" >/dev/null 2>&1 || true
+systemctl is-active --quiet "rascal@${inactive_slot}"
+
+rm -rf /tmp/rascal-bootstrap
+`, shellSingleQuote(domain), rascalSlotBluePort, rascalSlotGreenPort, shellSingleQuote(cfg.RunnerImage), shellSingleQuote(cfg.ServerCodexAuthDst), rascalSlotBluePort, rascalSlotGreenPort, installCaddy, preCaddySwitch, postSwitchHealthCheck)) + "\n"
 }
 
 func detectRemoteGOARCH(cfg deployConfig) (string, error) {
@@ -2418,9 +2621,12 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/rascal/rascal.env
+EnvironmentFile=-/etc/rascal/rascal-%i.env
 ExecStart=/opt/rascal/rascald
 Restart=always
 RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=330
 User=root
 WorkingDirectory=/opt/rascal
 
@@ -2431,24 +2637,42 @@ WantedBy=multi-user.target
 
 func renderCaddyfile(domain string) string {
 	domain = strings.TrimSpace(domain)
-	if domain == "" {
-		return ""
+	localProxyBlock := fmt.Sprintf(`
+:%d {
+  import rascal_common
+}
+`, rascalProxyPort)
+	if domain != "" {
+		localProxyBlock = ""
+	}
+	domainBlock := ""
+	if domain != "" {
+		domainBlock = fmt.Sprintf(`
+%s {
+  import rascal_common
+}
+`, domain)
 	}
 	templatePath := deployAssetPath(filepath.Join("deploy", "caddy", "Caddyfile.tmpl"))
 	data, err := os.ReadFile(templatePath)
 	if err == nil {
-		return strings.ReplaceAll(string(data), "{{DOMAIN}}", domain)
+		out := strings.ReplaceAll(string(data), "{{DOMAIN_BLOCK}}", strings.TrimSpace(domainBlock))
+		out = strings.ReplaceAll(out, "{{LOCAL_PROXY_BLOCK}}", strings.TrimSpace(localProxyBlock))
+		return strings.TrimSpace(out) + "\n"
 	}
 	return strings.TrimSpace(fmt.Sprintf(`
-%s {
+(rascal_common) {
   encode gzip zstd
-  reverse_proxy 127.0.0.1:8080
+  import /etc/caddy/rascal-upstream.caddy
   log {
     output file /var/log/caddy/rascal-access.log
     format json
   }
 }
-`, domain)) + "\n"
+
+%s
+%s
+`, strings.TrimSpace(localProxyBlock), strings.TrimSpace(domainBlock))) + "\n"
 }
 
 func expandPath(path string) (string, error) {

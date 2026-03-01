@@ -160,7 +160,7 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 			sshKey = strings.TrimSpace(sshKey)
 			goarch = strings.TrimSpace(goarch)
 			codexAuthPath = strings.TrimSpace(codexAuthPath)
-			domain = strings.TrimSpace(domain)
+			domain = firstNonEmpty(strings.TrimSpace(domain), strings.TrimSpace(a.cfg.Domain))
 			if host == "" {
 				return &cliError{Code: exitInput, Message: "--host is required"}
 			}

@@ -13,10 +13,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/rtzll/rascal/internal/config"
@@ -27,6 +29,7 @@ import (
 )
 
 var errTaskCompleted = errors.New("task is already completed")
+var errServerDraining = errors.New("orchestrator is draining")
 
 type server struct {
 	cfg      config.ServerConfig
@@ -38,6 +41,7 @@ type server struct {
 	activeRuns map[string]string
 	queuedRuns map[string][]string
 	runCancels map[string]context.CancelFunc
+	draining   bool
 }
 
 type runRequest struct {
@@ -93,6 +97,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/readyz", s.handleReady)
 	mux.HandleFunc("/v1/runs", s.withAuth(s.handleListRuns))
 	mux.HandleFunc("/v1/runs/", s.withAuth(s.handleRunSubresources))
 	mux.HandleFunc("/v1/tasks", s.withAuth(s.handleCreateTask))
@@ -107,8 +112,36 @@ func main() {
 	}
 
 	log.Printf("rascald listening on %s (runner=%s)", cfg.ListenAddr, cfg.RunnerMode)
-	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("server stopped: %v", err)
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- httpServer.ListenAndServe()
+	}()
+
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("server stopped: %v", err)
+		}
+		return
+	case <-sigCtx.Done():
+	}
+
+	log.Printf("shutdown signal received; entering drain mode")
+	s.beginDrain()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
+		log.Printf("http shutdown warning: %v", err)
+	}
+
+	if err := s.waitForNoActiveRuns(5 * time.Minute); err != nil {
+		log.Printf("active runs did not finish within drain timeout; canceling remaining runs")
+		s.cancelActiveRuns()
+		_ = s.waitForNoActiveRuns(30 * time.Second)
 	}
 }
 
@@ -151,7 +184,19 @@ func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "rascald"})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "rascald", "ready": !s.isDraining()})
+}
+
+func (s *server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.isDraining() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "service": "rascald", "ready": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "rascald", "ready": true})
 }
 
 func (s *server) handleListRuns(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +223,10 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if s.isDraining() {
+		http.Error(w, "server is draining", http.StatusServiceUnavailable)
+		return
+	}
 
 	var req createTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -202,6 +251,10 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Debug:      req.Debug,
 	})
 	if err != nil {
+		if errors.Is(err, errServerDraining) {
+			http.Error(w, "server is draining", http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, "failed to create run: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -211,6 +264,10 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.isDraining() {
+		http.Error(w, "server is draining", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -252,6 +309,10 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
 			return
 		}
+		if errors.Is(err, errServerDraining) {
+			http.Error(w, "server is draining", http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, "failed to create run: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -285,6 +346,10 @@ func (s *server) handleTaskSubresources(w http.ResponseWriter, r *http.Request) 
 func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.isDraining() {
+		http.Error(w, "server is draining", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -556,6 +621,9 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 }
 
 func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
+	if s.isDraining() {
+		return state.Run{}, errServerDraining
+	}
 	req.Repo = strings.TrimSpace(req.Repo)
 	req.Task = strings.TrimSpace(req.Task)
 	req.TaskID = strings.TrimSpace(req.TaskID)
@@ -693,6 +761,12 @@ func (s *server) enqueueExistingRun(run state.Run) {
 	pending := false
 
 	s.mu.Lock()
+	if s.draining {
+		s.mu.Unlock()
+		_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, "orchestrator shutting down")
+		_ = s.store.SetTaskPendingInput(run.TaskID, false)
+		return
+	}
 	if activeID, ok := s.activeRuns[run.TaskID]; ok && activeID != "" {
 		s.queuedRuns[run.TaskID] = append(s.queuedRuns[run.TaskID], run.ID)
 		pending = true
@@ -803,6 +877,11 @@ func (s *server) executeRun(runID string) {
 }
 
 func (s *server) finishRun(run state.Run) {
+	if s.isDraining() {
+		_ = s.store.CancelQueuedRuns(run.TaskID, "orchestrator shutting down")
+		_ = s.store.SetTaskPendingInput(run.TaskID, false)
+	}
+
 	taskCompleted := s.store.IsTaskCompleted(run.TaskID)
 	var nextRunID string
 	var remaining int
@@ -838,6 +917,11 @@ func (s *server) finishRun(run state.Run) {
 
 	_ = s.store.SetTaskPendingInput(run.TaskID, remaining > 0)
 	if nextRunID != "" {
+		if s.isDraining() {
+			_, _ = s.store.SetRunStatus(nextRunID, state.StatusCanceled, "orchestrator shutting down")
+			_ = s.store.SetTaskPendingInput(run.TaskID, false)
+			return
+		}
 		go s.executeRun(nextRunID)
 	}
 }
@@ -1044,6 +1128,63 @@ func maxInt(a, b int) int {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func (s *server) isDraining() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.draining
+}
+
+func (s *server) beginDrain() {
+	s.mu.Lock()
+	if s.draining {
+		s.mu.Unlock()
+		return
+	}
+	s.draining = true
+	queuedByTask := make(map[string][]string, len(s.queuedRuns))
+	for taskID, ids := range s.queuedRuns {
+		queuedByTask[taskID] = append([]string(nil), ids...)
+	}
+	s.queuedRuns = make(map[string][]string)
+	s.mu.Unlock()
+
+	for taskID, ids := range queuedByTask {
+		for _, runID := range ids {
+			_, _ = s.store.SetRunStatus(runID, state.StatusCanceled, "orchestrator shutting down")
+		}
+		_ = s.store.SetTaskPendingInput(taskID, false)
+	}
+}
+
+func (s *server) waitForNoActiveRuns(timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		active := len(s.activeRuns)
+		s.mu.Unlock()
+		if active == 0 {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for active runs to finish")
+}
+
+func (s *server) cancelActiveRuns() {
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.runCancels))
+	for _, cancel := range s.runCancels {
+		cancels = append(cancels, cancel)
+	}
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 }
 
 func (s *server) addIssueReactionBestEffort(repo string, issueNumber int, reaction string) {

@@ -81,7 +81,12 @@ func syncRemoteAuth(cfg syncRemoteAuthConfig) error {
 		"install -m 0600 /tmp/rascal-bootstrap/rascal.env.merged /etc/rascal/rascal.env",
 	}
 	if cfg.Restart {
-		steps = append(steps, "systemctl restart rascal")
+		steps = append(steps,
+			"slot=$(tr -d '[:space:]' </etc/rascal/active_slot 2>/dev/null || true)",
+			"case \"$slot\" in blue|green) ;;",
+			"*) if systemctl is-active --quiet 'rascal@blue'; then slot=blue; elif systemctl is-active --quiet 'rascal@green'; then slot=green; else slot=blue; fi ;; esac",
+			"systemctl restart \"rascal@$slot\"",
+		)
 	}
 	return runLocal("ssh", sshArgs(deploy, strings.Join(steps, " && "))...)
 }
