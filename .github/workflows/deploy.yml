@@ -21,6 +21,7 @@ jobs:
       DEPLOY_USER: ${{ vars.RASCAL_DEPLOY_SSH_USER || secrets.RASCAL_DEPLOY_SSH_USER || 'root' }}
       DEPLOY_PORT: ${{ vars.RASCAL_DEPLOY_SSH_PORT || secrets.RASCAL_DEPLOY_SSH_PORT || '22' }}
       DEPLOY_RUNNER_IMAGE: ${{ vars.RASCAL_RUNNER_IMAGE || 'rascal-runner:latest' }}
+      DEPLOY_DOMAIN: ${{ vars.RASCAL_DOMAIN || secrets.RASCAL_DOMAIN || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,4 +59,14 @@ jobs:
           chmod 644 "$HOME/.ssh/known_hosts"
 
       - name: Deploy
-        run: DEPLOY_SSH_KEY_PATH="$HOME/.ssh/id_ed25519" DEPLOY_KNOWN_HOSTS_PATH="$HOME/.ssh/known_hosts" bash deploy/scripts/ci_deploy.sh
+        run: |
+          go build -o ./bin/rascal ./cmd/rascal
+          ./bin/rascal infra deploy-existing \
+            --host "${DEPLOY_HOST}" \
+            --ssh-user "${DEPLOY_USER}" \
+            --ssh-port "${DEPLOY_PORT}" \
+            --ssh-key "$HOME/.ssh/id_ed25519" \
+            --domain "${DEPLOY_DOMAIN}" \
+            --runner-image "${DEPLOY_RUNNER_IMAGE}" \
+            --skip-env-upload \
+            --skip-auth-upload

@@ -196,6 +196,15 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := deployCmd.Flags().Lookup("goarch").DefValue; got != "" {
 		t.Fatalf("infra deploy-existing default goarch = %q, want empty for auto-detect", got)
 	}
+	if got := deployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner:latest" {
+		t.Fatalf("infra deploy-existing default runner-image = %q, want rascal-runner:latest", got)
+	}
+	if got := deployCmd.Flags().Lookup("skip-env-upload").DefValue; got != "false" {
+		t.Fatalf("infra deploy-existing default skip-env-upload = %q, want false", got)
+	}
+	if got := deployCmd.Flags().Lookup("skip-auth-upload").DefValue; got != "false" {
+		t.Fatalf("infra deploy-existing default skip-auth-upload = %q, want false", got)
+	}
 }
 
 func TestRunIssueRetryDebugDefaults(t *testing.T) {
