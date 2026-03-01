@@ -167,35 +167,20 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 			if sshPort <= 0 {
 				return &cliError{Code: exitInput, Message: "--ssh-port must be positive"}
 			}
-			if codexAuthPath == "" {
-				return &cliError{Code: exitInput, Message: "--codex-auth must be set"}
-			}
-			expandedAuthPath, err := expandPath(codexAuthPath)
-			if err != nil {
-				return &cliError{Code: exitInput, Message: "invalid --codex-auth path", Cause: err}
-			}
-			if _, err := os.Stat(expandedAuthPath); err != nil {
-				return &cliError{Code: exitInput, Message: "codex auth file is required", Hint: "run `codex login` first", Cause: err}
+			expandedAuthPath := ""
+			if codexAuthPath != "" {
+				var err error
+				expandedAuthPath, err = expandPath(codexAuthPath)
+				if err != nil {
+					return &cliError{Code: exitInput, Message: "invalid --codex-auth path", Cause: err}
+				}
+				if _, err := os.Stat(expandedAuthPath); err != nil {
+					return &cliError{Code: exitInput, Message: "codex auth file is required", Hint: "run `codex login` first", Cause: err}
+				}
 			}
 			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), a.cfg.APIToken)
-			if apiToken == "" {
-				created, err := randomToken(32)
-				if err != nil {
-					return err
-				}
-				apiToken = created
-			}
 			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
-			if githubRuntimeToken == "" {
-				return &cliError{Code: exitInput, Message: "--github-runtime-token is required"}
-			}
-			if webhookSecret == "" {
-				created, err := randomToken(32)
-				if err != nil {
-					return err
-				}
-				webhookSecret = created
-			}
+			webhookSecret = firstNonEmpty(strings.TrimSpace(webhookSecret), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")), strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")))
 
 			resolvedGoarch := goarch
 			if resolvedGoarch == "" {
@@ -238,14 +223,18 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 			if domain != "" {
 				serverURL = "https://" + domain
 			}
+			apiTokenDisplay := maskSecret(apiToken)
+			if strings.TrimSpace(apiToken) == "" {
+				apiTokenDisplay = "(reused from remote)"
+			}
 			return a.emit(map[string]any{
 				"host":       host,
 				"server_url": serverURL,
-				"api_token":  maskSecret(apiToken),
+				"api_token":  apiTokenDisplay,
 			}, func() error {
 				a.println("deployed rascald to %s", host)
 				a.println("server_url: %s", serverURL)
-				a.println("api_token: %s", maskSecret(apiToken))
+				a.println("api_token: %s", apiTokenDisplay)
 				return nil
 			})
 		},
@@ -258,7 +247,7 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token")
 	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
-	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path")
+	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "optional local Codex auth.json path (uploads when set)")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	return cmd
 }
