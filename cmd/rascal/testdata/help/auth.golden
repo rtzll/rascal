@@ -1,0 +1,41 @@
+Manage local and remote authentication secrets used by rascald and the CLI.
+
+Usage:
+  rascal auth [flags]
+  rascal auth [command]
+
+Examples:
+rascal auth rotate --write-config
+rascal auth sync --host 203.0.113.10
+
+Available Commands:
+  rotate      Generate fresh API/webhook tokens and optionally sync remote server
+  sync        Push auth tokens to remote /etc/rascal/rascal.env over SSH
+
+Flags:
+      --github-runtime-token string   GitHub runtime token for remote auth sync
+  -h, --help                          help for auth
+      --host string                   existing server host for remote auth sync
+      --restart-service               restart active rascal slot after remote auth sync (default true)
+      --show                          print raw token values
+      --ssh-key string                SSH private key path for remote auth sync
+      --ssh-port int                  SSH target port for remote auth sync (default 22)
+      --ssh-user string               SSH target user for remote auth sync (default "root")
+      --write-config                  write generated API token to local config
+
+Global Flags:
+      --api-token string         orchestrator API token
+      --client-ssh-host string   SSH target host for API transport=ssh/auto
+      --client-ssh-key string    SSH private key path for API transport=ssh/auto
+      --client-ssh-port int      SSH target port for API transport=ssh/auto
+      --client-ssh-user string   SSH target user for API transport=ssh/auto
+      --config string            config file path (default "$HOME/.rascal/config.toml")
+      --default-repo string      default repository in OWNER/REPO form
+      --env-file string          env file path (fallback: ./.rascal.env if present)
+      --no-color                 disable ANSI color/style output (also set by NO_COLOR)
+      --output string            output format: table|json|toml (default "table")
+  -q, --quiet                    reduce non-essential output
+      --server-url string        orchestrator URL
+      --transport string         API transport: auto|http|ssh
+
+Use "rascal auth [command] --help" for more information about a command.

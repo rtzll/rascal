@@ -44,6 +44,11 @@ func (a *app) newInfraCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "infra",
 		Short: "Infrastructure operations (provisioning/deploy)",
+		Long:  "Provision and deploy Rascal infrastructure resources.",
+		Example: strings.TrimSpace(`
+rascal infra provision-hetzner --token "$HCLOUD_TOKEN"
+rascal infra deploy-existing --host 203.0.113.10 --ssh-key ~/.ssh/id_ed25519
+`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
@@ -267,9 +272,9 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&host, "host", "", "existing server host")
-	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH user")
+	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH target user")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path")
-	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH port")
+	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH target port")
 	cmd.Flags().StringVar(&goarch, "goarch", "", "GOARCH for rascald binary (auto-detected when empty)")
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token")
 	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token")

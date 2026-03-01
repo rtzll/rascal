@@ -249,6 +249,45 @@ func TestAuthHelpContainsSync(t *testing.T) {
 	}
 }
 
+func TestHelpGoldenSnapshots(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "root", args: nil},
+		{name: "run", args: []string{"run"}},
+		{name: "logs", args: []string{"logs"}},
+		{name: "bootstrap", args: []string{"bootstrap"}},
+		{name: "auth", args: []string{"auth"}},
+		{name: "repo", args: []string{"repo"}},
+		{name: "infra", args: []string{"infra"}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderHelpOutput(t, tc.args...)
+			goldenPath := filepath.Join("testdata", "help", tc.name+".golden")
+			if os.Getenv("UPDATE_GOLDEN") == "1" {
+				if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+					t.Fatalf("mkdir golden dir: %v", err)
+				}
+				if err := os.WriteFile(goldenPath, []byte(got), 0o644); err != nil {
+					t.Fatalf("write golden: %v", err)
+				}
+				return
+			}
+			wantRaw, err := os.ReadFile(goldenPath)
+			if err != nil {
+				t.Fatalf("read golden %s: %v", goldenPath, err)
+			}
+			want := normalizeHelpOutput(string(wantRaw))
+			if got != want {
+				t.Fatalf("help output mismatch for %s\n--- want ---\n%s\n--- got ---\n%s", tc.name, want, got)
+			}
+		})
+	}
+}
+
 func TestNoColorRequested(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	if !noColorRequested(false) {
@@ -487,4 +526,27 @@ func captureStdout(fn func() error) (string, error) {
 	data, _ := io.ReadAll(r)
 	_ = r.Close()
 	return string(data), err
+}
+
+func renderHelpOutput(t *testing.T, args ...string) string {
+	t.Helper()
+	root := newRootCmd()
+	var stdout bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stdout)
+	allArgs := append([]string{}, args...)
+	allArgs = append(allArgs, "--help")
+	root.SetArgs(allArgs)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute help for %v: %v", args, err)
+	}
+	return normalizeHelpOutput(stdout.String())
+}
+
+func normalizeHelpOutput(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		s = strings.ReplaceAll(s, home, "$HOME")
+	}
+	return strings.TrimSpace(s) + "\n"
 }

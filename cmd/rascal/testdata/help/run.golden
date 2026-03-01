@@ -1,0 +1,30 @@
+Start a run for a repository/task pair. The repository must be in OWNER/REPO form.
+
+Usage:
+  rascal run [flags]
+
+Examples:
+rascal run -R OWNER/REPO -t "Fix flaky tests"
+rascal run --repo OWNER/REPO --task "Refactor parser" --output json
+
+Flags:
+  -b, --base-branch string   base branch (default "main")
+      --debug                stream detailed agent execution logs (use --debug=false to reduce verbosity) (default true)
+  -h, --help                 help for run
+  -R, --repo string          repository in OWNER/REPO form
+  -t, --task string          task text
+
+Global Flags:
+      --api-token string         orchestrator API token
+      --client-ssh-host string   SSH target host for API transport=ssh/auto
+      --client-ssh-key string    SSH private key path for API transport=ssh/auto
+      --client-ssh-port int      SSH target port for API transport=ssh/auto
+      --client-ssh-user string   SSH target user for API transport=ssh/auto
+      --config string            config file path (default "$HOME/.rascal/config.toml")
+      --default-repo string      default repository in OWNER/REPO form
+      --env-file string          env file path (fallback: ./.rascal.env if present)
+      --no-color                 disable ANSI color/style output (also set by NO_COLOR)
+      --output string            output format: table|json|toml (default "table")
+  -q, --quiet                    reduce non-essential output
+      --server-url string        orchestrator URL
+      --transport string         API transport: auto|http|ssh

@@ -14,6 +14,11 @@ func (a *app) newRepoCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "repo",
 		Short: "Repository webhook/label operations",
+		Long:  "Configure and inspect GitHub repository integrations used by Rascal.",
+		Example: strings.TrimSpace(`
+rascal repo status OWNER/REPO
+rascal repo enable OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$WEBHOOK_SECRET"
+`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
@@ -78,7 +83,7 @@ func (a *app) newRepoEnableCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token (or GITHUB_TOKEN)")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret (must match server secret)")
-	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "override webhook URL (default: <server-url>/v1/webhooks/github)")
+	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "override webhook URL (default: <orchestrator-url>/v1/webhooks/github)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 45*time.Second, "GitHub API timeout")
 	return cmd
 }
@@ -129,7 +134,7 @@ func (a *app) newRepoDisableCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token (or GITHUB_TOKEN)")
-	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "override webhook URL (default: <server-url>/v1/webhooks/github)")
+	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "override webhook URL (default: <orchestrator-url>/v1/webhooks/github)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "GitHub API timeout")
 	return cmd
 }
@@ -191,7 +196,7 @@ func (a *app) newRepoStatusCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token (or GITHUB_TOKEN)")
-	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "override webhook URL (default: <server-url>/v1/webhooks/github)")
+	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "override webhook URL (default: <orchestrator-url>/v1/webhooks/github)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "GitHub API timeout")
 	return cmd
 }

@@ -122,36 +122,81 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 
+	root.AddGroup(
+		&cobra.Group{ID: "setup", Title: "Setup:"},
+		&cobra.Group{ID: "runs", Title: "Runs:"},
+		&cobra.Group{ID: "logs", Title: "Logs:"},
+		&cobra.Group{ID: "integrations", Title: "Integrations:"},
+		&cobra.Group{ID: "utilities", Title: "Utilities:"},
+	)
+
 	root.PersistentFlags().StringVar(&a.configPath, "config", config.DefaultClientConfigPath(), "config file path")
 	root.PersistentFlags().StringVar(&a.envFilePath, "env-file", "", "env file path (fallback: ./.rascal.env if present)")
-	root.PersistentFlags().StringVar(&a.serverURLFlag, "server-url", "", "orchestrator base URL")
+	root.PersistentFlags().StringVar(&a.serverURLFlag, "server-url", "", "orchestrator URL")
 	root.PersistentFlags().StringVar(&a.apiTokenFlag, "api-token", "", "orchestrator API token")
 	root.PersistentFlags().StringVar(&a.defaultRepoFlag, "default-repo", "", "default repository in OWNER/REPO form")
 	root.PersistentFlags().StringVar(&a.transportFlag, "transport", "", "API transport: auto|http|ssh")
-	root.PersistentFlags().StringVar(&a.sshHostFlag, "client-ssh-host", "", "SSH host for API transport=ssh/auto")
-	root.PersistentFlags().StringVar(&a.sshUserFlag, "client-ssh-user", "", "SSH user for API transport=ssh/auto")
+	root.PersistentFlags().StringVar(&a.sshHostFlag, "client-ssh-host", "", "SSH target host for API transport=ssh/auto")
+	root.PersistentFlags().StringVar(&a.sshUserFlag, "client-ssh-user", "", "SSH target user for API transport=ssh/auto")
 	root.PersistentFlags().StringVar(&a.sshKeyFlag, "client-ssh-key", "", "SSH private key path for API transport=ssh/auto")
-	root.PersistentFlags().IntVar(&a.sshPortFlag, "client-ssh-port", 0, "SSH port for API transport=ssh/auto")
+	root.PersistentFlags().IntVar(&a.sshPortFlag, "client-ssh-port", 0, "SSH target port for API transport=ssh/auto")
 	root.PersistentFlags().StringVar(&a.output, "output", "table", "output format: table|json|toml")
 	root.PersistentFlags().BoolVar(&a.noColor, "no-color", false, "disable ANSI color/style output (also set by NO_COLOR)")
 	root.PersistentFlags().BoolVarP(&a.quiet, "quiet", "q", false, "reduce non-essential output")
 
-	root.AddCommand(a.newInitCmd())
-	root.AddCommand(a.newBootstrapCmd())
-	root.AddCommand(a.newRunCmd())
-	root.AddCommand(a.newIssueCmd())
-	root.AddCommand(a.newPSCmd())
-	root.AddCommand(a.newLogsCmd())
-	root.AddCommand(a.newDoctorCmd())
-	root.AddCommand(a.newOpenCmd())
-	root.AddCommand(a.newRetryCmd())
-	root.AddCommand(a.newCancelCmd())
-	root.AddCommand(a.newTaskCmd())
-	root.AddCommand(a.newConfigCmd())
-	root.AddCommand(a.newAuthCmd())
-	root.AddCommand(a.newRepoCmd())
-	root.AddCommand(a.newInfraCmd())
-	root.AddCommand(newCompletionCmd(root))
+	initCmd := a.newInitCmd()
+	initCmd.GroupID = "setup"
+	bootstrapCmd := a.newBootstrapCmd()
+	bootstrapCmd.GroupID = "setup"
+	configCmd := a.newConfigCmd()
+	configCmd.GroupID = "setup"
+	authCmd := a.newAuthCmd()
+	authCmd.GroupID = "setup"
+
+	runCmd := a.newRunCmd()
+	runCmd.GroupID = "runs"
+	issueCmd := a.newIssueCmd()
+	issueCmd.GroupID = "runs"
+	psCmd := a.newPSCmd()
+	psCmd.GroupID = "runs"
+	openCmd := a.newOpenCmd()
+	openCmd.GroupID = "runs"
+	retryCmd := a.newRetryCmd()
+	retryCmd.GroupID = "runs"
+	cancelCmd := a.newCancelCmd()
+	cancelCmd.GroupID = "runs"
+	taskCmd := a.newTaskCmd()
+	taskCmd.GroupID = "runs"
+
+	logsCmd := a.newLogsCmd()
+	logsCmd.GroupID = "logs"
+
+	repoCmd := a.newRepoCmd()
+	repoCmd.GroupID = "integrations"
+	infraCmd := a.newInfraCmd()
+	infraCmd.GroupID = "integrations"
+
+	doctorCmd := a.newDoctorCmd()
+	doctorCmd.GroupID = "utilities"
+	completionCmd := newCompletionCmd(root)
+	completionCmd.GroupID = "utilities"
+
+	root.AddCommand(initCmd)
+	root.AddCommand(bootstrapCmd)
+	root.AddCommand(configCmd)
+	root.AddCommand(authCmd)
+	root.AddCommand(runCmd)
+	root.AddCommand(issueCmd)
+	root.AddCommand(psCmd)
+	root.AddCommand(openCmd)
+	root.AddCommand(retryCmd)
+	root.AddCommand(cancelCmd)
+	root.AddCommand(taskCmd)
+	root.AddCommand(logsCmd)
+	root.AddCommand(repoCmd)
+	root.AddCommand(infraCmd)
+	root.AddCommand(doctorCmd)
+	root.AddCommand(completionCmd)
 
 	return root
 }
@@ -438,16 +483,16 @@ func (a *app) newInitCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverURL, "server-url", "", "orchestrator base URL")
+	cmd.Flags().StringVar(&serverURL, "server-url", "", "orchestrator URL")
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token")
-	cmd.Flags().StringVar(&defaultRepo, "default-repo", "", "default repository OWNER/REPO")
+	cmd.Flags().StringVar(&defaultRepo, "default-repo", "", "default repository in OWNER/REPO form")
 	cmd.Flags().StringVar(&host, "host", "", "default server host/IP for bootstrap/deploy")
 	cmd.Flags().StringVar(&domain, "domain", "", "default domain for server URL and Caddy")
 	cmd.Flags().StringVar(&transport, "transport", "", "default transport: auto|http|ssh")
-	cmd.Flags().StringVar(&sshHost, "ssh-host", "", "default SSH host for transport=ssh/auto")
-	cmd.Flags().StringVar(&sshUser, "ssh-user", "", "default SSH user for transport=ssh/auto")
+	cmd.Flags().StringVar(&sshHost, "ssh-host", "", "default SSH target host for transport=ssh/auto")
+	cmd.Flags().StringVar(&sshUser, "ssh-user", "", "default SSH target user for transport=ssh/auto")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "default SSH private key path for transport=ssh/auto")
-	cmd.Flags().IntVar(&sshPort, "ssh-port", 0, "default SSH port for transport=ssh/auto")
+	cmd.Flags().IntVar(&sshPort, "ssh-port", 0, "default SSH target port for transport=ssh/auto")
 	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "disable prompts and rely on flags")
 	return cmd
 }
@@ -793,7 +838,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&repo, "repo", "", "default repository in OWNER/REPO form")
 	cmd.Flags().StringVar(&domain, "domain", "", "orchestrator domain (e.g. rascal.example.com)")
-	cmd.Flags().StringVar(&serverURL, "server-url", "", "orchestrator base URL (overrides --domain)")
+	cmd.Flags().StringVar(&serverURL, "server-url", "", "orchestrator URL (overrides --domain)")
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "API token for orchestrator (auto-generated if empty)")
 	cmd.Flags().StringVar(&githubAdminToken, "github-admin-token", "", "GitHub token with repo Webhooks (rw) and Issues (rw) for label/webhook setup")
 	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub token for remote runner operations (push/PR)")
@@ -801,9 +846,9 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&skipWebhook, "skip-webhook", false, "skip GitHub webhook setup")
 	cmd.Flags().BoolVar(&writeConfig, "write-config", true, "write config file")
 	cmd.Flags().StringVar(&host, "host", "", "existing server host (defaults to config `host` if set)")
-	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH user for existing host deployment")
+	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH target user for existing host deployment")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path for existing host deployment")
-	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH port for existing host deployment")
+	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH target port for existing host deployment")
 	cmd.Flags().StringVar(&goarch, "goarch", "", "GOARCH for rascald binary (auto-detected when empty)")
 	cmd.Flags().BoolVar(&skipDeploy, "skip-deploy", false, "skip remote deployment")
 	cmd.Flags().BoolVar(&provisionNew, "provision-new", false, "force provisioning a new host when --hcloud-token is set")
@@ -826,9 +871,13 @@ func (a *app) newRunCmd() *cobra.Command {
 	var repo, task, baseBranch string
 	var debug bool
 	cmd := &cobra.Command{
-		Use:     "run",
-		Short:   "Start an ad-hoc run",
-		Example: "  rascal run -R owner/repo -t \"fix flaky tests\"\n  rascal run --repo owner/repo --task \"refactor\" --output json",
+		Use:   "run",
+		Short: "Start an ad-hoc run",
+		Long:  "Start a run for a repository/task pair. The repository must be in OWNER/REPO form.",
+		Example: strings.TrimSpace(`
+rascal run -R OWNER/REPO -t "Fix flaky tests"
+rascal run --repo OWNER/REPO --task "Refactor parser" --output json
+`),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if err := a.requireServerAuth(); err != nil {
 				return err
@@ -869,17 +918,21 @@ func (a *app) newRunCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository in OWNER/REPO form")
 	cmd.Flags().StringVarP(&task, "task", "t", "", "task text")
 	cmd.Flags().StringVarP(&baseBranch, "base-branch", "b", "main", "base branch")
-	cmd.Flags().BoolVar(&debug, "debug", true, "enable goose debug output (use --debug=false to disable)")
+	cmd.Flags().BoolVar(&debug, "debug", true, "stream detailed agent execution logs (use --debug=false to reduce verbosity)")
 	return cmd
 }
 
 func (a *app) newIssueCmd() *cobra.Command {
 	var debug bool
 	cmd := &cobra.Command{
-		Use:     "issue OWNER/REPO#123",
-		Short:   "Start a run from an issue",
-		Example: "  rascal issue owner/repo#123\n  rascal issue owner/repo#123 --output json",
-		Args:    cobra.ExactArgs(1),
+		Use:   "issue OWNER/REPO#123",
+		Short: "Start a run from an issue",
+		Long:  "Create a run using an issue reference in OWNER/REPO#NUMBER form.",
+		Example: strings.TrimSpace(`
+rascal issue OWNER/REPO#123
+rascal issue OWNER/REPO#123 --output json
+`),
+		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if err := a.requireServerAuth(); err != nil {
 				return err
@@ -913,7 +966,7 @@ func (a *app) newIssueCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().BoolVar(&debug, "debug", true, "enable goose debug output (use --debug=false to disable)")
+	cmd.Flags().BoolVar(&debug, "debug", true, "stream detailed agent execution logs (use --debug=false to reduce verbosity)")
 	return cmd
 }
 
@@ -992,10 +1045,16 @@ func (a *app) newLogsCmd() *cobra.Command {
 		lines    int
 	)
 	cmd := &cobra.Command{
-		Use:               "logs [run_id]",
-		Aliases:           []string{"tail"},
-		Short:             "Fetch run/service logs",
-		Example:           "  rascal logs run_abc123\n  rascal logs run run_abc123 --follow\n  rascal logs rascald --follow\n  rascal logs caddy-access --follow",
+		Use:     "logs [run_id]",
+		Aliases: []string{"tail"},
+		Short:   "Fetch run/service logs",
+		Long:    "Fetch run logs and service logs. Canonical run-log usage is `rascal logs run <run_id>`; `rascal logs <run_id>` is a shorthand.",
+		Example: strings.TrimSpace(`
+rascal logs run run_abc123
+rascal logs run run_abc123 --follow
+rascal logs rascald --follow
+rascal logs caddy-access --follow
+`),
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
 		RunE: func(c *cobra.Command, args []string) error {
@@ -1011,10 +1070,14 @@ func (a *app) newLogsCmd() *cobra.Command {
 	cmd.Flags().IntVar(&lines, "lines", 200, "max log lines to fetch")
 
 	runCmd := &cobra.Command{
-		Use:               "run <run_id>",
-		Aliases:           []string{"job"},
-		Short:             "Fetch logs for a run",
-		Example:           "  rascal logs run run_abc123\n  rascal logs run run_abc123 --follow --interval 4s",
+		Use:     "run <run_id>",
+		Aliases: []string{"job"},
+		Short:   "Fetch logs for a run",
+		Long:    "Fetch logs for a specific run ID.",
+		Example: strings.TrimSpace(`
+rascal logs run run_abc123
+rascal logs run run_abc123 --follow --interval 4s
+`),
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1033,9 +1096,12 @@ func (a *app) newLogsCmd() *cobra.Command {
 	rascaldCmd := &cobra.Command{
 		Use:   "rascald",
 		Short: "Fetch rascald system logs over SSH",
-		Example: "  rascal logs rascald\n" +
-			"  rascal logs rascald --follow\n" +
-			"  rascal logs rascald --host rascal-server",
+		Long:  "Stream logs from the remote `rascal`/`rascal@slot` systemd service over SSH.",
+		Example: strings.TrimSpace(`
+rascal logs rascald
+rascal logs rascald --follow
+rascal logs rascald --host rascal-server
+`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			host, _ := cmd.Flags().GetString("host")
 			sshUser, _ := cmd.Flags().GetString("ssh-user")
@@ -1050,8 +1116,11 @@ func (a *app) newLogsCmd() *cobra.Command {
 	caddyCmd := &cobra.Command{
 		Use:   "caddy",
 		Short: "Fetch Caddy system logs over SSH",
-		Example: "  rascal logs caddy\n" +
-			"  rascal logs caddy --follow",
+		Long:  "Stream logs from the remote Caddy systemd service over SSH.",
+		Example: strings.TrimSpace(`
+rascal logs caddy
+rascal logs caddy --follow
+`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			host, _ := cmd.Flags().GetString("host")
 			sshUser, _ := cmd.Flags().GetString("ssh-user")
@@ -1067,8 +1136,11 @@ func (a *app) newLogsCmd() *cobra.Command {
 		Use:     "caddy-access",
 		Aliases: []string{"caddy-access-log"},
 		Short:   "Fetch Caddy access log file over SSH",
-		Example: "  rascal logs caddy-access\n" +
-			"  rascal logs caddy-access --follow",
+		Long:    "Stream `/var/log/caddy/rascal-access.log` over SSH.",
+		Example: strings.TrimSpace(`
+rascal logs caddy-access
+rascal logs caddy-access --follow
+`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			host, _ := cmd.Flags().GetString("host")
 			sshUser, _ := cmd.Flags().GetString("ssh-user")
@@ -1082,9 +1154,9 @@ func (a *app) newLogsCmd() *cobra.Command {
 
 	addServiceFlags := func(sub *cobra.Command) {
 		sub.Flags().String("host", "", "remote host (default: ssh_host/host from config)")
-		sub.Flags().String("ssh-user", "", "SSH user (default: configured ssh_user or root)")
+		sub.Flags().String("ssh-user", "", "SSH target user (default: configured ssh_user or root)")
 		sub.Flags().String("ssh-key", "", "SSH private key path")
-		sub.Flags().Int("ssh-port", 0, "SSH port (default: configured ssh_port or 22)")
+		sub.Flags().Int("ssh-port", 0, "SSH target port (default: configured ssh_port or 22)")
 		sub.Flags().Bool("follow", false, "follow logs continuously")
 		sub.Flags().Int("lines", 200, "number of recent lines to show first")
 	}
@@ -1460,17 +1532,22 @@ func (a *app) newDoctorCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&fix, "fix", false, "attempt safe auto-fixes (create config file)")
 	cmd.Flags().StringVar(&host, "host", "", "optional remote host to validate over SSH")
-	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH user for remote checks")
+	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH target user for remote checks")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path for remote checks")
-	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH port for remote checks")
+	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH target port for remote checks")
 	return cmd
 }
 
 func (a *app) newOpenCmd() *cobra.Command {
 	var printOnly bool
 	cmd := &cobra.Command{
-		Use:               "open <run_id>",
-		Short:             "Open PR URL for a run in your browser",
+		Use:   "open <run_id>",
+		Short: "Open PR URL for a run in your browser",
+		Long:  "Open the pull request URL produced by a run. Use `--print` for script-friendly output.",
+		Example: strings.TrimSpace(`
+rascal open run_abc123
+rascal open run_abc123 --print
+`),
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -1503,9 +1580,14 @@ func (a *app) newOpenCmd() *cobra.Command {
 func (a *app) newRetryCmd() *cobra.Command {
 	var debug bool
 	cmd := &cobra.Command{
-		Use:               "retry <run_id>",
-		Aliases:           []string{"rerun"},
-		Short:             "Create a new run from an existing run",
+		Use:     "retry <run_id>",
+		Aliases: []string{"rerun"},
+		Short:   "Create a new run from an existing run",
+		Long:    "Retry a failed or canceled run by creating a new run with the same task/repository inputs.",
+		Example: strings.TrimSpace(`
+rascal retry run_abc123
+rascal retry run_abc123 --debug=false
+`),
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -1546,14 +1628,18 @@ func (a *app) newRetryCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().BoolVar(&debug, "debug", true, "enable goose debug output (use --debug=false to disable)")
+	cmd.Flags().BoolVar(&debug, "debug", true, "stream detailed agent execution logs (use --debug=false to reduce verbosity)")
 	return cmd
 }
 
 func (a *app) newCancelCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "cancel <run_id>",
-		Short:             "Cancel a queued or running run",
+		Use:   "cancel <run_id>",
+		Short: "Cancel a queued or running run",
+		Long:  "Request cancellation for a queued or running run.",
+		Example: strings.TrimSpace(`
+rascal cancel run_abc123
+`),
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -1585,7 +1671,11 @@ func (a *app) newTaskCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "task <task_id>",
 		Short: "Show task status/details",
-		Args:  cobra.ExactArgs(1),
+		Long:  "Show task status, repository, PR number, and pending-input state.",
+		Example: strings.TrimSpace(`
+rascal task run_abc123
+`),
+		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if err := a.requireServerAuth(); err != nil {
 				return err
@@ -1606,9 +1696,17 @@ func (a *app) newTaskCmd() *cobra.Command {
 }
 
 func (a *app) newConfigCmd() *cobra.Command {
+	keys := configKeysHelpText()
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Inspect effective config and manage local file values",
+		Long: "Inspect effective config and manage values in the local config file.\n\n" +
+			"Supported keys:\n" + keys,
+		Example: strings.TrimSpace(`
+rascal config view
+rascal config get default_repo
+rascal config set default_repo OWNER/REPO
+`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
@@ -1616,6 +1714,11 @@ func (a *app) newConfigCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "view",
 		Short: "View effective config (flags/env/file)",
+		Long:  "Show effective config values and where key values were sourced from (flag/env/config/default).",
+		Example: strings.TrimSpace(`
+rascal config view
+rascal config view --output json
+`),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			view := map[string]any{
 				"config_path":         a.configPath,
@@ -1646,7 +1749,13 @@ func (a *app) newConfigCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "get <key>",
 		Short: "Get a config key from the local config file",
-		Args:  cobra.ExactArgs(1),
+		Long: "Get one value from the local config file.\n\n" +
+			"Supported keys:\n" + keys,
+		Example: strings.TrimSpace(`
+rascal config get server_url
+rascal config get default_repo
+`),
+		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := loadFileConfig(a.configPath)
 			if err != nil {
@@ -1675,7 +1784,7 @@ func (a *app) newConfigCmd() *cobra.Command {
 			case "ssh_port":
 				a.println("%d", cfg.SSHPort)
 			default:
-				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo|host|domain|transport|ssh_host|ssh_user|ssh_key|ssh_port"}
+				return &cliError{Code: exitInput, Message: "invalid key", Hint: configKeysHint()}
 			}
 			return nil
 		},
@@ -1683,7 +1792,13 @@ func (a *app) newConfigCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "set <key> <value>",
 		Short: "Set a config key in the local config file",
-		Args:  cobra.ExactArgs(2),
+		Long: "Set one value in the local config file.\n\n" +
+			"Supported keys:\n" + keys,
+		Example: strings.TrimSpace(`
+rascal config set default_repo OWNER/REPO
+rascal config set transport ssh
+`),
+		Args: cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := loadFileConfig(a.configPath)
 			if err != nil {
@@ -1722,7 +1837,7 @@ func (a *app) newConfigCmd() *cobra.Command {
 				}
 				cfg.SSHPort = port
 			default:
-				return &cliError{Code: exitInput, Message: "invalid key", Hint: "use server_url|api_token|default_repo|host|domain|transport|ssh_host|ssh_user|ssh_key|ssh_port"}
+				return &cliError{Code: exitInput, Message: "invalid key", Hint: configKeysHint()}
 			}
 			if err := config.SaveClientConfig(a.configPath, cfg); err != nil {
 				return &cliError{Code: exitConfig, Message: "failed to write config", Cause: err}
@@ -1748,6 +1863,11 @@ func (a *app) newAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Authentication helpers",
+		Long:  "Manage local and remote authentication secrets used by rascald and the CLI.",
+		Example: strings.TrimSpace(`
+rascal auth rotate --write-config
+rascal auth sync --host 203.0.113.10
+`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
@@ -1821,9 +1941,9 @@ func (a *app) newAuthCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&writeConfig, "write-config", false, "write generated API token to local config")
 	cmd.PersistentFlags().BoolVar(&showRaw, "show", false, "print raw token values")
 	cmd.PersistentFlags().StringVar(&host, "host", "", "existing server host for remote auth sync")
-	cmd.PersistentFlags().StringVar(&sshUser, "ssh-user", "root", "SSH user for remote auth sync")
+	cmd.PersistentFlags().StringVar(&sshUser, "ssh-user", "root", "SSH target user for remote auth sync")
 	cmd.PersistentFlags().StringVar(&sshKey, "ssh-key", "", "SSH private key path for remote auth sync")
-	cmd.PersistentFlags().IntVar(&sshPort, "ssh-port", 22, "SSH port for remote auth sync")
+	cmd.PersistentFlags().IntVar(&sshPort, "ssh-port", 22, "SSH target port for remote auth sync")
 	cmd.PersistentFlags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token for remote auth sync")
 	cmd.PersistentFlags().BoolVar(&restartSvc, "restart-service", true, "restart active rascal slot after remote auth sync")
 	return cmd
@@ -1890,9 +2010,9 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&host, "host", "", "existing server host")
-	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH user")
+	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH target user")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path")
-	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH port")
+	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH target port")
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token (defaults to current config)")
 	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token (or GITHUB_RUNTIME_TOKEN)")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
@@ -2533,6 +2653,29 @@ func firstPositive(values ...int) int {
 		}
 	}
 	return 0
+}
+
+func supportedConfigKeys() []string {
+	return []string{
+		"server_url",
+		"api_token",
+		"default_repo",
+		"host",
+		"domain",
+		"transport",
+		"ssh_host",
+		"ssh_user",
+		"ssh_key",
+		"ssh_port",
+	}
+}
+
+func configKeysHint() string {
+	return "use " + strings.Join(supportedConfigKeys(), "|")
+}
+
+func configKeysHelpText() string {
+	return strings.Join(supportedConfigKeys(), "\n")
 }
 
 func resolveTransport(configured, serverURL, sshHost string) string {
