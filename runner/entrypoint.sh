@@ -100,6 +100,40 @@ load_agent_commit_message() {
   commit_body="${body}"
 }
 
+resolve_git_identity() {
+  if [[ -z "${GH_TOKEN:-}" ]]; then
+    log "GH_TOKEN is required to resolve commit author"
+    return 1
+  fi
+
+  if ! command -v gh >/dev/null 2>&1; then
+    log "gh CLI is required to resolve commit author"
+    return 1
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    log "jq is required to resolve commit author"
+    return 1
+  fi
+
+  local user_json login
+  user_json="$(gh api user 2>/dev/null || true)"
+  if [[ -z "${user_json}" ]]; then
+    log "failed to query GitHub user for commit author"
+    return 1
+  fi
+
+  login="$(jq -r '.login // ""' <<<"${user_json}" 2>/dev/null || true)"
+  if [[ -z "${login}" || "${login}" == "null" ]]; then
+    log "failed to parse GitHub login from token owner"
+    return 1
+  fi
+
+  commit_author_name="${login}"
+  commit_author_email="${login}@users.noreply.github.com"
+  return 0
+}
+
 write_meta() {
   local exit_code="$1"
   local pr_number="$2"
@@ -156,6 +190,8 @@ pr_url=""
 head_sha=""
 commit_title="chore(rascal): $(task_subject)"
 commit_body=""
+commit_author_name=""
+commit_author_email=""
 
 cleanup_and_exit() {
   local code="$1"
@@ -170,6 +206,11 @@ cleanup_and_exit() {
 }
 
 trap 'cleanup_and_exit 1 "unexpected error (line ${LINENO})"' ERR
+
+if ! resolve_git_identity; then
+  cleanup_and_exit 1 "unable to resolve commit author from GH_TOKEN"
+fi
+log "using commit identity: ${commit_author_name} <${commit_author_email}>"
 
 if [[ -d "${REPO_DIR}/.git" ]]; then
   log "repo already present, refreshing"
@@ -221,7 +262,7 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     final_commit_body+=$'\n\n'
   fi
   final_commit_body+="Run: ${RASCAL_RUN_ID}"
-  git -c user.name="rascal-bot" -c user.email="rascal-bot@users.noreply.github.com" \
+  git -c user.name="${commit_author_name}" -c user.email="${commit_author_email}" \
     commit -m "${commit_title}" -m "${final_commit_body}" || true
 fi
 
