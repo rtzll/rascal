@@ -25,6 +25,7 @@ Logs:
 Integrations:
   infra       Infrastructure operations (provisioning/deploy)
   repo        Repository webhook/label operations
+  webhook     Webhook helpers
 
 Utilities:
   completion  Generate shell completion scripts
