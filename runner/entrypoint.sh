@@ -9,6 +9,7 @@ GOOSE_LOG="${META_DIR}/goose.ndjson"
 META_JSON="${META_DIR}/meta.json"
 INSTRUCTIONS_FILE="${META_DIR}/instructions.md"
 COMMIT_MESSAGE_FILE="${META_DIR}/commit_message.txt"
+RUN_START_EPOCH="$(date +%s)"
 
 : "${RASCAL_RUN_ID:?RASCAL_RUN_ID is required}"
 : "${RASCAL_TASK_ID:?RASCAL_TASK_ID is required}"
@@ -24,6 +25,23 @@ mkdir -p "${META_DIR}" "${WORK_ROOT}" "${META_DIR}/goose" "${META_DIR}/codex"
 log() {
   local msg="$1"
   printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$msg"
+}
+
+format_duration() {
+  local total_seconds="$1"
+  local hours=$((total_seconds / 3600))
+  local minutes=$(((total_seconds % 3600) / 60))
+  local seconds=$((total_seconds % 60))
+  local output=""
+
+  if ((hours > 0)); then
+    output+="${hours}h "
+  fi
+  if ((hours > 0 || minutes > 0)); then
+    output+="${minutes}m "
+  fi
+  output+="${seconds}s"
+  printf '%s' "${output% }"
 }
 
 task_subject() {
@@ -231,6 +249,9 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
       if [[ "${RASCAL_ISSUE_NUMBER}" =~ ^[0-9]+$ ]] && [[ "${RASCAL_ISSUE_NUMBER}" -gt 0 ]]; then
         pr_body="${pr_body}"$'\n\n'"Closes #${RASCAL_ISSUE_NUMBER}"
       fi
+      run_duration_seconds="$(( $(date +%s) - RUN_START_EPOCH ))"
+      run_duration="$(format_duration "${run_duration_seconds}")"
+      pr_body="${pr_body}"$'\n\n---\n\n'"Rascal run took ${run_duration}"
       if ! pr_create_output="$(gh pr create \
         --repo "${RASCAL_REPO}" \
         --base "${RASCAL_BASE_BRANCH}" \
