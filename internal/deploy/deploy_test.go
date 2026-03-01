@@ -1,6 +1,9 @@
 package deploy
 
 import (
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -63,4 +66,178 @@ func TestRenderCaddyfileVariants(t *testing.T) {
 	if !strings.Contains(domain, "example.com {") {
 		t.Fatalf("domain caddyfile missing domain block:\n%s", domain)
 	}
+}
+
+func TestExecuteRollsBackWhenCaddyReloadFails(t *testing.T) {
+	logDir := setupFakeDeployCommands(t, "caddy_reload")
+
+	err := Execute(testDeployConfig())
+	if err == nil || !strings.Contains(err.Error(), "failed to reload caddy with new upstream") {
+		t.Fatalf("expected caddy reload failure, got: %v", err)
+	}
+
+	scripts := readCapturedSSHScripts(t, logDir)
+	if !containsScript(scripts, "systemctl enable caddy --now") {
+		t.Fatalf("expected cutover caddy reload script, got %d scripts", len(scripts))
+	}
+	if !containsScript(scripts, "EOF_ROLLBACK") {
+		t.Fatalf("expected rollback script, got %d scripts", len(scripts))
+	}
+}
+
+func TestExecuteRollsBackWhenProxyReadinessFails(t *testing.T) {
+	logDir := setupFakeDeployCommands(t, "proxy_readiness")
+
+	err := Execute(testDeployConfig())
+	if err == nil || !strings.Contains(err.Error(), "proxy readiness check failed on caddy") {
+		t.Fatalf("expected proxy readiness failure, got: %v", err)
+	}
+
+	scripts := readCapturedSSHScripts(t, logDir)
+	if !containsScript(scripts, "proxy readiness check failed on caddy; rolling back") {
+		t.Fatalf("expected proxy readiness probe script, got %d scripts", len(scripts))
+	}
+	if !containsScript(scripts, "EOF_ROLLBACK") {
+		t.Fatalf("expected rollback script, got %d scripts", len(scripts))
+	}
+}
+
+func testDeployConfig() Config {
+	return Config{
+		Host:               "example-host",
+		SSHUser:            "root",
+		SSHPort:            22,
+		Domain:             "rascal.example.com",
+		RunnerImage:        "rascal-runner:latest",
+		ServerListenAddr:   ":8080",
+		ServerDataDir:      "/var/lib/rascal",
+		ServerStatePath:    "/var/lib/rascal/state.db",
+		ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
+		GOARCH:             "amd64",
+		UploadEnvFile:      false,
+		UploadCodexAuth:    false,
+	}
+}
+
+func setupFakeDeployCommands(t *testing.T, failMode string) string {
+	t.Helper()
+
+	binDir := t.TempDir()
+	logDir := t.TempDir()
+	t.Setenv("RASCAL_TEST_LOG_DIR", logDir)
+	t.Setenv("RASCAL_TEST_FAIL_MODE", failMode)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	writeExe(t, filepath.Join(binDir, "go"), `#!/usr/bin/env bash
+set -eu
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    out="$arg"
+    break
+  fi
+  prev="$arg"
+done
+if [ -n "$out" ]; then
+  mkdir -p "$(dirname "$out")"
+  : > "$out"
+fi
+exit 0
+`)
+
+	writeExe(t, filepath.Join(binDir, "tar"), `#!/usr/bin/env bash
+set -eu
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-czf" ]; then
+    out="$arg"
+    break
+  fi
+  prev="$arg"
+done
+if [ -n "$out" ]; then
+  mkdir -p "$(dirname "$out")"
+  : > "$out"
+fi
+exit 0
+`)
+
+	writeExe(t, filepath.Join(binDir, "scp"), `#!/usr/bin/env bash
+set -eu
+exit 0
+`)
+
+	writeExe(t, filepath.Join(binDir, "ssh"), `#!/usr/bin/env bash
+set -eu
+log_dir="${RASCAL_TEST_LOG_DIR:?}"
+count_file="$log_dir/ssh_count"
+n=0
+if [ -f "$count_file" ]; then
+  n="$(cat "$count_file")"
+fi
+n=$((n + 1))
+echo "$n" > "$count_file"
+script_file="$log_dir/ssh_script_${n}.sh"
+cat > "$script_file"
+
+if grep -Fq "slot=''" "$script_file" && grep -Fq "printf 'blue'" "$script_file"; then
+  printf 'blue'
+  exit 0
+fi
+
+case "${RASCAL_TEST_FAIL_MODE:-}" in
+  caddy_reload)
+    if grep -Fq "systemctl enable caddy --now" "$script_file"; then
+      echo "forced caddy reload failure" >&2
+      exit 1
+    fi
+    ;;
+  proxy_readiness)
+    if grep -Fq "proxy readiness check failed on caddy; rolling back" "$script_file"; then
+      echo "forced proxy readiness failure" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+exit 0
+`)
+
+	return logDir
+}
+
+func writeExe(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatalf("write fake executable %s: %v", path, err)
+	}
+}
+
+func readCapturedSSHScripts(t *testing.T, logDir string) []string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(logDir, "ssh_script_*.sh"))
+	if err != nil {
+		t.Fatalf("glob scripts: %v", err)
+	}
+	sort.Strings(files)
+	out := make([]string, 0, len(files))
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read captured script %s: %v", f, err)
+		}
+		out = append(out, string(b))
+	}
+	return out
+}
+
+func containsScript(scripts []string, needle string) bool {
+	for _, script := range scripts {
+		if strings.Contains(script, needle) {
+			return true
+		}
+	}
+	return false
 }
