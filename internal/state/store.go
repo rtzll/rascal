@@ -427,6 +427,77 @@ func (s *Store) ClaimRunStart(runID string) (Run, bool, error) {
 	return fromDBRun(row), rows > 0, nil
 }
 
+func (s *Store) UpsertRunLease(runID, ownerID string, ttl time.Duration) error {
+	runID = strings.TrimSpace(runID)
+	ownerID = strings.TrimSpace(ownerID)
+	if runID == "" {
+		return fmt.Errorf("run id is required")
+	}
+	if ownerID == "" {
+		return fmt.Errorf("owner id is required")
+	}
+	if ttl <= 0 {
+		ttl = 90 * time.Second
+	}
+	now := time.Now().UTC()
+	return s.q.UpsertRunLease(context.Background(), sqlitegen.UpsertRunLeaseParams{
+		RunID:          runID,
+		OwnerID:        ownerID,
+		HeartbeatAt:    now.UnixNano(),
+		LeaseExpiresAt: now.Add(ttl).UnixNano(),
+	})
+}
+
+func (s *Store) RenewRunLease(runID, ownerID string, ttl time.Duration) (bool, error) {
+	runID = strings.TrimSpace(runID)
+	ownerID = strings.TrimSpace(ownerID)
+	if runID == "" {
+		return false, fmt.Errorf("run id is required")
+	}
+	if ownerID == "" {
+		return false, fmt.Errorf("owner id is required")
+	}
+	if ttl <= 0 {
+		ttl = 90 * time.Second
+	}
+	now := time.Now().UTC()
+	rows, err := s.q.RenewRunLease(context.Background(), sqlitegen.RenewRunLeaseParams{
+		HeartbeatAt:    now.UnixNano(),
+		LeaseExpiresAt: now.Add(ttl).UnixNano(),
+		RunID:          runID,
+		OwnerID:        ownerID,
+	})
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+func (s *Store) DeleteRunLease(runID string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil
+	}
+	_, err := s.q.DeleteRunLease(context.Background(), runID)
+	return err
+}
+
+func (s *Store) GetRunLease(runID string) (RunLease, bool) {
+	row, err := s.q.GetRunLease(context.Background(), strings.TrimSpace(runID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RunLease{}, false
+		}
+		return RunLease{}, false
+	}
+	return RunLease{
+		RunID:          row.RunID,
+		OwnerID:        row.OwnerID,
+		HeartbeatAt:    time.Unix(0, row.HeartbeatAt).UTC(),
+		LeaseExpiresAt: time.Unix(0, row.LeaseExpiresAt).UTC(),
+	}, true
+}
+
 func (s *Store) ActiveRunForTask(taskID string) (Run, bool) {
 	row, err := s.q.ActiveRunForTask(context.Background(), strings.TrimSpace(taskID))
 	if err != nil {

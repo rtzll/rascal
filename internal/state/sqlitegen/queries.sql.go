@@ -234,6 +234,19 @@ func (q *Queries) DeleteOldestDeliveries(ctx context.Context, limit int64) error
 	return err
 }
 
+const deleteRunLease = `-- name: DeleteRunLease :execrows
+DELETE FROM run_leases
+WHERE run_id = ?
+`
+
+func (q *Queries) DeleteRunLease(ctx context.Context, runID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteRunLease, runID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deliverySeen = `-- name: DeliverySeen :one
 SELECT EXISTS(SELECT 1 FROM deliveries WHERE id = ?)
 `
@@ -304,6 +317,24 @@ func (q *Queries) GetRun(ctx context.Context, id string) (Run, error) {
 		&i.UpdatedAt,
 		&i.StartedAt,
 		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const getRunLease = `-- name: GetRunLease :one
+SELECT run_id, owner_id, heartbeat_at, lease_expires_at
+FROM run_leases
+WHERE run_id = ?
+`
+
+func (q *Queries) GetRunLease(ctx context.Context, runID string) (RunLease, error) {
+	row := q.db.QueryRowContext(ctx, getRunLease, runID)
+	var i RunLease
+	err := row.Scan(
+		&i.RunID,
+		&i.OwnerID,
+		&i.HeartbeatAt,
+		&i.LeaseExpiresAt,
 	)
 	return i, err
 }
@@ -595,6 +626,34 @@ func (q *Queries) ReleaseDeliveryClaim(ctx context.Context, arg ReleaseDeliveryC
 	return result.RowsAffected()
 }
 
+const renewRunLease = `-- name: RenewRunLease :execrows
+UPDATE run_leases
+SET
+  heartbeat_at = ?,
+  lease_expires_at = ?
+WHERE run_id = ? AND owner_id = ?
+`
+
+type RenewRunLeaseParams struct {
+	HeartbeatAt    int64  `json:"heartbeat_at"`
+	LeaseExpiresAt int64  `json:"lease_expires_at"`
+	RunID          string `json:"run_id"`
+	OwnerID        string `json:"owner_id"`
+}
+
+func (q *Queries) RenewRunLease(ctx context.Context, arg RenewRunLeaseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renewRunLease,
+		arg.HeartbeatAt,
+		arg.LeaseExpiresAt,
+		arg.RunID,
+		arg.OwnerID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setTaskLastRun = `-- name: SetTaskLastRun :execrows
 UPDATE tasks
 SET
@@ -757,6 +816,32 @@ func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (int64, er
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const upsertRunLease = `-- name: UpsertRunLease :exec
+INSERT INTO run_leases (run_id, owner_id, heartbeat_at, lease_expires_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET
+  owner_id = excluded.owner_id,
+  heartbeat_at = excluded.heartbeat_at,
+  lease_expires_at = excluded.lease_expires_at
+`
+
+type UpsertRunLeaseParams struct {
+	RunID          string `json:"run_id"`
+	OwnerID        string `json:"owner_id"`
+	HeartbeatAt    int64  `json:"heartbeat_at"`
+	LeaseExpiresAt int64  `json:"lease_expires_at"`
+}
+
+func (q *Queries) UpsertRunLease(ctx context.Context, arg UpsertRunLeaseParams) error {
+	_, err := q.db.ExecContext(ctx, upsertRunLease,
+		arg.RunID,
+		arg.OwnerID,
+		arg.HeartbeatAt,
+		arg.LeaseExpiresAt,
+	)
+	return err
 }
 
 const upsertTask = `-- name: UpsertTask :one

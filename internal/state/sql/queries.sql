@@ -159,6 +159,30 @@ WHERE id IN (
   LIMIT -1 OFFSET ?
 );
 
+-- name: UpsertRunLease :exec
+INSERT INTO run_leases (run_id, owner_id, heartbeat_at, lease_expires_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET
+  owner_id = excluded.owner_id,
+  heartbeat_at = excluded.heartbeat_at,
+  lease_expires_at = excluded.lease_expires_at;
+
+-- name: RenewRunLease :execrows
+UPDATE run_leases
+SET
+  heartbeat_at = ?,
+  lease_expires_at = ?
+WHERE run_id = ? AND owner_id = ?;
+
+-- name: DeleteRunLease :execrows
+DELETE FROM run_leases
+WHERE run_id = ?;
+
+-- name: GetRunLease :one
+SELECT run_id, owner_id, heartbeat_at, lease_expires_at
+FROM run_leases
+WHERE run_id = ?;
+
 -- name: DeliverySeen :one
 SELECT EXISTS(SELECT 1 FROM deliveries WHERE id = ?);
 

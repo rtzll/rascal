@@ -43,6 +43,13 @@ type Run struct {
 	CompletedAt sql.NullInt64 `json:"completed_at"`
 }
 
+type RunLease struct {
+	RunID          string `json:"run_id"`
+	OwnerID        string `json:"owner_id"`
+	HeartbeatAt    int64  `json:"heartbeat_at"`
+	LeaseExpiresAt int64  `json:"lease_expires_at"`
+}
+
 type Task struct {
 	ID           string `json:"id"`
 	Repo         string `json:"repo"`

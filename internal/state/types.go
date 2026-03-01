@@ -58,6 +58,13 @@ type Task struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type RunLease struct {
+	RunID          string    `json:"run_id"`
+	OwnerID        string    `json:"owner_id"`
+	HeartbeatAt    time.Time `json:"heartbeat_at"`
+	LeaseExpiresAt time.Time `json:"lease_expires_at"`
+}
+
 type CreateRunInput struct {
 	ID          string
 	TaskID      string

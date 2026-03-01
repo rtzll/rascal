@@ -3,6 +3,7 @@ package state
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestStoreRunAndTaskLifecycle(t *testing.T) {
@@ -191,5 +192,44 @@ func TestStoreClaimRunStartAtomic(t *testing.T) {
 		t.Fatalf("claim run 2: %v", err)
 	} else if claimed {
 		t.Fatalf("expected run 2 claim to fail while task has running run, got status=%s", run.Status)
+	}
+}
+
+func TestStoreRunLeaseLifecycle(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	if err := store.UpsertRunLease("run_lease_1", "instance-a", 2*time.Minute); err != nil {
+		t.Fatalf("upsert run lease: %v", err)
+	}
+	lease, ok := store.GetRunLease("run_lease_1")
+	if !ok {
+		t.Fatal("expected run lease to exist")
+	}
+	if lease.OwnerID != "instance-a" {
+		t.Fatalf("unexpected owner id: %s", lease.OwnerID)
+	}
+
+	if ok, err := store.RenewRunLease("run_lease_1", "instance-a", 2*time.Minute); err != nil {
+		t.Fatalf("renew run lease: %v", err)
+	} else if !ok {
+		t.Fatal("expected renew by owner to succeed")
+	}
+
+	if ok, err := store.RenewRunLease("run_lease_1", "instance-b", 2*time.Minute); err != nil {
+		t.Fatalf("renew run lease with wrong owner: %v", err)
+	} else if ok {
+		t.Fatal("expected renew by non-owner to fail")
+	}
+
+	if err := store.DeleteRunLease("run_lease_1"); err != nil {
+		t.Fatalf("delete run lease: %v", err)
+	}
+	if _, ok := store.GetRunLease("run_lease_1"); ok {
+		t.Fatal("expected run lease to be deleted")
 	}
 }

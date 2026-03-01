@@ -39,6 +39,15 @@ CREATE TABLE runs (
 CREATE INDEX idx_runs_status_seq ON runs (status, seq DESC);
 CREATE INDEX idx_runs_task_seq ON runs (task_id, seq DESC);
 
+CREATE TABLE run_leases (
+  run_id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  heartbeat_at INTEGER NOT NULL,
+  lease_expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_run_leases_expires ON run_leases (lease_expires_at ASC);
+
 CREATE TABLE deliveries (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL DEFAULT 'processing',

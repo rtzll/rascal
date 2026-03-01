@@ -32,6 +32,8 @@ import (
 var errTaskCompleted = errors.New("task is already completed")
 var errServerDraining = errors.New("orchestrator is draining")
 
+const runLeaseTTL = 90 * time.Second
+
 type server struct {
 	cfg      config.ServerConfig
 	store    *state.Store
@@ -873,6 +875,17 @@ func (s *server) executeRun(runID string) {
 	}
 	s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionEyes)
 
+	if err := s.store.UpsertRunLease(run.ID, s.instanceID, runLeaseTTL); err != nil {
+		updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("claim run lease: %v", err))
+		s.finishRun(updated)
+		return
+	}
+	defer func() {
+		if err := s.store.DeleteRunLease(run.ID); err != nil {
+			log.Printf("failed to delete run lease for %s: %v", run.ID, err)
+		}
+	}()
+
 	spec := runner.Spec{
 		RunID:       run.ID,
 		TaskID:      run.TaskID,
@@ -893,7 +906,15 @@ func (s *server) executeRun(runID string) {
 	s.runCancels[runID] = cancel
 	s.mu.Unlock()
 
+	leaseDone := make(chan struct{})
+	go func() {
+		defer close(leaseDone)
+		s.heartbeatRunLease(ctx, run.ID, cancel)
+	}()
+
 	result, err := s.runLauncherWithRetry(ctx, spec)
+	cancel()
+	<-leaseDone
 
 	s.mu.Lock()
 	delete(s.runCancels, runID)
@@ -966,6 +987,32 @@ func (s *server) executeRun(runID string) {
 		_ = s.store.SetTaskPR(updated.TaskID, updated.Repo, updated.PRNumber)
 	}
 	s.finishRun(updated)
+}
+
+func (s *server) heartbeatRunLease(ctx context.Context, runID string, cancel context.CancelFunc) {
+	interval := runLeaseTTL / 3
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			ok, err := s.store.RenewRunLease(runID, s.instanceID, runLeaseTTL)
+			if err != nil {
+				log.Printf("run %s lease heartbeat failed: %v", runID, err)
+				continue
+			}
+			if !ok {
+				log.Printf("run %s lease ownership lost; canceling run context", runID)
+				cancel()
+				return
+			}
+		}
+	}
 }
 
 func (s *server) setRunStatusWithFallback(run state.Run, status state.RunStatus, errText string) state.Run {

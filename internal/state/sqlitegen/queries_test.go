@@ -51,6 +51,15 @@ CREATE TABLE runs (
 CREATE INDEX idx_runs_status_seq ON runs (status, seq DESC);
 CREATE INDEX idx_runs_task_seq ON runs (task_id, seq DESC);
 
+CREATE TABLE run_leases (
+  run_id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  heartbeat_at INTEGER NOT NULL,
+  lease_expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_run_leases_expires ON run_leases (lease_expires_at ASC);
+
 CREATE TABLE deliveries (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL DEFAULT 'processing',
@@ -308,6 +317,47 @@ func TestQueriesCoverage(t *testing.T) {
 	}
 	if len(runs) != 1 {
 		t.Fatalf("expected 1 run after trim, got %d", len(runs))
+	}
+
+	if err := q.UpsertRunLease(ctx, UpsertRunLeaseParams{
+		RunID:          "run_lease_1",
+		OwnerID:        "instance-a",
+		HeartbeatAt:    later + 50,
+		LeaseExpiresAt: later + 80,
+	}); err != nil {
+		t.Fatalf("UpsertRunLease: %v", err)
+	}
+	if rows, err := q.RenewRunLease(ctx, RenewRunLeaseParams{
+		HeartbeatAt:    later + 55,
+		LeaseExpiresAt: later + 85,
+		RunID:          "run_lease_1",
+		OwnerID:        "instance-a",
+	}); err != nil {
+		t.Fatalf("RenewRunLease owner: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected RenewRunLease rows=1 for owner, got %d", rows)
+	}
+	if rows, err := q.RenewRunLease(ctx, RenewRunLeaseParams{
+		HeartbeatAt:    later + 56,
+		LeaseExpiresAt: later + 86,
+		RunID:          "run_lease_1",
+		OwnerID:        "instance-b",
+	}); err != nil {
+		t.Fatalf("RenewRunLease non-owner: %v", err)
+	} else if rows != 0 {
+		t.Fatalf("expected RenewRunLease rows=0 for non-owner, got %d", rows)
+	}
+	leaseRow, err := q.GetRunLease(ctx, "run_lease_1")
+	if err != nil {
+		t.Fatalf("GetRunLease: %v", err)
+	}
+	if leaseRow.OwnerID != "instance-a" {
+		t.Fatalf("unexpected run lease owner: %s", leaseRow.OwnerID)
+	}
+	if rows, err := q.DeleteRunLease(ctx, "run_lease_1"); err != nil {
+		t.Fatalf("DeleteRunLease: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected DeleteRunLease rows=1, got %d", rows)
 	}
 
 	seen, err := q.DeliverySeen(ctx, "delivery_1")
