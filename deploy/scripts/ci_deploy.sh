@@ -283,7 +283,15 @@ EOF_ROLLBACK
     fi
   fi
 else
-  if ! check_http "http://127.0.0.1:8080/readyz"; then
+  healthy=0
+  for _ in $(seq 1 30); do
+    if check_http "http://127.0.0.1:8080/readyz"; then
+      healthy=1
+      break
+    fi
+    sleep 1
+  done
+  if [ "$healthy" -ne 1 ]; then
     echo "proxy readiness check failed on caddy; rolling back" >&2
     cat >/etc/caddy/rascal-upstream.caddy <<EOF_ROLLBACK
 reverse_proxy 127.0.0.1:${active_port}

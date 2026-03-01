@@ -2340,7 +2340,7 @@ func remoteBlueGreenDeployScript(cfg deployConfig) string {
 		installCaddy = "install -m 0644 /tmp/rascal-bootstrap/Caddyfile /etc/caddy/Caddyfile"
 	}
 	preCaddySwitch := ""
-	postSwitchHealthCheck := fmt.Sprintf("if ! check_http \"http://127.0.0.1:%d/readyz\"; then\n  echo \"proxy readiness check failed on caddy; rolling back\" >&2\n  cat >/etc/caddy/rascal-upstream.caddy <<EOF_ROLLBACK\nreverse_proxy 127.0.0.1:${active_port}\nEOF_ROLLBACK\n  (systemctl reload caddy || systemctl restart caddy) || true\n  systemctl stop \"rascal@${inactive_slot}\" || true\n  systemctl restart \"rascal@${active_slot}\" || true\n  exit 1\nfi", rascalProxyPort)
+	postSwitchHealthCheck := fmt.Sprintf("healthy=0\nfor _ in $(seq 1 30); do\n  if check_http \"http://127.0.0.1:%d/readyz\"; then\n    healthy=1\n    break\n  fi\n  sleep 1\ndone\nif [ \"$healthy\" -ne 1 ]; then\n  echo \"proxy readiness check failed on caddy; rolling back\" >&2\n  cat >/etc/caddy/rascal-upstream.caddy <<EOF_ROLLBACK\nreverse_proxy 127.0.0.1:${active_port}\nEOF_ROLLBACK\n  (systemctl reload caddy || systemctl restart caddy) || true\n  systemctl stop \"rascal@${inactive_slot}\" || true\n  systemctl restart \"rascal@${active_slot}\" || true\n  exit 1\nfi", rascalProxyPort)
 	if domain == "" {
 		preCaddySwitch = strings.TrimSpace(`
 if systemctl is-active --quiet rascal; then
