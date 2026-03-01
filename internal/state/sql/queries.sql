@@ -1,46 +1,67 @@
--- name: UpsertTask :one
+-- name: UpsertTask :exec
 INSERT INTO tasks (
   id,
   repo,
   issue_number,
   pr_number,
   status,
-  pending_input,
   last_run_id,
   created_at,
   updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   repo = excluded.repo,
   issue_number = CASE WHEN excluded.issue_number > 0 THEN excluded.issue_number ELSE tasks.issue_number END,
   pr_number = CASE WHEN excluded.pr_number > 0 THEN excluded.pr_number ELSE tasks.pr_number END,
-  updated_at = excluded.updated_at
-RETURNING id, repo, issue_number, pr_number, status, pending_input, last_run_id, created_at, updated_at;
+  updated_at = excluded.updated_at;
 
 -- name: GetTask :one
-SELECT id, repo, issue_number, pr_number, status, pending_input, last_run_id, created_at, updated_at
+SELECT
+  tasks.id,
+  tasks.repo,
+  tasks.issue_number,
+  tasks.pr_number,
+  tasks.status,
+  EXISTS(
+    SELECT 1
+    FROM runs
+    WHERE runs.task_id = tasks.id
+      AND runs.status = 'queued'
+  ) AS pending_input,
+  tasks.last_run_id,
+  tasks.created_at,
+  tasks.updated_at
 FROM tasks
-WHERE id = ?;
+WHERE tasks.id = ?;
 
 -- name: FindTaskByPR :one
-SELECT id, repo, issue_number, pr_number, status, pending_input, last_run_id, created_at, updated_at
+SELECT
+  tasks.id,
+  tasks.repo,
+  tasks.issue_number,
+  tasks.pr_number,
+  tasks.status,
+  EXISTS(
+    SELECT 1
+    FROM runs
+    WHERE runs.task_id = tasks.id
+      AND runs.status = 'queued'
+  ) AS pending_input,
+  tasks.last_run_id,
+  tasks.created_at,
+  tasks.updated_at
 FROM tasks
-WHERE repo = ? AND pr_number = ?;
+WHERE tasks.repo = ? AND tasks.pr_number = ?;
 
 -- name: SetTaskPR :execrows
 UPDATE tasks
 SET pr_number = ?, updated_at = ?
 WHERE id = ?;
 
--- name: SetTaskPendingInput :execrows
-UPDATE tasks
-SET pending_input = ?, updated_at = ?
-WHERE id = ?;
-
 -- name: MarkTaskCompleted :execrows
 UPDATE tasks
-SET status = 'completed', pending_input = 0, updated_at = ?
+SET status = 'completed', updated_at = ?
 WHERE id = ?;
 
 -- name: SetTaskLastRun :execrows
@@ -254,14 +275,6 @@ RETURNING
   updated_at,
   started_at,
   completed_at;
-
--- name: TaskHasQueuedRuns :one
-SELECT EXISTS(
-  SELECT 1
-  FROM runs
-  WHERE task_id = ?
-    AND status = 'queued'
-);
 
 -- name: TrimOldRuns :exec
 DELETE FROM runs

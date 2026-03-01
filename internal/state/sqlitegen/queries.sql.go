@@ -461,9 +461,23 @@ func (q *Queries) DeliverySeen(ctx context.Context, id string) (int64, error) {
 }
 
 const findTaskByPR = `-- name: FindTaskByPR :one
-SELECT id, repo, issue_number, pr_number, status, pending_input, last_run_id, created_at, updated_at
+SELECT
+  tasks.id,
+  tasks.repo,
+  tasks.issue_number,
+  tasks.pr_number,
+  tasks.status,
+  EXISTS(
+    SELECT 1
+    FROM runs
+    WHERE runs.task_id = tasks.id
+      AND runs.status = 'queued'
+  ) AS pending_input,
+  tasks.last_run_id,
+  tasks.created_at,
+  tasks.updated_at
 FROM tasks
-WHERE repo = ? AND pr_number = ?
+WHERE tasks.repo = ? AND tasks.pr_number = ?
 `
 
 type FindTaskByPRParams struct {
@@ -471,9 +485,21 @@ type FindTaskByPRParams struct {
 	PrNumber int64  `json:"pr_number"`
 }
 
-func (q *Queries) FindTaskByPR(ctx context.Context, arg FindTaskByPRParams) (Task, error) {
+type FindTaskByPRRow struct {
+	ID           string `json:"id"`
+	Repo         string `json:"repo"`
+	IssueNumber  int64  `json:"issue_number"`
+	PrNumber     int64  `json:"pr_number"`
+	Status       string `json:"status"`
+	PendingInput int64  `json:"pending_input"`
+	LastRunID    string `json:"last_run_id"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+}
+
+func (q *Queries) FindTaskByPR(ctx context.Context, arg FindTaskByPRParams) (FindTaskByPRRow, error) {
 	row := q.db.QueryRowContext(ctx, findTaskByPR, arg.Repo, arg.PrNumber)
-	var i Task
+	var i FindTaskByPRRow
 	err := row.Scan(
 		&i.ID,
 		&i.Repo,
@@ -560,14 +586,40 @@ func (q *Queries) GetRunLease(ctx context.Context, runID string) (RunLease, erro
 }
 
 const getTask = `-- name: GetTask :one
-SELECT id, repo, issue_number, pr_number, status, pending_input, last_run_id, created_at, updated_at
+SELECT
+  tasks.id,
+  tasks.repo,
+  tasks.issue_number,
+  tasks.pr_number,
+  tasks.status,
+  EXISTS(
+    SELECT 1
+    FROM runs
+    WHERE runs.task_id = tasks.id
+      AND runs.status = 'queued'
+  ) AS pending_input,
+  tasks.last_run_id,
+  tasks.created_at,
+  tasks.updated_at
 FROM tasks
-WHERE id = ?
+WHERE tasks.id = ?
 `
 
-func (q *Queries) GetTask(ctx context.Context, id string) (Task, error) {
+type GetTaskRow struct {
+	ID           string `json:"id"`
+	Repo         string `json:"repo"`
+	IssueNumber  int64  `json:"issue_number"`
+	PrNumber     int64  `json:"pr_number"`
+	Status       string `json:"status"`
+	PendingInput int64  `json:"pending_input"`
+	LastRunID    string `json:"last_run_id"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+}
+
+func (q *Queries) GetTask(ctx context.Context, id string) (GetTaskRow, error) {
 	row := q.db.QueryRowContext(ctx, getTask, id)
-	var i Task
+	var i GetTaskRow
 	err := row.Scan(
 		&i.ID,
 		&i.Repo,
@@ -786,7 +838,7 @@ func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]Run, error) {
 
 const markTaskCompleted = `-- name: MarkTaskCompleted :execrows
 UPDATE tasks
-SET status = 'completed', pending_input = 0, updated_at = ?
+SET status = 'completed', updated_at = ?
 WHERE id = ?
 `
 
@@ -924,42 +976,6 @@ func (q *Queries) SetTaskPR(ctx context.Context, arg SetTaskPRParams) (int64, er
 		return 0, err
 	}
 	return result.RowsAffected()
-}
-
-const setTaskPendingInput = `-- name: SetTaskPendingInput :execrows
-UPDATE tasks
-SET pending_input = ?, updated_at = ?
-WHERE id = ?
-`
-
-type SetTaskPendingInputParams struct {
-	PendingInput bool   `json:"pending_input"`
-	UpdatedAt    int64  `json:"updated_at"`
-	ID           string `json:"id"`
-}
-
-func (q *Queries) SetTaskPendingInput(ctx context.Context, arg SetTaskPendingInputParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setTaskPendingInput, arg.PendingInput, arg.UpdatedAt, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const taskHasQueuedRuns = `-- name: TaskHasQueuedRuns :one
-SELECT EXISTS(
-  SELECT 1
-  FROM runs
-  WHERE task_id = ?
-    AND status = 'queued'
-)
-`
-
-func (q *Queries) TaskHasQueuedRuns(ctx context.Context, taskID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, taskHasQueuedRuns, taskID)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
 }
 
 const trimOldRuns = `-- name: TrimOldRuns :exec
@@ -1106,62 +1122,46 @@ func (q *Queries) UpsertRunLease(ctx context.Context, arg UpsertRunLeaseParams) 
 	return err
 }
 
-const upsertTask = `-- name: UpsertTask :one
+const upsertTask = `-- name: UpsertTask :exec
 INSERT INTO tasks (
   id,
   repo,
   issue_number,
   pr_number,
   status,
-  pending_input,
   last_run_id,
   created_at,
   updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   repo = excluded.repo,
   issue_number = CASE WHEN excluded.issue_number > 0 THEN excluded.issue_number ELSE tasks.issue_number END,
   pr_number = CASE WHEN excluded.pr_number > 0 THEN excluded.pr_number ELSE tasks.pr_number END,
   updated_at = excluded.updated_at
-RETURNING id, repo, issue_number, pr_number, status, pending_input, last_run_id, created_at, updated_at
 `
 
 type UpsertTaskParams struct {
-	ID           string `json:"id"`
-	Repo         string `json:"repo"`
-	IssueNumber  int64  `json:"issue_number"`
-	PrNumber     int64  `json:"pr_number"`
-	Status       string `json:"status"`
-	PendingInput bool   `json:"pending_input"`
-	LastRunID    string `json:"last_run_id"`
-	CreatedAt    int64  `json:"created_at"`
-	UpdatedAt    int64  `json:"updated_at"`
+	ID          string `json:"id"`
+	Repo        string `json:"repo"`
+	IssueNumber int64  `json:"issue_number"`
+	PrNumber    int64  `json:"pr_number"`
+	Status      string `json:"status"`
+	LastRunID   string `json:"last_run_id"`
+	CreatedAt   int64  `json:"created_at"`
+	UpdatedAt   int64  `json:"updated_at"`
 }
 
-func (q *Queries) UpsertTask(ctx context.Context, arg UpsertTaskParams) (Task, error) {
-	row := q.db.QueryRowContext(ctx, upsertTask,
+func (q *Queries) UpsertTask(ctx context.Context, arg UpsertTaskParams) error {
+	_, err := q.db.ExecContext(ctx, upsertTask,
 		arg.ID,
 		arg.Repo,
 		arg.IssueNumber,
 		arg.PrNumber,
 		arg.Status,
-		arg.PendingInput,
 		arg.LastRunID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
-	var i Task
-	err := row.Scan(
-		&i.ID,
-		&i.Repo,
-		&i.IssueNumber,
-		&i.PrNumber,
-		&i.Status,
-		&i.PendingInput,
-		&i.LastRunID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+	return err
 }

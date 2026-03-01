@@ -16,7 +16,6 @@ CREATE TABLE tasks (
   issue_number INTEGER NOT NULL DEFAULT 0,
   pr_number INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'open',
-  pending_input BOOLEAN NOT NULL DEFAULT 0,
   last_run_id TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -109,22 +108,18 @@ func TestQueriesCoverage(t *testing.T) {
 	now := int64(1_700_000_000_000_000_000)
 	later := now + 10
 
-	upserted, err := q.UpsertTask(ctx, UpsertTaskParams{
-		ID:           "task_1",
-		Repo:         "owner/repo",
-		IssueNumber:  1,
-		PrNumber:     0,
-		Status:       "open",
-		PendingInput: false,
-		LastRunID:    "",
-		CreatedAt:    now,
-		UpdatedAt:    now,
+	err := q.UpsertTask(ctx, UpsertTaskParams{
+		ID:          "task_1",
+		Repo:        "owner/repo",
+		IssueNumber: 1,
+		PrNumber:    0,
+		Status:      "open",
+		LastRunID:   "",
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 	if err != nil {
 		t.Fatalf("UpsertTask: %v", err)
-	}
-	if upserted.ID != "task_1" {
-		t.Fatalf("unexpected upserted task id: %s", upserted.ID)
 	}
 
 	gotTask, err := q.GetTask(ctx, "task_1")
@@ -147,9 +142,6 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatalf("unexpected task by PR: %s", byPR.ID)
 	}
 
-	if _, err := q.SetTaskPendingInput(ctx, SetTaskPendingInputParams{PendingInput: true, UpdatedAt: later + 1, ID: "task_1"}); err != nil {
-		t.Fatalf("SetTaskPendingInput: %v", err)
-	}
 	if _, err := q.SetTaskLastRun(ctx, SetTaskLastRunParams{LastRunID: "run_2", UpdatedAt: later + 2, IssueNumber: int64(2), PrNumber: int64(77), ID: "task_1"}); err != nil {
 		t.Fatalf("SetTaskLastRun: %v", err)
 	}
@@ -302,16 +294,15 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatalf("UpdateRun: %v", err)
 	}
 
-	if _, err := q.UpsertTask(ctx, UpsertTaskParams{
-		ID:           "task_2",
-		Repo:         "owner/repo",
-		IssueNumber:  0,
-		PrNumber:     0,
-		Status:       "open",
-		PendingInput: false,
-		LastRunID:    "",
-		CreatedAt:    later + 22,
-		UpdatedAt:    later + 22,
+	if err := q.UpsertTask(ctx, UpsertTaskParams{
+		ID:          "task_2",
+		Repo:        "owner/repo",
+		IssueNumber: 0,
+		PrNumber:    0,
+		Status:      "open",
+		LastRunID:   "",
+		CreatedAt:   later + 22,
+		UpdatedAt:   later + 22,
 	}); err != nil {
 		t.Fatalf("UpsertTask task_2: %v", err)
 	}
@@ -352,12 +343,12 @@ func TestQueriesCoverage(t *testing.T) {
 	if claimedNext.ID != "run_3" {
 		t.Fatalf("expected run_3 claim, got %s", claimedNext.ID)
 	}
-	hasQueued, err := q.TaskHasQueuedRuns(ctx, "task_1")
+	taskWithQueue, err := q.GetTask(ctx, "task_1")
 	if err != nil {
-		t.Fatalf("TaskHasQueuedRuns task_1: %v", err)
+		t.Fatalf("GetTask task_1 with queued runs: %v", err)
 	}
-	if hasQueued == 0 {
-		t.Fatal("expected task_1 to still have queued runs")
+	if taskWithQueue.PendingInput == 0 {
+		t.Fatal("expected task_1 pending_input=true with queued runs")
 	}
 
 	if err := q.CancelQueuedRuns(ctx, CancelQueuedRunsParams{Error: "stop", UpdatedAt: later + 23, CompletedAt: sql.NullInt64{Int64: later + 23, Valid: true}, TaskID: "task_1"}); err != nil {

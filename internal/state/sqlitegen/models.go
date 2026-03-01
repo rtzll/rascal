@@ -58,13 +58,12 @@ type RunLease struct {
 }
 
 type Task struct {
-	ID           string `json:"id"`
-	Repo         string `json:"repo"`
-	IssueNumber  int64  `json:"issue_number"`
-	PrNumber     int64  `json:"pr_number"`
-	Status       string `json:"status"`
-	PendingInput bool   `json:"pending_input"`
-	LastRunID    string `json:"last_run_id"`
-	CreatedAt    int64  `json:"created_at"`
-	UpdatedAt    int64  `json:"updated_at"`
+	ID          string `json:"id"`
+	Repo        string `json:"repo"`
+	IssueNumber int64  `json:"issue_number"`
+	PrNumber    int64  `json:"pr_number"`
+	Status      string `json:"status"`
+	LastRunID   string `json:"last_run_id"`
+	CreatedAt   int64  `json:"created_at"`
+	UpdatedAt   int64  `json:"updated_at"`
 }

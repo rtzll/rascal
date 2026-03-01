@@ -101,21 +101,23 @@ func (s *Store) UpsertTask(in UpsertTaskInput) (Task, error) {
 		return Task{}, fmt.Errorf("task id and repo are required")
 	}
 	now := time.Now().UTC().UnixNano()
-	row, err := s.q.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
-		ID:           in.ID,
-		Repo:         in.Repo,
-		IssueNumber:  int64(in.IssueNumber),
-		PrNumber:     int64(in.PRNumber),
-		Status:       string(TaskOpen),
-		PendingInput: false,
-		LastRunID:    "",
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	})
+	if err := s.q.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
+		ID:          in.ID,
+		Repo:        in.Repo,
+		IssueNumber: int64(in.IssueNumber),
+		PrNumber:    int64(in.PRNumber),
+		Status:      string(TaskOpen),
+		LastRunID:   "",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		return Task{}, err
+	}
+	row, err := s.q.GetTask(context.Background(), in.ID)
 	if err != nil {
 		return Task{}, err
 	}
-	return fromDBTask(row), nil
+	return fromDBGetTaskRow(row), nil
 }
 
 func (s *Store) GetTask(taskID string) (Task, bool) {
@@ -126,7 +128,7 @@ func (s *Store) GetTask(taskID string) (Task, bool) {
 		}
 		return Task{}, false
 	}
-	return fromDBTask(row), true
+	return fromDBGetTaskRow(row), true
 }
 
 func (s *Store) FindTaskByPR(repo string, prNumber int) (Task, bool) {
@@ -140,7 +142,7 @@ func (s *Store) FindTaskByPR(repo string, prNumber int) (Task, bool) {
 		}
 		return Task{}, false
 	}
-	return fromDBTask(row), true
+	return fromDBFindTaskByPRRow(row), true
 }
 
 func (s *Store) SetTaskPR(taskID, _ string, prNumber int) error {
@@ -155,25 +157,6 @@ func (s *Store) SetTaskPR(taskID, _ string, prNumber int) error {
 		PrNumber:  int64(prNumber),
 		UpdatedAt: time.Now().UTC().UnixNano(),
 		ID:        taskID,
-	})
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return fmt.Errorf("task %q not found", taskID)
-	}
-	return nil
-}
-
-func (s *Store) SetTaskPendingInput(taskID string, pending bool) error {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return fmt.Errorf("task id is required")
-	}
-	rows, err := s.q.SetTaskPendingInput(context.Background(), sqlitegen.SetTaskPendingInputParams{
-		PendingInput: pending,
-		UpdatedAt:    time.Now().UTC().UnixNano(),
-		ID:           taskID,
 	})
 	if err != nil {
 		return err
@@ -242,16 +225,15 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	defer tx.Rollback()
 	qtx := s.q.WithTx(tx)
 
-	if _, err := qtx.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
-		ID:           in.TaskID,
-		Repo:         in.Repo,
-		IssueNumber:  int64(in.IssueNumber),
-		PrNumber:     int64(in.PRNumber),
-		Status:       string(TaskOpen),
-		PendingInput: false,
-		LastRunID:    "",
-		CreatedAt:    now.UnixNano(),
-		UpdatedAt:    now.UnixNano(),
+	if err := qtx.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
+		ID:          in.TaskID,
+		Repo:        in.Repo,
+		IssueNumber: int64(in.IssueNumber),
+		PrNumber:    int64(in.PRNumber),
+		Status:      string(TaskOpen),
+		LastRunID:   "",
+		CreatedAt:   now.UnixNano(),
+		UpdatedAt:   now.UnixNano(),
 	}); err != nil {
 		return Run{}, err
 	}
@@ -455,14 +437,6 @@ func (s *Store) ClaimNextQueuedRun(preferredTaskID string) (Run, bool, error) {
 		return Run{}, false, err
 	}
 	return fromDBRun(row), true, nil
-}
-
-func (s *Store) TaskHasQueuedRuns(taskID string) bool {
-	exists, err := s.q.TaskHasQueuedRuns(context.Background(), strings.TrimSpace(taskID))
-	if err != nil {
-		return false
-	}
-	return exists > 0
 }
 
 func (s *Store) UpsertRunLease(runID, ownerID string, ttl time.Duration) error {
@@ -745,18 +719,26 @@ func newClaimToken() (string, error) {
 	return "claim_" + hex.EncodeToString(buf), nil
 }
 
-func fromDBTask(t sqlitegen.Task) Task {
+func fromDBTaskParts(id, repo string, issueNumber, prNumber int64, status string, pendingInput int64, lastRunID string, createdAt, updatedAt int64) Task {
 	return Task{
-		ID:           t.ID,
-		Repo:         t.Repo,
-		IssueNumber:  int(t.IssueNumber),
-		PRNumber:     int(t.PrNumber),
-		Status:       TaskStatus(t.Status),
-		PendingInput: t.PendingInput,
-		LastRunID:    t.LastRunID,
-		CreatedAt:    time.Unix(0, t.CreatedAt).UTC(),
-		UpdatedAt:    time.Unix(0, t.UpdatedAt).UTC(),
+		ID:           id,
+		Repo:         repo,
+		IssueNumber:  int(issueNumber),
+		PRNumber:     int(prNumber),
+		Status:       TaskStatus(status),
+		PendingInput: pendingInput != 0,
+		LastRunID:    lastRunID,
+		CreatedAt:    time.Unix(0, createdAt).UTC(),
+		UpdatedAt:    time.Unix(0, updatedAt).UTC(),
 	}
+}
+
+func fromDBGetTaskRow(t sqlitegen.GetTaskRow) Task {
+	return fromDBTaskParts(t.ID, t.Repo, t.IssueNumber, t.PrNumber, t.Status, t.PendingInput, t.LastRunID, t.CreatedAt, t.UpdatedAt)
+}
+
+func fromDBFindTaskByPRRow(t sqlitegen.FindTaskByPRRow) Task {
+	return fromDBTaskParts(t.ID, t.Repo, t.IssueNumber, t.PrNumber, t.Status, t.PendingInput, t.LastRunID, t.CreatedAt, t.UpdatedAt)
 }
 
 func fromDBRun(r sqlitegen.Run) Run {

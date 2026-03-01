@@ -518,7 +518,6 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if err := s.store.CancelQueuedRuns(taskID, "task completed by merged PR"); err != nil {
 				return err
 			}
-			_ = s.store.SetTaskPendingInput(taskID, false)
 		}
 		return nil
 	default:
@@ -602,7 +601,6 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 			return
 		}
 		_ = s.store.ClearRunCancel(runID)
-		_ = s.syncTaskPendingInput(run.TaskID)
 		if !s.isDraining() {
 			s.scheduleRuns(run.TaskID)
 		}
@@ -615,7 +613,6 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 		writeJSON(w, http.StatusAccepted, map[string]any{"run_id": runID, "cancel_requested": true})
 		return
 	}
-	_ = s.syncTaskPendingInput(run.TaskID)
 	if !s.isDraining() {
 		s.scheduleRuns(run.TaskID)
 	}
@@ -773,7 +770,6 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, err.Error())
 		return state.Run{}, fmt.Errorf("prepare run files: %w", err)
 	}
-	_ = s.syncTaskPendingInput(run.TaskID)
 	s.scheduleRuns(run.TaskID)
 	return run, nil
 }
@@ -1061,9 +1057,6 @@ func (s *server) finishRun(run state.Run) {
 
 	if taskCompleted {
 		_ = s.store.CancelQueuedRuns(run.TaskID, "task completed; canceled pending runs")
-		_ = s.store.SetTaskPendingInput(run.TaskID, false)
-	} else {
-		_ = s.syncTaskPendingInput(run.TaskID)
 	}
 
 	if !s.isDraining() {
@@ -1100,32 +1093,20 @@ func (s *server) scheduleRuns(preferredTaskID string) {
 		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
 			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
 			_ = s.store.ClearRunCancel(run.ID)
-			_ = s.syncTaskPendingInput(run.TaskID)
 			continue
 		}
 
 		if s.isDraining() {
 			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, "orchestrator shutting down")
-			_ = s.syncTaskPendingInput(run.TaskID)
 			return
 		}
 		if err := s.store.UpsertRunLease(run.ID, s.instanceID, runLeaseTTL); err != nil {
 			_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, fmt.Sprintf("claim run lease: %v", err))
-			_ = s.syncTaskPendingInput(run.TaskID)
 			continue
 		}
 
-		_ = s.syncTaskPendingInput(run.TaskID)
 		go s.executeRun(run.ID)
 	}
-}
-
-func (s *server) syncTaskPendingInput(taskID string) error {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return nil
-	}
-	return s.store.SetTaskPendingInput(taskID, s.store.TaskHasQueuedRuns(taskID))
 }
 
 func (s *server) resolveTaskForPR(repo string, prNumber int) string {

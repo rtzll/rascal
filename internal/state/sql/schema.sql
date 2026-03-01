@@ -4,7 +4,6 @@ CREATE TABLE tasks (
   issue_number INTEGER NOT NULL DEFAULT 0,
   pr_number INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'open',
-  pending_input BOOLEAN NOT NULL DEFAULT 0,
   last_run_id TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
