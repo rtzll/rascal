@@ -34,13 +34,13 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		return strings.TrimSpace(out) == "ok"
 	}
 
-	status.RascalService = check("if systemctl is-active --quiet 'rascal@blue' || systemctl is-active --quiet 'rascal@green'; then echo ok; fi")
+	status.RascalService = check("if systemctl is-active --quiet 'rascal@blue' || systemctl is-active --quiet 'rascal@green' || systemctl is-active --quiet rascal; then echo ok; fi")
 	activeSlot, _ := runLocalCapture("ssh", sshArgs(cfg, strings.Join([]string{
 		"set -eu",
 		"slot=''",
 		"if [ -f /etc/rascal/active_slot ]; then slot=$(tr -d '[:space:]' </etc/rascal/active_slot); fi",
 		"case \"$slot\" in blue|green) echo \"$slot\" ;;",
-		"*) if systemctl is-active --quiet 'rascal@blue'; then echo blue; elif systemctl is-active --quiet 'rascal@green'; then echo green; fi ;; esac",
+		"*) if systemctl is-active --quiet 'rascal@blue'; then echo blue; elif systemctl is-active --quiet 'rascal@green'; then echo green; elif systemctl is-active --quiet rascal; then echo legacy; fi ;; esac",
 	}, "\n"))...)
 	status.ActiveSlot = strings.TrimSpace(activeSlot)
 	status.DockerInstalled = check("command -v docker >/dev/null 2>&1 && echo ok")
@@ -53,9 +53,9 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		"slot=''",
 		"if [ -f /etc/rascal/active_slot ]; then slot=$(tr -d '[:space:]' </etc/rascal/active_slot); fi",
 		"case \"$slot\" in blue|green) ;;",
-		"*) if systemctl is-active --quiet 'rascal@blue'; then slot=blue; elif systemctl is-active --quiet 'rascal@green'; then slot=green; else slot=''; fi ;; esac",
+		"*) if systemctl is-active --quiet 'rascal@blue'; then slot=blue; elif systemctl is-active --quiet 'rascal@green'; then slot=green; elif systemctl is-active --quiet rascal; then slot=legacy; else slot=''; fi ;; esac",
 		`[ -n "$slot" ]`,
-		`svc_ts=$(systemctl show "rascal@$slot" -p ExecMainStartTimestamp --value 2>/dev/null || true)`,
+		`if [ "$slot" = "legacy" ]; then svc_ts=$(systemctl show rascal -p ExecMainStartTimestamp --value 2>/dev/null || true); else svc_ts=$(systemctl show "rascal@$slot" -p ExecMainStartTimestamp --value 2>/dev/null || true); fi`,
 		`[ -n "$svc_ts" ]`,
 		`svc_epoch=$(date -d "$svc_ts" +%s 2>/dev/null || echo 0)`,
 		`[ "$svc_epoch" -ge "$env_epoch" ]`,
@@ -119,30 +119,19 @@ func waitForServerHealth(baseURL string, timeout time.Duration) error {
 func checkServerHealthSSH(cfg deployConfig) (bool, string) {
 	checkCmd := strings.Join([]string{
 		"set -u",
-		"slot=''",
-		"if [ -f /etc/rascal/active_slot ]; then slot=$(tr -d '[:space:]' </etc/rascal/active_slot); fi",
-		"case \"$slot\" in",
-		"  blue) port=18080 ;;",
-		"  green) port=18081 ;;",
-		"  *) if systemctl is-active --quiet 'rascal@blue'; then port=18080; elif systemctl is-active --quiet 'rascal@green'; then port=18081; else port=''; fi ;;",
-		"esac",
-		"try_probe() {",
-		"  local p=\"$1\"",
 		"  if command -v curl >/dev/null 2>&1; then",
-		"    curl -fsS --max-time 5 \"$p\" >/dev/null 2>&1 && return 0",
-		"    return 1",
+		"    if curl -fsS --max-time 5 http://127.0.0.1:8080/readyz >/dev/null 2>&1 || curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null 2>&1; then",
+		"      echo ok",
+		"      exit 0",
+		"    fi",
 		"  fi",
 		"  if command -v wget >/dev/null 2>&1; then",
-		"    wget -q -T 5 -O - \"$p\" >/dev/null 2>&1 && return 0",
-		"    return 1",
+		"    if wget -q -T 5 -O - http://127.0.0.1:8080/readyz >/dev/null 2>&1 || wget -q -T 5 -O - http://127.0.0.1:8080/healthz >/dev/null 2>&1; then",
+		"      echo ok",
+		"      exit 0",
+		"    fi",
 		"  fi",
-		"  return 1",
-		"}",
-		"if [ -n \"$port\" ]; then",
-		"  if try_probe \"http://127.0.0.1:${port}/readyz\" || try_probe \"http://127.0.0.1:${port}/healthz\"; then echo ok; exit 0; fi",
-		"fi",
-		"if try_probe \"http://127.0.0.1:8080/readyz\" || try_probe \"http://127.0.0.1:8080/healthz\"; then echo ok; exit 0; fi",
-		"if systemctl is-active --quiet 'rascal@blue' || systemctl is-active --quiet 'rascal@green'; then",
+		"if systemctl is-active --quiet 'rascal@blue' || systemctl is-active --quiet 'rascal@green' || systemctl is-active --quiet rascal; then",
 		"  echo ok",
 		"  exit 0",
 		"fi",
