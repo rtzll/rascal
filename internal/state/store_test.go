@@ -311,6 +311,49 @@ func TestStoreRunLeaseLifecycle(t *testing.T) {
 	}
 }
 
+func TestStoreListRunningRuns(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-running", Repo: "owner/repo"}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	if _, err := store.AddRun(CreateRunInput{
+		ID:         "run_running",
+		TaskID:     "task-running",
+		Repo:       "owner/repo",
+		Task:       "running",
+		BaseBranch: "main",
+		RunDir:     "/tmp/run_running",
+	}); err != nil {
+		t.Fatalf("add run_running: %v", err)
+	}
+	if _, err := store.AddRun(CreateRunInput{
+		ID:         "run_queued",
+		TaskID:     "task-running",
+		Repo:       "owner/repo",
+		Task:       "queued",
+		BaseBranch: "main",
+		RunDir:     "/tmp/run_queued",
+	}); err != nil {
+		t.Fatalf("add run_queued: %v", err)
+	}
+	if _, err := store.SetRunStatus("run_running", StatusRunning, ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+
+	running := store.ListRunningRuns()
+	if len(running) != 1 {
+		t.Fatalf("expected exactly 1 running run, got %d", len(running))
+	}
+	if running[0].ID != "run_running" {
+		t.Fatalf("expected run_running, got %s", running[0].ID)
+	}
+}
+
 func TestStoreRunCancelLifecycle(t *testing.T) {
 	t.Parallel()
 

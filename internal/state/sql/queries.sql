@@ -115,6 +115,12 @@ FROM runs
 ORDER BY seq DESC
 LIMIT ?;
 
+-- name: ListRunningRuns :many
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, head_sha, context, error, created_at, updated_at, started_at, completed_at
+FROM runs
+WHERE status = 'running'
+ORDER BY seq DESC;
+
 -- name: LastRunForTask :one
 SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs

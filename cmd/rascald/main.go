@@ -101,6 +101,7 @@ func main() {
 		instanceID:    fmt.Sprintf("%s-%d-%d", strings.TrimSpace(cfg.Slot), os.Getpid(), time.Now().UTC().UnixNano()),
 	}
 	s.recoverQueuedCancels()
+	s.recoverRunningRuns()
 	s.scheduleRuns("")
 
 	mux := http.NewServeMux()
@@ -163,6 +164,39 @@ func (s *server) recoverQueuedCancels() {
 		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
 			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
 			_ = s.store.ClearRunCancel(run.ID)
+		}
+	}
+}
+
+func (s *server) recoverRunningRuns() {
+	now := time.Now().UTC()
+	runs := s.store.ListRunningRuns()
+	for _, run := range runs {
+		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
+			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
+			_ = s.store.ClearRunCancel(run.ID)
+			continue
+		}
+
+		lease, hasLease := s.store.GetRunLease(run.ID)
+		if hasLease {
+			if lease.LeaseExpiresAt.After(now) {
+				continue
+			}
+			_ = s.store.DeleteRunLease(run.ID)
+			if err := s.requeueRun(run.ID); err != nil {
+				log.Printf("recover run %s after expired lease: %v", run.ID, err)
+			}
+			continue
+		}
+
+		// If there is no lease yet but start time is very recent, keep current
+		// state to avoid racing an in-flight lease write.
+		if run.StartedAt != nil && run.StartedAt.After(now.Add(-runLeaseTTL)) {
+			continue
+		}
+		if err := s.requeueRun(run.ID); err != nil {
+			log.Printf("recover run %s without lease: %v", run.ID, err)
 		}
 	}
 }
@@ -1387,6 +1421,20 @@ func (s *server) pendingRunCancelReason(runID string) (string, bool) {
 		reason = "canceled"
 	}
 	return reason, true
+}
+
+func (s *server) requeueRun(runID string) error {
+	_, err := s.store.UpdateRun(runID, func(r *state.Run) error {
+		if r.Status != state.StatusRunning {
+			return nil
+		}
+		r.Status = state.StatusQueued
+		r.Error = ""
+		r.StartedAt = nil
+		r.CompletedAt = nil
+		return nil
+	})
+	return err
 }
 
 func (s *server) addIssueReactionBestEffort(repo string, issueNumber int, reaction string) {

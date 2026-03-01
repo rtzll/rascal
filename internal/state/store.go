@@ -312,6 +312,18 @@ func (s *Store) ListRuns(limit int) []Run {
 	return out
 }
 
+func (s *Store) ListRunningRuns() []Run {
+	rows, err := s.q.ListRunningRuns(context.Background())
+	if err != nil {
+		return nil
+	}
+	out := make([]Run, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, fromDBRun(r))
+	}
+	return out
+}
+
 func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

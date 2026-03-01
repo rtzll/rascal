@@ -691,6 +691,116 @@ func TestRecoverQueueStateAppliesPersistedCancel(t *testing.T) {
 	}
 }
 
+func TestRecoverRunningRunExpiredLeaseRequeues(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_recover_expired_lease",
+		TaskID:     "task_recover_expired_lease",
+		Repo:       "owner/repo",
+		Task:       "recover running expired lease",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	if err := s.store.UpsertRunLease(run.ID, "other-instance", time.Nanosecond); err != nil {
+		t.Fatalf("upsert run lease: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+
+	s.recoverRunningRuns()
+
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if updated.Status != state.StatusQueued {
+		t.Fatalf("expected queued status after recovery, got %s", updated.Status)
+	}
+	if updated.StartedAt != nil {
+		t.Fatalf("expected started_at cleared on requeue")
+	}
+	if _, ok := s.store.GetRunLease(run.ID); ok {
+		t.Fatalf("expected stale run lease deleted")
+	}
+}
+
+func TestRecoverRunningRunValidLeaseKeepsRunning(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_recover_valid_lease",
+		TaskID:     "task_recover_valid_lease",
+		Repo:       "owner/repo",
+		Task:       "recover running valid lease",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	if err := s.store.UpsertRunLease(run.ID, "other-instance", 2*time.Minute); err != nil {
+		t.Fatalf("upsert run lease: %v", err)
+	}
+
+	s.recoverRunningRuns()
+
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if updated.Status != state.StatusRunning {
+		t.Fatalf("expected running status with valid lease, got %s", updated.Status)
+	}
+}
+
+func TestRecoverRunningRunWithoutLeaseOldStartRequeues(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_recover_no_lease_old",
+		TaskID:     "task_recover_no_lease_old",
+		Repo:       "owner/repo",
+		Task:       "recover running no lease old start",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	oldStart := time.Now().UTC().Add(-2 * runLeaseTTL)
+	if _, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
+		r.StartedAt = &oldStart
+		return nil
+	}); err != nil {
+		t.Fatalf("set old started_at: %v", err)
+	}
+
+	s.recoverRunningRuns()
+
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if updated.Status != state.StatusQueued {
+		t.Fatalf("expected queued status without lease and old start, got %s", updated.Status)
+	}
+}
+
 func TestHandleRunLogsRespectsLines(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)

@@ -784,6 +784,58 @@ func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (Run, error
 	return i, err
 }
 
+const listRunningRuns = `-- name: ListRunningRuns :many
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, head_sha, context, error, created_at, updated_at, started_at, completed_at
+FROM runs
+WHERE status = 'running'
+ORDER BY seq DESC
+`
+
+func (q *Queries) ListRunningRuns(ctx context.Context) ([]Run, error) {
+	rows, err := q.db.QueryContext(ctx, listRunningRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Run{}
+	for rows.Next() {
+		var i Run
+		if err := rows.Scan(
+			&i.Seq,
+			&i.ID,
+			&i.TaskID,
+			&i.Repo,
+			&i.Task,
+			&i.BaseBranch,
+			&i.HeadBranch,
+			&i.Trigger,
+			&i.Debug,
+			&i.Status,
+			&i.RunDir,
+			&i.IssueNumber,
+			&i.PrNumber,
+			&i.PrUrl,
+			&i.HeadSha,
+			&i.Context,
+			&i.Error,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRuns = `-- name: ListRuns :many
 SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
