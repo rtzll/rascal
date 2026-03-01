@@ -428,8 +428,8 @@ func TestResolveTransport(t *testing.T) {
 		{
 			name:       "auto remote 8080 prefers ssh",
 			configured: "auto",
-			serverURL:  "http://49.13.1.31:8080",
-			sshHost:    "49.13.1.31",
+			serverURL:  "http://203.0.113.10:8080",
+			sshHost:    "203.0.113.10",
 			want:       "ssh",
 		},
 		{
