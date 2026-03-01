@@ -1,124 +1,74 @@
-# rascal
+# Rascal
 
 Rascal is a self-hosted coding-agent runner for GitHub repositories.
 
-It gives you one command to:
-- provision a Hetzner VM (optional)
-- deploy `rascald` + runner
-- configure GitHub label/webhook
-- start and manage autonomous coding runs from CLI
+It gives you one CLI to provision/deploy the orchestrator, trigger agent runs, and ship PRs.
 
-## Prerequisites
+## Why Rascal
 
-- Go 1.26+
-- Docker available locally
-- `codex login` completed locally (`~/.codex/auth.json` exists)
-- A GitHub repo you can administer
+- Own your runtime: runs execute on your server.
+- Keep workflow simple: trigger from CLI or GitHub labels/comments.
+- Stay in GitHub-native flow: branch, commit, PR, review.
 
-## Token setup
+## Mental Model
 
-Rascal uses three tokens for production bootstrap:
+`rascal` (CLI) -> `rascald` (orchestrator API) -> runner container -> branch + PR on GitHub.
 
-1. `HCLOUD_TOKEN`
-- Used locally by `rascal bootstrap` to provision Hetzner hosts.
-- Use a **read/write** token (needs to create SSH keys, firewalls, and servers).
-- Create it in [Hetzner Cloud Console](https://console.hetzner.cloud/): `Project -> Security -> API Tokens`.
-- Docs: [Generate an API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token).
+## Quickstart (10 Minutes)
 
-2. `GITHUB_ADMIN_TOKEN`
-- Local-only token for label/webhook setup.
-- Create a [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) scoped to the target repo.
-- Fine-grained PAT (single repo) recommended with:
-  - `Webhooks`: **Read and write** (list/create/update repository webhooks)
-  - `Issues`: **Read and write** (label management)
-  - `Metadata`: **Read-only** (usually implicit)
-
-3. `GITHUB_RUNTIME_TOKEN`
-- Stored on server; used by runner for git push + PR/comment workflows.
-- Keep this least-privilege compared to admin token.
-- Create a separate [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) scoped to the target repo.
-- Fine-grained PAT (single repo) recommended with:
-  - `Contents`: **Read and write** (clone/push branch)
-  - `Pull requests`: **Read and write** (open/update PR)
-  - `Issues`: **Read and write** (comments/status messaging)
-
-For GitHub token details:
-- [Managing personal access tokens](https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
-- [Fine-grained PAT permissions](https://docs.github.com/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token#permissions)
-
-Note: GitHub does not provide an API to mint user PATs from another PAT, so runtime token creation is manual.
-
-You can store secrets in an env file and pass it to bootstrap:
+1. Build the CLI:
 
 ```bash
-# .rascal.env
+go build -o ./bin/rascal ./cmd/rascal
+```
+
+2. Create `./.rascal.env` with required tokens:
+
+```bash
 HCLOUD_TOKEN=...
 GITHUB_ADMIN_TOKEN=...
 GITHUB_RUNTIME_TOKEN=...
 ```
 
-Rascal auto-loads `./.rascal.env` for all commands (as fallback).  
-You can also point to a custom file globally with `--env-file` or `RASCAL_ENV_FILE`.
-
-## Quickstart
+3. Bootstrap:
 
 ```bash
-go run ./cmd/rascal bootstrap \
+./bin/rascal bootstrap \
   --repo OWNER/REPO \
   --domain rascal.example.com
 ```
 
-This writes local config to `~/.rascal/config.toml` (server URL, API token, repo, host/domain).
-
-## Daily use
+4. Verify:
 
 ```bash
-go run ./cmd/rascal issue OWNER/REPO#123
-go run ./cmd/rascal ps
-go run ./cmd/rascal logs <run_id>
-go run ./cmd/rascal open <run_id>
+./bin/rascal doctor --host <server_ip>
 ```
 
-Useful commands:
+5. Run first task:
 
 ```bash
-go run ./cmd/rascal doctor
-go run ./cmd/rascal config view
-go run ./cmd/rascal completion zsh
+./bin/rascal run -t "Add a short CONTRIBUTING.md section for local dev setup"
 ```
 
-## Existing host (no provisioning)
+## Core Commands
 
 ```bash
-go run ./cmd/rascal bootstrap \
-  --repo OWNER/REPO \
-  --host YOUR_SERVER_IP \
-  --domain rascal.example.com
+./bin/rascal run -t "..."
+./bin/rascal issue OWNER/REPO#123
+./bin/rascal ps
+./bin/rascal logs <run_id> --follow
+./bin/rascal open <run_id>
+./bin/rascal retry <run_id>
+./bin/rascal cancel <run_id>
+./bin/rascal doctor --host <server_ip>
+./bin/rascal config view
 ```
 
-Domain notes:
-- Domain is optional for CLI-triggered runs.
-- For GitHub webhook triggers, a stable public URL is recommended.
-- Without a domain, Rascal can use `http://<server_ip>:8080` if reachable from GitHub.
-- Flags still override values from `--env-file`.
+## Learn More
 
-Cloudflare + webhook notes:
-- During first setup/debug, `DNS only` is simplest (bypasses Cloudflare edge rules/caching).
-- If using Cloudflare proxy (orange cloud), set SSL/TLS mode to **Full (strict)**.
-- Avoid redirect rules that send `https://rascal.your-domain/...` back to itself.
-- Webhook URL must not redirect for `POST` requests:
-  - `https://YOUR_DOMAIN/v1/webhooks/github`
-- Quick checks:
-
-```bash
-# health endpoint (GET)
-curl -fsS https://YOUR_DOMAIN/healthz
-
-# webhook endpoint should NOT return 3xx on POST
-# (401/403/405 is fine without a valid signature payload)
-curl -i -X POST https://YOUR_DOMAIN/v1/webhooks/github
-```
-
-Troubleshooting:
-- `curl -I` uses `HEAD`; `/healthz` may return `405` for `HEAD` even when `GET` is healthy.
-- Browser redirect loops can be stale cache; verify with `curl` or a private window.
+- Setup and token details: [docs/setup.md](docs/setup.md)
+- Config and precedence: [docs/config.md](docs/config.md)
+- Command guide: [docs/commands.md](docs/commands.md)
+- Webhooks and Cloudflare notes: [docs/webhooks.md](docs/webhooks.md)
+- Operations and troubleshooting: [docs/operations.md](docs/operations.md)
+- Architecture overview: [docs/architecture.md](docs/architecture.md)
