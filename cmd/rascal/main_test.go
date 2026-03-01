@@ -147,6 +147,26 @@ func TestRootHasRepoAndInfraCommands(t *testing.T) {
 	}
 }
 
+func TestLogsFollowIntervalDefaults(t *testing.T) {
+	root := newRootCmd()
+
+	logsCmd, _, err := root.Find([]string{"logs"})
+	if err != nil {
+		t.Fatalf("logs command missing: %v", err)
+	}
+	if got := logsCmd.Flags().Lookup("interval").DefValue; got != "4s" {
+		t.Fatalf("logs default interval = %q, want 4s", got)
+	}
+
+	runLogsCmd, _, err := root.Find([]string{"logs", "run"})
+	if err != nil {
+		t.Fatalf("logs run command missing: %v", err)
+	}
+	if got := runLogsCmd.Flags().Lookup("interval").DefValue; got != "4s" {
+		t.Fatalf("logs run default interval = %q, want 4s", got)
+	}
+}
+
 func TestBootstrapAndInfraDefaults(t *testing.T) {
 	root := newRootCmd()
 

@@ -609,14 +609,38 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = fmt.Fprintln(w, "== runner.log ==")
+	var body strings.Builder
+	_, _ = fmt.Fprintln(&body, "== runner.log ==")
 	for _, line := range runnerLines {
-		_, _ = fmt.Fprintln(w, line)
+		_, _ = fmt.Fprintln(&body, line)
 	}
-	_, _ = fmt.Fprintln(w, "\n== goose.ndjson ==")
+	_, _ = fmt.Fprintln(&body, "\n== goose.ndjson ==")
 	for _, line := range gooseLines {
-		_, _ = fmt.Fprintln(w, line)
+		_, _ = fmt.Fprintln(&body, line)
+	}
+
+	logsText := body.String()
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format"))) {
+	case "", "text":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, logsText)
+	case "json":
+		writeJSON(w, http.StatusOK, map[string]any{
+			"logs":       logsText,
+			"run_status": run.Status,
+			"done":       runStatusIsDone(run.Status),
+		})
+	default:
+		http.Error(w, "invalid format", http.StatusBadRequest)
+	}
+}
+
+func runStatusIsDone(status state.RunStatus) bool {
+	switch status {
+	case state.StatusSucceeded, state.StatusFailed, state.StatusCanceled, state.StatusAwaitingFeedback:
+		return true
+	default:
+		return false
 	}
 }
 

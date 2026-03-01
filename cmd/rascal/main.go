@@ -1003,7 +1003,7 @@ func (a *app) newLogsCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&follow, "follow", false, "stream logs by polling")
-	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "polling interval when --follow is enabled")
+	cmd.Flags().DurationVar(&interval, "interval", 4*time.Second, "polling interval when --follow is enabled")
 	cmd.Flags().DurationVar(&since, "since", 0, "show logs since duration ago (best effort)")
 	cmd.Flags().IntVar(&lines, "lines", 200, "max log lines to fetch")
 
@@ -1011,7 +1011,7 @@ func (a *app) newLogsCmd() *cobra.Command {
 		Use:               "run <run_id>",
 		Aliases:           []string{"job"},
 		Short:             "Fetch logs for a run",
-		Example:           "  rascal logs run run_abc123\n  rascal logs run run_abc123 --follow --interval 2s",
+		Example:           "  rascal logs run run_abc123\n  rascal logs run run_abc123 --follow --interval 4s",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1023,7 +1023,7 @@ func (a *app) newLogsCmd() *cobra.Command {
 		},
 	}
 	runCmd.Flags().Bool("follow", false, "stream logs by polling")
-	runCmd.Flags().Duration("interval", 2*time.Second, "polling interval when --follow is enabled")
+	runCmd.Flags().Duration("interval", 4*time.Second, "polling interval when --follow is enabled")
 	runCmd.Flags().Duration("since", 0, "show logs since duration ago (best effort)")
 	runCmd.Flags().Int("lines", 200, "max log lines to fetch")
 
@@ -1104,19 +1104,28 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 		lines = 200
 	}
 	if interval <= 0 {
-		interval = 2 * time.Second
+		interval = 4 * time.Second
 	}
 
-	fetch := func() (string, error) {
-		path := fmt.Sprintf("/v1/runs/%s/logs?lines=%d", url.PathEscape(strings.TrimSpace(runID)), lines)
+	fetch := func(path string) (*http.Response, error) {
 		resp, err := a.client.do(http.MethodGet, path, nil)
 		if err != nil {
-			return "", &cliError{Code: exitServer, Message: "request failed", Cause: err}
+			return nil, &cliError{Code: exitServer, Message: "request failed", Cause: err}
+		}
+		if resp.StatusCode >= 300 {
+			defer resp.Body.Close()
+			return nil, decodeServerError(resp)
+		}
+		return resp, nil
+	}
+
+	fetchText := func() (string, error) {
+		path := fmt.Sprintf("/v1/runs/%s/logs?lines=%d", url.PathEscape(strings.TrimSpace(runID)), lines)
+		resp, err := fetch(path)
+		if err != nil {
+			return "", err
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode >= 300 {
-			return "", decodeServerError(resp)
-		}
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return "", err
@@ -1125,7 +1134,7 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 	}
 
 	if !follow {
-		body, err := fetch()
+		body, err := fetchText()
 		if err != nil {
 			return err
 		}
@@ -1138,12 +1147,33 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	type followResponse struct {
+		Logs      string          `json:"logs"`
+		RunStatus state.RunStatus `json:"run_status"`
+		Done      bool            `json:"done"`
+	}
+
+	fetchFollow := func() (followResponse, error) {
+		path := fmt.Sprintf("/v1/runs/%s/logs?lines=%d&format=json", url.PathEscape(strings.TrimSpace(runID)), lines)
+		resp, err := fetch(path)
+		if err != nil {
+			return followResponse{}, err
+		}
+		defer resp.Body.Close()
+		var out followResponse
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return followResponse{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+		}
+		return out, nil
+	}
+
 	last := ""
 	for {
-		body, err := fetch()
+		payload, err := fetchFollow()
 		if err != nil {
 			return err
 		}
+		body := payload.Logs
 		if since > 0 {
 			body = filterLogsSince(body, time.Now().Add(-since))
 		}
@@ -1156,6 +1186,9 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 			_, _ = io.WriteString(os.Stdout, body)
 		}
 		last = body
+		if payload.Done {
+			return nil
+		}
 		select {
 		case <-sigCtx.Done():
 			return nil

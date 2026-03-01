@@ -471,6 +471,95 @@ func TestHandleRunLogsRespectsLines(t *testing.T) {
 	}
 }
 
+func TestHandleRunLogsJSONIncludesStatusAndDone(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	runDir := t.TempDir()
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_logs_json",
+		TaskID:     "task_logs_json",
+		Repo:       "owner/repo",
+		Task:       "show logs as json",
+		BaseBranch: "main",
+		RunDir:     runDir,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(run.ID, state.StatusSucceeded, ""); err != nil {
+		t.Fatalf("set run status: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(run.RunDir, "runner.log"), []byte("runner-1\nrunner-2\n"), 0o644); err != nil {
+		t.Fatalf("write runner log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte("goose-1\ngoose-2\n"), 0o644); err != nil {
+		t.Fatalf("write goose log: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/logs?lines=1&format=json", nil)
+	rec := httptest.NewRecorder()
+	s.handleRunSubresources(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("expected json content type, got %q", rec.Header().Get("Content-Type"))
+	}
+	var out struct {
+		Logs      string          `json:"logs"`
+		RunStatus state.RunStatus `json:"run_status"`
+		Done      bool            `json:"done"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.RunStatus != state.StatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s", out.RunStatus)
+	}
+	if !out.Done {
+		t.Fatal("expected done=true for succeeded run")
+	}
+	if strings.Contains(out.Logs, "runner-1") || strings.Contains(out.Logs, "goose-1") {
+		t.Fatalf("expected oldest lines to be omitted, got:\n%s", out.Logs)
+	}
+	if !strings.Contains(out.Logs, "runner-2") || !strings.Contains(out.Logs, "goose-2") {
+		t.Fatalf("expected newest lines to be present, got:\n%s", out.Logs)
+	}
+}
+
+func TestHandleRunLogsRejectsInvalidFormat(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	runDir := t.TempDir()
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_logs_bad_format",
+		TaskID:     "task_logs_bad_format",
+		Repo:       "owner/repo",
+		Task:       "bad format",
+		BaseBranch: "main",
+		RunDir:     runDir,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, "runner.log"), []byte("runner-1\n"), 0o644); err != nil {
+		t.Fatalf("write runner log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte("goose-1\n"), 0o644); err != nil {
+		t.Fatalf("write goose log: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/logs?format=xml", nil)
+	rec := httptest.NewRecorder()
+	s.handleRunSubresources(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
 func TestBuildHeadBranchUsesTaskSummaryForAdHocRunTaskID(t *testing.T) {
 	got := buildHeadBranch(
 		"run_97073bc1e7787f7c",
