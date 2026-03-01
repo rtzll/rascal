@@ -1,6 +1,9 @@
-.PHONY: test build build-cli build-daemon run-daemon run-cli fmt codegen
+.PHONY: test test-fast build build-cli build-daemon run-daemon run-cli fmt codegen
 
 test: codegen
+	go test ./...
+
+test-fast:
 	go test ./...
 
 fmt:
