@@ -15,6 +15,8 @@ type ServerConfig struct {
 	ListenAddr          string
 	DataDir             string
 	StatePath           string
+	Slot                string
+	ActiveSlotPath      string
 	APIToken            string
 	GitHubToken         string
 	GitHubWebhookSecret string
@@ -48,6 +50,8 @@ func LoadServerConfig() ServerConfig {
 		ListenAddr:          envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
 		DataDir:             dataDir,
 		StatePath:           statePath,
+		Slot:                strings.TrimSpace(os.Getenv("RASCAL_SLOT")),
+		ActiveSlotPath:      envOrDefault("RASCAL_ACTIVE_SLOT_PATH", "/etc/rascal/active_slot"),
 		APIToken:            strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")),
 		GitHubToken:         strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")),
 		GitHubWebhookSecret: strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),

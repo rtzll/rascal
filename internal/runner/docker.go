@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,7 +70,8 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 		envPairs["GH_TOKEN"] = l.GitHubToken
 	}
 
-	args := []string{"run", "--rm", "--name", sanitizeContainerName("rascal-" + spec.RunID)}
+	containerName := sanitizeContainerName("rascal-" + spec.RunID)
+	args := []string{"run", "--rm", "--name", containerName}
 	envKeys := make([]string, 0, len(envPairs))
 	for k := range envPairs {
 		envKeys = append(envKeys, k)
@@ -89,7 +91,21 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	defer stopCancel()
+	go func() {
+		select {
+		case <-ctx.Done():
+			forceStopContainer(containerName, logFile)
+		case <-stopCtx.Done():
+		}
+	}()
+
 	err = cmd.Run()
+	stopCancel()
+	if ctx.Err() != nil {
+		err = context.Canceled
+	}
 	exitCode := 0
 	if err != nil {
 		if exitErr := new(exec.ExitError); errors.As(err, &exitErr) {
@@ -127,12 +143,29 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	}
 
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return res, context.Canceled
+		}
 		return res, fmt.Errorf("docker runner failed (exit=%d): %w", exitCode, unwrapSyscallError(err))
 	}
 	if exitCode != 0 {
 		return res, fmt.Errorf("docker runner failed with exit code %d", exitCode)
 	}
 	return res, nil
+}
+
+func forceStopContainer(containerName string, logOut io.Writer) {
+	if strings.TrimSpace(containerName) == "" {
+		return
+	}
+	stopCmd := exec.Command("docker", "stop", "--time", "5", containerName)
+	stopCmd.Stdout = logOut
+	stopCmd.Stderr = logOut
+	_ = stopCmd.Run()
+	rmCmd := exec.Command("docker", "rm", "-f", containerName)
+	rmCmd.Stdout = logOut
+	rmCmd.Stderr = logOut
+	_ = rmCmd.Run()
 }
 
 func sanitizeContainerName(s string) string {

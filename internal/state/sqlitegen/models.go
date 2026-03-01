@@ -9,8 +9,14 @@ import (
 )
 
 type Delivery struct {
-	ID     string `json:"id"`
-	SeenAt int64  `json:"seen_at"`
+	ID          string        `json:"id"`
+	Status      string        `json:"status"`
+	ClaimToken  string        `json:"claim_token"`
+	ClaimedBy   string        `json:"claimed_by"`
+	ClaimedAt   int64         `json:"claimed_at"`
+	ProcessedAt sql.NullInt64 `json:"processed_at"`
+	SeenAt      int64         `json:"seen_at"`
+	LastError   string        `json:"last_error"`
 }
 
 type Run struct {

@@ -70,6 +70,143 @@ func (q *Queries) CancelQueuedRuns(ctx context.Context, arg CancelQueuedRunsPara
 	return err
 }
 
+const claimDelivery = `-- name: ClaimDelivery :one
+INSERT INTO deliveries (
+  id,
+  status,
+  claim_token,
+  claimed_by,
+  claimed_at,
+  processed_at,
+  seen_at,
+  last_error
+)
+VALUES (
+  ?1,
+  'processing',
+  ?2,
+  ?3,
+  ?4,
+  NULL,
+  ?5,
+  ''
+)
+ON CONFLICT(id) DO UPDATE SET
+  status = CASE
+    WHEN deliveries.status = 'processed' THEN deliveries.status
+    WHEN deliveries.status = 'processing' AND deliveries.claimed_at >= (excluded.claimed_at - 600000000000) THEN deliveries.status
+    ELSE 'processing'
+  END,
+  claim_token = CASE
+    WHEN deliveries.status = 'processed' THEN deliveries.claim_token
+    WHEN deliveries.status = 'processing' AND deliveries.claimed_at >= (excluded.claimed_at - 600000000000) THEN deliveries.claim_token
+    ELSE excluded.claim_token
+  END,
+  claimed_by = CASE
+    WHEN deliveries.status = 'processed' THEN deliveries.claimed_by
+    WHEN deliveries.status = 'processing' AND deliveries.claimed_at >= (excluded.claimed_at - 600000000000) THEN deliveries.claimed_by
+    ELSE excluded.claimed_by
+  END,
+  claimed_at = CASE
+    WHEN deliveries.status = 'processed' THEN deliveries.claimed_at
+    WHEN deliveries.status = 'processing' AND deliveries.claimed_at >= (excluded.claimed_at - 600000000000) THEN deliveries.claimed_at
+    ELSE excluded.claimed_at
+  END,
+  last_error = CASE
+    WHEN deliveries.status = 'processed' THEN deliveries.last_error
+    WHEN deliveries.status = 'processing' AND deliveries.claimed_at >= (excluded.claimed_at - 600000000000) THEN deliveries.last_error
+    ELSE ''
+  END
+RETURNING status, claim_token
+`
+
+type ClaimDeliveryParams struct {
+	ID         string `json:"id"`
+	ClaimToken string `json:"claim_token"`
+	ClaimedBy  string `json:"claimed_by"`
+	ClaimedAt  int64  `json:"claimed_at"`
+	SeenAt     int64  `json:"seen_at"`
+}
+
+type ClaimDeliveryRow struct {
+	Status     string `json:"status"`
+	ClaimToken string `json:"claim_token"`
+}
+
+func (q *Queries) ClaimDelivery(ctx context.Context, arg ClaimDeliveryParams) (ClaimDeliveryRow, error) {
+	row := q.db.QueryRowContext(ctx, claimDelivery,
+		arg.ID,
+		arg.ClaimToken,
+		arg.ClaimedBy,
+		arg.ClaimedAt,
+		arg.SeenAt,
+	)
+	var i ClaimDeliveryRow
+	err := row.Scan(&i.Status, &i.ClaimToken)
+	return i, err
+}
+
+const claimRunStart = `-- name: ClaimRunStart :execrows
+UPDATE runs
+SET status = 'running', error = '', updated_at = ?, started_at = ?
+WHERE id = ?
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM runs AS other
+    WHERE other.task_id = runs.task_id
+      AND other.status = 'running'
+      AND other.id <> runs.id
+  )
+`
+
+type ClaimRunStartParams struct {
+	UpdatedAt int64         `json:"updated_at"`
+	StartedAt sql.NullInt64 `json:"started_at"`
+	ID        string        `json:"id"`
+}
+
+func (q *Queries) ClaimRunStart(ctx context.Context, arg ClaimRunStartParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, claimRunStart, arg.UpdatedAt, arg.StartedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const completeDeliveryClaim = `-- name: CompleteDeliveryClaim :execrows
+UPDATE deliveries
+SET
+  status = 'processed',
+  claim_token = '',
+  claimed_by = '',
+  claimed_at = 0,
+  processed_at = ?,
+  seen_at = ?,
+  last_error = ''
+WHERE id = ? AND claim_token = ?
+`
+
+type CompleteDeliveryClaimParams struct {
+	ProcessedAt sql.NullInt64 `json:"processed_at"`
+	SeenAt      int64         `json:"seen_at"`
+	ID          string        `json:"id"`
+	ClaimToken  string        `json:"claim_token"`
+}
+
+func (q *Queries) CompleteDeliveryClaim(ctx context.Context, arg CompleteDeliveryClaimParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, completeDeliveryClaim,
+		arg.ProcessedAt,
+		arg.SeenAt,
+		arg.ID,
+		arg.ClaimToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const countDeliveries = `-- name: CountDeliveries :one
 SELECT COUNT(*)
 FROM deliveries
@@ -416,18 +553,46 @@ func (q *Queries) MarkTaskCompleted(ctx context.Context, arg MarkTaskCompletedPa
 }
 
 const recordDelivery = `-- name: RecordDelivery :exec
-INSERT OR IGNORE INTO deliveries (id, seen_at)
-VALUES (?, ?)
+INSERT OR REPLACE INTO deliveries (
+  id,
+  status,
+  claim_token,
+  claimed_by,
+  claimed_at,
+  processed_at,
+  seen_at,
+  last_error
+)
+VALUES (?, 'processed', '', '', 0, ?, ?, '')
 `
 
 type RecordDeliveryParams struct {
-	ID     string `json:"id"`
-	SeenAt int64  `json:"seen_at"`
+	ID          string        `json:"id"`
+	ProcessedAt sql.NullInt64 `json:"processed_at"`
+	SeenAt      int64         `json:"seen_at"`
 }
 
 func (q *Queries) RecordDelivery(ctx context.Context, arg RecordDeliveryParams) error {
-	_, err := q.db.ExecContext(ctx, recordDelivery, arg.ID, arg.SeenAt)
+	_, err := q.db.ExecContext(ctx, recordDelivery, arg.ID, arg.ProcessedAt, arg.SeenAt)
 	return err
+}
+
+const releaseDeliveryClaim = `-- name: ReleaseDeliveryClaim :execrows
+DELETE FROM deliveries
+WHERE id = ? AND claim_token = ?
+`
+
+type ReleaseDeliveryClaimParams struct {
+	ID         string `json:"id"`
+	ClaimToken string `json:"claim_token"`
+}
+
+func (q *Queries) ReleaseDeliveryClaim(ctx context.Context, arg ReleaseDeliveryClaimParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, releaseDeliveryClaim, arg.ID, arg.ClaimToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setTaskLastRun = `-- name: SetTaskLastRun :execrows

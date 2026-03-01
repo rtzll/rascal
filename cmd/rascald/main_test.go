@@ -35,6 +35,13 @@ type fakeLauncher struct {
 	errSeq []error
 }
 
+type stubbornLauncher struct {
+	mu    sync.Mutex
+	calls int
+	wait  <-chan struct{}
+	res   runner.Result
+}
+
 func (f *fakeLauncher) Start(ctx context.Context, spec runner.Spec) (runner.Result, error) {
 	f.mu.Lock()
 	f.calls++
@@ -58,6 +65,16 @@ func (f *fakeLauncher) Start(ctx context.Context, spec runner.Spec) (runner.Resu
 		}
 	}
 	return res, err
+}
+
+func (l *stubbornLauncher) Start(_ context.Context, _ runner.Spec) (runner.Result, error) {
+	l.mu.Lock()
+	l.calls++
+	l.mu.Unlock()
+	if l.wait != nil {
+		<-l.wait
+	}
+	return l.res, nil
 }
 
 func (f *fakeLauncher) Calls() int {
@@ -88,7 +105,9 @@ func newTestServer(t *testing.T, launcher runner.Launcher) *server {
 		activeRuns:    make(map[string]string),
 		queuedRuns:    make(map[string][]string),
 		runCancels:    make(map[string]context.CancelFunc),
+		runCancelNote: make(map[string]string),
 		maxConcurrent: defaultMaxConcurrent(),
+		instanceID:    "test-instance",
 	}
 }
 
@@ -180,6 +199,29 @@ func TestHandleWebhookIgnoresIssueLabeledOnPR(t *testing.T) {
 	}
 	if got := len(s.store.ListRuns(10)); got != 0 {
 		t.Fatalf("expected zero runs, got %d", got)
+	}
+}
+
+func TestHandleWebhookInactiveSlotIsSkipped(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	slotFile := filepath.Join(t.TempDir(), "active_slot")
+	if err := os.WriteFile(slotFile, []byte("green\n"), 0o644); err != nil {
+		t.Fatalf("write active slot file: %v", err)
+	}
+	s.cfg.Slot = "blue"
+	s.cfg.ActiveSlotPath = slotFile
+
+	payload := []byte(`{"action":"labeled","label":{"name":"rascal"},"issue":{"number":7,"title":"Title","body":"Body"},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "issues", "delivery-slot", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for inactive slot skip, got %d", rec.Code)
+	}
+	if got := len(s.store.ListRuns(10)); got != 0 {
+		t.Fatalf("expected no runs when inactive slot handles webhook, got %d", got)
 	}
 }
 
@@ -461,6 +503,95 @@ func TestHandleCancelRunQueued(t *testing.T) {
 	}
 
 	_ = first
+}
+
+func TestHandleCancelRunActiveUsesUserReason(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "active-cancel", Repo: "owner/repo", Task: "cancel me"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "run start")
+
+	rec := httptest.NewRecorder()
+	s.handleCancelRun(rec, run.ID)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for active cancel, got %d", rec.Code)
+	}
+
+	close(waitCh)
+	waitFor(t, 2*time.Second, func() bool {
+		updated, ok := s.store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusCanceled && strings.Contains(updated.Error, "canceled by user")
+	}, "active run canceled with user reason")
+}
+
+func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
+	done := make(chan struct{})
+	launcher := &stubbornLauncher{
+		wait: done,
+		res: runner.Result{
+			PRNumber: 42,
+			PRURL:    "https://example.com/pr/42",
+		},
+	}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "cancel-guard", Repo: "owner/repo", Task: "guard cancel"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	waitFor(t, time.Second, func() bool {
+		current, ok := s.store.GetRun(run.ID)
+		return ok && current.Status == state.StatusRunning
+	}, "run enters running status")
+
+	rec := httptest.NewRecorder()
+	s.handleCancelRun(rec, run.ID)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for active cancel, got %d", rec.Code)
+	}
+
+	close(done)
+	waitFor(t, 2*time.Second, func() bool {
+		current, ok := s.store.GetRun(run.ID)
+		return ok && current.Status == state.StatusCanceled
+	}, "run remains canceled after launcher returns success")
+
+	current, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if current.Status != state.StatusCanceled {
+		t.Fatalf("expected final canceled status, got %s", current.Status)
+	}
+}
+
+func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "drain-reason", Repo: "owner/repo", Task: "drain"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "run start")
+
+	s.cancelActiveRuns("orchestrator shutdown drain timeout")
+	close(waitCh)
+
+	waitFor(t, 2*time.Second, func() bool {
+		current, ok := s.store.GetRun(run.ID)
+		return ok && current.Status == state.StatusCanceled && strings.Contains(current.Error, "drain timeout")
+	}, "run canceled with drain reason")
 }
 
 func TestHandleRunLogsRespectsLines(t *testing.T) {

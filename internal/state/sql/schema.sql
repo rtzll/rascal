@@ -41,7 +41,13 @@ CREATE INDEX idx_runs_task_seq ON runs (task_id, seq DESC);
 
 CREATE TABLE deliveries (
   id TEXT PRIMARY KEY,
-  seen_at INTEGER NOT NULL
+  status TEXT NOT NULL DEFAULT 'processing',
+  claim_token TEXT NOT NULL DEFAULT '',
+  claimed_by TEXT NOT NULL DEFAULT '',
+  claimed_at INTEGER NOT NULL DEFAULT 0,
+  processed_at INTEGER,
+  seen_at INTEGER NOT NULL,
+  last_error TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX idx_deliveries_seen_at ON deliveries (seen_at ASC);

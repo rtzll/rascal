@@ -403,6 +403,30 @@ func (s *Store) SetRunStatus(runID string, status RunStatus, errText string) (Ru
 	})
 }
 
+func (s *Store) ClaimRunStart(runID string) (Run, bool, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return Run{}, false, fmt.Errorf("run id is required")
+	}
+	now := time.Now().UTC().UnixNano()
+	rows, err := s.q.ClaimRunStart(context.Background(), sqlitegen.ClaimRunStartParams{
+		UpdatedAt: now,
+		StartedAt: sql.NullInt64{Int64: now, Valid: true},
+		ID:        runID,
+	})
+	if err != nil {
+		return Run{}, false, err
+	}
+	row, err := s.q.GetRun(context.Background(), runID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Run{}, false, fmt.Errorf("run %q not found", runID)
+		}
+		return Run{}, false, err
+	}
+	return fromDBRun(row), rows > 0, nil
+}
+
 func (s *Store) ActiveRunForTask(taskID string) (Run, bool) {
 	row, err := s.q.ActiveRunForTask(context.Background(), strings.TrimSpace(taskID))
 	if err != nil {
@@ -448,18 +472,94 @@ func (s *Store) DeliverySeen(deliveryID string) bool {
 	return exists > 0
 }
 
+type DeliveryClaim struct {
+	ID    string
+	Token string
+}
+
+func (s *Store) ClaimDelivery(deliveryID, claimedBy string) (DeliveryClaim, bool, error) {
+	deliveryID = strings.TrimSpace(deliveryID)
+	claimedBy = strings.TrimSpace(claimedBy)
+	if deliveryID == "" {
+		return DeliveryClaim{}, false, fmt.Errorf("delivery id is required")
+	}
+	if claimedBy == "" {
+		claimedBy = "rascald"
+	}
+	token, err := newClaimToken()
+	if err != nil {
+		return DeliveryClaim{}, false, err
+	}
+	now := time.Now().UTC()
+	row, err := s.q.ClaimDelivery(context.Background(), sqlitegen.ClaimDeliveryParams{
+		ID:         deliveryID,
+		ClaimToken: token,
+		ClaimedBy:  claimedBy,
+		ClaimedAt:  now.UnixNano(),
+		SeenAt:     now.UnixNano(),
+	})
+	if err != nil {
+		return DeliveryClaim{}, false, err
+	}
+	if err := s.trimDeliveriesIfNeeded(); err != nil {
+		return DeliveryClaim{}, false, err
+	}
+	return DeliveryClaim{ID: deliveryID, Token: token}, row.Status == "processing" && row.ClaimToken == token, nil
+}
+
+func (s *Store) CompleteDeliveryClaim(claim DeliveryClaim) error {
+	claim.ID = strings.TrimSpace(claim.ID)
+	claim.Token = strings.TrimSpace(claim.Token)
+	if claim.ID == "" || claim.Token == "" {
+		return fmt.Errorf("delivery claim is required")
+	}
+	now := time.Now().UTC().UnixNano()
+	rows, err := s.q.CompleteDeliveryClaim(context.Background(), sqlitegen.CompleteDeliveryClaimParams{
+		ProcessedAt: sql.NullInt64{Int64: now, Valid: true},
+		SeenAt:      now,
+		ID:          claim.ID,
+		ClaimToken:  claim.Token,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("delivery claim %q is no longer active", claim.ID)
+	}
+	return nil
+}
+
+func (s *Store) ReleaseDeliveryClaim(claim DeliveryClaim) error {
+	claim.ID = strings.TrimSpace(claim.ID)
+	claim.Token = strings.TrimSpace(claim.Token)
+	if claim.ID == "" || claim.Token == "" {
+		return nil
+	}
+	_, err := s.q.ReleaseDeliveryClaim(context.Background(), sqlitegen.ReleaseDeliveryClaimParams{
+		ID:         claim.ID,
+		ClaimToken: claim.Token,
+	})
+	return err
+}
+
 // RecordDelivery stores a processed delivery id.
 func (s *Store) RecordDelivery(deliveryID string) error {
 	deliveryID = strings.TrimSpace(deliveryID)
 	if deliveryID == "" {
 		return nil
 	}
+	now := time.Now().UTC().UnixNano()
 	if err := s.q.RecordDelivery(context.Background(), sqlitegen.RecordDeliveryParams{
-		ID:     deliveryID,
-		SeenAt: time.Now().UTC().UnixNano(),
+		ID:          deliveryID,
+		ProcessedAt: sql.NullInt64{Int64: now, Valid: true},
+		SeenAt:      now,
 	}); err != nil {
 		return err
 	}
+	return s.trimDeliveriesIfNeeded()
+}
+
+func (s *Store) trimDeliveriesIfNeeded() error {
 	count, err := s.q.CountDeliveries(context.Background())
 	if err != nil {
 		return err
@@ -468,6 +568,14 @@ func (s *Store) RecordDelivery(deliveryID string) error {
 		return nil
 	}
 	return s.q.DeleteOldestDeliveries(context.Background(), count-maxDeliveries)
+}
+
+func newClaimToken() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("create delivery claim token: %w", err)
+	}
+	return "claim_" + hex.EncodeToString(buf), nil
 }
 
 func fromDBTask(t sqlitegen.Task) Task {

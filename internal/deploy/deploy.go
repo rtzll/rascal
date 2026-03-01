@@ -317,7 +317,7 @@ if systemctl is-active --quiet rascal; then
   systemctl disable rascal >/dev/null 2>&1 || true
 fi
 if [ %s != %s ]; then
-  systemctl stop "rascal@%s" || true
+  systemctl stop --no-block "rascal@%s" || true
   systemctl disable "rascal@%s" >/dev/null 2>&1 || true
 fi
 systemctl enable "rascal@%s" >/dev/null 2>&1 || true

@@ -42,8 +42,10 @@ type server struct {
 	activeRuns    map[string]string
 	queuedRuns    map[string][]string
 	runCancels    map[string]context.CancelFunc
+	runCancelNote map[string]string
 	maxConcurrent int
 	draining      bool
+	instanceID    string
 }
 
 type runRequest struct {
@@ -94,7 +96,9 @@ func main() {
 		activeRuns:    make(map[string]string),
 		queuedRuns:    make(map[string][]string),
 		runCancels:    make(map[string]context.CancelFunc),
+		runCancelNote: make(map[string]string),
 		maxConcurrent: defaultMaxConcurrent(),
+		instanceID:    fmt.Sprintf("%s-%d-%d", strings.TrimSpace(cfg.Slot), os.Getpid(), time.Now().UTC().UnixNano()),
 	}
 	s.recoverQueueState()
 
@@ -143,7 +147,7 @@ func main() {
 
 	if err := s.waitForNoActiveRuns(5 * time.Minute); err != nil {
 		log.Printf("active runs did not finish within drain timeout; canceling remaining runs")
-		s.cancelActiveRuns()
+		s.cancelActiveRuns("orchestrator shutdown drain timeout")
 		_ = s.waitForNoActiveRuns(30 * time.Second)
 	}
 }
@@ -153,8 +157,6 @@ func (s *server) recoverQueueState() {
 	for i := len(runs) - 1; i >= 0; i-- {
 		run := runs[i]
 		switch run.Status {
-		case state.StatusRunning:
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, "orchestrator restarted while run was active")
 		case state.StatusQueued:
 			s.enqueueExistingRun(run)
 		}
@@ -355,6 +357,10 @@ func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server is draining", http.StatusServiceUnavailable)
 		return
 	}
+	if !s.isActiveWebhookSlot() {
+		writeJSON(w, http.StatusAccepted, map[string]any{"accepted": false, "inactive_slot": true})
+		return
+	}
 
 	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 2*1024*1024))
 	if err != nil {
@@ -371,19 +377,33 @@ func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deliveryID := ghapi.DeliveryID(r.Header)
-	if s.store.DeliverySeen(deliveryID) {
-		writeJSON(w, http.StatusOK, map[string]any{"duplicate": true})
-		return
+	var deliveryClaim state.DeliveryClaim
+	if deliveryID != "" {
+		claim, claimed, claimErr := s.store.ClaimDelivery(deliveryID, s.instanceID)
+		if claimErr != nil {
+			http.Error(w, "failed to claim delivery id", http.StatusInternalServerError)
+			return
+		}
+		if !claimed {
+			writeJSON(w, http.StatusOK, map[string]any{"duplicate": true})
+			return
+		}
+		deliveryClaim = claim
 	}
 
 	eventType := ghapi.EventType(r.Header)
 	if err := s.processWebhookEvent(r.Context(), eventType, payload); err != nil {
+		if deliveryClaim.ID != "" {
+			_ = s.store.ReleaseDeliveryClaim(deliveryClaim)
+		}
 		http.Error(w, "webhook processing failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := s.store.RecordDelivery(deliveryID); err != nil {
-		http.Error(w, "failed to persist delivery id", http.StatusInternalServerError)
-		return
+	if deliveryClaim.ID != "" {
+		if err := s.store.CompleteDeliveryClaim(deliveryClaim); err != nil {
+			http.Error(w, "failed to finalize delivery id", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true})
@@ -561,6 +581,7 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 
 	s.mu.Lock()
 	if cancel, ok := s.runCancels[runID]; ok {
+		s.runCancelNote[runID] = "canceled by user"
 		cancel()
 	}
 	removed := s.removeQueuedRunLocked(run.TaskID, runID)
@@ -577,8 +598,12 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 		return
 	}
 
-	// If the run is active, cancellation is cooperative via context.
-	writeJSON(w, http.StatusAccepted, map[string]any{"run_id": runID, "cancel_requested": true})
+	updated, err := s.store.SetRunStatus(runID, state.StatusCanceled, "canceled by user")
+	if err != nil {
+		writeJSON(w, http.StatusAccepted, map[string]any{"run_id": runID, "cancel_requested": true})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"run": updated, "cancel_requested": true})
 }
 
 func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID string) {
@@ -824,7 +849,28 @@ func (s *server) executeRun(runID string) {
 		return
 	}
 
-	run = s.setRunStatusWithFallback(run, state.StatusRunning, "")
+	for {
+		claimedRun, claimed, err := s.store.ClaimRunStart(runID)
+		if err != nil {
+			updated := s.setRunStatusWithFallback(run, state.StatusFailed, err.Error())
+			s.finishRun(updated)
+			return
+		}
+		run = claimedRun
+		if claimed {
+			break
+		}
+		if run.Status != state.StatusQueued {
+			s.finishRun(run)
+			return
+		}
+		if s.isDraining() {
+			updated := s.setRunStatusWithFallback(run, state.StatusCanceled, "orchestrator shutting down")
+			s.finishRun(updated)
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 	s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionEyes)
 
 	spec := runner.Spec{
@@ -842,6 +888,7 @@ func (s *server) executeRun(runID string) {
 		Debug:       run.Debug,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	s.mu.Lock()
 	s.runCancels[runID] = cancel
 	s.mu.Unlock()
@@ -850,6 +897,8 @@ func (s *server) executeRun(runID string) {
 
 	s.mu.Lock()
 	delete(s.runCancels, runID)
+	reason := strings.TrimSpace(s.runCancelNote[runID])
+	delete(s.runCancelNote, runID)
 	s.mu.Unlock()
 
 	if err != nil {
@@ -857,9 +906,15 @@ func (s *server) executeRun(runID string) {
 		errText := err.Error()
 		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
 			status = state.StatusCanceled
-			errText = "canceled by user"
+			if reason == "" {
+				reason = "canceled"
+			}
+			errText = reason
 		}
-		updated := s.setRunStatusWithFallback(run, status, errText)
+		updated, ok := s.store.GetRun(run.ID)
+		if !ok || updated.Status != state.StatusCanceled {
+			updated = s.setRunStatusWithFallback(run, status, errText)
+		}
 		if updated.Status == state.StatusFailed {
 			s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionConfused)
 		}
@@ -872,7 +927,11 @@ func (s *server) executeRun(runID string) {
 	if result.PRNumber > 0 || strings.TrimSpace(result.PRURL) != "" {
 		status = state.StatusAwaitingFeedback
 	}
+	var errRunCanceled = errors.New("run already canceled")
 	updated, uErr := s.store.UpdateRun(run.ID, func(r *state.Run) error {
+		if r.Status == state.StatusCanceled {
+			return errRunCanceled
+		}
 		r.Status = status
 		r.Error = ""
 		r.PRNumber = maxInt(r.PRNumber, result.PRNumber)
@@ -885,6 +944,14 @@ func (s *server) executeRun(runID string) {
 		r.CompletedAt = &now
 		return nil
 	})
+	if errors.Is(uErr, errRunCanceled) {
+		if latest, ok := s.store.GetRun(run.ID); ok {
+			s.finishRun(latest)
+			return
+		}
+		s.finishRun(s.setRunStatusWithFallback(run, state.StatusCanceled, "canceled"))
+		return
+	}
 	if uErr != nil {
 		log.Printf("failed to persist run result for %s: %v", run.ID, uErr)
 		updated = s.setRunStatusWithFallback(run, state.StatusFailed, uErr.Error())
@@ -1286,15 +1353,44 @@ func (s *server) waitForNoActiveRuns(timeout time.Duration) error {
 	return fmt.Errorf("timed out waiting for active runs to finish")
 }
 
-func (s *server) cancelActiveRuns() {
+func (s *server) cancelActiveRuns(reason string) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "canceled"
+	}
 	s.mu.Lock()
 	cancels := make([]context.CancelFunc, 0, len(s.runCancels))
-	for _, cancel := range s.runCancels {
+	for runID, cancel := range s.runCancels {
+		s.runCancelNote[runID] = reason
 		cancels = append(cancels, cancel)
 	}
 	s.mu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
+	}
+}
+
+func (s *server) isActiveWebhookSlot() bool {
+	slot := strings.TrimSpace(s.cfg.Slot)
+	if slot == "" {
+		return true
+	}
+	activePath := strings.TrimSpace(s.cfg.ActiveSlotPath)
+	if activePath == "" {
+		return true
+	}
+	data, err := os.ReadFile(activePath)
+	if err != nil {
+		log.Printf("webhook slot gate: failed reading %s: %v", activePath, err)
+		return false
+	}
+	active := strings.TrimSpace(string(data))
+	switch active {
+	case "blue", "green":
+		return slot == active
+	default:
+		log.Printf("webhook slot gate: invalid active slot %q from %s", active, activePath)
+		return false
 	}
 }
 

@@ -53,7 +53,13 @@ CREATE INDEX idx_runs_task_seq ON runs (task_id, seq DESC);
 
 CREATE TABLE deliveries (
   id TEXT PRIMARY KEY,
-  seen_at INTEGER NOT NULL
+  status TEXT NOT NULL DEFAULT 'processing',
+  claim_token TEXT NOT NULL DEFAULT '',
+  claimed_by TEXT NOT NULL DEFAULT '',
+  claimed_at INTEGER NOT NULL DEFAULT 0,
+  processed_at INTEGER,
+  seen_at INTEGER NOT NULL,
+  last_error TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX idx_deliveries_seen_at ON deliveries (seen_at ASC);
@@ -236,6 +242,25 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatalf("expected run_2 to be active run, got %s", active.ID)
 	}
 
+	if rows, err := q.ClaimRunStart(ctx, ClaimRunStartParams{
+		UpdatedAt: later + 20,
+		StartedAt: sql.NullInt64{Int64: later + 20, Valid: true},
+		ID:        run1.ID,
+	}); err != nil {
+		t.Fatalf("ClaimRunStart run_1: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected run_1 claim rows=1, got %d", rows)
+	}
+	if rows, err := q.ClaimRunStart(ctx, ClaimRunStartParams{
+		UpdatedAt: later + 21,
+		StartedAt: sql.NullInt64{Int64: later + 21, Valid: true},
+		ID:        run2.ID,
+	}); err != nil {
+		t.Fatalf("ClaimRunStart run_2 while run_1 active: %v", err)
+	} else if rows != 0 {
+		t.Fatalf("expected run_2 claim rows=0 while run_1 active, got %d", rows)
+	}
+
 	if _, err := q.UpdateRun(ctx, UpdateRunParams{
 		TaskID:      run2.TaskID,
 		Repo:        run2.Repo,
@@ -244,7 +269,7 @@ func TestQueriesCoverage(t *testing.T) {
 		HeadBranch:  run2.HeadBranch,
 		Trigger:     run2.Trigger,
 		Debug:       run2.Debug,
-		Status:      "running",
+		Status:      "queued",
 		RunDir:      run2.RunDir,
 		IssueNumber: run2.IssueNumber,
 		PrNumber:    run2.PrNumber,
@@ -253,24 +278,24 @@ func TestQueriesCoverage(t *testing.T) {
 		Context:     run2.Context,
 		Error:       run2.Error,
 		CreatedAt:   run2.CreatedAt,
-		UpdatedAt:   run2.UpdatedAt + 1,
-		StartedAt:   sql.NullInt64{Int64: later + 21, Valid: true},
+		UpdatedAt:   run2.UpdatedAt + 2,
+		StartedAt:   sql.NullInt64{},
 		CompletedAt: sql.NullInt64{},
 		ID:          run2.ID,
 	}); err != nil {
 		t.Fatalf("UpdateRun: %v", err)
 	}
 
-	if err := q.CancelQueuedRuns(ctx, CancelQueuedRunsParams{Error: "stop", UpdatedAt: later + 22, CompletedAt: sql.NullInt64{Int64: later + 22, Valid: true}, TaskID: "task_1"}); err != nil {
+	if err := q.CancelQueuedRuns(ctx, CancelQueuedRunsParams{Error: "stop", UpdatedAt: later + 23, CompletedAt: sql.NullInt64{Int64: later + 23, Valid: true}, TaskID: "task_1"}); err != nil {
 		t.Fatalf("CancelQueuedRuns: %v", err)
 	}
 
-	gotRun1, err := q.GetRun(ctx, run1.ID)
+	gotRun1, err := q.GetRun(ctx, run2.ID)
 	if err != nil {
-		t.Fatalf("GetRun run_1 after cancel: %v", err)
+		t.Fatalf("GetRun run_2 after cancel: %v", err)
 	}
 	if gotRun1.Status != "canceled" {
-		t.Fatalf("expected run_1 canceled, got %s", gotRun1.Status)
+		t.Fatalf("expected run_2 canceled, got %s", gotRun1.Status)
 	}
 
 	if err := q.TrimOldRuns(ctx, 1); err != nil {
@@ -293,10 +318,74 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatalf("expected delivery to be unseen, got %d", seen)
 	}
 
-	if err := q.RecordDelivery(ctx, RecordDeliveryParams{ID: "delivery_1", SeenAt: later + 100}); err != nil {
-		t.Fatalf("RecordDelivery delivery_1: %v", err)
+	delivery1Token := "claim_1"
+	claim1, err := q.ClaimDelivery(ctx, ClaimDeliveryParams{
+		ID:         "delivery_1",
+		ClaimToken: delivery1Token,
+		ClaimedBy:  "rascald-a",
+		ClaimedAt:  later + 100,
+		SeenAt:     later + 100,
+	})
+	if err != nil {
+		t.Fatalf("ClaimDelivery delivery_1: %v", err)
 	}
-	if err := q.RecordDelivery(ctx, RecordDeliveryParams{ID: "delivery_2", SeenAt: later + 200}); err != nil {
+	if claim1.Status != "processing" || claim1.ClaimToken != delivery1Token {
+		t.Fatalf("expected claimed delivery_1 token=%s, got status=%s token=%s", delivery1Token, claim1.Status, claim1.ClaimToken)
+	}
+
+	dupClaim, err := q.ClaimDelivery(ctx, ClaimDeliveryParams{
+		ID:         "delivery_1",
+		ClaimToken: "claim_2",
+		ClaimedBy:  "rascald-b",
+		ClaimedAt:  later + 101,
+		SeenAt:     later + 101,
+	})
+	if err != nil {
+		t.Fatalf("ClaimDelivery duplicate delivery_1: %v", err)
+	}
+	if dupClaim.ClaimToken != delivery1Token {
+		t.Fatalf("expected duplicate claim token to remain %s, got %s", delivery1Token, dupClaim.ClaimToken)
+	}
+
+	if rows, err := q.ReleaseDeliveryClaim(ctx, ReleaseDeliveryClaimParams{
+		ID:         "delivery_1",
+		ClaimToken: delivery1Token,
+	}); err != nil {
+		t.Fatalf("ReleaseDeliveryClaim delivery_1: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected release rows=1, got %d", rows)
+	}
+
+	claimAfterRelease, err := q.ClaimDelivery(ctx, ClaimDeliveryParams{
+		ID:         "delivery_1",
+		ClaimToken: "claim_3",
+		ClaimedBy:  "rascald-c",
+		ClaimedAt:  later + 102,
+		SeenAt:     later + 102,
+	})
+	if err != nil {
+		t.Fatalf("ClaimDelivery after release delivery_1: %v", err)
+	}
+	if claimAfterRelease.ClaimToken != "claim_3" {
+		t.Fatalf("expected claim_3 token after release, got %s", claimAfterRelease.ClaimToken)
+	}
+
+	if rows, err := q.CompleteDeliveryClaim(ctx, CompleteDeliveryClaimParams{
+		ProcessedAt: sql.NullInt64{Int64: later + 103, Valid: true},
+		SeenAt:      later + 103,
+		ID:          "delivery_1",
+		ClaimToken:  "claim_3",
+	}); err != nil {
+		t.Fatalf("CompleteDeliveryClaim delivery_1: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected complete rows=1, got %d", rows)
+	}
+
+	if err := q.RecordDelivery(ctx, RecordDeliveryParams{
+		ID:          "delivery_2",
+		ProcessedAt: sql.NullInt64{Int64: later + 200, Valid: true},
+		SeenAt:      later + 200,
+	}); err != nil {
 		t.Fatalf("RecordDelivery delivery_2: %v", err)
 	}
 

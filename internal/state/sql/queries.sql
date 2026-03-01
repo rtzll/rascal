@@ -137,6 +137,19 @@ UPDATE runs
 SET status = 'canceled', error = ?, updated_at = ?, completed_at = ?
 WHERE task_id = ? AND status = 'queued';
 
+-- name: ClaimRunStart :execrows
+UPDATE runs
+SET status = 'running', error = '', updated_at = ?, started_at = ?
+WHERE id = ?
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM runs AS other
+    WHERE other.task_id = runs.task_id
+      AND other.status = 'running'
+      AND other.id <> runs.id
+  );
+
 -- name: TrimOldRuns :exec
 DELETE FROM runs
 WHERE id IN (
@@ -149,9 +162,83 @@ WHERE id IN (
 -- name: DeliverySeen :one
 SELECT EXISTS(SELECT 1 FROM deliveries WHERE id = ?);
 
+-- name: ClaimDelivery :one
+INSERT INTO deliveries (
+  id,
+  status,
+  claim_token,
+  claimed_by,
+  claimed_at,
+  processed_at,
+  seen_at,
+  last_error
+)
+VALUES (
+  sqlc.arg(id),
+  'processing',
+  sqlc.arg(claim_token),
+  sqlc.arg(claimed_by),
+  sqlc.arg(claimed_at),
+  NULL,
+  sqlc.arg(seen_at),
+  ''
+)
+ON CONFLICT(id) DO UPDATE SET
+  status = CASE
+    WHEN deliveries.status = 'processed' THEN deliveries.status
+    WHEN deliveries.status = 'processing' AND deliveries.claimed_at >= (excluded.claimed_at - 600000000000) THEN deliveries.status
+    ELSE 'processing'
+  END,
+  claim_token = CASE
+    WHEN deliveries.status = 'processed' THEN deliveries.claim_token
+    WHEN deliveries.status = 'processing' AND deliveries.claimed_at >= (excluded.claimed_at - 600000000000) THEN deliveries.claim_token
+    ELSE excluded.claim_token
+  END,
+  claimed_by = CASE
+    WHEN deliveries.status = 'processed' THEN deliveries.claimed_by
+    WHEN deliveries.status = 'processing' AND deliveries.claimed_at >= (excluded.claimed_at - 600000000000) THEN deliveries.claimed_by
+    ELSE excluded.claimed_by
+  END,
+  claimed_at = CASE
+    WHEN deliveries.status = 'processed' THEN deliveries.claimed_at
+    WHEN deliveries.status = 'processing' AND deliveries.claimed_at >= (excluded.claimed_at - 600000000000) THEN deliveries.claimed_at
+    ELSE excluded.claimed_at
+  END,
+  last_error = CASE
+    WHEN deliveries.status = 'processed' THEN deliveries.last_error
+    WHEN deliveries.status = 'processing' AND deliveries.claimed_at >= (excluded.claimed_at - 600000000000) THEN deliveries.last_error
+    ELSE ''
+  END
+RETURNING status, claim_token;
+
+-- name: CompleteDeliveryClaim :execrows
+UPDATE deliveries
+SET
+  status = 'processed',
+  claim_token = '',
+  claimed_by = '',
+  claimed_at = 0,
+  processed_at = ?,
+  seen_at = ?,
+  last_error = ''
+WHERE id = ? AND claim_token = ?;
+
+-- name: ReleaseDeliveryClaim :execrows
+DELETE FROM deliveries
+WHERE id = ? AND claim_token = ?;
+
 -- name: RecordDelivery :exec
-INSERT OR IGNORE INTO deliveries (id, seen_at)
-VALUES (?, ?);
+INSERT OR REPLACE INTO deliveries (
+  id,
+  status,
+  claim_token,
+  claimed_by,
+  claimed_at,
+  processed_at,
+  seen_at,
+  last_error
+)
+VALUES (?, 'processed', '', '', 0, ?, ?, '');
 
 -- name: CountDeliveries :one
 SELECT COUNT(*)

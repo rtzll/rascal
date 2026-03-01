@@ -99,13 +99,97 @@ func TestStoreSeenDelivery(t *testing.T) {
 	if store.DeliverySeen("delivery-1") {
 		t.Fatal("expected first delivery to be unseen")
 	}
-	if err := store.RecordDelivery("delivery-1"); err != nil {
-		t.Fatalf("record delivery first call: %v", err)
+	claim, claimed, err := store.ClaimDelivery("delivery-1", "test")
+	if err != nil {
+		t.Fatalf("claim delivery first call: %v", err)
+	}
+	if !claimed {
+		t.Fatal("expected first delivery claim to succeed")
+	}
+	if err := store.CompleteDeliveryClaim(claim); err != nil {
+		t.Fatalf("complete delivery first claim: %v", err)
 	}
 	if !store.DeliverySeen("delivery-1") {
 		t.Fatal("expected delivery to be seen after record")
 	}
-	if err := store.RecordDelivery("delivery-1"); err != nil {
-		t.Fatalf("record delivery second call: %v", err)
+	_, claimed, err = store.ClaimDelivery("delivery-1", "test-2")
+	if err != nil {
+		t.Fatalf("claim delivery second call: %v", err)
+	}
+	if claimed {
+		t.Fatal("expected second delivery claim to be rejected as duplicate")
+	}
+}
+
+func TestStoreReleaseDeliveryClaimAllowsRetry(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	claim, claimed, err := store.ClaimDelivery("delivery-2", "test")
+	if err != nil {
+		t.Fatalf("claim delivery: %v", err)
+	}
+	if !claimed {
+		t.Fatal("expected claim")
+	}
+	if err := store.ReleaseDeliveryClaim(claim); err != nil {
+		t.Fatalf("release claim: %v", err)
+	}
+	retryClaim, claimed, err := store.ClaimDelivery("delivery-2", "test-retry")
+	if err != nil {
+		t.Fatalf("retry claim: %v", err)
+	}
+	if !claimed {
+		t.Fatal("expected retry claim after release")
+	}
+	if err := store.CompleteDeliveryClaim(retryClaim); err != nil {
+		t.Fatalf("complete retry claim: %v", err)
+	}
+}
+
+func TestStoreClaimRunStartAtomic(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-claim", Repo: "owner/repo"}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	if _, err := store.AddRun(CreateRunInput{
+		ID:         "run_claim_1",
+		TaskID:     "task-claim",
+		Repo:       "owner/repo",
+		Task:       "first",
+		BaseBranch: "main",
+		RunDir:     "/tmp/run_claim_1",
+	}); err != nil {
+		t.Fatalf("add run 1: %v", err)
+	}
+	if _, err := store.AddRun(CreateRunInput{
+		ID:         "run_claim_2",
+		TaskID:     "task-claim",
+		Repo:       "owner/repo",
+		Task:       "second",
+		BaseBranch: "main",
+		RunDir:     "/tmp/run_claim_2",
+	}); err != nil {
+		t.Fatalf("add run 2: %v", err)
+	}
+
+	if _, claimed, err := store.ClaimRunStart("run_claim_1"); err != nil {
+		t.Fatalf("claim run 1: %v", err)
+	} else if !claimed {
+		t.Fatal("expected run 1 claim to succeed")
+	}
+	if run, claimed, err := store.ClaimRunStart("run_claim_2"); err != nil {
+		t.Fatalf("claim run 2: %v", err)
+	} else if claimed {
+		t.Fatalf("expected run 2 claim to fail while task has running run, got status=%s", run.Status)
 	}
 }
