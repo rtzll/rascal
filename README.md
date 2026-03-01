@@ -16,7 +16,7 @@ and ship PRs.
 `rascal` (CLI) -> `rascald` (orchestrator API) -> runner container -> branch +
 PR on GitHub.
 
-## Quickstart (10 Minutes)
+## Getting Started (10 Minutes)
 
 1. Build the CLI:
 
@@ -45,6 +45,8 @@ GITHUB_RUNTIME_TOKEN=...
 ```bash
 ./bin/rascal doctor --host <server_ip>
 ```
+
+To redeploy the daemon on an existing server, run `./bin/rascal deploy --host <server_ip>`.
 
 5. Run first task:
 
