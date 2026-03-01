@@ -489,6 +489,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
+		s.addIssueCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
 
 		taskID := s.resolveTaskForPR(ev.Repository.FullName, ev.Issue.Number)
 		_, err := s.createAndQueueRun(runRequest{
@@ -517,6 +518,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if s.isBotActor(ev.Review.User.Login) || s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
+		s.addPullRequestReviewReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ev.Review.ID, ghapi.ReactionEyes)
 
 		taskID := s.resolveTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
 		contextText := strings.TrimSpace(ev.Review.Body)
@@ -1448,6 +1450,34 @@ func (s *server) addIssueReactionBestEffort(repo string, issueNumber int, reacti
 	defer cancel()
 	if err := s.gh.AddIssueReaction(ctx, repo, issueNumber, reaction); err != nil {
 		log.Printf("failed to add %q reaction for %s#%d: %v", reaction, repo, issueNumber, err)
+	}
+}
+
+func (s *server) addIssueCommentReactionBestEffort(repo string, commentID int64, reaction string) {
+	if commentID <= 0 || strings.TrimSpace(repo) == "" {
+		return
+	}
+	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := s.gh.AddIssueCommentReaction(ctx, repo, commentID, reaction); err != nil {
+		log.Printf("failed to add %q reaction for issue comment %d in %s: %v", reaction, commentID, repo, err)
+	}
+}
+
+func (s *server) addPullRequestReviewReactionBestEffort(repo string, pullNumber int, reviewID int64, reaction string) {
+	if reviewID <= 0 || pullNumber <= 0 || strings.TrimSpace(repo) == "" {
+		return
+	}
+	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := s.gh.AddPullRequestReviewReaction(ctx, repo, pullNumber, reviewID, reaction); err != nil {
+		log.Printf("failed to add %q reaction for PR review %d on %s#%d: %v", reaction, reviewID, repo, pullNumber, err)
 	}
 }
 

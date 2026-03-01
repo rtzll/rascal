@@ -185,3 +185,77 @@ func TestAddIssueReaction(t *testing.T) {
 		}
 	})
 }
+
+func TestAddIssueCommentReaction(t *testing.T) {
+	t.Run("posts reaction", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			if r.URL.Path != "/repos/owner/repo/issues/comments/123/reactions" {
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+			var in map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			if in["content"] != ReactionEyes {
+				t.Fatalf("unexpected reaction payload: %v", in)
+			}
+			w.WriteHeader(http.StatusCreated)
+		}))
+		defer srv.Close()
+
+		client := newTestAPIClient(srv.URL)
+		if err := client.AddIssueCommentReaction(context.Background(), "owner/repo", 123, ReactionEyes); err != nil {
+			t.Fatalf("AddIssueCommentReaction returned error: %v", err)
+		}
+	})
+
+	t.Run("rejects invalid id", func(t *testing.T) {
+		client := NewAPIClient("token")
+		err := client.AddIssueCommentReaction(context.Background(), "owner/repo", 0, ReactionEyes)
+		if err == nil || !strings.Contains(err.Error(), "comment id must be positive") {
+			t.Fatalf("expected comment id error, got: %v", err)
+		}
+	})
+}
+
+func TestAddPullRequestReviewReaction(t *testing.T) {
+	t.Run("posts reaction", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			if r.URL.Path != "/repos/owner/repo/pulls/42/reviews/999/reactions" {
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+			var in map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			if in["content"] != ReactionEyes {
+				t.Fatalf("unexpected reaction payload: %v", in)
+			}
+			w.WriteHeader(http.StatusCreated)
+		}))
+		defer srv.Close()
+
+		client := newTestAPIClient(srv.URL)
+		if err := client.AddPullRequestReviewReaction(context.Background(), "owner/repo", 42, 999, ReactionEyes); err != nil {
+			t.Fatalf("AddPullRequestReviewReaction returned error: %v", err)
+		}
+	})
+
+	t.Run("rejects invalid ids", func(t *testing.T) {
+		client := NewAPIClient("token")
+		err := client.AddPullRequestReviewReaction(context.Background(), "owner/repo", 0, 999, ReactionEyes)
+		if err == nil || !strings.Contains(err.Error(), "pull number must be positive") {
+			t.Fatalf("expected pull number error, got: %v", err)
+		}
+		err = client.AddPullRequestReviewReaction(context.Background(), "owner/repo", 42, 0, ReactionEyes)
+		if err == nil || !strings.Contains(err.Error(), "review id must be positive") {
+			t.Fatalf("expected review id error, got: %v", err)
+		}
+	})
+}

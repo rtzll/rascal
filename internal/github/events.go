@@ -20,6 +20,7 @@ type Issue struct {
 }
 
 type Comment struct {
+	ID   int64  `json:"id"`
 	Body string `json:"body"`
 	User User   `json:"user"`
 }
@@ -36,6 +37,7 @@ type PullRequest struct {
 }
 
 type Review struct {
+	ID    int64  `json:"id"`
 	Body  string `json:"body"`
 	State string `json:"state"`
 	User  User   `json:"user"`
