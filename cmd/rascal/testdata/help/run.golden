@@ -1,4 +1,4 @@
-Start a run for a repository/task pair. The repository must be in OWNER/REPO form.
+Start a run for a repository/task pair, or create a run from an issue reference. The repository must be in OWNER/REPO form.
 
 Usage:
   rascal run [flags]
@@ -6,11 +6,13 @@ Usage:
 Examples:
 rascal run -R OWNER/REPO -t "Fix flaky tests"
 rascal run --repo OWNER/REPO --task "Refactor parser" --output json
+rascal run --issue OWNER/REPO#123
 
 Flags:
   -b, --base-branch string   base branch (default "main")
       --debug                stream detailed agent execution logs (use --debug=false to reduce verbosity) (default true)
   -h, --help                 help for run
+      --issue string         issue reference in OWNER/REPO#NUMBER form
   -R, --repo string          repository in OWNER/REPO form
   -t, --task string          task text
 
