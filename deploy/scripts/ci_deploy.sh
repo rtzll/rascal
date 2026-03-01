@@ -116,12 +116,29 @@ install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald
 install -m 0644 /tmp/rascal-bootstrap/rascal.service /etc/systemd/system/rascal.service
 
 systemctl daemon-reload
-systemctl enable rascal --now
-systemctl restart rascal
+systemctl enable rascal
+if systemctl is-active --quiet rascal; then
+  systemctl restart rascal
+else
+  systemctl start rascal
+fi
 systemctl is-active --quiet rascal
 
 if command -v curl >/dev/null 2>&1; then
-  curl -fsS http://127.0.0.1:8080/healthz >/dev/null
+  healthy=0
+  for _ in $(seq 1 30); do
+    if curl -fsS http://127.0.0.1:8080/healthz >/dev/null; then
+      healthy=1
+      break
+    fi
+    sleep 1
+  done
+  if [ "$healthy" -ne 1 ]; then
+    echo "rascal health check failed after restart" >&2
+    systemctl status rascal --no-pager || true
+    journalctl -u rascal -n 80 --no-pager || true
+    exit 1
+  fi
 fi
 
 rm -rf /tmp/rascal-bootstrap
