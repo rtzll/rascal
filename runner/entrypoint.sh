@@ -239,6 +239,10 @@ if command -v goose >/dev/null 2>&1; then
   case "${RASCAL_GOOSE_DEBUG:-true}" in
     1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn])
       goose_args+=(--debug)
+      export GOOSE_CODEX_DEBUG=1
+      ;;
+    *)
+      unset GOOSE_CODEX_DEBUG || true
       ;;
   esac
   # Capture both stdout and stderr so goose debug logs are available in
