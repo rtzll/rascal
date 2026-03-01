@@ -61,6 +61,17 @@ jobs:
           chmod 600 "$HOME/.ssh/id_ed25519"
           chmod 644 "$HOME/.ssh/known_hosts"
 
+      - name: Mask deploy endpoints
+        run: |
+          if [ -n "${DEPLOY_HOST:-}" ]; then
+            echo "::add-mask::${DEPLOY_HOST}"
+          fi
+          if [ -n "${DEPLOY_DOMAIN:-}" ]; then
+            echo "::add-mask::${DEPLOY_DOMAIN}"
+            echo "::add-mask::https://${DEPLOY_DOMAIN}"
+            echo "::add-mask::http://${DEPLOY_DOMAIN}"
+          fi
+
       - name: Deploy
         run: |
           go build -o ./bin/rascal ./cmd/rascal
