@@ -64,7 +64,7 @@ jobs:
       - name: Deploy
         run: |
           go build -o ./bin/rascal ./cmd/rascal
-          ./bin/rascal infra deploy-existing \
+          ./bin/rascal deploy \
             --host "${DEPLOY_HOST}" \
             --ssh-user "${DEPLOY_USER}" \
             --ssh-port "${DEPLOY_PORT}" \
