@@ -242,6 +242,160 @@ func TestHandleWebhookSignatureValidation(t *testing.T) {
 	}
 }
 
+func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	const (
+		repo    = "owner/repo"
+		taskID  = "owner/repo#7"
+		prNum   = 7
+		baseRef = "develop"
+		headRef = "rascal/task-7"
+	)
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, PRNumber: prNum}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	seedRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "seed_run",
+		TaskID:     taskID,
+		Repo:       repo,
+		Task:       "seed",
+		BaseBranch: baseRef,
+		HeadBranch: headRef,
+		Trigger:    "seed",
+		RunDir:     filepath.Join(t.TempDir(), "seed_run"),
+		PRNumber:   prNum,
+	})
+	if err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(seedRun.ID, state.StatusSucceeded, ""); err != nil {
+		t.Fatalf("mark seed run succeeded: %v", err)
+	}
+
+	payload := []byte(`{"action":"created","issue":{"number":7,"pull_request":{}},"comment":{"id":101,"body":"  please address review notes  ","user":{"login":"alice"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-comment", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var got state.Run
+	waitFor(t, time.Second, func() bool {
+		runs := s.store.ListRuns(20)
+		for _, run := range runs {
+			if run.Trigger == "pr_comment" {
+				got = run
+				return true
+			}
+		}
+		return false
+	}, "pr_comment run created")
+
+	if got.TaskID != taskID {
+		t.Fatalf("task id = %q, want %q", got.TaskID, taskID)
+	}
+	if got.PRNumber != prNum {
+		t.Fatalf("pr number = %d, want %d", got.PRNumber, prNum)
+	}
+	if got.BaseBranch != baseRef {
+		t.Fatalf("base branch = %q, want %q", got.BaseBranch, baseRef)
+	}
+	if got.HeadBranch != headRef {
+		t.Fatalf("head branch = %q, want %q", got.HeadBranch, headRef)
+	}
+	if got.Context != "please address review notes" {
+		t.Fatalf("context = %q, want trimmed comment body", got.Context)
+	}
+}
+
+func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	const (
+		repo    = "owner/repo"
+		taskID  = "owner/repo#11"
+		prNum   = 11
+		baseRef = "main"
+		headRef = "rascal/pr-11"
+	)
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, PRNumber: prNum}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	seedRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "seed_review",
+		TaskID:     taskID,
+		Repo:       repo,
+		Task:       "seed",
+		BaseBranch: baseRef,
+		HeadBranch: headRef,
+		Trigger:    "seed",
+		RunDir:     filepath.Join(t.TempDir(), "seed_review"),
+		PRNumber:   prNum,
+	})
+	if err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(seedRun.ID, state.StatusSucceeded, ""); err != nil {
+		t.Fatalf("mark seed run succeeded: %v", err)
+	}
+
+	payload := []byte(`{"action":"submitted","review":{"id":303,"body":"   ","state":"changes_requested","user":{"login":"bob"}},"pull_request":{"number":11},"repository":{"full_name":"owner/repo"},"sender":{"login":"bob"}}`)
+	req := webhookRequest(t, payload, "pull_request_review", "delivery-review", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var got state.Run
+	waitFor(t, time.Second, func() bool {
+		runs := s.store.ListRuns(20)
+		for _, run := range runs {
+			if run.Trigger == "pr_review" {
+				got = run
+				return true
+			}
+		}
+		return false
+	}, "pr_review run created")
+
+	if got.TaskID != taskID {
+		t.Fatalf("task id = %q, want %q", got.TaskID, taskID)
+	}
+	if got.PRNumber != prNum {
+		t.Fatalf("pr number = %d, want %d", got.PRNumber, prNum)
+	}
+	if got.BaseBranch != baseRef {
+		t.Fatalf("base branch = %q, want %q", got.BaseBranch, baseRef)
+	}
+	if got.HeadBranch != headRef {
+		t.Fatalf("head branch = %q, want %q", got.HeadBranch, headRef)
+	}
+	if got.Context != "review state: changes_requested" {
+		t.Fatalf("context = %q, want review state fallback", got.Context)
+	}
+}
+
+func TestHandleWebhookIssueCommentIgnoresBotActor(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	payload := []byte(`{"action":"created","issue":{"number":9,"pull_request":{}},"comment":{"id":501,"body":"please fix","user":{"login":"rascal[bot]"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"human"}}`)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-bot", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+	if got := len(s.store.ListRuns(10)); got != 0 {
+		t.Fatalf("expected zero runs for bot-authored comment, got %d", got)
+	}
+}
+
 func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
