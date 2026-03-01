@@ -1,3 +1,5 @@
+.DEFAULT_GOAL := build
+
 .PHONY: test test-fast build build-cli build-daemon run-daemon run-cli fmt codegen
 
 test: codegen
