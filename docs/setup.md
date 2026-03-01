@@ -12,20 +12,26 @@
 Rascal uses three tokens for production bootstrap.
 
 1. `HCLOUD_TOKEN`
+
 - Used locally to provision Hetzner resources.
 - Needs read/write API access.
-- Create in [Hetzner Cloud Console](https://console.hetzner.cloud/) at `Project -> Security -> API Tokens`.
-- Docs: [Generate an API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token)
+- Create in [Hetzner Cloud Console](https://console.hetzner.cloud/) at
+  `Project -> Security -> API Tokens`.
+- Docs:
+  [Generate an API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token)
 
 2. `GITHUB_ADMIN_TOKEN`
+
 - Local-only token for setup tasks (label + webhook management).
-- Create a fine-grained PAT at [GitHub token settings](https://github.com/settings/personal-access-tokens/new).
+- Create a fine-grained PAT at
+  [GitHub token settings](https://github.com/settings/personal-access-tokens/new).
 - Scope to the target repo.
 - Required repository permissions:
   - `Webhooks`: Read and write
   - `Issues`: Read and write
 
 3. `GITHUB_RUNTIME_TOKEN`
+
 - Stored on server for runner operations.
 - Scope to the target repo.
 - Required repository permissions:
@@ -34,6 +40,7 @@ Rascal uses three tokens for production bootstrap.
   - `Issues`: Read and write
 
 Docs:
+
 - [Managing personal access tokens](https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 - [Fine-grained PAT permissions](https://docs.github.com/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token#permissions)
 
@@ -73,7 +80,8 @@ You can also set a custom env file via `--env-file` or `RASCAL_ENV_FILE`.
 You can run Rascal over host IP without a domain.
 
 - CLI-triggered runs work over SSH transport or direct server URL.
-- GitHub webhooks can also target an IP URL if publicly reachable, but a stable domain + TLS is easier to operate.
+- GitHub webhooks can also target an IP URL if publicly reachable, but a stable
+  domain + TLS is easier to operate.
 
 ## Verify Setup
 

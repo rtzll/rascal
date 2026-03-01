@@ -6,7 +6,8 @@
 ./bin/rascal doctor --host YOUR_SERVER_IP
 ```
 
-`doctor` validates local config, server health, transport choice, and remote runtime prerequisites.
+`doctor` validates local config, server health, transport choice, and remote
+runtime prerequisites.
 
 ## Run Statuses
 

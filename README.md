@@ -2,7 +2,8 @@
 
 Rascal is a self-hosted coding-agent runner for GitHub repositories.
 
-It gives you one CLI to provision/deploy the orchestrator, trigger agent runs, and ship PRs.
+It gives you one CLI to provision/deploy the orchestrator, trigger agent runs,
+and ship PRs.
 
 ## Why Rascal
 
@@ -12,7 +13,8 @@ It gives you one CLI to provision/deploy the orchestrator, trigger agent runs, a
 
 ## Mental Model
 
-`rascal` (CLI) -> `rascald` (orchestrator API) -> runner container -> branch + PR on GitHub.
+`rascal` (CLI) -> `rascald` (orchestrator API) -> runner container -> branch +
+PR on GitHub.
 
 ## Quickstart (10 Minutes)
 

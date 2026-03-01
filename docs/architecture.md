@@ -5,15 +5,18 @@ Rascal has three runtime parts.
 ## Components
 
 1. `rascal` (CLI)
+
 - Local operator interface.
 - Handles setup, config, run creation, logs, and control commands.
 
 2. `rascald` (orchestrator server)
+
 - Receives API requests and GitHub webhooks.
 - Persists run/task state.
 - Schedules and executes runs serially per task.
 
 3. Runner container (`rascal-runner`)
+
 - Clones repository and checks out target branch.
 - Executes Goose/Codex task loop.
 - Commits changes, pushes branch, opens/updates PR.
@@ -28,7 +31,8 @@ Rascal has three runtime parts.
 
 ## State
 
-Persistent state is stored on the server in a JSON state file under Rascal data dir.
+Persistent state is stored on the server in a JSON state file under Rascal data
+dir.
 
 Each run stores:
 
