@@ -72,7 +72,7 @@ func newTestServer(t *testing.T, launcher runner.Launcher) *server {
 	dataDir := t.TempDir()
 	cfg := config.ServerConfig{
 		DataDir:    dataDir,
-		StatePath:  filepath.Join(dataDir, "state.json"),
+		StatePath:  filepath.Join(dataDir, "state.db"),
 		MaxRuns:    200,
 		RunnerMode: "noop",
 	}

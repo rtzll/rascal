@@ -6,10 +6,8 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,12 +27,6 @@ const (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-type legacyPersistentState struct {
-	Runs       []Run                `json:"runs"`
-	Tasks      []Task               `json:"tasks"`
-	Deliveries map[string]time.Time `json:"deliveries"`
-}
-
 type Store struct {
 	mu      sync.RWMutex
 	path    string
@@ -52,20 +44,6 @@ func New(path string, maxRuns int) (*Store, error) {
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create state directory: %w", err)
-	}
-
-	legacy, hasLegacy, err := detectLegacyState(path)
-	if err != nil {
-		return nil, err
-	}
-	if hasLegacy {
-		backup := path + ".legacy.json"
-		if _, statErr := os.Stat(backup); statErr == nil {
-			backup = fmt.Sprintf("%s.%d", backup, time.Now().UTC().Unix())
-		}
-		if err := os.Rename(path, backup); err != nil {
-			return nil, fmt.Errorf("backup legacy state: %w", err)
-		}
 	}
 
 	db, err := sql.Open(sqliteDriverName, path)
@@ -100,12 +78,6 @@ func New(path string, maxRuns int) (*Store, error) {
 		maxRuns: maxRuns,
 		db:      db,
 		q:       sqlitegen.New(db),
-	}
-	if hasLegacy {
-		if err := s.importLegacy(legacy); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("import legacy state: %w", err)
-		}
 	}
 	return s, nil
 }
@@ -492,170 +464,6 @@ func (s *Store) RecordDelivery(deliveryID string) error {
 		return nil
 	}
 	return s.q.DeleteOldestDeliveries(context.Background(), count-maxDeliveries)
-}
-
-func detectLegacyState(path string) (*legacyPersistentState, bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("open state file: %w", err)
-	}
-	defer f.Close()
-
-	sample := make([]byte, 512)
-	n, _ := f.Read(sample)
-	head := strings.TrimSpace(string(sample[:n]))
-	if head == "" {
-		return nil, false, nil
-	}
-	if !strings.HasPrefix(head, "{") {
-		return nil, false, nil
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil, false, fmt.Errorf("seek state file: %w", err)
-	}
-	var legacy legacyPersistentState
-	if err := json.NewDecoder(f).Decode(&legacy); err != nil {
-		return nil, false, fmt.Errorf("decode legacy state file: %w", err)
-	}
-	return &legacy, true, nil
-}
-
-func (s *Store) importLegacy(legacy *legacyPersistentState) error {
-	if legacy == nil {
-		return nil
-	}
-	tx, err := s.db.BeginTx(context.Background(), nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	qtx := s.q.WithTx(tx)
-
-	for _, t := range legacy.Tasks {
-		created := t.CreatedAt.UnixNano()
-		if t.CreatedAt.IsZero() {
-			created = time.Now().UTC().UnixNano()
-		}
-		updated := t.UpdatedAt.UnixNano()
-		if t.UpdatedAt.IsZero() {
-			updated = created
-		}
-		if _, err := qtx.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
-			ID:           t.ID,
-			Repo:         t.Repo,
-			IssueNumber:  int64(t.IssueNumber),
-			PrNumber:     int64(t.PRNumber),
-			Status:       string(TaskOpen),
-			PendingInput: false,
-			LastRunID:    "",
-			CreatedAt:    created,
-			UpdatedAt:    updated,
-		}); err != nil {
-			return err
-		}
-		if _, err := qtx.SetTaskPendingInput(context.Background(), sqlitegen.SetTaskPendingInputParams{
-			PendingInput: t.PendingInput,
-			UpdatedAt:    updated,
-			ID:           t.ID,
-		}); err != nil {
-			return err
-		}
-		if _, err := qtx.SetTaskLastRun(context.Background(), sqlitegen.SetTaskLastRunParams{
-			LastRunID:   t.LastRunID,
-			UpdatedAt:   updated,
-			IssueNumber: int64(t.IssueNumber),
-			PrNumber:    int64(t.PRNumber),
-			ID:          t.ID,
-		}); err != nil {
-			return err
-		}
-		if t.Status == TaskCompleted {
-			if _, err := qtx.MarkTaskCompleted(context.Background(), sqlitegen.MarkTaskCompletedParams{UpdatedAt: updated, ID: t.ID}); err != nil {
-				return err
-			}
-		}
-	}
-
-	for i := len(legacy.Runs) - 1; i >= 0; i-- {
-		r := legacy.Runs[i]
-		if _, err := qtx.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
-			ID:           r.TaskID,
-			Repo:         r.Repo,
-			IssueNumber:  int64(r.IssueNumber),
-			PrNumber:     int64(r.PRNumber),
-			Status:       string(TaskOpen),
-			PendingInput: false,
-			LastRunID:    "",
-			CreatedAt:    fallbackUnixNano(r.CreatedAt, time.Now().UTC()),
-			UpdatedAt:    fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
-		}); err != nil {
-			return err
-		}
-		if _, err := qtx.InsertRun(context.Background(), sqlitegen.InsertRunParams{
-			ID:          r.ID,
-			TaskID:      r.TaskID,
-			Repo:        r.Repo,
-			Task:        r.Task,
-			BaseBranch:  r.BaseBranch,
-			HeadBranch:  r.HeadBranch,
-			Trigger:     r.Trigger,
-			Debug:       r.Debug,
-			Status:      string(r.Status),
-			RunDir:      r.RunDir,
-			IssueNumber: int64(r.IssueNumber),
-			PrNumber:    int64(r.PRNumber),
-			PrUrl:       r.PRURL,
-			HeadSha:     r.HeadSHA,
-			Context:     r.Context,
-			Error:       r.Error,
-			CreatedAt:   fallbackUnixNano(r.CreatedAt, time.Now().UTC()),
-			UpdatedAt:   fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
-			StartedAt:   toNullInt64(r.StartedAt),
-			CompletedAt: toNullInt64(r.CompletedAt),
-		}); err != nil {
-			if strings.Contains(err.Error(), "UNIQUE constraint failed: runs.id") {
-				continue
-			}
-			return err
-		}
-		if _, err := qtx.SetTaskLastRun(context.Background(), sqlitegen.SetTaskLastRunParams{
-			LastRunID:   r.ID,
-			UpdatedAt:   fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
-			IssueNumber: int64(r.IssueNumber),
-			PrNumber:    int64(r.PRNumber),
-			ID:          r.TaskID,
-		}); err != nil {
-			return err
-		}
-	}
-
-	for id, ts := range legacy.Deliveries {
-		if err := qtx.RecordDelivery(context.Background(), sqlitegen.RecordDeliveryParams{
-			ID:     id,
-			SeenAt: fallbackUnixNano(ts, time.Now().UTC()),
-		}); err != nil {
-			return err
-		}
-	}
-
-	if err := qtx.TrimOldRuns(context.Background(), int64(s.maxRuns)); err != nil {
-		return err
-	}
-
-	count, err := qtx.CountDeliveries(context.Background())
-	if err != nil {
-		return err
-	}
-	if count > maxDeliveries {
-		if err := qtx.DeleteOldestDeliveries(context.Background(), count-maxDeliveries); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
 }
 
 func fromDBTask(t sqlitegen.Task) Task {

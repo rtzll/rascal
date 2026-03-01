@@ -8,7 +8,7 @@ import (
 func TestStoreRunAndTaskLifecycle(t *testing.T) {
 	t.Parallel()
 
-	store, err := New(filepath.Join(t.TempDir(), "state.json"), 200)
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 func TestStoreSeenDelivery(t *testing.T) {
 	t.Parallel()
 
-	store, err := New(filepath.Join(t.TempDir(), "state.json"), 200)
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
