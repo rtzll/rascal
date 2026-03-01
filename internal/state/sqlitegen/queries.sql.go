@@ -146,6 +146,182 @@ func (q *Queries) ClaimDelivery(ctx context.Context, arg ClaimDeliveryParams) (C
 	return i, err
 }
 
+const claimNextQueuedRun = `-- name: ClaimNextQueuedRun :one
+UPDATE runs
+SET status = 'running', error = '', updated_at = ?1, started_at = ?2
+WHERE id = (
+  SELECT r.id
+  FROM runs AS r
+  WHERE r.status = 'queued'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM runs AS other
+      WHERE other.task_id = r.task_id
+        AND other.status = 'running'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM run_cancels AS rc
+      WHERE rc.run_id = r.id
+    )
+  ORDER BY r.created_at ASC, r.seq ASC
+  LIMIT 1
+)
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM runs AS other
+    WHERE other.task_id = runs.task_id
+      AND other.status = 'running'
+      AND other.id <> runs.id
+  )
+RETURNING
+  seq,
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  debug,
+  status,
+  run_dir,
+  issue_number,
+  pr_number,
+  pr_url,
+  head_sha,
+  context,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+`
+
+type ClaimNextQueuedRunParams struct {
+	UpdatedAt int64         `json:"updated_at"`
+	StartedAt sql.NullInt64 `json:"started_at"`
+}
+
+func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRunParams) (Run, error) {
+	row := q.db.QueryRowContext(ctx, claimNextQueuedRun, arg.UpdatedAt, arg.StartedAt)
+	var i Run
+	err := row.Scan(
+		&i.Seq,
+		&i.ID,
+		&i.TaskID,
+		&i.Repo,
+		&i.Task,
+		&i.BaseBranch,
+		&i.HeadBranch,
+		&i.Trigger,
+		&i.Debug,
+		&i.Status,
+		&i.RunDir,
+		&i.IssueNumber,
+		&i.PrNumber,
+		&i.PrUrl,
+		&i.HeadSha,
+		&i.Context,
+		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const claimNextQueuedRunForTask = `-- name: ClaimNextQueuedRunForTask :one
+UPDATE runs
+SET status = 'running', error = '', updated_at = ?1, started_at = ?2
+WHERE id = (
+  SELECT r.id
+  FROM runs AS r
+  WHERE r.status = 'queued'
+    AND r.task_id = ?3
+    AND NOT EXISTS (
+      SELECT 1
+      FROM runs AS other
+      WHERE other.task_id = r.task_id
+        AND other.status = 'running'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM run_cancels AS rc
+      WHERE rc.run_id = r.id
+    )
+  ORDER BY r.created_at ASC, r.seq ASC
+  LIMIT 1
+)
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM runs AS other
+    WHERE other.task_id = runs.task_id
+      AND other.status = 'running'
+      AND other.id <> runs.id
+  )
+RETURNING
+  seq,
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  debug,
+  status,
+  run_dir,
+  issue_number,
+  pr_number,
+  pr_url,
+  head_sha,
+  context,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+`
+
+type ClaimNextQueuedRunForTaskParams struct {
+	UpdatedAt int64         `json:"updated_at"`
+	StartedAt sql.NullInt64 `json:"started_at"`
+	TaskID    string        `json:"task_id"`
+}
+
+func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQueuedRunForTaskParams) (Run, error) {
+	row := q.db.QueryRowContext(ctx, claimNextQueuedRunForTask, arg.UpdatedAt, arg.StartedAt, arg.TaskID)
+	var i Run
+	err := row.Scan(
+		&i.Seq,
+		&i.ID,
+		&i.TaskID,
+		&i.Repo,
+		&i.Task,
+		&i.BaseBranch,
+		&i.HeadBranch,
+		&i.Trigger,
+		&i.Debug,
+		&i.Status,
+		&i.RunDir,
+		&i.IssueNumber,
+		&i.PrNumber,
+		&i.PrUrl,
+		&i.HeadSha,
+		&i.Context,
+		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const claimRunStart = `-- name: ClaimRunStart :execrows
 UPDATE runs
 SET status = 'running', error = '', updated_at = ?, started_at = ?
@@ -755,6 +931,22 @@ func (q *Queries) SetTaskPendingInput(ctx context.Context, arg SetTaskPendingInp
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const taskHasQueuedRuns = `-- name: TaskHasQueuedRuns :one
+SELECT EXISTS(
+  SELECT 1
+  FROM runs
+  WHERE task_id = ?
+    AND status = 'queued'
+)
+`
+
+func (q *Queries) TaskHasQueuedRuns(ctx context.Context, taskID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, taskHasQueuedRuns, taskID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const trimOldRuns = `-- name: TrimOldRuns :exec

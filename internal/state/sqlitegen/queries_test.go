@@ -302,6 +302,64 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatalf("UpdateRun: %v", err)
 	}
 
+	if _, err := q.UpsertTask(ctx, UpsertTaskParams{
+		ID:           "task_2",
+		Repo:         "owner/repo",
+		IssueNumber:  0,
+		PrNumber:     0,
+		Status:       "open",
+		PendingInput: false,
+		LastRunID:    "",
+		CreatedAt:    later + 22,
+		UpdatedAt:    later + 22,
+	}); err != nil {
+		t.Fatalf("UpsertTask task_2: %v", err)
+	}
+
+	if _, err := q.InsertRun(ctx, InsertRunParams{
+		ID:          "run_3",
+		TaskID:      "task_2",
+		Repo:        "owner/repo",
+		Task:        "third task",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/task-2",
+		Trigger:     "cli",
+		Debug:       true,
+		Status:      "queued",
+		RunDir:      "/tmp/run_3",
+		IssueNumber: 0,
+		PrNumber:    0,
+		PrUrl:       "",
+		HeadSha:     "",
+		Context:     "",
+		Error:       "",
+		CreatedAt:   later + 22,
+		UpdatedAt:   later + 22,
+		StartedAt:   sql.NullInt64{},
+		CompletedAt: sql.NullInt64{},
+	}); err != nil {
+		t.Fatalf("InsertRun run_3: %v", err)
+	}
+
+	claimedNext, err := q.ClaimNextQueuedRunForTask(ctx, ClaimNextQueuedRunForTaskParams{
+		UpdatedAt: later + 22,
+		StartedAt: sql.NullInt64{Int64: later + 22, Valid: true},
+		TaskID:    "task_2",
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextQueuedRunForTask: %v", err)
+	}
+	if claimedNext.ID != "run_3" {
+		t.Fatalf("expected run_3 claim, got %s", claimedNext.ID)
+	}
+	hasQueued, err := q.TaskHasQueuedRuns(ctx, "task_1")
+	if err != nil {
+		t.Fatalf("TaskHasQueuedRuns task_1: %v", err)
+	}
+	if hasQueued == 0 {
+		t.Fatal("expected task_1 to still have queued runs")
+	}
+
 	if err := q.CancelQueuedRuns(ctx, CancelQueuedRunsParams{Error: "stop", UpdatedAt: later + 23, CompletedAt: sql.NullInt64{Int64: later + 23, Valid: true}, TaskID: "task_1"}); err != nil {
 		t.Fatalf("CancelQueuedRuns: %v", err)
 	}

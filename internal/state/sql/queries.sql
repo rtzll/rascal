@@ -150,6 +150,119 @@ WHERE id = ?
       AND other.id <> runs.id
   );
 
+-- name: ClaimNextQueuedRunForTask :one
+UPDATE runs
+SET status = 'running', error = '', updated_at = sqlc.arg(updated_at), started_at = sqlc.arg(started_at)
+WHERE id = (
+  SELECT r.id
+  FROM runs AS r
+  WHERE r.status = 'queued'
+    AND r.task_id = sqlc.arg(task_id)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM runs AS other
+      WHERE other.task_id = r.task_id
+        AND other.status = 'running'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM run_cancels AS rc
+      WHERE rc.run_id = r.id
+    )
+  ORDER BY r.created_at ASC, r.seq ASC
+  LIMIT 1
+)
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM runs AS other
+    WHERE other.task_id = runs.task_id
+      AND other.status = 'running'
+      AND other.id <> runs.id
+  )
+RETURNING
+  seq,
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  debug,
+  status,
+  run_dir,
+  issue_number,
+  pr_number,
+  pr_url,
+  head_sha,
+  context,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at;
+
+-- name: ClaimNextQueuedRun :one
+UPDATE runs
+SET status = 'running', error = '', updated_at = sqlc.arg(updated_at), started_at = sqlc.arg(started_at)
+WHERE id = (
+  SELECT r.id
+  FROM runs AS r
+  WHERE r.status = 'queued'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM runs AS other
+      WHERE other.task_id = r.task_id
+        AND other.status = 'running'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM run_cancels AS rc
+      WHERE rc.run_id = r.id
+    )
+  ORDER BY r.created_at ASC, r.seq ASC
+  LIMIT 1
+)
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM runs AS other
+    WHERE other.task_id = runs.task_id
+      AND other.status = 'running'
+      AND other.id <> runs.id
+  )
+RETURNING
+  seq,
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  debug,
+  status,
+  run_dir,
+  issue_number,
+  pr_number,
+  pr_url,
+  head_sha,
+  context,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at;
+
+-- name: TaskHasQueuedRuns :one
+SELECT EXISTS(
+  SELECT 1
+  FROM runs
+  WHERE task_id = ?
+    AND status = 'queued'
+);
+
 -- name: TrimOldRuns :exec
 DELETE FROM runs
 WHERE id IN (

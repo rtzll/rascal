@@ -195,6 +195,77 @@ func TestStoreClaimRunStartAtomic(t *testing.T) {
 	}
 }
 
+func TestStoreClaimNextQueuedRun(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	for _, taskID := range []string{"task-a", "task-b"} {
+		if _, err := store.UpsertTask(UpsertTaskInput{ID: taskID, Repo: "owner/repo"}); err != nil {
+			t.Fatalf("upsert task %s: %v", taskID, err)
+		}
+	}
+
+	if _, err := store.AddRun(CreateRunInput{
+		ID:         "run_a_1",
+		TaskID:     "task-a",
+		Repo:       "owner/repo",
+		Task:       "a1",
+		BaseBranch: "main",
+		RunDir:     "/tmp/run_a_1",
+	}); err != nil {
+		t.Fatalf("add run_a_1: %v", err)
+	}
+	if _, err := store.AddRun(CreateRunInput{
+		ID:         "run_b_1",
+		TaskID:     "task-b",
+		Repo:       "owner/repo",
+		Task:       "b1",
+		BaseBranch: "main",
+		RunDir:     "/tmp/run_b_1",
+	}); err != nil {
+		t.Fatalf("add run_b_1: %v", err)
+	}
+	if _, err := store.AddRun(CreateRunInput{
+		ID:         "run_a_2",
+		TaskID:     "task-a",
+		Repo:       "owner/repo",
+		Task:       "a2",
+		BaseBranch: "main",
+		RunDir:     "/tmp/run_a_2",
+	}); err != nil {
+		t.Fatalf("add run_a_2: %v", err)
+	}
+
+	claimed, ok, err := store.ClaimNextQueuedRun("task-a")
+	if err != nil {
+		t.Fatalf("claim preferred task-a: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected claim for task-a")
+	}
+	if claimed.ID != "run_a_1" {
+		t.Fatalf("expected run_a_1, got %s", claimed.ID)
+	}
+
+	if run, ok, err := store.ClaimNextQueuedRun("task-a"); err != nil {
+		t.Fatalf("claim while task-a active: %v", err)
+	} else if !ok {
+		t.Fatal("expected claim for another task while task-a is active")
+	} else if run.ID != "run_b_1" {
+		t.Fatalf("expected run_b_1, got %s", run.ID)
+	}
+
+	if _, ok, err := store.ClaimNextQueuedRun(""); err != nil {
+		t.Fatalf("claim when only blocked queued run remains: %v", err)
+	} else if ok {
+		t.Fatal("expected no claim while only queued run is blocked by active task")
+	}
+}
+
 func TestStoreRunLeaseLifecycle(t *testing.T) {
 	t.Parallel()
 

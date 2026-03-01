@@ -103,7 +103,6 @@ func newTestServer(t *testing.T, launcher runner.Launcher) *server {
 		launcher:      launcher,
 		gh:            ghapi.NewAPIClient(""),
 		activeRuns:    make(map[string]string),
-		queuedRuns:    make(map[string][]string),
 		runCancels:    make(map[string]context.CancelFunc),
 		runCancelNote: make(map[string]string),
 		maxConcurrent: defaultMaxConcurrent(),
@@ -686,7 +685,7 @@ func TestRecoverQueueStateAppliesPersistedCancel(t *testing.T) {
 		t.Fatalf("request run cancel: %v", err)
 	}
 
-	s.recoverQueueState()
+	s.recoverQueuedCancels()
 	updated, ok := s.store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
@@ -892,7 +891,7 @@ func TestCreateAndQueueRunRejectedWhenDraining(t *testing.T) {
 	}
 }
 
-func TestBeginDrainCancelsQueuedRuns(t *testing.T) {
+func TestBeginDrainLeavesQueuedRunsForNextSlot(t *testing.T) {
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -915,6 +914,6 @@ func TestBeginDrainCancelsQueuedRuns(t *testing.T) {
 
 	waitFor(t, time.Second, func() bool {
 		r, ok := s.store.GetRun(queued.ID)
-		return ok && r.Status == state.StatusCanceled
-	}, "queued run canceled by drain")
+		return ok && r.Status == state.StatusQueued
+	}, "queued run remains queued during drain")
 }

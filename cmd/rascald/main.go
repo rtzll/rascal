@@ -43,9 +43,9 @@ type server struct {
 
 	mu            sync.Mutex
 	activeRuns    map[string]string
-	queuedRuns    map[string][]string
 	runCancels    map[string]context.CancelFunc
 	runCancelNote map[string]string
+	scheduleMu    sync.Mutex
 	maxConcurrent int
 	draining      bool
 	instanceID    string
@@ -97,13 +97,13 @@ func main() {
 		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
 		activeRuns:    make(map[string]string),
-		queuedRuns:    make(map[string][]string),
 		runCancels:    make(map[string]context.CancelFunc),
 		runCancelNote: make(map[string]string),
 		maxConcurrent: defaultMaxConcurrent(),
 		instanceID:    fmt.Sprintf("%s-%d-%d", strings.TrimSpace(cfg.Slot), os.Getpid(), time.Now().UTC().UnixNano()),
 	}
-	s.recoverQueueState()
+	s.recoverQueuedCancels()
+	s.scheduleRuns("")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -155,18 +155,16 @@ func main() {
 	}
 }
 
-func (s *server) recoverQueueState() {
+func (s *server) recoverQueuedCancels() {
 	runs := s.store.ListRuns(10000)
 	for i := len(runs) - 1; i >= 0; i-- {
 		run := runs[i]
-		switch run.Status {
-		case state.StatusQueued:
-			if reason, ok := s.pendingRunCancelReason(run.ID); ok {
-				_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
-				_ = s.store.ClearRunCancel(run.ID)
-				continue
-			}
-			s.enqueueExistingRun(run)
+		if run.Status != state.StatusQueued {
+			continue
+		}
+		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
+			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
+			_ = s.store.ClearRunCancel(run.ID)
 		}
 	}
 }
@@ -597,17 +595,19 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 		s.runCancelNote[runID] = "canceled by user"
 		cancel()
 	}
-	removed := s.removeQueuedRunLocked(run.TaskID, runID)
 	s.mu.Unlock()
 
-	if removed {
+	if run.Status == state.StatusQueued {
 		updated, err := s.store.SetRunStatus(runID, state.StatusCanceled, "canceled by user")
 		if err != nil {
 			http.Error(w, "failed to cancel run", http.StatusInternalServerError)
 			return
 		}
 		_ = s.store.ClearRunCancel(runID)
-		_ = s.store.SetTaskPendingInput(run.TaskID, s.taskHasQueuedRuns(run.TaskID))
+		_ = s.syncTaskPendingInput(run.TaskID)
+		if !s.isDraining() {
+			s.scheduleRuns(run.TaskID)
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"run": updated, "canceled": true})
 		return
 	}
@@ -616,6 +616,10 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 	if err != nil {
 		writeJSON(w, http.StatusAccepted, map[string]any{"run_id": runID, "cancel_requested": true})
 		return
+	}
+	_ = s.syncTaskPendingInput(run.TaskID)
+	if !s.isDraining() {
+		s.scheduleRuns(run.TaskID)
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"run": updated, "cancel_requested": true})
 }
@@ -771,8 +775,8 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, err.Error())
 		return state.Run{}, fmt.Errorf("prepare run files: %w", err)
 	}
-
-	s.enqueueExistingRun(run)
+	_ = s.syncTaskPendingInput(run.TaskID)
+	s.scheduleRuns(run.TaskID)
 	return run, nil
 }
 
@@ -822,35 +826,6 @@ func (s *server) writeRunFiles(run state.Run) error {
 	return err
 }
 
-func (s *server) enqueueExistingRun(run state.Run) {
-	startNow := false
-	pending := false
-
-	s.mu.Lock()
-	if s.draining {
-		s.mu.Unlock()
-		_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, "orchestrator shutting down")
-		_ = s.store.SetTaskPendingInput(run.TaskID, false)
-		return
-	}
-	if activeID, ok := s.activeRuns[run.TaskID]; (ok && activeID != "") || len(s.queuedRuns[run.TaskID]) > 0 || len(s.activeRuns) >= s.concurrencyLimit() {
-		s.queuedRuns[run.TaskID] = append(s.queuedRuns[run.TaskID], run.ID)
-		pending = true
-	} else {
-		s.activeRuns[run.TaskID] = run.ID
-		startNow = true
-	}
-	s.mu.Unlock()
-
-	if pending {
-		_ = s.store.SetTaskPendingInput(run.TaskID, true)
-	}
-	if startNow {
-		_ = s.store.SetTaskPendingInput(run.TaskID, false)
-		go s.executeRun(run.ID)
-	}
-}
-
 func (s *server) executeRun(runID string) {
 	run, ok := s.store.GetRun(runID)
 	if !ok {
@@ -868,7 +843,7 @@ func (s *server) executeRun(runID string) {
 		return
 	}
 
-	for {
+	if run.Status == state.StatusQueued {
 		claimedRun, claimed, err := s.store.ClaimRunStart(runID)
 		if err != nil {
 			updated := s.setRunStatusWithFallback(run, state.StatusFailed, err.Error())
@@ -876,24 +851,17 @@ func (s *server) executeRun(runID string) {
 			return
 		}
 		run = claimedRun
-		if claimed {
-			break
-		}
-		if run.Status != state.StatusQueued {
-			s.finishRun(run)
+		if !claimed {
+			if run.Status != state.StatusQueued {
+				s.finishRun(run)
+				return
+			}
 			return
 		}
-		if reason, ok := s.pendingRunCancelReason(runID); ok {
-			updated := s.setRunStatusWithFallback(run, state.StatusCanceled, reason)
-			s.finishRun(updated)
-			return
-		}
-		if s.isDraining() {
-			updated := s.setRunStatusWithFallback(run, state.StatusCanceled, "orchestrator shutting down")
-			s.finishRun(updated)
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
+	}
+	if run.Status != state.StatusRunning {
+		s.finishRun(run)
+		return
 	}
 	s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionEyes)
 
@@ -1088,132 +1056,82 @@ func (s *server) finishRun(run state.Run) {
 	if runStatusIsDone(run.Status) {
 		_ = s.store.ClearRunCancel(run.ID)
 	}
-	if s.isDraining() {
-		_ = s.store.CancelQueuedRuns(run.TaskID, "orchestrator shutting down")
-		_ = s.store.SetTaskPendingInput(run.TaskID, false)
-	}
-
 	taskCompleted := s.store.IsTaskCompleted(run.TaskID)
-	var (
-		nextRunID     string
-		nextTaskID    string
-		pendingByTask = make(map[string]bool)
-	)
 
 	s.mu.Lock()
 	if current, ok := s.activeRuns[run.TaskID]; ok && current == run.ID {
 		delete(s.activeRuns, run.TaskID)
 	}
-	if taskCompleted {
-		delete(s.queuedRuns, run.TaskID)
-		pendingByTask[run.TaskID] = false
-	}
-
-	preferredTaskID := ""
-	if !taskCompleted {
-		preferredTaskID = run.TaskID
-	}
-	if !s.draining && len(s.activeRuns) < s.concurrencyLimit() {
-		taskID, runID, remaining, ok := s.popNextQueuedRunLocked(preferredTaskID)
-		if ok {
-			nextTaskID = taskID
-			nextRunID = runID
-			s.activeRuns[taskID] = runID
-			pendingByTask[taskID] = remaining > 0
-		}
-	}
-	if !taskCompleted {
-		if _, ok := pendingByTask[run.TaskID]; !ok {
-			pendingByTask[run.TaskID] = len(s.queuedRuns[run.TaskID]) > 0
-		}
-	}
 	s.mu.Unlock()
 
 	if taskCompleted {
 		_ = s.store.CancelQueuedRuns(run.TaskID, "task completed; canceled pending runs")
+		_ = s.store.SetTaskPendingInput(run.TaskID, false)
+	} else {
+		_ = s.syncTaskPendingInput(run.TaskID)
 	}
 
-	for taskID, pending := range pendingByTask {
-		_ = s.store.SetTaskPendingInput(taskID, pending)
+	if !s.isDraining() {
+		s.scheduleRuns(run.TaskID)
 	}
+}
 
-	if nextRunID != "" {
-		if s.isDraining() {
-			_, _ = s.store.SetRunStatus(nextRunID, state.StatusCanceled, "orchestrator shutting down")
-			s.mu.Lock()
-			if activeID, ok := s.activeRuns[nextTaskID]; ok && activeID == nextRunID {
-				delete(s.activeRuns, nextTaskID)
-			}
-			s.mu.Unlock()
-			_ = s.store.SetTaskPendingInput(nextTaskID, s.taskHasQueuedRuns(nextTaskID))
+func (s *server) scheduleRuns(preferredTaskID string) {
+	if s.isDraining() {
+		return
+	}
+	preferredTaskID = strings.TrimSpace(preferredTaskID)
+
+	s.scheduleMu.Lock()
+	defer s.scheduleMu.Unlock()
+
+	for {
+		s.mu.Lock()
+		atCapacity := len(s.activeRuns) >= s.concurrencyLimit()
+		draining := s.draining
+		s.mu.Unlock()
+		if draining || atCapacity {
 			return
 		}
-		go s.executeRun(nextRunID)
-	}
-}
 
-func (s *server) popNextQueuedRunLocked(preferredTaskID string) (taskID, runID string, remaining int, ok bool) {
-	if preferredTaskID != "" {
-		if runID, remaining, ok = s.popQueuedRunForTaskLocked(preferredTaskID); ok {
-			return preferredTaskID, runID, remaining, true
+		run, claimed, err := s.store.ClaimNextQueuedRun(preferredTaskID)
+		preferredTaskID = ""
+		if err != nil {
+			log.Printf("failed to claim next queued run: %v", err)
+			return
 		}
-	}
-	for candidateTaskID := range s.queuedRuns {
-		if candidateTaskID == preferredTaskID {
+		if !claimed {
+			return
+		}
+
+		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
+			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
+			_ = s.store.ClearRunCancel(run.ID)
+			_ = s.syncTaskPendingInput(run.TaskID)
 			continue
 		}
-		if runID, remaining, ok = s.popQueuedRunForTaskLocked(candidateTaskID); ok {
-			return candidateTaskID, runID, remaining, true
+
+		s.mu.Lock()
+		if s.draining {
+			s.mu.Unlock()
+			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, "orchestrator shutting down")
+			_ = s.syncTaskPendingInput(run.TaskID)
+			return
 		}
+		s.activeRuns[run.TaskID] = run.ID
+		s.mu.Unlock()
+
+		_ = s.syncTaskPendingInput(run.TaskID)
+		go s.executeRun(run.ID)
 	}
-	return "", "", 0, false
 }
 
-func (s *server) popQueuedRunForTaskLocked(taskID string) (runID string, remaining int, ok bool) {
-	if _, busy := s.activeRuns[taskID]; busy {
-		return "", 0, false
+func (s *server) syncTaskPendingInput(taskID string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
 	}
-	queue := s.queuedRuns[taskID]
-	if len(queue) == 0 {
-		delete(s.queuedRuns, taskID)
-		return "", 0, false
-	}
-	runID = queue[0]
-	queue = queue[1:]
-	if len(queue) == 0 {
-		delete(s.queuedRuns, taskID)
-	} else {
-		s.queuedRuns[taskID] = queue
-	}
-	return runID, len(queue), true
-}
-
-func (s *server) removeQueuedRunLocked(taskID, runID string) bool {
-	queue := s.queuedRuns[taskID]
-	if len(queue) == 0 {
-		return false
-	}
-	out := queue[:0]
-	removed := false
-	for _, id := range queue {
-		if id == runID {
-			removed = true
-			continue
-		}
-		out = append(out, id)
-	}
-	if len(out) == 0 {
-		delete(s.queuedRuns, taskID)
-	} else {
-		s.queuedRuns[taskID] = out
-	}
-	return removed
-}
-
-func (s *server) taskHasQueuedRuns(taskID string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.queuedRuns[taskID]) > 0
+	return s.store.SetTaskPendingInput(taskID, s.store.TaskHasQueuedRuns(taskID))
 }
 
 func (s *server) resolveTaskForPR(repo string, prNumber int) string {
@@ -1420,19 +1338,7 @@ func (s *server) beginDrain() {
 		return
 	}
 	s.draining = true
-	queuedByTask := make(map[string][]string, len(s.queuedRuns))
-	for taskID, ids := range s.queuedRuns {
-		queuedByTask[taskID] = append([]string(nil), ids...)
-	}
-	s.queuedRuns = make(map[string][]string)
 	s.mu.Unlock()
-
-	for taskID, ids := range queuedByTask {
-		for _, runID := range ids {
-			_, _ = s.store.SetRunStatus(runID, state.StatusCanceled, "orchestrator shutting down")
-		}
-		_ = s.store.SetTaskPendingInput(taskID, false)
-	}
 }
 
 func (s *server) waitForNoActiveRuns(timeout time.Duration) error {

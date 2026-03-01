@@ -427,6 +427,44 @@ func (s *Store) ClaimRunStart(runID string) (Run, bool, error) {
 	return fromDBRun(row), rows > 0, nil
 }
 
+func (s *Store) ClaimNextQueuedRun(preferredTaskID string) (Run, bool, error) {
+	now := time.Now().UTC().UnixNano()
+	preferredTaskID = strings.TrimSpace(preferredTaskID)
+	if preferredTaskID != "" {
+		row, err := s.q.ClaimNextQueuedRunForTask(context.Background(), sqlitegen.ClaimNextQueuedRunForTaskParams{
+			UpdatedAt: now,
+			StartedAt: sql.NullInt64{Int64: now, Valid: true},
+			TaskID:    preferredTaskID,
+		})
+		if err == nil {
+			return fromDBRun(row), true, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Run{}, false, err
+		}
+	}
+
+	row, err := s.q.ClaimNextQueuedRun(context.Background(), sqlitegen.ClaimNextQueuedRunParams{
+		UpdatedAt: now,
+		StartedAt: sql.NullInt64{Int64: now, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Run{}, false, nil
+		}
+		return Run{}, false, err
+	}
+	return fromDBRun(row), true, nil
+}
+
+func (s *Store) TaskHasQueuedRuns(taskID string) bool {
+	exists, err := s.q.TaskHasQueuedRuns(context.Background(), strings.TrimSpace(taskID))
+	if err != nil {
+		return false
+	}
+	return exists > 0
+}
+
 func (s *Store) UpsertRunLease(runID, ownerID string, ttl time.Duration) error {
 	runID = strings.TrimSpace(runID)
 	ownerID = strings.TrimSpace(ownerID)
