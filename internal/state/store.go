@@ -194,6 +194,10 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	if baseBranch == "" {
 		baseBranch = "main"
 	}
+	debugEnabled := true
+	if in.Debug != nil {
+		debugEnabled = *in.Debug
+	}
 
 	r := Run{
 		ID:          in.ID,
@@ -203,6 +207,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		BaseBranch:  baseBranch,
 		HeadBranch:  in.HeadBranch,
 		Trigger:     in.Trigger,
+		Debug:       debugEnabled,
 		Status:      StatusQueued,
 		RunDir:      in.RunDir,
 		IssueNumber: in.IssueNumber,

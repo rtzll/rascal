@@ -49,6 +49,7 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 		"RASCAL_BASE_BRANCH":           spec.BaseBranch,
 		"RASCAL_HEAD_BRANCH":           spec.HeadBranch,
 		"RASCAL_TRIGGER":               spec.Trigger,
+		"RASCAL_GOOSE_DEBUG":           strconv.FormatBool(spec.Debug),
 		"RASCAL_CONTEXT":               spec.Context,
 		"RASCAL_CONTEXT_JSON":          "/rascal-meta/context.json",
 		"RASCAL_ISSUE_NUMBER":          strconv.Itoa(spec.IssueNumber),

@@ -34,6 +34,27 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 	if run.Status != StatusQueued {
 		t.Fatalf("expected queued run status, got %s", run.Status)
 	}
+	if !run.Debug {
+		t.Fatal("expected debug=true by default")
+	}
+
+	debugOff := false
+	run2, err := store.AddRun(CreateRunInput{
+		ID:         "run_2",
+		TaskID:     "repo#1",
+		Repo:       "owner/repo",
+		Task:       "No debug",
+		BaseBranch: "main",
+		HeadBranch: "rascal/repo-1/run_2",
+		RunDir:     "/tmp/run_2",
+		Debug:      &debugOff,
+	})
+	if err != nil {
+		t.Fatalf("add second run: %v", err)
+	}
+	if run2.Debug {
+		t.Fatal("expected debug=false when explicitly requested")
+	}
 
 	if _, err := store.SetRunStatus(run.ID, StatusRunning, ""); err != nil {
 		t.Fatalf("set running: %v", err)

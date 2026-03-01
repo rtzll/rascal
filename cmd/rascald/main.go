@@ -50,6 +50,7 @@ type runRequest struct {
 	IssueNumber int
 	PRNumber    int
 	Context     string
+	Debug       *bool
 }
 
 type createTaskRequest struct {
@@ -57,11 +58,13 @@ type createTaskRequest struct {
 	Repo       string `json:"repo"`
 	Task       string `json:"task"`
 	BaseBranch string `json:"base_branch"`
+	Debug      *bool  `json:"debug,omitempty"`
 }
 
 type createIssueTaskRequest struct {
 	Repo        string `json:"repo"`
 	IssueNumber int    `json:"issue_number"`
+	Debug       *bool  `json:"debug,omitempty"`
 }
 
 type requestIDKey struct{}
@@ -196,6 +199,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Task:       req.Task,
 		BaseBranch: req.BaseBranch,
 		Trigger:    "cli",
+		Debug:      req.Debug,
 	})
 	if err != nil {
 		http.Error(w, "failed to create run: "+err.Error(), http.StatusInternalServerError)
@@ -241,6 +245,7 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		Trigger:     "issue_api",
 		IssueNumber: req.IssueNumber,
 		Context:     ctxText,
+		Debug:       req.Debug,
 	})
 	if err != nil {
 		if errors.Is(err, errTaskCompleted) {
@@ -341,6 +346,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			Trigger:     "issue_label",
 			IssueNumber: ev.Issue.Number,
 			Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number),
+			Debug:       boolPtr(true),
 		})
 		if errors.Is(err, errTaskCompleted) {
 			return nil
@@ -368,6 +374,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			Context:    strings.TrimSpace(ev.Comment.Body),
 			BaseBranch: s.defaultBaseBranchForTask(taskID),
 			HeadBranch: s.defaultHeadBranchForTask(taskID),
+			Debug:      boolPtr(true),
 		})
 		if errors.Is(err, errTaskCompleted) {
 			return nil
@@ -399,6 +406,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			Context:    contextText,
 			BaseBranch: s.defaultBaseBranchForTask(taskID),
 			HeadBranch: s.defaultHeadBranchForTask(taskID),
+			Debug:      boolPtr(true),
 		})
 		if errors.Is(err, errTaskCompleted) {
 			return nil
@@ -560,6 +568,10 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if req.Trigger == "" {
 		req.Trigger = "cli"
 	}
+	debugEnabled := true
+	if req.Debug != nil {
+		debugEnabled = *req.Debug
+	}
 
 	runID, err := state.NewRunID()
 	if err != nil {
@@ -615,6 +627,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		IssueNumber: req.IssueNumber,
 		PRNumber:    req.PRNumber,
 		Context:     req.Context,
+		Debug:       boolPtr(debugEnabled),
 	})
 	if err != nil {
 		return state.Run{}, fmt.Errorf("persist run: %w", err)
@@ -650,6 +663,7 @@ func (s *server) writeRunFiles(run state.Run) error {
 		"issue_number": run.IssueNumber,
 		"pr_number":    run.PRNumber,
 		"context":      run.Context,
+		"debug":        run.Debug,
 	}
 	ctxData, err := json.MarshalIndent(ctxPayload, "", "  ")
 	if err != nil {
@@ -725,6 +739,7 @@ func (s *server) executeRun(runID string) {
 		IssueNumber: run.IssueNumber,
 		PRNumber:    run.PRNumber,
 		Context:     run.Context,
+		Debug:       run.Debug,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
@@ -1015,6 +1030,10 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func (s *server) runLauncherWithRetry(ctx context.Context, spec runner.Spec) (runner.Result, error) {

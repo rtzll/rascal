@@ -28,6 +28,7 @@ type Run struct {
 	BaseBranch string    `json:"base_branch"`
 	HeadBranch string    `json:"head_branch"`
 	Trigger    string    `json:"trigger"`
+	Debug      bool      `json:"debug"`
 	Status     RunStatus `json:"status"`
 	RunDir     string    `json:"run_dir"`
 
@@ -65,6 +66,7 @@ type CreateRunInput struct {
 	BaseBranch  string
 	HeadBranch  string
 	Trigger     string
+	Debug       *bool
 	RunDir      string
 	IssueNumber int
 	PRNumber    int

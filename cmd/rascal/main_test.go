@@ -163,6 +163,34 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	}
 }
 
+func TestRunIssueRetryDebugDefaults(t *testing.T) {
+	root := newRootCmd()
+
+	runCmd, _, err := root.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("run command missing: %v", err)
+	}
+	if got := runCmd.Flags().Lookup("debug").DefValue; got != "true" {
+		t.Fatalf("run default debug = %q, want true", got)
+	}
+
+	issueCmd, _, err := root.Find([]string{"issue"})
+	if err != nil {
+		t.Fatalf("issue command missing: %v", err)
+	}
+	if got := issueCmd.Flags().Lookup("debug").DefValue; got != "true" {
+		t.Fatalf("issue default debug = %q, want true", got)
+	}
+
+	retryCmd, _, err := root.Find([]string{"retry"})
+	if err != nil {
+		t.Fatalf("retry command missing: %v", err)
+	}
+	if got := retryCmd.Flags().Lookup("debug").DefValue; got != "true" {
+		t.Fatalf("retry default debug = %q, want true", got)
+	}
+}
+
 func TestAuthHelpContainsSync(t *testing.T) {
 	root := newRootCmd()
 	var stdout bytes.Buffer

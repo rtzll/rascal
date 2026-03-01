@@ -13,6 +13,7 @@ type Spec struct {
 	BaseBranch  string
 	HeadBranch  string
 	Trigger     string
+	Debug       bool
 	RunDir      string
 	IssueNumber int
 	PRNumber    int

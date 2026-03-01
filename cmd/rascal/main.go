@@ -821,6 +821,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 
 func (a *app) newRunCmd() *cobra.Command {
 	var repo, task, baseBranch string
+	var debug bool
 	cmd := &cobra.Command{
 		Use:     "run",
 		Short:   "Start an ad-hoc run",
@@ -836,7 +837,12 @@ func (a *app) newRunCmd() *cobra.Command {
 				return &cliError{Code: exitInput, Message: "both --repo/-R and --task/-t are required"}
 			}
 
-			payload := map[string]any{"repo": repo, "task": task, "base_branch": baseBranch}
+			payload := map[string]any{
+				"repo":        repo,
+				"task":        task,
+				"base_branch": baseBranch,
+				"debug":       debug,
+			}
 			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
@@ -860,10 +866,12 @@ func (a *app) newRunCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository in OWNER/REPO form")
 	cmd.Flags().StringVarP(&task, "task", "t", "", "task text")
 	cmd.Flags().StringVarP(&baseBranch, "base-branch", "b", "main", "base branch")
+	cmd.Flags().BoolVar(&debug, "debug", true, "enable goose debug output (use --debug=false to disable)")
 	return cmd
 }
 
 func (a *app) newIssueCmd() *cobra.Command {
+	var debug bool
 	cmd := &cobra.Command{
 		Use:     "issue OWNER/REPO#123",
 		Short:   "Start a run from an issue",
@@ -877,7 +885,11 @@ func (a *app) newIssueCmd() *cobra.Command {
 			if err != nil {
 				return &cliError{Code: exitInput, Message: err.Error()}
 			}
-			payload := map[string]any{"repo": repo, "issue_number": issueNumber}
+			payload := map[string]any{
+				"repo":         repo,
+				"issue_number": issueNumber,
+				"debug":        debug,
+			}
 			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks/issue", payload)
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
@@ -898,6 +910,7 @@ func (a *app) newIssueCmd() *cobra.Command {
 			})
 		},
 	}
+	cmd.Flags().BoolVar(&debug, "debug", true, "enable goose debug output (use --debug=false to disable)")
 	return cmd
 }
 
@@ -1259,6 +1272,7 @@ func (a *app) newOpenCmd() *cobra.Command {
 }
 
 func (a *app) newRetryCmd() *cobra.Command {
+	var debug bool
 	cmd := &cobra.Command{
 		Use:               "retry <run_id>",
 		Aliases:           []string{"rerun"},
@@ -1281,6 +1295,7 @@ func (a *app) newRetryCmd() *cobra.Command {
 				"repo":        run.Repo,
 				"task":        run.Task,
 				"base_branch": run.BaseBranch,
+				"debug":       debug,
 			}
 			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
 			if err != nil {
@@ -1302,6 +1317,7 @@ func (a *app) newRetryCmd() *cobra.Command {
 			})
 		},
 	}
+	cmd.Flags().BoolVar(&debug, "debug", true, "enable goose debug output (use --debug=false to disable)")
 	return cmd
 }
 

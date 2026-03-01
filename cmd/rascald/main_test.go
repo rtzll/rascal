@@ -219,6 +219,16 @@ func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
 	}
 
 	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to start only")
+	launcher.mu.Lock()
+	firstSpecCount := len(launcher.specs)
+	firstSpecDebug := false
+	if firstSpecCount > 0 {
+		firstSpecDebug = launcher.specs[0].Debug
+	}
+	launcher.mu.Unlock()
+	if firstSpecCount == 0 || !firstSpecDebug {
+		t.Fatalf("expected first run spec debug=true, got count=%d debug=%t", firstSpecCount, firstSpecDebug)
+	}
 	r2, ok := s.store.GetRun(second.ID)
 	if !ok {
 		t.Fatalf("missing second run %s", second.ID)
@@ -349,6 +359,35 @@ func TestHandleCreateTaskRespectsProvidedTaskID(t *testing.T) {
 	}
 	if out.Run.TaskID != "owner/repo#99" {
 		t.Fatalf("expected task id owner/repo#99, got %q", out.Run.TaskID)
+	}
+	if !out.Run.Debug {
+		t.Fatal("expected debug=true by default")
+	}
+}
+
+func TestHandleCreateTaskAcceptsDebugFalse(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/tasks",
+		strings.NewReader(`{"task_id":"owner/repo#100","repo":"owner/repo","task":"quiet debug","base_branch":"main","debug":false}`),
+	)
+	rec := httptest.NewRecorder()
+	s.handleCreateTask(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var out struct {
+		Run state.Run `json:"run"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Run.Debug {
+		t.Fatal("expected debug=false when explicitly requested")
 	}
 }
 
