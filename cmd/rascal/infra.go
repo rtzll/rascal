@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -506,18 +505,6 @@ func defaultFirewallIPNets() []net.IPNet {
 
 func ptrString(v string) *string {
 	return &v
-}
-
-func repoRootPath() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return wd
-}
-
-func deployAssetPath(rel string) string {
-	return filepath.Join(repoRootPath(), rel)
 }
 
 func findSSHKeyByPublicKey(ctx context.Context, client *hcloud.Client, publicKey string) (*hcloud.SSHKey, error) {
