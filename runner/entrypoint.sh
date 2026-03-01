@@ -221,6 +221,13 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
       if [[ -n "${commit_body}" ]]; then
         pr_body="${commit_body}"$'\n\n'"${pr_body}"
       fi
+      if [[ -s "${GOOSE_LOG}" ]]; then
+        goose_output="$(cat "${GOOSE_LOG}")"
+      else
+        goose_output="(no goose output captured)"
+      fi
+      goose_section=$'<details><summary>Run Details</summary>\n\n```\n'"${goose_output}"$'\n```\n\n</details>'
+      pr_body="${pr_body}"$'\n\n'"${goose_section}"
       if [[ "${RASCAL_ISSUE_NUMBER}" =~ ^[0-9]+$ ]] && [[ "${RASCAL_ISSUE_NUMBER}" -gt 0 ]]; then
         pr_body="${pr_body}"$'\n\n'"Closes #${RASCAL_ISSUE_NUMBER}"
       fi
