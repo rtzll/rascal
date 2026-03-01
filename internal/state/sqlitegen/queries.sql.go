@@ -234,6 +234,19 @@ func (q *Queries) DeleteOldestDeliveries(ctx context.Context, limit int64) error
 	return err
 }
 
+const deleteRunCancel = `-- name: DeleteRunCancel :execrows
+DELETE FROM run_cancels
+WHERE run_id = ?
+`
+
+func (q *Queries) DeleteRunCancel(ctx context.Context, runID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteRunCancel, runID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteRunLease = `-- name: DeleteRunLease :execrows
 DELETE FROM run_leases
 WHERE run_id = ?
@@ -317,6 +330,24 @@ func (q *Queries) GetRun(ctx context.Context, id string) (Run, error) {
 		&i.UpdatedAt,
 		&i.StartedAt,
 		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const getRunCancel = `-- name: GetRunCancel :one
+SELECT run_id, reason, source, requested_at
+FROM run_cancels
+WHERE run_id = ?
+`
+
+func (q *Queries) GetRunCancel(ctx context.Context, runID string) (RunCancel, error) {
+	row := q.db.QueryRowContext(ctx, getRunCancel, runID)
+	var i RunCancel
+	err := row.Scan(
+		&i.RunID,
+		&i.Reason,
+		&i.Source,
+		&i.RequestedAt,
 	)
 	return i, err
 }
@@ -816,6 +847,32 @@ func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (int64, er
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const upsertRunCancel = `-- name: UpsertRunCancel :exec
+INSERT INTO run_cancels (run_id, reason, source, requested_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET
+  reason = excluded.reason,
+  source = excluded.source,
+  requested_at = excluded.requested_at
+`
+
+type UpsertRunCancelParams struct {
+	RunID       string `json:"run_id"`
+	Reason      string `json:"reason"`
+	Source      string `json:"source"`
+	RequestedAt int64  `json:"requested_at"`
+}
+
+func (q *Queries) UpsertRunCancel(ctx context.Context, arg UpsertRunCancelParams) error {
+	_, err := q.db.ExecContext(ctx, upsertRunCancel,
+		arg.RunID,
+		arg.Reason,
+		arg.Source,
+		arg.RequestedAt,
+	)
+	return err
 }
 
 const upsertRunLease = `-- name: UpsertRunLease :exec

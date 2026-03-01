@@ -498,6 +498,52 @@ func (s *Store) GetRunLease(runID string) (RunLease, bool) {
 	}, true
 }
 
+func (s *Store) RequestRunCancel(runID, reason, source string) error {
+	runID = strings.TrimSpace(runID)
+	reason = strings.TrimSpace(reason)
+	source = strings.TrimSpace(source)
+	if runID == "" {
+		return fmt.Errorf("run id is required")
+	}
+	if reason == "" {
+		reason = "canceled"
+	}
+	if source == "" {
+		source = "system"
+	}
+	return s.q.UpsertRunCancel(context.Background(), sqlitegen.UpsertRunCancelParams{
+		RunID:       runID,
+		Reason:      reason,
+		Source:      source,
+		RequestedAt: time.Now().UTC().UnixNano(),
+	})
+}
+
+func (s *Store) GetRunCancel(runID string) (RunCancelRequest, bool) {
+	row, err := s.q.GetRunCancel(context.Background(), strings.TrimSpace(runID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RunCancelRequest{}, false
+		}
+		return RunCancelRequest{}, false
+	}
+	return RunCancelRequest{
+		RunID:       row.RunID,
+		Reason:      row.Reason,
+		Source:      row.Source,
+		RequestedAt: time.Unix(0, row.RequestedAt).UTC(),
+	}, true
+}
+
+func (s *Store) ClearRunCancel(runID string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil
+	}
+	_, err := s.q.DeleteRunCancel(context.Background(), runID)
+	return err
+}
+
 func (s *Store) ActiveRunForTask(taskID string) (Run, bool) {
 	row, err := s.q.ActiveRunForTask(context.Background(), strings.TrimSpace(taskID))
 	if err != nil {

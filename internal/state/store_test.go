@@ -233,3 +233,44 @@ func TestStoreRunLeaseLifecycle(t *testing.T) {
 		t.Fatal("expected run lease to be deleted")
 	}
 }
+
+func TestStoreRunCancelLifecycle(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	if err := store.RequestRunCancel("run_cancel_1", "canceled by user", "user"); err != nil {
+		t.Fatalf("request run cancel: %v", err)
+	}
+	cancelReq, ok := store.GetRunCancel("run_cancel_1")
+	if !ok {
+		t.Fatal("expected cancel request to exist")
+	}
+	if cancelReq.Reason != "canceled by user" {
+		t.Fatalf("unexpected cancel reason: %q", cancelReq.Reason)
+	}
+	if cancelReq.Source != "user" {
+		t.Fatalf("unexpected cancel source: %q", cancelReq.Source)
+	}
+
+	if err := store.RequestRunCancel("run_cancel_1", "orchestrator shutdown", "shutdown"); err != nil {
+		t.Fatalf("update run cancel: %v", err)
+	}
+	cancelReq, ok = store.GetRunCancel("run_cancel_1")
+	if !ok {
+		t.Fatal("expected cancel request after update")
+	}
+	if cancelReq.Source != "shutdown" {
+		t.Fatalf("expected updated source shutdown, got %q", cancelReq.Source)
+	}
+
+	if err := store.ClearRunCancel("run_cancel_1"); err != nil {
+		t.Fatalf("clear run cancel: %v", err)
+	}
+	if _, ok := store.GetRunCancel("run_cancel_1"); ok {
+		t.Fatal("expected cancel request to be cleared")
+	}
+}

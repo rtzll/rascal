@@ -33,6 +33,7 @@ var errTaskCompleted = errors.New("task is already completed")
 var errServerDraining = errors.New("orchestrator is draining")
 
 const runLeaseTTL = 90 * time.Second
+const runSupervisorTick = 1 * time.Second
 
 type server struct {
 	cfg      config.ServerConfig
@@ -160,6 +161,11 @@ func (s *server) recoverQueueState() {
 		run := runs[i]
 		switch run.Status {
 		case state.StatusQueued:
+			if reason, ok := s.pendingRunCancelReason(run.ID); ok {
+				_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
+				_ = s.store.ClearRunCancel(run.ID)
+				continue
+			}
 			s.enqueueExistingRun(run)
 		}
 	}
@@ -577,7 +583,12 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 		return
 	}
 	if run.Status == state.StatusSucceeded || run.Status == state.StatusFailed || run.Status == state.StatusCanceled {
+		_ = s.store.ClearRunCancel(runID)
 		writeJSON(w, http.StatusOK, map[string]any{"run": run, "canceled": false, "reason": "run already completed"})
+		return
+	}
+	if err := s.store.RequestRunCancel(runID, "canceled by user", "user"); err != nil {
+		http.Error(w, "failed to persist cancel request", http.StatusInternalServerError)
 		return
 	}
 
@@ -595,6 +606,7 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 			http.Error(w, "failed to cancel run", http.StatusInternalServerError)
 			return
 		}
+		_ = s.store.ClearRunCancel(runID)
 		_ = s.store.SetTaskPendingInput(run.TaskID, s.taskHasQueuedRuns(run.TaskID))
 		writeJSON(w, http.StatusOK, map[string]any{"run": updated, "canceled": true})
 		return
@@ -844,6 +856,11 @@ func (s *server) executeRun(runID string) {
 	if !ok {
 		return
 	}
+	if reason, ok := s.pendingRunCancelReason(runID); ok {
+		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, reason)
+		s.finishRun(updated)
+		return
+	}
 
 	if s.store.IsTaskCompleted(run.TaskID) {
 		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, "task is already completed")
@@ -866,6 +883,11 @@ func (s *server) executeRun(runID string) {
 			s.finishRun(run)
 			return
 		}
+		if reason, ok := s.pendingRunCancelReason(runID); ok {
+			updated := s.setRunStatusWithFallback(run, state.StatusCanceled, reason)
+			s.finishRun(updated)
+			return
+		}
 		if s.isDraining() {
 			updated := s.setRunStatusWithFallback(run, state.StatusCanceled, "orchestrator shutting down")
 			s.finishRun(updated)
@@ -885,6 +907,11 @@ func (s *server) executeRun(runID string) {
 			log.Printf("failed to delete run lease for %s: %v", run.ID, err)
 		}
 	}()
+	if reason, ok := s.pendingRunCancelReason(runID); ok {
+		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, reason)
+		s.finishRun(updated)
+		return
+	}
 
 	spec := runner.Spec{
 		RunID:       run.ID,
@@ -909,7 +936,7 @@ func (s *server) executeRun(runID string) {
 	leaseDone := make(chan struct{})
 	go func() {
 		defer close(leaseDone)
-		s.heartbeatRunLease(ctx, run.ID, cancel)
+		s.superviseRun(ctx, run.ID, cancel)
 	}()
 
 	result, err := s.runLauncherWithRetry(ctx, spec)
@@ -989,28 +1016,50 @@ func (s *server) executeRun(runID string) {
 	s.finishRun(updated)
 }
 
-func (s *server) heartbeatRunLease(ctx context.Context, runID string, cancel context.CancelFunc) {
-	interval := runLeaseTTL / 3
+func (s *server) superviseRun(ctx context.Context, runID string, cancel context.CancelFunc) {
+	interval := runSupervisorTick
 	if interval <= 0 {
-		interval = 30 * time.Second
+		interval = time.Second
+	}
+	renewEvery := runLeaseTTL / 3
+	if renewEvery <= 0 {
+		renewEvery = 30 * time.Second
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	nextRenewAt := time.Now().UTC().Add(renewEvery)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if reason, ok := s.pendingRunCancelReason(runID); ok {
+				s.mu.Lock()
+				s.runCancelNote[runID] = reason
+				s.mu.Unlock()
+				cancel()
+				return
+			}
+			if time.Now().UTC().Before(nextRenewAt) {
+				continue
+			}
 			ok, err := s.store.RenewRunLease(runID, s.instanceID, runLeaseTTL)
 			if err != nil {
 				log.Printf("run %s lease heartbeat failed: %v", runID, err)
+				nextRenewAt = time.Now().UTC().Add(renewEvery)
 				continue
 			}
 			if !ok {
 				log.Printf("run %s lease ownership lost; canceling run context", runID)
+				s.mu.Lock()
+				if _, exists := s.runCancelNote[runID]; !exists {
+					s.runCancelNote[runID] = "lease ownership lost"
+				}
+				s.mu.Unlock()
 				cancel()
 				return
 			}
+			nextRenewAt = time.Now().UTC().Add(renewEvery)
 		}
 	}
 }
@@ -1036,6 +1085,9 @@ func (s *server) setRunStatusWithFallback(run state.Run, status state.RunStatus,
 }
 
 func (s *server) finishRun(run state.Run) {
+	if runStatusIsDone(run.Status) {
+		_ = s.store.ClearRunCancel(run.ID)
+	}
 	if s.isDraining() {
 		_ = s.store.CancelQueuedRuns(run.TaskID, "orchestrator shutting down")
 		_ = s.store.SetTaskPendingInput(run.TaskID, false)
@@ -1409,6 +1461,7 @@ func (s *server) cancelActiveRuns(reason string) {
 	cancels := make([]context.CancelFunc, 0, len(s.runCancels))
 	for runID, cancel := range s.runCancels {
 		s.runCancelNote[runID] = reason
+		_ = s.store.RequestRunCancel(runID, reason, "shutdown")
 		cancels = append(cancels, cancel)
 	}
 	s.mu.Unlock()
@@ -1439,6 +1492,18 @@ func (s *server) isActiveWebhookSlot() bool {
 		log.Printf("webhook slot gate: invalid active slot %q from %s", active, activePath)
 		return false
 	}
+}
+
+func (s *server) pendingRunCancelReason(runID string) (string, bool) {
+	req, ok := s.store.GetRunCancel(runID)
+	if !ok {
+		return "", false
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "canceled"
+	}
+	return reason, true
 }
 
 func (s *server) addIssueReactionBestEffort(repo string, issueNumber int, reaction string) {

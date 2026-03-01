@@ -60,6 +60,13 @@ CREATE TABLE run_leases (
 
 CREATE INDEX idx_run_leases_expires ON run_leases (lease_expires_at ASC);
 
+CREATE TABLE run_cancels (
+  run_id TEXT PRIMARY KEY,
+  reason TEXT NOT NULL,
+  source TEXT NOT NULL,
+  requested_at INTEGER NOT NULL
+);
+
 CREATE TABLE deliveries (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL DEFAULT 'processing',
@@ -358,6 +365,35 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatalf("DeleteRunLease: %v", err)
 	} else if rows != 1 {
 		t.Fatalf("expected DeleteRunLease rows=1, got %d", rows)
+	}
+
+	if err := q.UpsertRunCancel(ctx, UpsertRunCancelParams{
+		RunID:       "run_cancel_1",
+		Reason:      "canceled by user",
+		Source:      "user",
+		RequestedAt: later + 57,
+	}); err != nil {
+		t.Fatalf("UpsertRunCancel: %v", err)
+	}
+	if err := q.UpsertRunCancel(ctx, UpsertRunCancelParams{
+		RunID:       "run_cancel_1",
+		Reason:      "orchestrator shutdown",
+		Source:      "shutdown",
+		RequestedAt: later + 58,
+	}); err != nil {
+		t.Fatalf("UpsertRunCancel update: %v", err)
+	}
+	cancelRow, err := q.GetRunCancel(ctx, "run_cancel_1")
+	if err != nil {
+		t.Fatalf("GetRunCancel: %v", err)
+	}
+	if cancelRow.Source != "shutdown" {
+		t.Fatalf("expected updated cancel source shutdown, got %q", cancelRow.Source)
+	}
+	if rows, err := q.DeleteRunCancel(ctx, "run_cancel_1"); err != nil {
+		t.Fatalf("DeleteRunCancel: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected DeleteRunCancel rows=1, got %d", rows)
 	}
 
 	seen, err := q.DeliverySeen(ctx, "delivery_1")

@@ -594,6 +594,111 @@ func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
 	}, "run canceled with drain reason")
 }
 
+func TestExecuteRunHonorsPersistedCancelBeforeStart(t *testing.T) {
+	launcher := &fakeLauncher{}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_pre_cancel",
+		TaskID:     "task_pre_cancel",
+		Repo:       "owner/repo",
+		Task:       "should not start",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := s.store.RequestRunCancel(run.ID, "persisted cancel", "user"); err != nil {
+		t.Fatalf("request run cancel: %v", err)
+	}
+
+	s.mu.Lock()
+	s.activeRuns[run.TaskID] = run.ID
+	s.mu.Unlock()
+
+	s.executeRun(run.ID)
+
+	if calls := launcher.Calls(); calls != 0 {
+		t.Fatalf("expected launcher not to start, got calls=%d", calls)
+	}
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if updated.Status != state.StatusCanceled {
+		t.Fatalf("expected canceled status, got %s", updated.Status)
+	}
+	if !strings.Contains(updated.Error, "persisted cancel") {
+		t.Fatalf("expected persisted cancel reason, got %q", updated.Error)
+	}
+}
+
+func TestPersistedRunCancelStopsActiveRun(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer func() {
+		close(waitCh)
+		waitForServerIdle(t, s)
+	}()
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "persisted-cancel", Repo: "owner/repo", Task: "cancel while running"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "run start")
+
+	if err := s.store.RequestRunCancel(run.ID, "cancel from store", "user"); err != nil {
+		t.Fatalf("request run cancel: %v", err)
+	}
+
+	waitFor(t, 4*time.Second, func() bool {
+		current, ok := s.store.GetRun(run.ID)
+		return ok && current.Status == state.StatusCanceled
+	}, "run canceled from persisted request")
+	current, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if !strings.Contains(current.Error, "cancel from store") {
+		t.Fatalf("expected persisted cancel reason in run error, got %q", current.Error)
+	}
+}
+
+func TestRecoverQueueStateAppliesPersistedCancel(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_recover_cancel",
+		TaskID:     "task_recover_cancel",
+		Repo:       "owner/repo",
+		Task:       "recover queued cancel",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := s.store.RequestRunCancel(run.ID, "queued canceled before restart", "user"); err != nil {
+		t.Fatalf("request run cancel: %v", err)
+	}
+
+	s.recoverQueueState()
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if updated.Status != state.StatusCanceled {
+		t.Fatalf("expected recovered run canceled, got %s", updated.Status)
+	}
+	if !strings.Contains(updated.Error, "queued canceled before restart") {
+		t.Fatalf("unexpected recovered cancel reason: %q", updated.Error)
+	}
+}
+
 func TestHandleRunLogsRespectsLines(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)

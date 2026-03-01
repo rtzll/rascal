@@ -48,6 +48,13 @@ CREATE TABLE run_leases (
 
 CREATE INDEX idx_run_leases_expires ON run_leases (lease_expires_at ASC);
 
+CREATE TABLE run_cancels (
+  run_id TEXT PRIMARY KEY,
+  reason TEXT NOT NULL,
+  source TEXT NOT NULL,
+  requested_at INTEGER NOT NULL
+);
+
 CREATE TABLE deliveries (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL DEFAULT 'processing',

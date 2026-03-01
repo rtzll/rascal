@@ -65,6 +65,13 @@ type RunLease struct {
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 }
 
+type RunCancelRequest struct {
+	RunID       string    `json:"run_id"`
+	Reason      string    `json:"reason"`
+	Source      string    `json:"source"`
+	RequestedAt time.Time `json:"requested_at"`
+}
+
 type CreateRunInput struct {
 	ID          string
 	TaskID      string

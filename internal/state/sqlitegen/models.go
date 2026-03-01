@@ -43,6 +43,13 @@ type Run struct {
 	CompletedAt sql.NullInt64 `json:"completed_at"`
 }
 
+type RunCancel struct {
+	RunID       string `json:"run_id"`
+	Reason      string `json:"reason"`
+	Source      string `json:"source"`
+	RequestedAt int64  `json:"requested_at"`
+}
+
 type RunLease struct {
 	RunID          string `json:"run_id"`
 	OwnerID        string `json:"owner_id"`

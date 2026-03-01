@@ -183,6 +183,23 @@ SELECT run_id, owner_id, heartbeat_at, lease_expires_at
 FROM run_leases
 WHERE run_id = ?;
 
+-- name: UpsertRunCancel :exec
+INSERT INTO run_cancels (run_id, reason, source, requested_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET
+  reason = excluded.reason,
+  source = excluded.source,
+  requested_at = excluded.requested_at;
+
+-- name: GetRunCancel :one
+SELECT run_id, reason, source, requested_at
+FROM run_cancels
+WHERE run_id = ?;
+
+-- name: DeleteRunCancel :execrows
+DELETE FROM run_cancels
+WHERE run_id = ?;
+
 -- name: DeliverySeen :one
 SELECT EXISTS(SELECT 1 FROM deliveries WHERE id = ?);
 
