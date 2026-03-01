@@ -324,6 +324,36 @@ func TestCreateAndQueueRunRespectsGlobalConcurrencyLimit(t *testing.T) {
 	}, "second run to complete")
 }
 
+func TestTaskPendingInputTracksQueuedRuns(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+	taskID := "owner/repo#pending"
+
+	_, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "first"})
+	if err != nil {
+		t.Fatalf("create first run: %v", err)
+	}
+	_, err = s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "second"})
+	if err != nil {
+		t.Fatalf("create second run: %v", err)
+	}
+
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to start")
+	waitFor(t, time.Second, func() bool {
+		task, ok := s.store.GetTask(taskID)
+		return ok && task.PendingInput
+	}, "task pending input reflects queued run")
+
+	close(waitCh)
+	waitFor(t, 2*time.Second, func() bool { return launcher.Calls() == 2 }, "second run to start")
+	waitFor(t, 2*time.Second, func() bool {
+		task, ok := s.store.GetTask(taskID)
+		return ok && !task.PendingInput
+	}, "task pending input cleared after queue drains")
+}
+
 func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
