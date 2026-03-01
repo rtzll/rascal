@@ -5,10 +5,15 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/rtzll/rascal/internal/config"
 )
 
 func TestMaskSecret(t *testing.T) {
@@ -533,6 +538,124 @@ func TestLoadGlobalEnvExplicitEnvWinsOverFile(t *testing.T) {
 	if got := os.Getenv("RASCAL_TEST_ENV_PRIORITY"); got != "from_env" {
 		t.Fatalf("expected env var to keep precedence, got %q", got)
 	}
+}
+
+func TestStreamRunLogsFollowAppendsOnlyDiff(t *testing.T) {
+	responses := []map[string]any{
+		{"logs": "alpha\n", "run_status": "running", "done": false},
+		{"logs": "alpha\nbeta\n", "run_status": "running", "done": false},
+		{"logs": "alpha\nbeta\ngamma\n", "run_status": "succeeded", "done": true},
+	}
+
+	a, closeServer, _ := newFollowLogsTestApp(t, responses)
+	defer closeServer()
+
+	out, err := captureStdout(func() error {
+		return a.streamRunLogs("run_abc123", true, 1*time.Millisecond, 0, 200)
+	})
+	if err != nil {
+		t.Fatalf("streamRunLogs follow: %v", err)
+	}
+	if out != "alpha\nbeta\ngamma\n" {
+		t.Fatalf("unexpected follow output:\n--- got ---\n%s\n--- want ---\n%s", out, "alpha\nbeta\ngamma\n")
+	}
+}
+
+func TestStreamRunLogsFollowPrintsFullBodyOnReset(t *testing.T) {
+	responses := []map[string]any{
+		{"logs": "one\ntwo\n", "run_status": "running", "done": false},
+		{"logs": "reset\n", "run_status": "running", "done": true},
+	}
+
+	a, closeServer, _ := newFollowLogsTestApp(t, responses)
+	defer closeServer()
+
+	out, err := captureStdout(func() error {
+		return a.streamRunLogs("run_reset", true, 1*time.Millisecond, 0, 200)
+	})
+	if err != nil {
+		t.Fatalf("streamRunLogs follow: %v", err)
+	}
+	if out != "one\ntwo\nreset\n" {
+		t.Fatalf("unexpected follow output on reset:\n--- got ---\n%s\n--- want ---\n%s", out, "one\ntwo\nreset\n")
+	}
+}
+
+func TestStreamRunLogsFollowStopsAfterDone(t *testing.T) {
+	responses := []map[string]any{
+		{"logs": "done-now\n", "run_status": "failed", "done": true},
+	}
+
+	a, closeServer, requestCount := newFollowLogsTestApp(t, responses)
+	defer closeServer()
+
+	out, err := captureStdout(func() error {
+		return a.streamRunLogs("run_done", true, 5*time.Millisecond, 0, 200)
+	})
+	if err != nil {
+		t.Fatalf("streamRunLogs follow: %v", err)
+	}
+	if out != "done-now\n" {
+		t.Fatalf("unexpected output:\n--- got ---\n%s\n--- want ---\n%s", out, "done-now\n")
+	}
+	if got := requestCount(); got != 1 {
+		t.Fatalf("expected exactly one follow request when done=true, got %d", got)
+	}
+}
+
+func newFollowLogsTestApp(t *testing.T, responses []map[string]any) (*app, func(), func() int) {
+	t.Helper()
+
+	var (
+		mu    sync.Mutex
+		idx   int
+		calls int
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if !strings.HasPrefix(r.URL.Path, "/v1/runs/") || !strings.HasSuffix(r.URL.Path, "/logs") {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("format"); got != "json" {
+			t.Fatalf("expected format=json, got %q", got)
+		}
+
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		current := responses[len(responses)-1]
+		if idx < len(responses) {
+			current = responses[idx]
+			idx++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(current)
+	}))
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL:  srv.URL,
+			APIToken:   "test-token",
+			Transport:  "http",
+			SSHPort:    22,
+			DefaultRepo: "owner/repo",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+	}
+
+	getCalls := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return calls
+	}
+	return a, srv.Close, getCalls
 }
 
 func captureStdout(fn func() error) (string, error) {
