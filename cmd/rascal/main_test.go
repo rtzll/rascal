@@ -460,9 +460,9 @@ func TestLoadEnvFile(t *testing.T) {
 	path := t.TempDir() + "/.env"
 	content := `
 # comment
-HCLOUD_TOKEN=abc
-export GITHUB_ADMIN_TOKEN=admin_token
-GITHUB_RUNTIME_TOKEN="runtime_token"
+HCLOUD_TOKEN=test_hcloud_token
+export GITHUB_ADMIN_TOKEN=test_github_admin_token
+GITHUB_RUNTIME_TOKEN="test_github_runtime_token"
 EMPTY=
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -472,13 +472,13 @@ EMPTY=
 	if err != nil {
 		t.Fatalf("load env file: %v", err)
 	}
-	if got["HCLOUD_TOKEN"] != "abc" {
+	if got["HCLOUD_TOKEN"] != "test_hcloud_token" {
 		t.Fatalf("unexpected HCLOUD_TOKEN: %q", got["HCLOUD_TOKEN"])
 	}
-	if got["GITHUB_ADMIN_TOKEN"] != "admin_token" {
+	if got["GITHUB_ADMIN_TOKEN"] != "test_github_admin_token" {
 		t.Fatalf("unexpected GITHUB_ADMIN_TOKEN: %q", got["GITHUB_ADMIN_TOKEN"])
 	}
-	if got["GITHUB_RUNTIME_TOKEN"] != "runtime_token" {
+	if got["GITHUB_RUNTIME_TOKEN"] != "test_github_runtime_token" {
 		t.Fatalf("unexpected GITHUB_RUNTIME_TOKEN: %q", got["GITHUB_RUNTIME_TOKEN"])
 	}
 }
