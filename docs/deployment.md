@@ -46,6 +46,8 @@ Given active slot `A` and inactive slot `B`, deploy does:
 
 Important: deploy success is no longer coupled to waiting for old-slot drain.
 
+- Cutover checks use `/readyz` on the target slot.
+
 ## Drain Behavior
 
 When old slot gets `SIGTERM`:
