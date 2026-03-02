@@ -259,3 +259,46 @@ func TestAddPullRequestReviewReaction(t *testing.T) {
 		}
 	})
 }
+
+func TestUpsertWebhookDefaultEventsIncludeReviewComment(t *testing.T) {
+	var receivedEvents []string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/hooks":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/repo/hooks":
+			var payload struct {
+				Events []string `json:"events"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			receivedEvents = append(receivedEvents, payload.Events...)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, `{"id":1}`)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	client := newTestAPIClient(srv.URL)
+	if err := client.UpsertWebhook(context.Background(), "owner/repo", "https://example.com/hook", "secret", nil); err != nil {
+		t.Fatalf("UpsertWebhook returned error: %v", err)
+	}
+
+	want := []string{"issues", "issue_comment", "pull_request_review", "pull_request_review_comment", "pull_request"}
+	for _, ev := range want {
+		found := false
+		for _, got := range receivedEvents {
+			if got == ev {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("default webhook events missing %q: %v", ev, receivedEvents)
+		}
+	}
+}

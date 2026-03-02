@@ -380,6 +380,76 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 	}
 }
 
+func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	const (
+		repo    = "owner/repo"
+		taskID  = "owner/repo#12"
+		prNum   = 12
+		baseRef = "main"
+		headRef = "rascal/pr-12"
+	)
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, PRNumber: prNum}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	seedRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "seed_review_comment",
+		TaskID:     taskID,
+		Repo:       repo,
+		Task:       "seed",
+		BaseBranch: baseRef,
+		HeadBranch: headRef,
+		Trigger:    "seed",
+		RunDir:     filepath.Join(t.TempDir(), "seed_review_comment"),
+		PRNumber:   prNum,
+	})
+	if err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(seedRun.ID, state.StatusSucceeded, ""); err != nil {
+		t.Fatalf("mark seed run succeeded: %v", err)
+	}
+
+	payload := []byte(`{"action":"created","comment":{"id":404,"body":"Please rename this helper","path":"cmd/rascald/main.go","line":515,"start_line":512,"user":{"login":"eve"}},"pull_request":{"number":12},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var got state.Run
+	waitFor(t, time.Second, func() bool {
+		runs := s.store.ListRuns(20)
+		for _, run := range runs {
+			if run.Trigger == "pr_review_comment" {
+				got = run
+				return true
+			}
+		}
+		return false
+	}, "pr_review_comment run created")
+
+	if got.TaskID != taskID {
+		t.Fatalf("task id = %q, want %q", got.TaskID, taskID)
+	}
+	if got.PRNumber != prNum {
+		t.Fatalf("pr number = %d, want %d", got.PRNumber, prNum)
+	}
+	if got.BaseBranch != baseRef {
+		t.Fatalf("base branch = %q, want %q", got.BaseBranch, baseRef)
+	}
+	if got.HeadBranch != headRef {
+		t.Fatalf("head branch = %q, want %q", got.HeadBranch, headRef)
+	}
+	wantContext := "Please rename this helper\n\nInline comment location: cmd/rascald/main.go:512-515"
+	if got.Context != wantContext {
+		t.Fatalf("context = %q, want %q", got.Context, wantContext)
+	}
+}
+
 func TestHandleWebhookIssueCommentIgnoresBotActor(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)

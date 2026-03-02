@@ -540,6 +540,43 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			return nil
 		}
 		return err
+	case "pull_request_review_comment":
+		var ev ghapi.PullRequestReviewCommentEvent
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return fmt.Errorf("decode pull_request_review_comment event: %w", err)
+		}
+		if ev.Action != "created" {
+			return nil
+		}
+		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
+			return nil
+		}
+		s.addIssueCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
+
+		taskID := s.resolveTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
+		contextText := strings.TrimSpace(ev.Comment.Body)
+		if location := formatReviewCommentLocation(ev.Comment.Path, ev.Comment.StartLine, ev.Comment.Line); location != "" {
+			if contextText == "" {
+				contextText = fmt.Sprintf("inline review comment at %s", location)
+			} else {
+				contextText = contextText + "\n\nInline comment location: " + location
+			}
+		}
+		_, err := s.createAndQueueRun(runRequest{
+			TaskID:     taskID,
+			Repo:       ev.Repository.FullName,
+			Task:       fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
+			Trigger:    "pr_review_comment",
+			PRNumber:   ev.PullRequest.Number,
+			Context:    contextText,
+			BaseBranch: s.defaultBaseBranchForTask(taskID),
+			HeadBranch: s.defaultHeadBranchForTask(taskID),
+			Debug:      boolPtr(true),
+		})
+		if errors.Is(err, errTaskCompleted) {
+			return nil
+		}
+		return err
 	case "pull_request":
 		var ev ghapi.PullRequestEvent
 		if err := json.Unmarshal(payload, &ev); err != nil {
@@ -1229,6 +1266,23 @@ func issueTaskFromIssue(title, body string) string {
 		return title
 	}
 	return fmt.Sprintf("%s\n\n%s", title, body)
+}
+
+func formatReviewCommentLocation(path string, startLine, line *int) string {
+	path = strings.TrimSpace(path)
+	if line != nil && *line > 0 {
+		if startLine != nil && *startLine > 0 && *startLine != *line {
+			if path == "" {
+				return fmt.Sprintf("lines %d-%d", *startLine, *line)
+			}
+			return fmt.Sprintf("%s:%d-%d", path, *startLine, *line)
+		}
+		if path == "" {
+			return fmt.Sprintf("line %d", *line)
+		}
+		return fmt.Sprintf("%s:%d", path, *line)
+	}
+	return path
 }
 
 func instructionText(run state.Run) string {

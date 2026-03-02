@@ -43,6 +43,15 @@ type Review struct {
 	User  User   `json:"user"`
 }
 
+type ReviewComment struct {
+	ID        int64  `json:"id"`
+	Body      string `json:"body"`
+	Path      string `json:"path"`
+	Line      *int   `json:"line"`
+	StartLine *int   `json:"start_line"`
+	User      User   `json:"user"`
+}
+
 type IssuesEvent struct {
 	Action     string     `json:"action"`
 	Label      Label      `json:"label"`
@@ -65,6 +74,14 @@ type PullRequestReviewEvent struct {
 	PullRequest PullRequest `json:"pull_request"`
 	Repository  Repository  `json:"repository"`
 	Sender      User        `json:"sender"`
+}
+
+type PullRequestReviewCommentEvent struct {
+	Action      string        `json:"action"`
+	Comment     ReviewComment `json:"comment"`
+	PullRequest PullRequest   `json:"pull_request"`
+	Repository  Repository    `json:"repository"`
+	Sender      User          `json:"sender"`
 }
 
 type PullRequestEvent struct {
