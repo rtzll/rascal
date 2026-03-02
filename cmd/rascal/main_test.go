@@ -128,7 +128,196 @@ func TestRootFlagsDoNotExposeDeadFlags(t *testing.T) {
 	}
 }
 
-func TestRootHasGitHubAndInfraCommands(t *testing.T) {
+func TestInitConfigResolutionSources(t *testing.T) {
+	type flags struct {
+		serverURL   string
+		apiToken    string
+		defaultRepo string
+		transport   string
+	}
+
+	type want struct {
+		serverURL         string
+		apiToken          string
+		defaultRepo       string
+		transport         string
+		serverSource      string
+		apiTokenSource    string
+		defaultRepoSource string
+		transportSource   string
+	}
+
+	cases := []struct {
+		name          string
+		configContent string
+		env           map[string]string
+		flags         flags
+		want          want
+	}{
+		{
+			name: "flags override env and config",
+			configContent: `
+server_url = "http://from-config"
+api_token = "token-config"
+default_repo = "config/repo"
+transport = "ssh"
+`,
+			env: map[string]string{
+				"RASCAL_SERVER_URL":   "http://from-env",
+				"RASCAL_API_TOKEN":    "token-env",
+				"RASCAL_DEFAULT_REPO": "env/repo",
+				"RASCAL_TRANSPORT":    "http",
+			},
+			flags: flags{
+				serverURL:   "http://from-flag",
+				apiToken:    "token-flag",
+				defaultRepo: "flag/repo",
+				transport:   "HTTP",
+			},
+			want: want{
+				serverURL:         "http://from-flag",
+				apiToken:          "token-flag",
+				defaultRepo:       "flag/repo",
+				transport:         "http",
+				serverSource:      configSourceFlag,
+				apiTokenSource:    configSourceFlag,
+				defaultRepoSource: configSourceFlag,
+				transportSource:   configSourceFlag,
+			},
+		},
+		{
+			name: "env overrides config",
+			configContent: `
+server_url = "http://from-config"
+api_token = "token-config"
+default_repo = "config/repo"
+transport = "ssh"
+`,
+			env: map[string]string{
+				"RASCAL_SERVER_URL":   "http://from-env",
+				"RASCAL_API_TOKEN":    "token-env",
+				"RASCAL_DEFAULT_REPO": "env/repo",
+				"RASCAL_TRANSPORT":    "http",
+			},
+			want: want{
+				serverURL:         "http://from-env",
+				apiToken:          "token-env",
+				defaultRepo:       "env/repo",
+				transport:         "http",
+				serverSource:      configSourceEnv,
+				apiTokenSource:    configSourceEnv,
+				defaultRepoSource: configSourceEnv,
+				transportSource:   configSourceEnv,
+			},
+		},
+		{
+			name: "config used without env or flags",
+			configContent: `
+server_url = "http://from-config"
+api_token = "token-config"
+default_repo = "config/repo"
+transport = "ssh"
+`,
+			want: want{
+				serverURL:         "http://from-config",
+				apiToken:          "token-config",
+				defaultRepo:       "config/repo",
+				transport:         "ssh",
+				serverSource:      configSourceConfig,
+				apiTokenSource:    configSourceConfig,
+				defaultRepoSource: configSourceConfig,
+				transportSource:   configSourceConfig,
+			},
+		},
+		{
+			name: "defaults and unset when nothing provided",
+			want: want{
+				serverURL:         "http://127.0.0.1:8080",
+				apiToken:          "",
+				defaultRepo:       "",
+				transport:         "auto",
+				serverSource:      configSourceDefault,
+				apiTokenSource:    configSourceUnset,
+				defaultRepoSource: configSourceUnset,
+				transportSource:   configSourceResolved,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.toml")
+			if strings.TrimSpace(tc.configContent) != "" {
+				if err := os.WriteFile(configPath, []byte(tc.configContent), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+			}
+
+			setEnvForTest(t, "RASCAL_SERVER_URL", tc.env)
+			setEnvForTest(t, "RASCAL_API_TOKEN", tc.env)
+			setEnvForTest(t, "RASCAL_DEFAULT_REPO", tc.env)
+			setEnvForTest(t, "RASCAL_TRANSPORT", tc.env)
+
+			a := &app{
+				configPath:      configPath,
+				serverURLFlag:   tc.flags.serverURL,
+				apiTokenFlag:    tc.flags.apiToken,
+				defaultRepoFlag: tc.flags.defaultRepo,
+				transportFlag:   tc.flags.transport,
+			}
+
+			if err := a.initConfig(); err != nil {
+				t.Fatalf("initConfig: %v", err)
+			}
+
+			if a.cfg.ServerURL != tc.want.serverURL {
+				t.Fatalf("server_url = %q, want %q", a.cfg.ServerURL, tc.want.serverURL)
+			}
+			if a.cfg.APIToken != tc.want.apiToken {
+				t.Fatalf("api_token = %q, want %q", a.cfg.APIToken, tc.want.apiToken)
+			}
+			if a.cfg.DefaultRepo != tc.want.defaultRepo {
+				t.Fatalf("default_repo = %q, want %q", a.cfg.DefaultRepo, tc.want.defaultRepo)
+			}
+			if a.cfg.Transport != tc.want.transport {
+				t.Fatalf("transport = %q, want %q", a.cfg.Transport, tc.want.transport)
+			}
+			if a.serverSource != tc.want.serverSource {
+				t.Fatalf("server_source = %q, want %q", a.serverSource, tc.want.serverSource)
+			}
+			if a.tokenSource != tc.want.apiTokenSource {
+				t.Fatalf("api_token_source = %q, want %q", a.tokenSource, tc.want.apiTokenSource)
+			}
+			if a.repoSource != tc.want.defaultRepoSource {
+				t.Fatalf("default_repo_source = %q, want %q", a.repoSource, tc.want.defaultRepoSource)
+			}
+			if a.transportSource != tc.want.transportSource {
+				t.Fatalf("transport_source = %q, want %q", a.transportSource, tc.want.transportSource)
+			}
+		})
+	}
+}
+
+func setEnvForTest(t *testing.T, key string, values map[string]string) {
+	t.Helper()
+	prev, had := os.LookupEnv(key)
+	if val, ok := values[key]; ok {
+		if err := os.Setenv(key, val); err != nil {
+			t.Fatalf("setenv %s: %v", key, err)
+		}
+	} else if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unsetenv %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv(key, prev)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
+}
+
+func TestRootHasRepoAndInfraCommands(t *testing.T) {
 	root := newRootCmd()
 	if _, _, err := root.Find([]string{"deploy"}); err != nil {
 		t.Fatalf("deploy command missing: %v", err)

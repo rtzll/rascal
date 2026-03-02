@@ -201,78 +201,43 @@ func newRootCmd() *cobra.Command {
 }
 
 func (a *app) initConfig() error {
-	v := viper.New()
-	v.SetConfigFile(a.configPath)
-	v.SetConfigType("toml")
-	v.SetDefault("server_url", "http://127.0.0.1:8080")
-	v.SetEnvPrefix("RASCAL")
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	v.AutomaticEnv()
-
-	if err := v.ReadInConfig(); err != nil {
-		var notFound viper.ConfigFileNotFoundError
-		if !errors.As(err, &notFound) && !os.IsNotExist(err) {
-			return &cliError{
-				Code:    exitConfig,
-				Message: "failed to read config",
-				Hint:    fmt.Sprintf("fix %s or run `rascal init`", a.configPath),
-				Cause:   err,
-			}
+	resolver, err := newConfigResolver(a.configPath)
+	if err != nil {
+		return &cliError{
+			Code:    exitConfig,
+			Message: "failed to read config",
+			Hint:    fmt.Sprintf("fix %s or run `rascal init`", a.configPath),
+			Cause:   err,
 		}
 	}
-	a.cfg = config.ClientConfig{
-		ServerURL:   strings.TrimSpace(v.GetString("server_url")),
-		APIToken:    strings.TrimSpace(v.GetString("api_token")),
-		DefaultRepo: strings.TrimSpace(v.GetString("default_repo")),
-		Host:        strings.TrimSpace(v.GetString("host")),
-		Domain:      strings.TrimSpace(v.GetString("domain")),
-		Transport:   strings.TrimSpace(v.GetString("transport")),
-		SSHHost:     strings.TrimSpace(v.GetString("ssh_host")),
-		SSHUser:     strings.TrimSpace(v.GetString("ssh_user")),
-		SSHKey:      strings.TrimSpace(v.GetString("ssh_key")),
-		SSHPort:     v.GetInt("ssh_port"),
+
+	transportFlag := strings.TrimSpace(a.transportFlag)
+	if transportFlag != "" {
+		transportFlag = strings.ToLower(transportFlag)
 	}
 
-	if strings.TrimSpace(a.serverURLFlag) != "" {
-		a.cfg.ServerURL = strings.TrimSpace(a.serverURLFlag)
-		a.serverSource = "flag"
-	} else if strings.TrimSpace(os.Getenv("RASCAL_SERVER_URL")) != "" {
-		a.serverSource = "env"
-	} else if v.InConfig("server_url") {
-		a.serverSource = "config"
-	} else {
-		a.serverSource = "default"
+	server := resolver.resolveString(a.serverURLFlag, "RASCAL_SERVER_URL", "server_url", configSourceDefault)
+	token := resolver.resolveString(a.apiTokenFlag, "RASCAL_API_TOKEN", "api_token", configSourceUnset)
+	repo := resolver.resolveString(a.defaultRepoFlag, "RASCAL_DEFAULT_REPO", "default_repo", configSourceUnset)
+	transport := resolver.resolveString(transportFlag, "RASCAL_TRANSPORT", "transport", configSourceDefault)
+
+	a.cfg = config.ClientConfig{
+		ServerURL:   server.value,
+		APIToken:    token.value,
+		DefaultRepo: repo.value,
+		Host:        resolver.stringValue("host"),
+		Domain:      resolver.stringValue("domain"),
+		Transport:   transport.value,
+		SSHHost:     resolver.stringValue("ssh_host"),
+		SSHUser:     resolver.stringValue("ssh_user"),
+		SSHKey:      resolver.stringValue("ssh_key"),
+		SSHPort:     resolver.intValue("ssh_port"),
 	}
-	if strings.TrimSpace(a.apiTokenFlag) != "" {
-		a.cfg.APIToken = strings.TrimSpace(a.apiTokenFlag)
-		a.tokenSource = "flag"
-	} else if strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")) != "" {
-		a.tokenSource = "env"
-	} else if v.InConfig("api_token") {
-		a.tokenSource = "config"
-	} else {
-		a.tokenSource = "unset"
-	}
-	if strings.TrimSpace(a.defaultRepoFlag) != "" {
-		a.cfg.DefaultRepo = strings.TrimSpace(a.defaultRepoFlag)
-		a.repoSource = "flag"
-	} else if strings.TrimSpace(os.Getenv("RASCAL_DEFAULT_REPO")) != "" {
-		a.repoSource = "env"
-	} else if v.InConfig("default_repo") {
-		a.repoSource = "config"
-	} else {
-		a.repoSource = "unset"
-	}
-	if strings.TrimSpace(a.transportFlag) != "" {
-		a.cfg.Transport = strings.ToLower(strings.TrimSpace(a.transportFlag))
-		a.transportSource = "flag"
-	} else if strings.TrimSpace(os.Getenv("RASCAL_TRANSPORT")) != "" {
-		a.transportSource = "env"
-	} else if v.InConfig("transport") {
-		a.transportSource = "config"
-	} else {
-		a.transportSource = "default"
-	}
+
+	a.serverSource = server.source
+	a.tokenSource = token.source
+	a.repoSource = repo.source
+	a.transportSource = transport.source
 	if strings.TrimSpace(a.sshHostFlag) != "" {
 		a.cfg.SSHHost = strings.TrimSpace(a.sshHostFlag)
 	}
@@ -314,8 +279,8 @@ func (a *app) initConfig() error {
 		sshKey:    strings.TrimSpace(a.cfg.SSHKey),
 		sshPort:   a.cfg.SSHPort,
 	}
-	if a.transportSource == "default" {
-		a.transportSource = "resolved"
+	if a.transportSource == configSourceDefault {
+		a.transportSource = configSourceResolved
 	}
 
 	switch strings.ToLower(strings.TrimSpace(a.output)) {
