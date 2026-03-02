@@ -1891,8 +1891,12 @@ rascal config set transport ssh
 	cmd.AddCommand(&cobra.Command{
 		Use:   "unset <key>",
 		Short: "Unset a config key in the local config file",
-		Long: "Remove one key from the local config file.\n\n" +
-			"Supported keys:\n" + keys,
+		Long: fmt.Sprintf(strings.TrimSpace(`
+Remove one key from the local config file.
+
+Supported keys:
+%s
+`), keys),
 		Example: strings.TrimSpace(`
 rascal config unset server_url
 rascal config unset default_repo
