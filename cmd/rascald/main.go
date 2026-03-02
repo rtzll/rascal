@@ -551,7 +551,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
-		s.addIssueCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
+		s.addPullRequestReviewCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
 
 		taskID := s.resolveTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
 		contextText := strings.TrimSpace(ev.Comment.Body)
@@ -1532,6 +1532,20 @@ func (s *server) addPullRequestReviewReactionBestEffort(repo string, pullNumber 
 	defer cancel()
 	if err := s.gh.AddPullRequestReviewReaction(ctx, repo, pullNumber, reviewID, reaction); err != nil {
 		log.Printf("failed to add %q reaction for PR review %d on %s#%d: %v", reaction, reviewID, repo, pullNumber, err)
+	}
+}
+
+func (s *server) addPullRequestReviewCommentReactionBestEffort(repo string, commentID int64, reaction string) {
+	if commentID <= 0 || strings.TrimSpace(repo) == "" {
+		return
+	}
+	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := s.gh.AddPullRequestReviewCommentReaction(ctx, repo, commentID, reaction); err != nil {
+		log.Printf("failed to add %q reaction for PR review comment %d in %s: %v", reaction, commentID, repo, err)
 	}
 }
 

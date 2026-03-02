@@ -235,6 +235,31 @@ func (c *APIClient) AddPullRequestReviewReaction(ctx context.Context, repo strin
 	return nil
 }
 
+func (c *APIClient) AddPullRequestReviewCommentReaction(ctx context.Context, repo string, commentID int64, content string) error {
+	if commentID <= 0 {
+		return fmt.Errorf("comment id must be positive")
+	}
+	content, err := validateReactionContent(content)
+	if err != nil {
+		return err
+	}
+	owner, repoName, err := splitRepo(repo)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/comments/%d/reactions", owner, repoName, commentID)
+	resp, err := c.do(ctx, http.MethodPost, path, map[string]string{"content": content})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github add pull request review comment reaction failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
 func validateReactionContent(content string) (string, error) {
 	content = strings.TrimSpace(content)
 	switch content {

@@ -260,6 +260,41 @@ func TestAddPullRequestReviewReaction(t *testing.T) {
 	})
 }
 
+func TestAddPullRequestReviewCommentReaction(t *testing.T) {
+	t.Run("posts reaction", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			if r.URL.Path != "/repos/owner/repo/pulls/comments/777/reactions" {
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+			var in map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			if in["content"] != ReactionEyes {
+				t.Fatalf("unexpected reaction payload: %v", in)
+			}
+			w.WriteHeader(http.StatusCreated)
+		}))
+		defer srv.Close()
+
+		client := newTestAPIClient(srv.URL)
+		if err := client.AddPullRequestReviewCommentReaction(context.Background(), "owner/repo", 777, ReactionEyes); err != nil {
+			t.Fatalf("AddPullRequestReviewCommentReaction returned error: %v", err)
+		}
+	})
+
+	t.Run("rejects invalid id", func(t *testing.T) {
+		client := NewAPIClient("token")
+		err := client.AddPullRequestReviewCommentReaction(context.Background(), "owner/repo", 0, ReactionEyes)
+		if err == nil || !strings.Contains(err.Error(), "comment id must be positive") {
+			t.Fatalf("expected comment id error, got: %v", err)
+		}
+	})
+}
+
 func TestUpsertWebhookDefaultEventsIncludeReviewComment(t *testing.T) {
 	var receivedEvents []string
 
