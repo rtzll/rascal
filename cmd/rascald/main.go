@@ -1639,64 +1639,20 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 		return "", fmt.Errorf("read goose log: %w", err)
 	}
 
-	commitBody, err := loadAgentCommitBody(filepath.Join(run.RunDir, "commit_message.txt"))
-	if err != nil {
-		return "", err
-	}
-
-	closesSection := ""
-	if run.IssueNumber > 0 {
-		closesSection = fmt.Sprintf("\n\nCloses #%d", run.IssueNumber)
-	}
-	runDuration := runsummary.FormatDuration(runDurationSeconds(run))
-	commentBody := runsummary.BuildPRBody(run.ID, commitBody, gooseOutput, runDuration, closesSection)
-
-	requestedBy := strings.TrimSpace(target.RequestedBy)
-	if requestedBy == "" {
-		return commentBody, nil
-	}
-
-	headSHA := strings.TrimSpace(run.HeadSHA)
-	if headSHA == "" {
-		return fmt.Sprintf("@%s posted the run details below.\n\n%s", requestedBy, commentBody), nil
-	}
-
-	shaShort := headSHA
-	if len(shaShort) > 12 {
-		shaShort = shaShort[:12]
-	}
-	commitURL := fmt.Sprintf("https://github.com/%s/commit/%s", repo, headSHA)
-	return fmt.Sprintf("@%s implemented in commit [`%s`](%s).\n\n%s", requestedBy, shaShort, commitURL, commentBody), nil
-}
-
-func loadAgentCommitBody(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
+	commitMessageData, err := os.ReadFile(filepath.Join(run.RunDir, "commit_message.txt"))
+	if err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("read commit message: %w", err)
 	}
-	commitBody, err := runsummary.ParseCommitBody(data)
-	if err != nil {
-		return "", fmt.Errorf("parse commit body: %w", err)
-	}
-	return commitBody, nil
-}
-
-func runDurationSeconds(run state.Run) int64 {
-	start := run.CreatedAt
-	if run.StartedAt != nil {
-		start = run.StartedAt.UTC()
-	}
-	end := time.Now().UTC()
-	if run.CompletedAt != nil {
-		end = run.CompletedAt.UTC()
-	}
-	if end.Before(start) {
-		return 0
-	}
-	return int64(end.Sub(start).Seconds())
+	return runsummary.BuildCompletionComment(runsummary.CompletionCommentInput{
+		RunID:           run.ID,
+		Repo:            repo,
+		RequestedBy:     target.RequestedBy,
+		HeadSHA:         run.HeadSHA,
+		IssueNumber:     run.IssueNumber,
+		GooseOutput:     gooseOutput,
+		CommitMessage:   commitMessageData,
+		DurationSeconds: runsummary.RunDurationSeconds(run.CreatedAt, run.StartedAt, run.CompletedAt),
+	})
 }
 
 func (s *server) requeueRun(runID string) error {
