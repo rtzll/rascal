@@ -173,6 +173,8 @@ func newRootCmd() *cobra.Command {
 
 	repoCmd := a.newRepoCmd()
 	repoCmd.GroupID = "integrations"
+	githubCmd := a.newGitHubCmd()
+	githubCmd.GroupID = "integrations"
 	infraCmd := a.newInfraCmd()
 	infraCmd.GroupID = "integrations"
 	webhookCmd := a.newWebhookCmd()
@@ -195,6 +197,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(cancelCmd)
 	root.AddCommand(taskCmd)
 	root.AddCommand(logsCmd)
+	root.AddCommand(githubCmd)
 	root.AddCommand(repoCmd)
 	root.AddCommand(infraCmd)
 	root.AddCommand(webhookCmd)

@@ -23,6 +23,7 @@ Logs:
   logs        Fetch run/service logs
 
 Integrations:
+  github      GitHub integration setup and status
   infra       Infrastructure operations (provisioning/deploy)
   repo        Repository webhook/label operations
   webhook     Webhook helpers

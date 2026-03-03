@@ -1,20 +1,20 @@
-Configure and inspect GitHub repository integrations used by Rascal. Prefer `rascal github ...`; `repo` is kept as a compatibility alias.
+Configure and inspect GitHub repository integrations used by Rascal.
 
 Usage:
-  rascal repo [flags]
-  rascal repo [command]
+  rascal github [flags]
+  rascal github [command]
 
 Examples:
-rascal github status OWNER/REPO
 rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$WEBHOOK_SECRET"
+rascal github status OWNER/REPO --github-token "$GITHUB_TOKEN"
 
 Available Commands:
   disable     Remove Rascal webhook from a repository
-  enable      Ensure rascal label and webhook are configured
+  setup       Ensure rascal label and webhook are configured
   status      Show Rascal label/webhook status
 
 Flags:
-  -h, --help   help for repo
+  -h, --help   help for github
 
 Global Flags:
       --api-token string         orchestrator API token
@@ -31,4 +31,4 @@ Global Flags:
       --server-url string        orchestrator URL
       --transport string         API transport: auto|http|ssh
 
-Use "rascal repo [command] --help" for more information about a command.
+Use "rascal github [command] --help" for more information about a command.

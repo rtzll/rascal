@@ -135,6 +135,12 @@ func TestRootHasRepoAndInfraCommands(t *testing.T) {
 	if _, _, err := root.Find([]string{"repo"}); err != nil {
 		t.Fatalf("repo command missing: %v", err)
 	}
+	if _, _, err := root.Find([]string{"github"}); err != nil {
+		t.Fatalf("github command missing: %v", err)
+	}
+	if _, _, err := root.Find([]string{"github", "setup"}); err != nil {
+		t.Fatalf("github setup command missing: %v", err)
+	}
 	if _, _, err := root.Find([]string{"infra"}); err != nil {
 		t.Fatalf("infra command missing: %v", err)
 	}
@@ -532,6 +538,7 @@ func TestHelpGoldenSnapshots(t *testing.T) {
 		{name: "bootstrap", args: []string{"bootstrap"}},
 		{name: "deploy", args: []string{"deploy"}},
 		{name: "auth", args: []string{"auth"}},
+		{name: "github", args: []string{"github"}},
 		{name: "repo", args: []string{"repo"}},
 		{name: "infra", args: []string{"infra"}},
 	}

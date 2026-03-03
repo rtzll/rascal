@@ -14,10 +14,10 @@ func (a *app) newRepoCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "repo",
 		Short: "Repository webhook/label operations",
-		Long:  "Configure and inspect GitHub repository integrations used by Rascal.",
+		Long:  "Configure and inspect GitHub repository integrations used by Rascal. Prefer `rascal github ...`; `repo` is kept as a compatibility alias.",
 		Example: strings.TrimSpace(`
-rascal repo status OWNER/REPO
-rascal repo enable OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$WEBHOOK_SECRET"
+rascal github status OWNER/REPO
+rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$WEBHOOK_SECRET"
 `),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
