@@ -5,7 +5,7 @@ ARG NODE_MAJOR=24
 ARG GO_VERSION=1.26.0
 ARG GOOSE_VERSION=1.26.1
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -qq update && apt-get -y -qq install --no-install-recommends \
     ca-certificates curl gnupg bzip2 xz-utils zip unzip \
     git gh \
     bash jq ripgrep make patch diffutils file less \
@@ -25,10 +25,10 @@ RUN set -eux; \
     /usr/local/go/bin/go version; \
     rm -f /tmp/go.tar.gz
 
-RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @openai/codex \
+RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >/dev/null \
+    && apt-get -qq update \
+    && apt-get -y -qq install --no-install-recommends nodejs \
+    && npm install -g --silent --no-progress --no-fund --no-audit @openai/codex \
     && node --version \
     && codex --version \
     && rm -rf /var/lib/apt/lists/*
