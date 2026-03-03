@@ -42,6 +42,14 @@ Issue-driven task:
 ./bin/rascal cancel <run_id>
 ```
 
+## GitHub Integrations
+
+```bash
+./bin/rascal github status OWNER/REPO
+./bin/rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$WEBHOOK_SECRET"
+./bin/rascal github disable OWNER/REPO --github-token "$GITHUB_TOKEN"
+```
+
 ## Infra Helpers
 
 ```bash
