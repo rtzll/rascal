@@ -386,7 +386,9 @@ func buildLinuxRascalRunner(outputPath, goarch string) error {
 	if strings.TrimSpace(goarch) == "" {
 		goarch = "amd64"
 	}
-	cmd := exec.Command("go", "build", "-o", outputPath, "./cmd/rascal-runner")
+	version, commit, builtAt := resolveRunnerBuildInfo()
+	ldflags := fmt.Sprintf("-X main.buildVersion=%s -X main.buildCommit=%s -X main.buildTime=%s", version, commit, builtAt)
+	cmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", outputPath, "./cmd/rascal-runner")
 	cmd.Dir = repoRootPath()
 	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goarch, "CGO_ENABLED=0")
 	cmd.Stdout = os.Stdout
@@ -395,6 +397,38 @@ func buildLinuxRascalRunner(outputPath, goarch string) error {
 		return fmt.Errorf("build rascal-runner: %w", err)
 	}
 	return nil
+}
+
+func resolveRunnerBuildInfo() (version, commit, builtAt string) {
+	version = normalizeBuildMeta(strings.TrimSpace(os.Getenv("RASCAL_BUILD_VERSION")), "dev")
+	commit = normalizeBuildMeta(strings.TrimSpace(os.Getenv("RASCAL_BUILD_COMMIT")), "unknown")
+	builtAt = normalizeBuildMeta(strings.TrimSpace(os.Getenv("RASCAL_BUILD_TIME")), "")
+
+	if version == "dev" {
+		if out, err := runLocalCapture("git", "-C", repoRootPath(), "describe", "--tags", "--always", "--dirty"); err == nil {
+			version = normalizeBuildMeta(out, version)
+		}
+	}
+	if commit == "unknown" {
+		if out, err := runLocalCapture("git", "-C", repoRootPath(), "rev-parse", "--short", "HEAD"); err == nil {
+			commit = normalizeBuildMeta(out, commit)
+		}
+	}
+	if builtAt == "" {
+		builtAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	return version, commit, builtAt
+}
+
+func normalizeBuildMeta(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = fallback
+	}
+	if strings.Contains(value, " ") {
+		value = strings.ReplaceAll(value, " ", "_")
+	}
+	return value
 }
 
 func runLocal(name string, args ...string) error {
