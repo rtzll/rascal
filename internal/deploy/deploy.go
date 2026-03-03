@@ -92,6 +92,10 @@ func Execute(cfg Config) error {
 	if err := buildLinuxRascald(binaryPath, cfg.GOARCH); err != nil {
 		return err
 	}
+	runnerBinaryPath := filepath.Join(tmpDir, "rascal-runner")
+	if err := buildLinuxRascalRunner(runnerBinaryPath, cfg.GOARCH); err != nil {
+		return err
+	}
 
 	var envPath string
 	if cfg.UploadEnvFile {
@@ -158,6 +162,7 @@ func Execute(cfg Config) error {
 
 	uploads := []remoteUpload{
 		{LocalPath: binaryPath, RemotePath: "/tmp/rascal-bootstrap/rascald"},
+		{LocalPath: runnerBinaryPath, RemotePath: "/tmp/rascal-bootstrap/rascal-runner"},
 		{LocalPath: servicePath, RemotePath: "/tmp/rascal-bootstrap/rascal@.service"},
 		{LocalPath: installDockerPath, RemotePath: "/tmp/rascal-bootstrap/install_docker.sh"},
 		{LocalPath: runnerArchivePath, RemotePath: "/tmp/rascal-bootstrap/runner.tgz"},
@@ -197,6 +202,7 @@ apt-get install -y caddy
 set -eu
 mkdir -p /opt/rascal /etc/rascal
 tar -xzf /tmp/rascal-bootstrap/runner.tgz -C /opt/rascal
+install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner
 docker build -t %s /opt/rascal/runner
 install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald
 install -m 0644 /tmp/rascal-bootstrap/rascal@.service /etc/systemd/system/rascal@.service
@@ -372,6 +378,21 @@ func buildLinuxRascald(outputPath, goarch string) error {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("build rascald: %w", err)
+	}
+	return nil
+}
+
+func buildLinuxRascalRunner(outputPath, goarch string) error {
+	if strings.TrimSpace(goarch) == "" {
+		goarch = "amd64"
+	}
+	cmd := exec.Command("go", "build", "-o", outputPath, "./cmd/rascal-runner")
+	cmd.Dir = repoRootPath()
+	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goarch, "CGO_ENABLED=0")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build rascal-runner: %w", err)
 	}
 	return nil
 }
