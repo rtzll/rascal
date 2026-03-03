@@ -32,6 +32,10 @@ const (
 var (
 	convCommitPattern = regexp.MustCompile(`^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?(!)?:[[:space:]].+`)
 	prURLPattern      = regexp.MustCompile(`https://github\.com/[^[:space:]]+/pull/[0-9]+`)
+
+	buildVersion = "dev"
+	buildCommit  = "unknown"
+	buildTime    = "unknown"
 )
 
 type config struct {
@@ -105,6 +109,7 @@ func (osExecutor) Run(dir string, extraEnv []string, stdout, stderr io.Writer, n
 
 func main() {
 	log.SetFlags(0)
+	log.Printf("[%s] starting rascal-runner %s", nowUTC(), buildInfoSummary())
 	if err := run(); err != nil {
 		log.Printf("[%s] run failed: %v", nowUTC(), err)
 		os.Exit(1)
@@ -612,4 +617,8 @@ func isConventionalTitle(title string) bool {
 
 func nowUTC() string {
 	return time.Now().UTC().Format(time.RFC3339)
+}
+
+func buildInfoSummary() string {
+	return fmt.Sprintf("version=%s commit=%s built=%s", buildVersion, buildCommit, buildTime)
 }
