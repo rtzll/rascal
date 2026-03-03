@@ -221,6 +221,49 @@ func TestAddIssueCommentReaction(t *testing.T) {
 	})
 }
 
+func TestCreateIssueComment(t *testing.T) {
+	t.Run("posts issue comment", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			if r.URL.Path != "/repos/owner/repo/issues/42/comments" {
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+			var in map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			if in["body"] != "hello from rascal" {
+				t.Fatalf("unexpected comment payload: %v", in)
+			}
+			w.WriteHeader(http.StatusCreated)
+		}))
+		defer srv.Close()
+
+		client := newTestAPIClient(srv.URL)
+		if err := client.CreateIssueComment(context.Background(), "owner/repo", 42, "hello from rascal"); err != nil {
+			t.Fatalf("CreateIssueComment returned error: %v", err)
+		}
+	})
+
+	t.Run("rejects invalid issue number", func(t *testing.T) {
+		client := NewAPIClient("token")
+		err := client.CreateIssueComment(context.Background(), "owner/repo", 0, "x")
+		if err == nil || !strings.Contains(err.Error(), "issue number must be positive") {
+			t.Fatalf("expected issue number error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects empty body", func(t *testing.T) {
+		client := NewAPIClient("token")
+		err := client.CreateIssueComment(context.Background(), "owner/repo", 1, "   ")
+		if err == nil || !strings.Contains(err.Error(), "comment body is required") {
+			t.Fatalf("expected comment body error, got: %v", err)
+		}
+	})
+}
+
 func TestAddPullRequestReviewReaction(t *testing.T) {
 	t.Run("posts reaction", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -15,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -34,12 +37,24 @@ var errServerDraining = errors.New("orchestrator is draining")
 
 const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
+const runResponseTargetFile = "response_target.json"
+
+var totalTokensPattern = regexp.MustCompile(`"total_tokens"[[:space:]]*:[[:space:]]*([0-9]+)`)
+
+type githubClient interface {
+	GetIssue(ctx context.Context, repo string, issueNumber int) (ghapi.IssueData, error)
+	AddIssueReaction(ctx context.Context, repo string, issueNumber int, content string) error
+	AddIssueCommentReaction(ctx context.Context, repo string, commentID int64, content string) error
+	AddPullRequestReviewReaction(ctx context.Context, repo string, pullNumber int, reviewID int64, content string) error
+	AddPullRequestReviewCommentReaction(ctx context.Context, repo string, commentID int64, content string) error
+	CreateIssueComment(ctx context.Context, repo string, issueNumber int, body string) error
+}
 
 type server struct {
 	cfg      config.ServerConfig
 	store    *state.Store
 	launcher runner.Launcher
-	gh       *ghapi.APIClient
+	gh       githubClient
 
 	mu            sync.Mutex
 	runCancels    map[string]context.CancelFunc
@@ -61,6 +76,15 @@ type runRequest struct {
 	PRNumber    int
 	Context     string
 	Debug       *bool
+
+	ResponseTarget *runResponseTarget
+}
+
+type runResponseTarget struct {
+	Repo        string `json:"repo"`
+	IssueNumber int    `json:"issue_number"`
+	RequestedBy string `json:"requested_by,omitempty"`
+	Trigger     string `json:"trigger"`
 }
 
 type createTaskRequest struct {
@@ -502,6 +526,12 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			BaseBranch: s.defaultBaseBranchForTask(taskID),
 			HeadBranch: s.defaultHeadBranchForTask(taskID),
 			Debug:      boolPtr(true),
+			ResponseTarget: &runResponseTarget{
+				Repo:        ev.Repository.FullName,
+				IssueNumber: ev.Issue.Number,
+				RequestedBy: strings.TrimSpace(ev.Sender.Login),
+				Trigger:     "pr_comment",
+			},
 		})
 		if errors.Is(err, errTaskCompleted) {
 			return nil
@@ -535,6 +565,12 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			BaseBranch: s.defaultBaseBranchForTask(taskID),
 			HeadBranch: s.defaultHeadBranchForTask(taskID),
 			Debug:      boolPtr(true),
+			ResponseTarget: &runResponseTarget{
+				Repo:        ev.Repository.FullName,
+				IssueNumber: ev.PullRequest.Number,
+				RequestedBy: strings.TrimSpace(ev.Sender.Login),
+				Trigger:     "pr_review",
+			},
 		})
 		if errors.Is(err, errTaskCompleted) {
 			return nil
@@ -572,6 +608,12 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			BaseBranch: s.defaultBaseBranchForTask(taskID),
 			HeadBranch: s.defaultHeadBranchForTask(taskID),
 			Debug:      boolPtr(true),
+			ResponseTarget: &runResponseTarget{
+				Repo:        ev.Repository.FullName,
+				IssueNumber: ev.PullRequest.Number,
+				RequestedBy: strings.TrimSpace(ev.Sender.Login),
+				Trigger:     "pr_review_comment",
+			},
 		})
 		if errors.Is(err, errTaskCompleted) {
 			return nil
@@ -843,6 +885,10 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, err.Error())
 		return state.Run{}, fmt.Errorf("prepare run files: %w", err)
 	}
+	if err := s.writeRunResponseTarget(run, req.ResponseTarget); err != nil {
+		_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, err.Error())
+		return state.Run{}, fmt.Errorf("prepare run response target: %w", err)
+	}
 	s.scheduleRuns(run.TaskID)
 	return run, nil
 }
@@ -891,6 +937,40 @@ func (s *server) writeRunFiles(run state.Run) error {
 	defer f.Close()
 	_, err = f.WriteString(logLine)
 	return err
+}
+
+func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget) error {
+	if target == nil {
+		return nil
+	}
+	out := runResponseTarget{
+		Repo:        strings.TrimSpace(target.Repo),
+		IssueNumber: target.IssueNumber,
+		RequestedBy: strings.TrimSpace(target.RequestedBy),
+		Trigger:     strings.TrimSpace(target.Trigger),
+	}
+	if out.Repo == "" {
+		out.Repo = strings.TrimSpace(run.Repo)
+	}
+	if out.IssueNumber <= 0 {
+		out.IssueNumber = run.PRNumber
+	}
+	if out.Trigger == "" {
+		out.Trigger = strings.TrimSpace(run.Trigger)
+	}
+	if out.Repo == "" || out.IssueNumber <= 0 {
+		return nil
+	}
+
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode run response target: %w", err)
+	}
+	path := filepath.Join(run.RunDir, runResponseTargetFile)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write run response target: %w", err)
+	}
+	return nil
 }
 
 func (s *server) executeRun(runID string) {
@@ -1050,6 +1130,9 @@ func (s *server) executeRun(runID string) {
 	}
 	if updated.PRNumber > 0 {
 		_ = s.store.SetTaskPR(updated.TaskID, updated.Repo, updated.PRNumber)
+	}
+	if updated.Status == state.StatusSucceeded || updated.Status == state.StatusAwaitingFeedback {
+		s.postRunCompletionCommentBestEffort(updated)
 	}
 	s.finishRun(updated)
 }
@@ -1477,6 +1560,222 @@ func (s *server) pendingRunCancelReason(runID string) (string, bool) {
 		reason = "canceled"
 	}
 	return reason, true
+}
+
+func isCommentTriggeredRun(trigger string) bool {
+	switch strings.TrimSpace(trigger) {
+	case "pr_comment", "pr_review", "pr_review_comment":
+		return true
+	default:
+		return false
+	}
+}
+
+func loadRunResponseTarget(runDir string) (runResponseTarget, bool, error) {
+	path := filepath.Join(strings.TrimSpace(runDir), runResponseTargetFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return runResponseTarget{}, false, nil
+		}
+		return runResponseTarget{}, false, fmt.Errorf("read run response target: %w", err)
+	}
+	var target runResponseTarget
+	if err := json.Unmarshal(data, &target); err != nil {
+		return runResponseTarget{}, false, fmt.Errorf("decode run response target: %w", err)
+	}
+	target.Repo = strings.TrimSpace(target.Repo)
+	target.RequestedBy = strings.TrimSpace(target.RequestedBy)
+	target.Trigger = strings.TrimSpace(target.Trigger)
+	return target, true, nil
+}
+
+func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
+	if !isCommentTriggeredRun(run.Trigger) {
+		return
+	}
+	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+		return
+	}
+
+	target, ok, err := loadRunResponseTarget(run.RunDir)
+	if err != nil {
+		log.Printf("failed to load run response target for %s: %v", run.ID, err)
+		return
+	}
+	if !ok {
+		return
+	}
+
+	repo := strings.TrimSpace(target.Repo)
+	if repo == "" {
+		repo = strings.TrimSpace(run.Repo)
+	}
+	issueNumber := target.IssueNumber
+	if issueNumber <= 0 {
+		issueNumber = run.PRNumber
+	}
+	if repo == "" || issueNumber <= 0 {
+		return
+	}
+
+	body, err := buildRunCompletionComment(run, target, repo)
+	if err != nil {
+		log.Printf("failed to build completion comment for %s: %v", run.ID, err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := s.gh.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
+		log.Printf("failed to post completion comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
+	}
+}
+
+func buildRunCompletionComment(run state.Run, target runResponseTarget, repo string) (string, error) {
+	goosePath := filepath.Join(run.RunDir, "goose.ndjson")
+	gooseOutput := "(no goose output captured)"
+	if data, err := os.ReadFile(goosePath); err == nil {
+		if strings.TrimSpace(string(data)) != "" {
+			gooseOutput = string(data)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("read goose log: %w", err)
+	}
+
+	commitBody, err := loadAgentCommitBody(filepath.Join(run.RunDir, "commit_message.txt"))
+	if err != nil {
+		return "", err
+	}
+
+	closesSection := ""
+	if run.IssueNumber > 0 {
+		closesSection = fmt.Sprintf("\n\nCloses #%d", run.IssueNumber)
+	}
+	runDuration := formatRunDuration(runDurationSeconds(run))
+	totalTokens, hasTokens := extractTotalTokens(gooseOutput)
+	commentBody := buildPRStyleBody(run.ID, commitBody, gooseOutput, runDuration, closesSection, totalTokens, hasTokens)
+
+	requestedBy := strings.TrimSpace(target.RequestedBy)
+	if requestedBy == "" {
+		return commentBody, nil
+	}
+
+	headSHA := strings.TrimSpace(run.HeadSHA)
+	if headSHA == "" {
+		return fmt.Sprintf("@%s posted the run details below.\n\n%s", requestedBy, commentBody), nil
+	}
+
+	shaShort := headSHA
+	if len(shaShort) > 12 {
+		shaShort = shaShort[:12]
+	}
+	commitURL := fmt.Sprintf("https://github.com/%s/commit/%s", repo, headSHA)
+	return fmt.Sprintf("@%s implemented in commit [`%s`](%s).\n\n%s", requestedBy, shaShort, commitURL, commentBody), nil
+}
+
+func loadAgentCommitBody(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read commit message: %w", err)
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	sawTitle := false
+	bodyLines := make([]string, 0)
+	for scanner.Scan() {
+		line := strings.TrimSuffix(scanner.Text(), "\r")
+		if !sawTitle {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			sawTitle = true
+			continue
+		}
+		bodyLines = append(bodyLines, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("scan commit message: %w", err)
+	}
+
+	body := strings.Join(bodyLines, "\n")
+	body = strings.TrimSuffix(body, "\n")
+	for strings.HasPrefix(body, "\n") {
+		body = strings.TrimPrefix(body, "\n")
+	}
+	return body, nil
+}
+
+func buildPRStyleBody(runID, commitBody, gooseOutput, runDuration, closesSection string, totalTokens int64, hasTokens bool) string {
+	gooseSection := "<details><summary>Run Details</summary>\n\n```\n" + gooseOutput + "\n```\n\n</details>"
+	if hasTokens {
+		gooseSection = "<details><summary>Goose Details</summary>\n\n```\n" + gooseOutput + "\n```\n\n</details>"
+		body := ""
+		if strings.TrimSpace(commitBody) != "" {
+			body = commitBody + "\n\n"
+		}
+		body += gooseSection + closesSection + "\n\n---\n\n" + fmt.Sprintf("Rascal run `%s` took %s [consumed %d tokens]", runID, runDuration, totalTokens)
+		return body
+	}
+
+	body := fmt.Sprintf("Automated changes from Rascal run %s.", runID)
+	if strings.TrimSpace(commitBody) != "" {
+		body = commitBody + "\n\n" + body
+	}
+	body += "\n\n" + gooseSection + closesSection + "\n\n---\n\n" + fmt.Sprintf("Rascal run took %s", runDuration)
+	return body
+}
+
+func extractTotalTokens(gooseOutput string) (int64, bool) {
+	matches := totalTokensPattern.FindAllStringSubmatch(gooseOutput, -1)
+	if len(matches) == 0 {
+		return 0, false
+	}
+	last := matches[len(matches)-1]
+	if len(last) < 2 {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(last[1], 10, 64)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+func runDurationSeconds(run state.Run) int64 {
+	start := run.CreatedAt
+	if run.StartedAt != nil {
+		start = run.StartedAt.UTC()
+	}
+	end := time.Now().UTC()
+	if run.CompletedAt != nil {
+		end = run.CompletedAt.UTC()
+	}
+	if end.Before(start) {
+		return 0
+	}
+	return int64(end.Sub(start).Seconds())
+}
+
+func formatRunDuration(totalSeconds int64) string {
+	if totalSeconds < 0 {
+		totalSeconds = 0
+	}
+	hours := totalSeconds / 3600
+	minutes := (totalSeconds % 3600) / 60
+	seconds := totalSeconds % 60
+	parts := make([]string, 0, 3)
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if hours > 0 || minutes > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	parts = append(parts, fmt.Sprintf("%ds", seconds))
+	return strings.Join(parts, " ")
 }
 
 func (s *server) requeueRun(runID string) error {

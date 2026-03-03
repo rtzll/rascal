@@ -207,6 +207,32 @@ func (c *APIClient) AddIssueCommentReaction(ctx context.Context, repo string, co
 	return nil
 }
 
+func (c *APIClient) CreateIssueComment(ctx context.Context, repo string, issueNumber int, body string) error {
+	if issueNumber <= 0 {
+		return fmt.Errorf("issue number must be positive")
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return fmt.Errorf("comment body is required")
+	}
+
+	owner, repoName, err := splitRepo(repo)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repoName, issueNumber)
+	resp, err := c.do(ctx, http.MethodPost, path, map[string]string{"body": body})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github create issue comment failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+	}
+	return nil
+}
+
 func (c *APIClient) AddPullRequestReviewReaction(ctx context.Context, repo string, pullNumber int, reviewID int64, content string) error {
 	if pullNumber <= 0 {
 		return fmt.Errorf("pull number must be positive")

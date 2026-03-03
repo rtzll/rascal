@@ -42,6 +42,21 @@ type stubbornLauncher struct {
 	res   runner.Result
 }
 
+type postedIssueComment struct {
+	repo        string
+	issueNumber int
+	body        string
+}
+
+type fakeGitHubClient struct {
+	mu sync.Mutex
+
+	issueData ghapi.IssueData
+	issueErr  error
+
+	issueComments []postedIssueComment
+}
+
 func (f *fakeLauncher) Start(ctx context.Context, spec runner.Spec) (runner.Result, error) {
 	f.mu.Lock()
 	f.calls++
@@ -75,6 +90,48 @@ func (l *stubbornLauncher) Start(_ context.Context, _ runner.Spec) (runner.Resul
 		<-l.wait
 	}
 	return l.res, nil
+}
+
+func (f *fakeGitHubClient) GetIssue(_ context.Context, _ string, _ int) (ghapi.IssueData, error) {
+	if f.issueErr != nil {
+		return ghapi.IssueData{}, f.issueErr
+	}
+	return f.issueData, nil
+}
+
+func (f *fakeGitHubClient) AddIssueReaction(_ context.Context, _ string, _ int, _ string) error {
+	return nil
+}
+
+func (f *fakeGitHubClient) AddIssueCommentReaction(_ context.Context, _ string, _ int64, _ string) error {
+	return nil
+}
+
+func (f *fakeGitHubClient) AddPullRequestReviewReaction(_ context.Context, _ string, _ int, _ int64, _ string) error {
+	return nil
+}
+
+func (f *fakeGitHubClient) AddPullRequestReviewCommentReaction(_ context.Context, _ string, _ int64, _ string) error {
+	return nil
+}
+
+func (f *fakeGitHubClient) CreateIssueComment(_ context.Context, repo string, issueNumber int, body string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.issueComments = append(f.issueComments, postedIssueComment{
+		repo:        repo,
+		issueNumber: issueNumber,
+		body:        body,
+	})
+	return nil
+}
+
+func (f *fakeGitHubClient) postedComments() []postedIssueComment {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]postedIssueComment, len(f.issueComments))
+	copy(out, f.issueComments)
+	return out
 }
 
 func (f *fakeLauncher) Calls() int {
@@ -450,6 +507,45 @@ func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.
 	}
 }
 
+func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	run, err := s.createAndQueueRun(runRequest{
+		TaskID:   "owner/repo#99",
+		Repo:     "owner/repo",
+		Task:     "Address PR #99 feedback",
+		Trigger:  "pr_comment",
+		PRNumber: 99,
+		ResponseTarget: &runResponseTarget{
+			RequestedBy: " alice ",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	target, ok, err := loadRunResponseTarget(run.RunDir)
+	if err != nil {
+		t.Fatalf("load run response target: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected run response target file")
+	}
+	if target.Repo != "owner/repo" {
+		t.Fatalf("target repo = %q, want owner/repo", target.Repo)
+	}
+	if target.IssueNumber != 99 {
+		t.Fatalf("target issue number = %d, want 99", target.IssueNumber)
+	}
+	if target.RequestedBy != "alice" {
+		t.Fatalf("target requested_by = %q, want alice", target.RequestedBy)
+	}
+	if target.Trigger != "pr_comment" {
+		t.Fatalf("target trigger = %q, want pr_comment", target.Trigger)
+	}
+}
+
 func TestHandleWebhookIssueCommentIgnoresBotActor(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
@@ -610,6 +706,74 @@ func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
 
 	if calls := launcher.Calls(); calls != 2 {
 		t.Fatalf("expected 2 launcher calls, got %d", calls)
+	}
+}
+
+func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
+	launcher := &fakeLauncher{
+		res: runner.Result{
+			PRNumber: 77,
+			PRURL:    "https://example.com/pr/77",
+			HeadSHA:  "0123456789abcdef0123456789abcdef01234567",
+		},
+	}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_comment_completion",
+		TaskID:     "owner/repo#77",
+		Repo:       "owner/repo",
+		Task:       "Address PR #77 feedback",
+		BaseBranch: "main",
+		HeadBranch: "rascal/pr-77",
+		Trigger:    "pr_comment",
+		RunDir:     t.TempDir(),
+		PRNumber:   77,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 77,
+		RequestedBy: "alice",
+		Trigger:     "pr_comment",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, "commit_message.txt"), []byte("fix(rascal): address feedback\n\n- updated handlers\n- added tests\n"), 0o644); err != nil {
+		t.Fatalf("write commit message: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(`{"event":"x","usage":{"total_tokens":123}}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write goose log: %v", err)
+	}
+
+	s.executeRun(run.ID)
+
+	comments := fakeGH.postedComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted comment, got %d", len(comments))
+	}
+	comment := comments[0]
+	if comment.repo != "owner/repo" || comment.issueNumber != 77 {
+		t.Fatalf("unexpected comment target: %+v", comment)
+	}
+	if !strings.Contains(comment.body, "@alice implemented in commit [`0123456789ab`]") {
+		t.Fatalf("expected requester mention with short sha, got body:\n%s", comment.body)
+	}
+	if !strings.Contains(comment.body, "- updated handlers") {
+		t.Fatalf("expected commit body bullets in comment, got:\n%s", comment.body)
+	}
+	if !strings.Contains(comment.body, "<details><summary>Goose Details</summary>") {
+		t.Fatalf("expected goose details section, got:\n%s", comment.body)
+	}
+	if !strings.Contains(comment.body, "Rascal run `run_comment_completion` took ") || !strings.Contains(comment.body, "[consumed 123 tokens]") {
+		t.Fatalf("expected runtime and token summary, got:\n%s", comment.body)
 	}
 }
 
