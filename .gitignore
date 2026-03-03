@@ -5,3 +5,4 @@
 .rascal.env
 coverage.out
 coverage.html
+runner/rascal-runner
