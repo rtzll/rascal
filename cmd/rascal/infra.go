@@ -46,6 +46,7 @@ func (a *app) newInfraCmd() *cobra.Command {
 		Short: "Infrastructure operations (provisioning/deploy)",
 		Long:  "Provision and deploy Rascal infrastructure resources.",
 		Example: strings.TrimSpace(`
+rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
 rascal infra provision-hetzner --token "$HCLOUD_TOKEN"
 rascal infra deploy-existing --host 203.0.113.10 --ssh-key ~/.ssh/id_ed25519
 `),
@@ -53,6 +54,7 @@ rascal infra deploy-existing --host 203.0.113.10 --ssh-key ~/.ssh/id_ed25519
 			return cmd.Help()
 		},
 	}
+	cmd.AddCommand(a.newInfraUpCmd())
 	cmd.AddCommand(a.newInfraProvisionHetznerCmd())
 	cmd.AddCommand(a.newInfraDeployExistingCmd())
 	return cmd
@@ -145,6 +147,133 @@ func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 	return a.newDeployExistingCmd("deploy-existing", "Deploy rascald to an existing Linux host over SSH")
 }
 
+func (a *app) newInfraUpCmd() *cobra.Command {
+	var (
+		host               string
+		provision          bool
+		hcloudToken        string
+		name               string
+		sshUser            string
+		sshKey             string
+		sshPort            int
+		goarch             string
+		apiToken           string
+		githubRuntimeToken string
+		webhookSecret      string
+		codexAuthPath      string
+		domain             string
+		runnerImage        string
+		skipEnvUpload      bool
+		skipAuthUpload     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "up",
+		Short: "Provision (optional) and deploy rascald",
+		Long:  "One-shot infrastructure flow: optionally provision a Hetzner host, then deploy rascald over SSH.",
+		Example: strings.TrimSpace(`
+rascal infra up --host 203.0.113.10 --github-runtime-token "$GITHUB_RUNTIME_TOKEN" --codex-auth ~/.codex/auth.json
+rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$GITHUB_RUNTIME_TOKEN" --codex-auth ~/.codex/auth.json
+`),
+		RunE: func(_ *cobra.Command, _ []string) error {
+			host = strings.TrimSpace(host)
+			hcloudToken = firstNonEmpty(strings.TrimSpace(hcloudToken), strings.TrimSpace(os.Getenv("HCLOUD_TOKEN")))
+			if provision && host != "" {
+				return &cliError{Code: exitInput, Message: "--host cannot be combined with --provision"}
+			}
+			if !provision && host == "" {
+				return &cliError{Code: exitInput, Message: "--host is required unless --provision is set"}
+			}
+
+			var provisionOut *hcloudProvisionResult
+			if provision {
+				if hcloudToken == "" {
+					return &cliError{Code: exitInput, Message: "missing Hetzner token", Hint: "set --hcloud-token or HCLOUD_TOKEN"}
+				}
+				name = firstNonEmpty(strings.TrimSpace(name), fmt.Sprintf("rascal-%d", time.Now().UTC().Unix()))
+				publicPath, err := expandPath("~/.ssh/id_ed25519.pub")
+				if err != nil {
+					return &cliError{Code: exitInput, Message: "invalid default ssh public key path", Cause: err}
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+				defer cancel()
+				out, err := provisionHetznerServer(ctx, hcloudProvisionConfig{
+					Token:         hcloudToken,
+					ServerName:    name,
+					ServerType:    "cx23",
+					Location:      "fsn1",
+					Image:         "ubuntu-24.04",
+					SSHKeyName:    "rascal",
+					SSHPublicPath: publicPath,
+					FirewallName:  "rascal-fw",
+					ApplyFirewall: true,
+				})
+				if err != nil {
+					return &cliError{Code: exitRuntime, Message: "hetzner provisioning failed", Cause: err}
+				}
+				host = strings.TrimSpace(out.Host)
+				provisionOut = &out
+				a.println("provisioned %s (%d)", out.ServerName, out.ServerID)
+				a.println("host: %s", out.Host)
+			}
+
+			result, err := a.runDeployExisting(deployExistingInput{
+				Host:               host,
+				SSHUser:            sshUser,
+				SSHKey:             sshKey,
+				SSHPort:            sshPort,
+				GOARCH:             goarch,
+				APIToken:           apiToken,
+				GitHubRuntimeToken: githubRuntimeToken,
+				WebhookSecret:      webhookSecret,
+				CodexAuthPath:      codexAuthPath,
+				Domain:             domain,
+				RunnerImage:        runnerImage,
+				SkipEnvUpload:      skipEnvUpload,
+				SkipAuthUpload:     skipAuthUpload,
+			})
+			if err != nil {
+				return err
+			}
+
+			out := map[string]any{
+				"host":       result.Host,
+				"server_url": result.ServerURL,
+				"api_token":  maskSecret(result.APIToken),
+			}
+			if provisionOut != nil {
+				out["provisioned_server"] = provisionOut
+			}
+			return a.emit(out, func() error {
+				a.println("deployed rascald to %s", result.Host)
+				a.println("server_url: %s", result.ServerURL)
+				if strings.TrimSpace(result.APIToken) != "" {
+					a.println("api_token: %s", maskSecret(result.APIToken))
+				} else {
+					a.println("api_token: unchanged on remote")
+				}
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringVar(&host, "host", "", "existing server host")
+	cmd.Flags().BoolVar(&provision, "provision", false, "provision a new Hetzner host before deploy")
+	cmd.Flags().StringVar(&hcloudToken, "hcloud-token", "", "Hetzner Cloud token (or HCLOUD_TOKEN) used with --provision")
+	cmd.Flags().StringVar(&name, "name", "", "provisioned server name (default: rascal-<timestamp>)")
+	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH target user")
+	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path")
+	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH target port")
+	cmd.Flags().StringVar(&goarch, "goarch", "", "GOARCH for rascald binary (auto-detected when empty)")
+	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token")
+	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token")
+	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
+	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path")
+	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
+	cmd.Flags().StringVar(&runnerImage, "runner-image", "rascal-runner:latest", "runner docker image tag")
+	cmd.Flags().BoolVar(&skipEnvUpload, "skip-env-upload", false, "keep existing /etc/rascal/rascal.env on server")
+	cmd.Flags().BoolVar(&skipAuthUpload, "skip-auth-upload", false, "keep existing codex auth file on server")
+	return cmd
+}
+
 func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	var (
 		host               string
@@ -166,108 +295,33 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 		Use:   use,
 		Short: short,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			host = strings.TrimSpace(host)
-			sshUser = strings.TrimSpace(sshUser)
-			sshKey = strings.TrimSpace(sshKey)
-			goarch = strings.TrimSpace(goarch)
-			codexAuthPath = strings.TrimSpace(codexAuthPath)
-			domain = firstNonEmpty(strings.TrimSpace(domain), strings.TrimSpace(a.cfg.Domain))
-			runnerImage = firstNonEmpty(strings.TrimSpace(runnerImage), "rascal-runner:latest")
-			if host == "" {
-				return &cliError{Code: exitInput, Message: "--host is required"}
-			}
-			if sshPort <= 0 {
-				return &cliError{Code: exitInput, Message: "--ssh-port must be positive"}
-			}
-
-			expandedAuthPath := ""
-			if !skipAuthUpload {
-				if codexAuthPath == "" {
-					return &cliError{Code: exitInput, Message: "--codex-auth must be set (or pass --skip-auth-upload)"}
-				}
-				expandedAuthPath, err := expandPath(codexAuthPath)
-				if err != nil {
-					return &cliError{Code: exitInput, Message: "invalid --codex-auth path", Cause: err}
-				}
-				if _, err := os.Stat(expandedAuthPath); err != nil {
-					return &cliError{Code: exitInput, Message: "codex auth file is required", Hint: "run `codex login` first", Cause: err}
-				}
-			}
-
-			if !skipEnvUpload {
-				apiToken = firstNonEmpty(strings.TrimSpace(apiToken), a.cfg.APIToken)
-				if apiToken == "" {
-					created, err := randomToken(32)
-					if err != nil {
-						return err
-					}
-					apiToken = created
-				}
-				githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
-				if githubRuntimeToken == "" {
-					return &cliError{Code: exitInput, Message: "--github-runtime-token is required (or pass --skip-env-upload)"}
-				}
-				if webhookSecret == "" {
-					created, err := randomToken(32)
-					if err != nil {
-						return err
-					}
-					webhookSecret = created
-				}
-			}
-
-			resolvedGoarch := goarch
-			if resolvedGoarch == "" {
-				detected, err := detectRemoteGOARCH(deployConfig{
-					Host:       host,
-					SSHUser:    firstNonEmpty(sshUser, "root"),
-					SSHKeyPath: sshKey,
-					SSHPort:    sshPort,
-				})
-				if err != nil {
-					return &cliError{Code: exitRuntime, Message: "auto-detect goarch failed", Hint: "set --goarch explicitly", Cause: err}
-				}
-				resolvedGoarch = detected
-				a.println("detected goarch: %s (remote host)", resolvedGoarch)
-			}
-
-			cfg := deployConfig{
+			result, err := a.runDeployExisting(deployExistingInput{
 				Host:               host,
-				SSHUser:            firstNonEmpty(sshUser, "root"),
-				SSHKeyPath:         sshKey,
+				SSHUser:            sshUser,
+				SSHKey:             sshKey,
 				SSHPort:            sshPort,
+				GOARCH:             goarch,
 				APIToken:           apiToken,
-				WebhookSecret:      webhookSecret,
 				GitHubRuntimeToken: githubRuntimeToken,
-				CodexAuthPath:      expandedAuthPath,
-				RunnerMode:         "docker",
-				RunnerImage:        runnerImage,
-				ServerListenAddr:   ":8080",
-				ServerDataDir:      "/var/lib/rascal",
-				ServerStatePath:    "/var/lib/rascal/state.db",
-				ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
-				GOARCH:             resolvedGoarch,
+				WebhookSecret:      webhookSecret,
+				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
-				UploadEnvFile:      !skipEnvUpload,
-				UploadCodexAuth:    !skipAuthUpload,
-			}
-			if err := deployToExistingHost(cfg); err != nil {
-				return &cliError{Code: exitRuntime, Message: "deploy failed", Cause: err}
-			}
-
-			serverURL := firstNonEmpty(strings.TrimSpace(a.cfg.ServerURL), "http://"+host+":8080")
-			if domain != "" {
-				serverURL = "https://" + domain
+				RunnerImage:        runnerImage,
+				SkipEnvUpload:      skipEnvUpload,
+				SkipAuthUpload:     skipAuthUpload,
+			})
+			if err != nil {
+				return err
 			}
 			return a.emit(map[string]any{
-				"host":       host,
-				"server_url": serverURL,
-				"api_token":  maskSecret(apiToken),
+				"host":       result.Host,
+				"server_url": result.ServerURL,
+				"api_token":  maskSecret(result.APIToken),
 			}, func() error {
-				a.println("deployed rascald to %s", host)
-				a.println("server_url: %s", serverURL)
-				if strings.TrimSpace(apiToken) != "" {
-					a.println("api_token: %s", maskSecret(apiToken))
+				a.println("deployed rascald to %s", result.Host)
+				a.println("server_url: %s", result.ServerURL)
+				if strings.TrimSpace(result.APIToken) != "" {
+					a.println("api_token: %s", maskSecret(result.APIToken))
 				} else {
 					a.println("api_token: unchanged on remote")
 				}
@@ -289,6 +343,135 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().BoolVar(&skipEnvUpload, "skip-env-upload", false, "keep existing /etc/rascal/rascal.env on server")
 	cmd.Flags().BoolVar(&skipAuthUpload, "skip-auth-upload", false, "keep existing codex auth file on server")
 	return cmd
+}
+
+type deployExistingInput struct {
+	Host               string
+	SSHUser            string
+	SSHKey             string
+	SSHPort            int
+	GOARCH             string
+	APIToken           string
+	GitHubRuntimeToken string
+	WebhookSecret      string
+	CodexAuthPath      string
+	Domain             string
+	RunnerImage        string
+	SkipEnvUpload      bool
+	SkipAuthUpload     bool
+}
+
+type deployExistingResult struct {
+	Host      string
+	ServerURL string
+	APIToken  string
+}
+
+func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult, error) {
+	host := strings.TrimSpace(input.Host)
+	sshUser := strings.TrimSpace(input.SSHUser)
+	sshKey := strings.TrimSpace(input.SSHKey)
+	goarch := strings.TrimSpace(input.GOARCH)
+	codexAuthPath := strings.TrimSpace(input.CodexAuthPath)
+	domain := firstNonEmpty(strings.TrimSpace(input.Domain), strings.TrimSpace(a.cfg.Domain))
+	runnerImage := firstNonEmpty(strings.TrimSpace(input.RunnerImage), "rascal-runner:latest")
+	sshPort := input.SSHPort
+	apiToken := strings.TrimSpace(input.APIToken)
+	githubRuntimeToken := strings.TrimSpace(input.GitHubRuntimeToken)
+	webhookSecret := strings.TrimSpace(input.WebhookSecret)
+
+	if host == "" {
+		return deployExistingResult{}, &cliError{Code: exitInput, Message: "--host is required"}
+	}
+	if sshPort <= 0 {
+		return deployExistingResult{}, &cliError{Code: exitInput, Message: "--ssh-port must be positive"}
+	}
+
+	expandedAuthPath := ""
+	if !input.SkipAuthUpload {
+		if codexAuthPath == "" {
+			return deployExistingResult{}, &cliError{Code: exitInput, Message: "--codex-auth must be set (or pass --skip-auth-upload)"}
+		}
+		var err error
+		expandedAuthPath, err = expandPath(codexAuthPath)
+		if err != nil {
+			return deployExistingResult{}, &cliError{Code: exitInput, Message: "invalid --codex-auth path", Cause: err}
+		}
+		if _, err := os.Stat(expandedAuthPath); err != nil {
+			return deployExistingResult{}, &cliError{Code: exitInput, Message: "codex auth file is required", Hint: "run `codex login` first", Cause: err}
+		}
+	}
+
+	if !input.SkipEnvUpload {
+		apiToken = firstNonEmpty(apiToken, a.cfg.APIToken)
+		if apiToken == "" {
+			created, err := randomToken(32)
+			if err != nil {
+				return deployExistingResult{}, err
+			}
+			apiToken = created
+		}
+		githubRuntimeToken = firstNonEmpty(githubRuntimeToken, strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
+		if githubRuntimeToken == "" {
+			return deployExistingResult{}, &cliError{Code: exitInput, Message: "--github-runtime-token is required (or pass --skip-env-upload)"}
+		}
+		if webhookSecret == "" {
+			created, err := randomToken(32)
+			if err != nil {
+				return deployExistingResult{}, err
+			}
+			webhookSecret = created
+		}
+	}
+
+	resolvedGoarch := goarch
+	if resolvedGoarch == "" {
+		detected, err := detectRemoteGOARCH(deployConfig{
+			Host:       host,
+			SSHUser:    firstNonEmpty(sshUser, "root"),
+			SSHKeyPath: sshKey,
+			SSHPort:    sshPort,
+		})
+		if err != nil {
+			return deployExistingResult{}, &cliError{Code: exitRuntime, Message: "auto-detect goarch failed", Hint: "set --goarch explicitly", Cause: err}
+		}
+		resolvedGoarch = detected
+		a.println("detected goarch: %s (remote host)", resolvedGoarch)
+	}
+
+	cfg := deployConfig{
+		Host:               host,
+		SSHUser:            firstNonEmpty(sshUser, "root"),
+		SSHKeyPath:         sshKey,
+		SSHPort:            sshPort,
+		APIToken:           apiToken,
+		WebhookSecret:      webhookSecret,
+		GitHubRuntimeToken: githubRuntimeToken,
+		CodexAuthPath:      expandedAuthPath,
+		RunnerMode:         "docker",
+		RunnerImage:        runnerImage,
+		ServerListenAddr:   ":8080",
+		ServerDataDir:      "/var/lib/rascal",
+		ServerStatePath:    "/var/lib/rascal/state.db",
+		ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
+		GOARCH:             resolvedGoarch,
+		Domain:             domain,
+		UploadEnvFile:      !input.SkipEnvUpload,
+		UploadCodexAuth:    !input.SkipAuthUpload,
+	}
+	if err := deployToExistingHost(cfg); err != nil {
+		return deployExistingResult{}, &cliError{Code: exitRuntime, Message: "deploy failed", Cause: err}
+	}
+
+	serverURL := firstNonEmpty(strings.TrimSpace(a.cfg.ServerURL), "http://"+host+":8080")
+	if domain != "" {
+		serverURL = "https://" + domain
+	}
+	return deployExistingResult{
+		Host:      host,
+		ServerURL: serverURL,
+		APIToken:  apiToken,
+	}, nil
 }
 
 func provisionHetznerServer(ctx context.Context, cfg hcloudProvisionConfig) (hcloudProvisionResult, error) {

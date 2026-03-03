@@ -5,12 +5,14 @@ Usage:
   rascal infra [command]
 
 Examples:
+rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
 rascal infra provision-hetzner --token "$HCLOUD_TOKEN"
 rascal infra deploy-existing --host 203.0.113.10 --ssh-key ~/.ssh/id_ed25519
 
 Available Commands:
   deploy-existing   Deploy rascald to an existing Linux host over SSH
   provision-hetzner Provision a Hetzner Cloud server
+  up                Provision (optional) and deploy rascald
 
 Flags:
   -h, --help   help for infra

@@ -239,6 +239,14 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := infraDeployCmd.Flags().Lookup("skip-auth-upload").DefValue; got != "false" {
 		t.Fatalf("infra deploy-existing default skip-auth-upload = %q, want false", got)
 	}
+
+	infraUpCmd, _, err := root.Find([]string{"infra", "up"})
+	if err != nil {
+		t.Fatalf("infra up command missing: %v", err)
+	}
+	if got := infraUpCmd.Flags().Lookup("provision").DefValue; got != "false" {
+		t.Fatalf("infra up default provision = %q, want false", got)
+	}
 }
 
 func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
@@ -391,6 +399,51 @@ func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
 		t.Fatal("expected bootstrap to fail when webhook admin token is missing")
 	}
 	if !strings.Contains(err.Error(), "--github-admin-token is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInfraUpValidatesRequiredInputs(t *testing.T) {
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://127.0.0.1:8080",
+		},
+	}
+	cmd := a.newInfraUpCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	cmd.SetArgs([]string{})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected infra up to fail without host/provision")
+	}
+	if !strings.Contains(err.Error(), "--host is required unless --provision is set") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cmd = a.newInfraUpCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--host", "203.0.113.10", "--provision"})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("expected infra up to fail when host and provision are combined")
+	}
+	if !strings.Contains(err.Error(), "--host cannot be combined with --provision") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cmd = a.newInfraUpCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	t.Setenv("HCLOUD_TOKEN", "")
+	cmd.SetArgs([]string{"--provision"})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("expected infra up to fail without hcloud token in provision mode")
+	}
+	if !strings.Contains(err.Error(), "missing Hetzner token") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
