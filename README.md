@@ -18,35 +18,90 @@ PR on GitHub.
 
 ## Quickstart (10 Minutes)
 
-1. Build the CLI:
+Build the CLI:
 
 ```bash
 go build -o ./bin/rascal ./cmd/rascal
 ```
 
-2. Create `./.rascal.env` with required tokens:
+Ensure Codex auth exists (one time):
+
+```bash
+codex login
+```
+
+Create `./.rascal.env` with required tokens:
 
 ```bash
 HCLOUD_TOKEN=...
 GITHUB_ADMIN_TOKEN=...
 GITHUB_RUNTIME_TOKEN=...
+RASCAL_API_TOKEN=...
+WEBHOOK_SECRET=...
 ```
 
-3. Bootstrap:
+Setup flow:
+
+1. Initialize local config:
 
 ```bash
-./bin/rascal bootstrap \
-  --repo OWNER/REPO \
+./bin/rascal init \
+  --server-url https://rascal.example.com \
+  --api-token "$RASCAL_API_TOKEN" \
+  --default-repo OWNER/REPO \
+  --non-interactive
+```
+
+2. Provision + deploy:
+
+```bash
+./bin/rascal infra up \
+  --provision \
+  --hcloud-token "$HCLOUD_TOKEN" \
+  --github-runtime-token "$GITHUB_RUNTIME_TOKEN" \
+  --webhook-secret "$WEBHOOK_SECRET" \
+  --api-token "$RASCAL_API_TOKEN" \
   --domain rascal.example.com
+```
+
+Existing host alternative:
+
+```bash
+./bin/rascal infra deploy-existing \
+  --host YOUR_SERVER_IP \
+  --github-runtime-token "$GITHUB_RUNTIME_TOKEN" \
+  --webhook-secret "$WEBHOOK_SECRET" \
+  --api-token "$RASCAL_API_TOKEN" \
+  --domain rascal.example.com
+```
+
+3. Configure GitHub:
+
+```bash
+./bin/rascal github setup OWNER/REPO \
+  --github-token "$GITHUB_ADMIN_TOKEN" \
+  --webhook-secret "$WEBHOOK_SECRET"
 ```
 
 4. Verify:
 
 ```bash
-./bin/rascal doctor --host <server_ip>
+./bin/rascal doctor --host YOUR_SERVER_IP
 ```
 
-5. Run first task:
+Optional convenience (single command):
+
+```bash
+./bin/rascal bootstrap \
+  --repo OWNER/REPO \
+  --domain rascal.example.com \
+  --github-admin-token "$GITHUB_ADMIN_TOKEN" \
+  --github-runtime-token "$GITHUB_RUNTIME_TOKEN" \
+  --webhook-secret "$WEBHOOK_SECRET" \
+  --api-token "$RASCAL_API_TOKEN"
+```
+
+Run first task:
 
 ```bash
 ./bin/rascal run -t "Add a short CONTRIBUTING.md section for local dev setup"
