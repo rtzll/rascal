@@ -283,9 +283,12 @@ func loadConfig() (config, error) {
 		trigger = "cli"
 	}
 
-	metaDir := defaultMetaDir
-	workRoot := defaultWorkRoot
-	repoDir := filepath.Join(workRoot, defaultRepoDirName)
+	metaDir := firstNonEmptyValue(strings.TrimSpace(os.Getenv("RASCAL_META_DIR")), defaultMetaDir)
+	workRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("RASCAL_WORK_ROOT")), defaultWorkRoot)
+	repoDir := strings.TrimSpace(os.Getenv("RASCAL_REPO_DIR"))
+	if repoDir == "" {
+		repoDir = filepath.Join(workRoot, defaultRepoDirName)
+	}
 
 	debug := true
 	if raw := strings.TrimSpace(os.Getenv("RASCAL_GOOSE_DEBUG")); raw != "" {
@@ -317,6 +320,15 @@ func loadConfig() (config, error) {
 		PRBodyPath:       filepath.Join(metaDir, defaultPRBodyFile),
 		GooseDebug:       debug,
 	}, nil
+}
+
+func firstNonEmptyValue(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func ensureInstructions(cfg config) error {
