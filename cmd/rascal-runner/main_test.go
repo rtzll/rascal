@@ -88,6 +88,22 @@ func TestIsConventionalTitle(t *testing.T) {
 	}
 }
 
+func TestBuildInfoSummary(t *testing.T) {
+	origVersion, origCommit, origTime := buildVersion, buildCommit, buildTime
+	t.Cleanup(func() {
+		buildVersion, buildCommit, buildTime = origVersion, origCommit, origTime
+	})
+
+	buildVersion = "v1.2.3"
+	buildCommit = "abcdef0"
+	buildTime = "2026-03-03T12:00:00Z"
+	got := buildInfoSummary()
+	want := "version=v1.2.3 commit=abcdef0 built=2026-03-03T12:00:00Z"
+	if got != want {
+		t.Fatalf("buildInfoSummary() = %q, want %q", got, want)
+	}
+}
+
 func TestLoadAgentCommitMessage(t *testing.T) {
 	t.Run("returns empty when file missing", func(t *testing.T) {
 		title, body, err := loadAgentCommitMessage(filepath.Join(t.TempDir(), "missing.txt"))
