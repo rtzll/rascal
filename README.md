@@ -52,6 +52,8 @@ GITHUB_RUNTIME_TOKEN=...
 ./bin/rascal run -t "Add a short CONTRIBUTING.md section for local dev setup"
 ```
 
+Smoke test run on 2026-03-03.
+
 ## Core Commands
 
 ```bash
