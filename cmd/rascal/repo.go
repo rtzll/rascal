@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -17,6 +18,68 @@ var requiredWebhookEvents = []string{
 	"pull_request_review",
 	"pull_request_review_comment",
 	"pull_request",
+}
+
+type repoEnableInput struct {
+	Repo          string
+	GitHubToken   string
+	WebhookSecret string
+	WebhookURL    string
+	Timeout       time.Duration
+	Client        repoGitHubClient
+	RawErrors     bool
+}
+
+type repoEnableResult struct {
+	Repo       string
+	WebhookURL string
+}
+
+type repoGitHubClient interface {
+	EnsureLabel(ctx context.Context, repo, name, color, description string) error
+	UpsertWebhook(ctx context.Context, repo, webhookURL, secret string, events []string) error
+}
+
+func (a *app) runRepoEnable(input repoEnableInput) (repoEnableResult, error) {
+	repo := strings.TrimSpace(input.Repo)
+	if repo == "" {
+		return repoEnableResult{}, &cliError{Code: exitInput, Message: "repo is required", Hint: "pass OWNER/REPO or set --default-repo"}
+	}
+	githubToken := firstNonEmpty(strings.TrimSpace(input.GitHubToken), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
+	if githubToken == "" {
+		return repoEnableResult{}, &cliError{Code: exitInput, Message: "missing GitHub token", Hint: "set --github-token or GITHUB_TOKEN"}
+	}
+	webhookSecret := strings.TrimSpace(input.WebhookSecret)
+	if webhookSecret == "" {
+		return repoEnableResult{}, &cliError{Code: exitInput, Message: "missing webhook secret", Hint: "pass --webhook-secret (must match server secret)"}
+	}
+	webhookURL := firstNonEmpty(strings.TrimSpace(input.WebhookURL), strings.TrimSpace(a.cfg.ServerURL)+"/v1/webhooks/github")
+	webhookURL = strings.TrimRight(webhookURL, "/")
+	timeout := input.Timeout
+	if timeout <= 0 {
+		timeout = 45 * time.Second
+	}
+
+	client := input.Client
+	if client == nil {
+		client = ghapi.NewAPIClient(githubToken)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if err := client.EnsureLabel(ctx, repo, "rascal", "0e8a16", "Trigger Rascal automation"); err != nil {
+		if input.RawErrors {
+			return repoEnableResult{}, fmt.Errorf("ensure label: %w", err)
+		}
+		return repoEnableResult{}, &cliError{Code: exitRuntime, Message: "failed to ensure label", Cause: err}
+	}
+	if err := client.UpsertWebhook(ctx, repo, webhookURL, webhookSecret, nil); err != nil {
+		if input.RawErrors {
+			return repoEnableResult{}, fmt.Errorf("upsert webhook: %w", err)
+		}
+		return repoEnableResult{}, &cliError{Code: exitRuntime, Message: "failed to upsert webhook", Cause: err}
+	}
+	return repoEnableResult{Repo: repo, WebhookURL: webhookURL}, nil
 }
 
 func (a *app) newRepoCmd() *cobra.Command {
@@ -51,41 +114,24 @@ func (a *app) newRepoEnableCmd() *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			repo := resolveRepoArg(args, a.cfg.DefaultRepo)
-			if repo == "" {
-				return &cliError{Code: exitInput, Message: "repo is required", Hint: "pass OWNER/REPO or set --default-repo"}
-			}
-			githubToken = firstNonEmpty(strings.TrimSpace(githubToken), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
-			if githubToken == "" {
-				return &cliError{Code: exitInput, Message: "missing GitHub token", Hint: "set --github-token or GITHUB_TOKEN"}
-			}
-			webhookSecret = strings.TrimSpace(webhookSecret)
-			if webhookSecret == "" {
-				return &cliError{Code: exitInput, Message: "missing webhook secret", Hint: "pass --webhook-secret (must match server secret)"}
-			}
-			webhookURL = firstNonEmpty(strings.TrimSpace(webhookURL), strings.TrimSpace(a.cfg.ServerURL)+"/v1/webhooks/github")
-			webhookURL = strings.TrimRight(webhookURL, "/")
-			if timeout <= 0 {
-				timeout = 45 * time.Second
-			}
-
-			gh := ghapi.NewAPIClient(githubToken)
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			defer cancel()
-
-			if err := gh.EnsureLabel(ctx, repo, "rascal", "0e8a16", "Trigger Rascal automation"); err != nil {
-				return &cliError{Code: exitRuntime, Message: "failed to ensure label", Cause: err}
-			}
-			if err := gh.UpsertWebhook(ctx, repo, webhookURL, webhookSecret, nil); err != nil {
-				return &cliError{Code: exitRuntime, Message: "failed to upsert webhook", Cause: err}
+			result, err := a.runRepoEnable(repoEnableInput{
+				Repo:          repo,
+				GitHubToken:   githubToken,
+				WebhookSecret: webhookSecret,
+				WebhookURL:    webhookURL,
+				Timeout:       timeout,
+			})
+			if err != nil {
+				return err
 			}
 			return a.emit(map[string]any{
-				"repo":        repo,
+				"repo":        result.Repo,
 				"enabled":     true,
-				"webhook_url": webhookURL,
+				"webhook_url": result.WebhookURL,
 				"label":       "rascal",
 			}, func() error {
-				a.println("repo enabled: %s", repo)
-				a.println("webhook: %s", webhookURL)
+				a.println("repo enabled: %s", result.Repo)
+				a.println("webhook: %s", result.WebhookURL)
 				return nil
 			})
 		},

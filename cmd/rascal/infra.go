@@ -40,6 +40,52 @@ type hcloudProvisionResult struct {
 	ProvisionedAt string `json:"provisioned_at"`
 }
 
+type hetznerProvisionInput struct {
+	Token         string
+	Name          string
+	ServerType    string
+	Location      string
+	Image         string
+	SSHKeyName    string
+	SSHPublicPath string
+	FirewallName  string
+	ApplyFirewall bool
+	Timeout       time.Duration
+}
+
+func resolveHetznerProvisionConfig(input hetznerProvisionInput) (hcloudProvisionConfig, time.Duration, error) {
+	cfg := hcloudProvisionConfig{
+		Token:         strings.TrimSpace(input.Token),
+		ServerName:    firstNonEmpty(strings.TrimSpace(input.Name), fmt.Sprintf("rascal-%d", time.Now().UTC().Unix())),
+		ServerType:    firstNonEmpty(strings.TrimSpace(input.ServerType), "cx23"),
+		Location:      firstNonEmpty(strings.TrimSpace(input.Location), "fsn1"),
+		Image:         firstNonEmpty(strings.TrimSpace(input.Image), "ubuntu-24.04"),
+		SSHKeyName:    firstNonEmpty(strings.TrimSpace(input.SSHKeyName), "rascal"),
+		SSHPublicPath: firstNonEmpty(strings.TrimSpace(input.SSHPublicPath), "~/.ssh/id_ed25519.pub"),
+		FirewallName:  firstNonEmpty(strings.TrimSpace(input.FirewallName), "rascal-fw"),
+		ApplyFirewall: input.ApplyFirewall,
+	}
+	timeout := input.Timeout
+	if timeout <= 0 {
+		timeout = 8 * time.Minute
+	}
+	publicPath, err := expandPath(cfg.SSHPublicPath)
+	if err != nil {
+		return hcloudProvisionConfig{}, 0, err
+	}
+	cfg.SSHPublicPath = publicPath
+	return cfg, timeout, nil
+}
+
+func runHetznerProvision(cfg hcloudProvisionConfig, timeout time.Duration) (hcloudProvisionResult, error) {
+	if timeout <= 0 {
+		timeout = 8 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return provisionHetznerServer(ctx, cfg)
+}
+
 func (a *app) newInfraCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "infra",
@@ -81,36 +127,23 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 			if token == "" {
 				return &cliError{Code: exitInput, Message: "missing Hetzner token", Hint: "set --token or HCLOUD_TOKEN"}
 			}
-			name = firstNonEmpty(strings.TrimSpace(name), fmt.Sprintf("rascal-%d", time.Now().UTC().Unix()))
-			serverType = firstNonEmpty(strings.TrimSpace(serverType), "cx23")
-			location = firstNonEmpty(strings.TrimSpace(location), "fsn1")
-			image = firstNonEmpty(strings.TrimSpace(image), "ubuntu-24.04")
-			sshKeyName = firstNonEmpty(strings.TrimSpace(sshKeyName), "rascal")
-			sshPublicPath = firstNonEmpty(strings.TrimSpace(sshPublicPath), "~/.ssh/id_ed25519.pub")
-			firewallName = firstNonEmpty(strings.TrimSpace(firewallName), "rascal-fw")
-			if timeout <= 0 {
-				timeout = 8 * time.Minute
-			}
-
-			publicPath, err := expandPath(sshPublicPath)
-			if err != nil {
-				return &cliError{Code: exitInput, Message: "invalid ssh public key path", Cause: err}
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			defer cancel()
-
-			out, err := provisionHetznerServer(ctx, hcloudProvisionConfig{
+			cfg, timeout, err := resolveHetznerProvisionConfig(hetznerProvisionInput{
 				Token:         token,
-				ServerName:    name,
+				Name:          name,
 				ServerType:    serverType,
 				Location:      location,
 				Image:         image,
 				SSHKeyName:    sshKeyName,
-				SSHPublicPath: publicPath,
+				SSHPublicPath: sshPublicPath,
 				FirewallName:  firewallName,
 				ApplyFirewall: applyFirewall,
+				Timeout:       timeout,
 			})
+			if err != nil {
+				return &cliError{Code: exitInput, Message: "invalid ssh public key path", Cause: err}
+			}
+
+			out, err := runHetznerProvision(cfg, timeout)
 			if err != nil {
 				return &cliError{Code: exitRuntime, Message: "hetzner provisioning failed", Cause: err}
 			}
@@ -189,24 +222,15 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 				if hcloudToken == "" {
 					return &cliError{Code: exitInput, Message: "missing Hetzner token", Hint: "set --hcloud-token or HCLOUD_TOKEN"}
 				}
-				name = firstNonEmpty(strings.TrimSpace(name), fmt.Sprintf("rascal-%d", time.Now().UTC().Unix()))
-				publicPath, err := expandPath("~/.ssh/id_ed25519.pub")
+				cfg, timeout, err := resolveHetznerProvisionConfig(hetznerProvisionInput{
+					Token:         hcloudToken,
+					Name:          name,
+					ApplyFirewall: true,
+				})
 				if err != nil {
 					return &cliError{Code: exitInput, Message: "invalid default ssh public key path", Cause: err}
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
-				defer cancel()
-				out, err := provisionHetznerServer(ctx, hcloudProvisionConfig{
-					Token:         hcloudToken,
-					ServerName:    name,
-					ServerType:    "cx23",
-					Location:      "fsn1",
-					Image:         "ubuntu-24.04",
-					SSHKeyName:    "rascal",
-					SSHPublicPath: publicPath,
-					FirewallName:  "rascal-fw",
-					ApplyFirewall: true,
-				})
+				out, err := runHetznerProvision(cfg, timeout)
 				if err != nil {
 					return &cliError{Code: exitRuntime, Message: "hetzner provisioning failed", Cause: err}
 				}
@@ -351,6 +375,7 @@ type deployExistingInput struct {
 	SSHKey             string
 	SSHPort            int
 	GOARCH             string
+	ProvisionedArch    string
 	APIToken           string
 	GitHubRuntimeToken string
 	WebhookSecret      string
@@ -359,19 +384,29 @@ type deployExistingInput struct {
 	RunnerImage        string
 	SkipEnvUpload      bool
 	SkipAuthUpload     bool
+	SkipIfHealthy      bool
+	RawErrors          bool
 }
 
 type deployExistingResult struct {
-	Host      string
-	ServerURL string
-	APIToken  string
+	Host            string
+	ServerURL       string
+	APIToken        string
+	DeployPerformed bool
 }
+
+var (
+	deployToExistingHostFn        = deployToExistingHost
+	runRemoteDoctorFn             = runRemoteDoctor
+	remoteCaddyDomainConfiguredFn = remoteCaddyDomainConfigured
+)
 
 func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult, error) {
 	host := strings.TrimSpace(input.Host)
 	sshUser := strings.TrimSpace(input.SSHUser)
 	sshKey := strings.TrimSpace(input.SSHKey)
 	goarch := strings.TrimSpace(input.GOARCH)
+	provisionedArch := strings.TrimSpace(input.ProvisionedArch)
 	codexAuthPath := strings.TrimSpace(input.CodexAuthPath)
 	domain := firstNonEmpty(strings.TrimSpace(input.Domain), strings.TrimSpace(a.cfg.Domain))
 	runnerImage := firstNonEmpty(strings.TrimSpace(input.RunnerImage), "rascal-runner:latest")
@@ -426,17 +461,41 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 
 	resolvedGoarch := goarch
 	if resolvedGoarch == "" {
-		detected, err := detectRemoteGOARCH(deployConfig{
-			Host:       host,
-			SSHUser:    firstNonEmpty(sshUser, "root"),
-			SSHKeyPath: sshKey,
-			SSHPort:    sshPort,
-		})
-		if err != nil {
-			return deployExistingResult{}, &cliError{Code: exitRuntime, Message: "auto-detect goarch failed", Hint: "set --goarch explicitly", Cause: err}
+		switch {
+		case provisionedArch != "":
+			detected, ok := goarchFromHetznerArchitecture(provisionedArch)
+			if ok {
+				resolvedGoarch = detected
+				a.println("detected goarch: %s (hcloud architecture: %s)", resolvedGoarch, provisionedArch)
+				break
+			}
+			detected, err := detectRemoteGOARCH(deployConfig{
+				Host:       host,
+				SSHUser:    firstNonEmpty(sshUser, "root"),
+				SSHKeyPath: sshKey,
+				SSHPort:    sshPort,
+			})
+			if err != nil {
+				return deployExistingResult{}, fmt.Errorf("auto-detect goarch: unable to map Hetzner architecture %q and ssh detection failed: %w", provisionedArch, err)
+			}
+			resolvedGoarch = detected
+			a.println("detected goarch: %s (remote host)", resolvedGoarch)
+		default:
+			detected, err := detectRemoteGOARCH(deployConfig{
+				Host:       host,
+				SSHUser:    firstNonEmpty(sshUser, "root"),
+				SSHKeyPath: sshKey,
+				SSHPort:    sshPort,
+			})
+			if err != nil {
+				if input.RawErrors {
+					return deployExistingResult{}, fmt.Errorf("auto-detect goarch: %w", err)
+				}
+				return deployExistingResult{}, &cliError{Code: exitRuntime, Message: "auto-detect goarch failed", Hint: "set --goarch explicitly", Cause: err}
+			}
+			resolvedGoarch = detected
+			a.println("detected goarch: %s (remote host)", resolvedGoarch)
 		}
-		resolvedGoarch = detected
-		a.println("detected goarch: %s (remote host)", resolvedGoarch)
 	}
 
 	cfg := deployConfig{
@@ -459,8 +518,40 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		UploadEnvFile:      !input.SkipEnvUpload,
 		UploadCodexAuth:    !input.SkipAuthUpload,
 	}
-	if err := deployToExistingHost(cfg); err != nil {
-		return deployExistingResult{}, &cliError{Code: exitRuntime, Message: "deploy failed", Cause: err}
+	healthyExisting := false
+	if input.SkipIfHealthy {
+		if st, err := runRemoteDoctorFn(deployConfig{
+			Host:       cfg.Host,
+			SSHUser:    cfg.SSHUser,
+			SSHKeyPath: cfg.SSHKeyPath,
+			SSHPort:    cfg.SSHPort,
+		}); err == nil {
+			caddyOK := st.CaddyInstalled || strings.TrimSpace(domain) == ""
+			if caddyOK && strings.TrimSpace(domain) != "" {
+				configured, err := remoteCaddyDomainConfiguredFn(deployConfig{
+					Host:       cfg.Host,
+					SSHUser:    cfg.SSHUser,
+					SSHKeyPath: cfg.SSHKeyPath,
+					SSHPort:    cfg.SSHPort,
+				}, domain)
+				if err != nil || !configured {
+					caddyOK = false
+				}
+			}
+			healthyExisting = st.RascalService && st.DockerInstalled && st.SQLiteInstalled && caddyOK && st.EnvFilePresent && st.AuthRuntimeSynced && st.CodexAuthPresent && st.RunnerImagePresent
+		}
+	}
+	deployPerformed := false
+	if !healthyExisting {
+		if err := deployToExistingHostFn(cfg); err != nil {
+			if input.RawErrors {
+				return deployExistingResult{}, err
+			}
+			return deployExistingResult{}, &cliError{Code: exitRuntime, Message: "deploy failed", Cause: err}
+		}
+		deployPerformed = true
+	} else if input.SkipIfHealthy {
+		a.println("existing deployment detected on %s; skipping deploy", host)
 	}
 
 	serverURL := firstNonEmpty(strings.TrimSpace(a.cfg.ServerURL), "http://"+host+":8080")
@@ -468,9 +559,10 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		serverURL = "https://" + domain
 	}
 	return deployExistingResult{
-		Host:      host,
-		ServerURL: serverURL,
-		APIToken:  apiToken,
+		Host:            host,
+		ServerURL:       serverURL,
+		APIToken:        apiToken,
+		DeployPerformed: deployPerformed,
 	}, nil
 }
 
