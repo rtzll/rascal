@@ -182,11 +182,11 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap command missing: %v", err)
 	}
-	if got := bootstrapCmd.Flags().Lookup("hcloud-server-type").DefValue; got != "cx23" {
-		t.Fatalf("bootstrap default hcloud server type = %q, want cx23", got)
+	if got := bootstrapCmd.Flags().Lookup("goarch"); got != nil {
+		t.Fatalf("bootstrap should not expose goarch flag, got %q", got.Name)
 	}
-	if got := bootstrapCmd.Flags().Lookup("goarch").DefValue; got != "" {
-		t.Fatalf("bootstrap default goarch = %q, want empty for auto-detect", got)
+	if got := bootstrapCmd.Flags().Lookup("hcloud-server-type"); got != nil {
+		t.Fatalf("bootstrap should not expose hcloud-server-type flag, got %q", got.Name)
 	}
 
 	deployCmd, _, err := root.Find([]string{"deploy"})
@@ -726,10 +726,10 @@ func newFollowLogsTestApp(t *testing.T, responses []map[string]any) (*app, func(
 
 	a := &app{
 		cfg: config.ClientConfig{
-			ServerURL:  srv.URL,
-			APIToken:   "test-token",
-			Transport:  "http",
-			SSHPort:    22,
+			ServerURL:   srv.URL,
+			APIToken:    "test-token",
+			Transport:   "http",
+			SSHPort:     22,
 			DefaultRepo: "owner/repo",
 		},
 		client: apiClient{

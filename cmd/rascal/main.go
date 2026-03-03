@@ -515,20 +515,10 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 		sshUser            string
 		sshKey             string
 		sshPort            int
-		goarch             string
 		skipDeploy         bool
 		provisionNew       bool
 		codexAuthPath      string
 		hcloudToken        string
-		hcloudServerName   string
-		hcloudServerType   string
-		hcloudLocation     string
-		hcloudImage        string
-		hcloudSSHKeyName   string
-		hcloudSSHPublicKey string
-		hcloudFirewallName string
-		hcloudApplyFW      bool
-		hcloudTimeout      time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -545,16 +535,8 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			host = firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.Host))
 			sshUser = strings.TrimSpace(sshUser)
 			sshKey = strings.TrimSpace(sshKey)
-			goarch = strings.TrimSpace(goarch)
 			codexAuthPath = strings.TrimSpace(codexAuthPath)
 			hcloudToken = firstNonEmpty(strings.TrimSpace(hcloudToken), strings.TrimSpace(os.Getenv("HCLOUD_TOKEN")))
-			hcloudServerName = strings.TrimSpace(hcloudServerName)
-			hcloudServerType = strings.TrimSpace(hcloudServerType)
-			hcloudLocation = strings.TrimSpace(hcloudLocation)
-			hcloudImage = strings.TrimSpace(hcloudImage)
-			hcloudSSHKeyName = strings.TrimSpace(hcloudSSHKeyName)
-			hcloudSSHPublicKey = strings.TrimSpace(hcloudSSHPublicKey)
-			hcloudFirewallName = strings.TrimSpace(hcloudFirewallName)
 
 			if provisionNew {
 				host = ""
@@ -599,28 +581,23 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				if hcloudToken == "" {
 					return fmt.Errorf("no host configured: pass --host, configure `host` in config, or set --hcloud-token")
 				}
-				if hcloudTimeout <= 0 {
-					hcloudTimeout = 8 * time.Minute
-				}
-				publicKeyPath, err := expandPath(firstNonEmpty(hcloudSSHPublicKey, "~/.ssh/id_ed25519.pub"))
+				publicKeyPath, err := expandPath("~/.ssh/id_ed25519.pub")
 				if err != nil {
-					return fmt.Errorf("expand --hcloud-ssh-public-key path: %w", err)
+					return fmt.Errorf("expand default ssh public key path: %w", err)
 				}
-				if hcloudServerName == "" {
-					hcloudServerName = fmt.Sprintf("rascal-%d", time.Now().UTC().Unix())
-				}
-				ctx, cancel := context.WithTimeout(context.Background(), hcloudTimeout)
+				serverName := fmt.Sprintf("rascal-%d", time.Now().UTC().Unix())
+				ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 				defer cancel()
 				out, err := provisionHetznerServer(ctx, hcloudProvisionConfig{
 					Token:         hcloudToken,
-					ServerName:    hcloudServerName,
-					ServerType:    firstNonEmpty(hcloudServerType, "cx23"),
-					Location:      firstNonEmpty(hcloudLocation, "fsn1"),
-					Image:         firstNonEmpty(hcloudImage, "ubuntu-24.04"),
-					SSHKeyName:    firstNonEmpty(hcloudSSHKeyName, "rascal"),
+					ServerName:    serverName,
+					ServerType:    "cx23",
+					Location:      "fsn1",
+					Image:         "ubuntu-24.04",
+					SSHKeyName:    "rascal",
 					SSHPublicPath: publicKeyPath,
-					FirewallName:  firstNonEmpty(hcloudFirewallName, "rascal-fw"),
-					ApplyFirewall: hcloudApplyFW,
+					FirewallName:  "rascal-fw",
+					ApplyFirewall: true,
 				})
 				if err != nil {
 					return fmt.Errorf("hcloud provision: %w", err)
@@ -646,40 +623,38 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 
 			deployPerformed := false
 			if shouldDeploy {
-				resolvedGoarch := goarch
-				if resolvedGoarch == "" {
-					switch {
-					case provisionOut != nil:
-						detected, ok := goarchFromHetznerArchitecture(provisionOut.Architecture)
-						if ok {
-							resolvedGoarch = detected
-							a.println("detected goarch: %s (hcloud architecture: %s)", resolvedGoarch, provisionOut.Architecture)
-							break
-						}
-						detected, err := detectRemoteGOARCH(deployConfig{
-							Host:       host,
-							SSHUser:    firstNonEmpty(sshUser, "root"),
-							SSHKeyPath: sshKey,
-							SSHPort:    sshPort,
-						})
-						if err != nil {
-							return fmt.Errorf("auto-detect goarch: unable to map Hetzner architecture %q and ssh detection failed: %w", provisionOut.Architecture, err)
-						}
+				resolvedGoarch := ""
+				switch {
+				case provisionOut != nil:
+					detected, ok := goarchFromHetznerArchitecture(provisionOut.Architecture)
+					if ok {
 						resolvedGoarch = detected
-						a.println("detected goarch: %s (remote host)", resolvedGoarch)
-					default:
-						detected, err := detectRemoteGOARCH(deployConfig{
-							Host:       host,
-							SSHUser:    firstNonEmpty(sshUser, "root"),
-							SSHKeyPath: sshKey,
-							SSHPort:    sshPort,
-						})
-						if err != nil {
-							return fmt.Errorf("auto-detect goarch: %w", err)
-						}
-						resolvedGoarch = detected
-						a.println("detected goarch: %s (remote host)", resolvedGoarch)
+						a.println("detected goarch: %s (hcloud architecture: %s)", resolvedGoarch, provisionOut.Architecture)
+						break
 					}
+					detected, err := detectRemoteGOARCH(deployConfig{
+						Host:       host,
+						SSHUser:    firstNonEmpty(sshUser, "root"),
+						SSHKeyPath: sshKey,
+						SSHPort:    sshPort,
+					})
+					if err != nil {
+						return fmt.Errorf("auto-detect goarch: unable to map Hetzner architecture %q and ssh detection failed: %w", provisionOut.Architecture, err)
+					}
+					resolvedGoarch = detected
+					a.println("detected goarch: %s (remote host)", resolvedGoarch)
+				default:
+					detected, err := detectRemoteGOARCH(deployConfig{
+						Host:       host,
+						SSHUser:    firstNonEmpty(sshUser, "root"),
+						SSHKeyPath: sshKey,
+						SSHPort:    sshPort,
+					})
+					if err != nil {
+						return fmt.Errorf("auto-detect goarch: %w", err)
+					}
+					resolvedGoarch = detected
+					a.println("detected goarch: %s (remote host)", resolvedGoarch)
 				}
 
 				deployCfg := deployConfig{
@@ -852,20 +827,10 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH target user for existing host deployment")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path for existing host deployment")
 	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH target port for existing host deployment")
-	cmd.Flags().StringVar(&goarch, "goarch", "", "GOARCH for rascald binary (auto-detected when empty)")
 	cmd.Flags().BoolVar(&skipDeploy, "skip-deploy", false, "skip remote deployment")
 	cmd.Flags().BoolVar(&provisionNew, "provision-new", false, "force provisioning a new host when --hcloud-token is set")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path copied to the server")
-	cmd.Flags().StringVar(&hcloudToken, "hcloud-token", "", "Hetzner Cloud token (used to provision a host when needed)")
-	cmd.Flags().StringVar(&hcloudServerName, "hcloud-server-name", "", "Hetzner server name")
-	cmd.Flags().StringVar(&hcloudServerType, "hcloud-server-type", "cx23", "Hetzner server type")
-	cmd.Flags().StringVar(&hcloudLocation, "hcloud-location", "fsn1", "Hetzner location")
-	cmd.Flags().StringVar(&hcloudImage, "hcloud-image", "ubuntu-24.04", "Hetzner image")
-	cmd.Flags().StringVar(&hcloudSSHKeyName, "hcloud-ssh-key-name", "rascal", "Hetzner SSH key resource name")
-	cmd.Flags().StringVar(&hcloudSSHPublicKey, "hcloud-ssh-public-key", "~/.ssh/id_ed25519.pub", "local SSH public key path for Hetzner")
-	cmd.Flags().StringVar(&hcloudFirewallName, "hcloud-firewall-name", "rascal-fw", "Hetzner firewall resource name")
-	cmd.Flags().BoolVar(&hcloudApplyFW, "hcloud-apply-firewall", true, "create/update and attach firewall (22,80,443)")
-	cmd.Flags().DurationVar(&hcloudTimeout, "hcloud-timeout", 8*time.Minute, "Hetzner provisioning timeout")
+	cmd.Flags().StringVar(&hcloudToken, "hcloud-token", "", "Hetzner Cloud token (or HCLOUD_TOKEN) for provisioning")
 
 	return cmd
 }
