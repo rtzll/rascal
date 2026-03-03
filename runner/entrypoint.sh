@@ -44,6 +44,38 @@ format_duration() {
   printf '%s' "${output% }"
 }
 
+extract_total_tokens() {
+  local goose_log_path="$1"
+  local tokens
+
+  if [[ ! -s "${goose_log_path}" ]]; then
+    return 1
+  fi
+
+  # Goose stream logs can include non-JSON debug lines; parse JSON lines robustly first.
+  tokens="$(
+    jq -Rr 'try fromjson catch empty | .. | .total_tokens? // empty' "${goose_log_path}" 2>/dev/null \
+      | rg '^[0-9]+$' \
+      | tail -n1 || true
+  )"
+
+  if [[ -z "${tokens}" ]]; then
+    tokens="$(
+      rg -o '"total_tokens"[[:space:]]*:[[:space:]]*[0-9]+' "${goose_log_path}" 2>/dev/null \
+        | tail -n1 \
+        | rg -o '[0-9]+' \
+        | tail -n1 || true
+    )"
+  fi
+
+  if [[ "${tokens}" =~ ^[0-9]+$ ]]; then
+    printf '%s' "${tokens}"
+    return 0
+  fi
+
+  return 1
+}
+
 task_subject() {
   local subject
   subject="$(printf '%s' "${RASCAL_TASK}" | tr '\r\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ +//; s/ +$//')"
@@ -282,23 +314,33 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
       pr_url="$(jq -r '.url // ""' <<<"$pr_view_json")"
     else
       log "creating pull request"
-      pr_body="Automated changes from Rascal run ${RASCAL_RUN_ID}."
-      if [[ -n "${commit_body}" ]]; then
-        pr_body="${commit_body}"$'\n\n'"${pr_body}"
-      fi
       if [[ -s "${GOOSE_LOG}" ]]; then
         goose_output="$(cat "${GOOSE_LOG}")"
       else
         goose_output="(no goose output captured)"
       fi
       goose_section=$'<details><summary>Run Details</summary>\n\n```\n'"${goose_output}"$'\n```\n\n</details>'
-      pr_body="${pr_body}"$'\n\n'"${goose_section}"
       if [[ "${RASCAL_ISSUE_NUMBER}" =~ ^[0-9]+$ ]] && [[ "${RASCAL_ISSUE_NUMBER}" -gt 0 ]]; then
-        pr_body="${pr_body}"$'\n\n'"Closes #${RASCAL_ISSUE_NUMBER}"
+        closes_section=$'\n\n'"Closes #${RASCAL_ISSUE_NUMBER}"
+      else
+        closes_section=""
       fi
       run_duration_seconds="$(( $(date +%s) - RUN_START_EPOCH ))"
       run_duration="$(format_duration "${run_duration_seconds}")"
-      pr_body="${pr_body}"$'\n\n---\n\n'"Rascal run took ${run_duration}"
+      if total_tokens="$(extract_total_tokens "${GOOSE_LOG}")"; then
+        goose_section=$'<details><summary>Goose Details</summary>\n\n```\n'"${goose_output}"$'\n```\n\n</details>'
+        pr_body=""
+        if [[ -n "${commit_body}" ]]; then
+          pr_body="${commit_body}"$'\n\n'
+        fi
+        pr_body+="${goose_section}${closes_section}"$'\n\n---\n\n'"Rascal run \`${RASCAL_RUN_ID}\` took ${run_duration} [consumed ${total_tokens} tokens]"
+      else
+        pr_body="Automated changes from Rascal run ${RASCAL_RUN_ID}."
+        if [[ -n "${commit_body}" ]]; then
+          pr_body="${commit_body}"$'\n\n'"${pr_body}"
+        fi
+        pr_body="${pr_body}"$'\n\n'"${goose_section}${closes_section}"$'\n\n---\n\n'"Rascal run took ${run_duration}"
+      fi
       if ! pr_create_output="$(gh pr create \
         --repo "${RASCAL_REPO}" \
         --base "${RASCAL_BASE_BRANCH}" \
