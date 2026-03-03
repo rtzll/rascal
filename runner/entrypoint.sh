@@ -4,7 +4,6 @@ set -euo pipefail
 META_DIR="/rascal-meta"
 WORK_ROOT="/work"
 REPO_DIR="${WORK_ROOT}/repo"
-RUNNER_LOG="${META_DIR}/runner.log"
 GOOSE_LOG="${META_DIR}/goose.ndjson"
 META_JSON="${META_DIR}/meta.json"
 INSTRUCTIONS_FILE="${META_DIR}/instructions.md"
@@ -19,12 +18,27 @@ RUN_START_EPOCH="$(date +%s)"
 : "${RASCAL_HEAD_BRANCH:=rascal/${RASCAL_RUN_ID}}"
 : "${RASCAL_ISSUE_NUMBER:=0}"
 : "${RASCAL_TRIGGER:=cli}"
+: "${GH_TOKEN:?GH_TOKEN is required}"
 
 mkdir -p "${META_DIR}" "${WORK_ROOT}" "${META_DIR}/goose" "${META_DIR}/codex"
 
 log() {
   local msg="$1"
   printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$msg"
+}
+
+require_cmds() {
+  local missing=()
+  local cmd
+  for cmd in "$@"; do
+    if ! command -v "${cmd}" >/dev/null 2>&1; then
+      missing+=("${cmd}")
+    fi
+  done
+  if ((${#missing[@]} > 0)); then
+    log "required command(s) missing: ${missing[*]}"
+    return 1
+  fi
 }
 
 format_duration() {
@@ -133,21 +147,6 @@ load_agent_commit_message() {
 }
 
 resolve_git_identity() {
-  if [[ -z "${GH_TOKEN:-}" ]]; then
-    log "GH_TOKEN is required to resolve commit author"
-    return 1
-  fi
-
-  if ! command -v gh >/dev/null 2>&1; then
-    log "gh CLI is required to resolve commit author"
-    return 1
-  fi
-
-  if ! command -v jq >/dev/null 2>&1; then
-    log "jq is required to resolve commit author"
-    return 1
-  fi
-
   local user_json login
   user_json="$(gh api user 2>/dev/null || true)"
   if [[ -z "${user_json}" ]]; then
@@ -164,6 +163,45 @@ resolve_git_identity() {
   commit_author_name="${login}"
   commit_author_email="${login}@users.noreply.github.com"
   return 0
+}
+
+load_pr_view() {
+  local pr_view_json
+
+  if ! pr_view_json="$(gh pr view "${RASCAL_HEAD_BRANCH}" --repo "${RASCAL_REPO}" --json number,url 2>/dev/null)"; then
+    return 1
+  fi
+
+  pr_number="$(jq -r '.number // 0' <<<"$pr_view_json")"
+  pr_url="$(jq -r '.url // ""' <<<"$pr_view_json")"
+  return 0
+}
+
+build_pr_body() {
+  local goose_output="$1"
+  local run_duration="$2"
+  local closes_section="$3"
+  local goose_section
+  local total_tokens
+  local pr_body_local
+
+  goose_section=$'<details><summary>Run Details</summary>\n\n```\n'"${goose_output}"$'\n```\n\n</details>'
+  if total_tokens="$(extract_total_tokens "${GOOSE_LOG}")"; then
+    goose_section=$'<details><summary>Goose Details</summary>\n\n```\n'"${goose_output}"$'\n```\n\n</details>'
+    pr_body_local=""
+    if [[ -n "${commit_body}" ]]; then
+      pr_body_local="${commit_body}"$'\n\n'
+    fi
+    pr_body_local+="${goose_section}${closes_section}"$'\n\n---\n\n'"Rascal run \`${RASCAL_RUN_ID}\` took ${run_duration} [consumed ${total_tokens} tokens]"
+  else
+    pr_body_local="Automated changes from Rascal run ${RASCAL_RUN_ID}."
+    if [[ -n "${commit_body}" ]]; then
+      pr_body_local="${commit_body}"$'\n\n'"${pr_body_local}"
+    fi
+    pr_body_local="${pr_body_local}"$'\n\n'"${goose_section}${closes_section}"$'\n\n---\n\n'"Rascal run took ${run_duration}"
+  fi
+
+  printf '%s' "${pr_body_local}"
 }
 
 write_meta() {
@@ -198,10 +236,7 @@ write_meta() {
     }' >"${META_JSON}"
 }
 
-repo_url="https://github.com/${RASCAL_REPO}.git"
-if [[ -n "${GH_TOKEN:-}" ]]; then
-  repo_url="https://x-access-token:${GH_TOKEN}@github.com/${RASCAL_REPO}.git"
-fi
+repo_url="https://x-access-token:${GH_TOKEN}@github.com/${RASCAL_REPO}.git"
 
 if [[ ! -f "${INSTRUCTIONS_FILE}" ]]; then
   cat >"${INSTRUCTIONS_FILE}" <<EOT
@@ -239,6 +274,9 @@ cleanup_and_exit() {
 
 trap 'cleanup_and_exit 1 "unexpected error (line ${LINENO})"' ERR
 
+if ! require_cmds git gh jq goose rg; then
+  cleanup_and_exit 1 "missing required commands"
+fi
 if ! resolve_git_identity; then
   cleanup_and_exit 1 "unable to resolve commit author from GH_TOKEN"
 fi
@@ -265,25 +303,24 @@ else
   git checkout -b "${RASCAL_HEAD_BRANCH}"
 fi
 
-if command -v goose >/dev/null 2>&1; then
-  log "running goose (debug=${RASCAL_GOOSE_DEBUG:-true})"
-  goose_args=(run --no-session -i "${INSTRUCTIONS_FILE}" --output-format stream-json)
-  case "${RASCAL_GOOSE_DEBUG:-true}" in
-    1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn])
-      goose_args+=(--debug)
-      export GOOSE_CODEX_DEBUG=1
-      ;;
-    *)
-      unset GOOSE_CODEX_DEBUG || true
-      ;;
-  esac
-  # Capture both stdout and stderr so goose debug logs are available in
-  # rascal logs and the PR "Run Details" section.
-  goose "${goose_args[@]}" >"${GOOSE_LOG}" 2>&1
-else
-  log "goose binary is required but was not found in PATH"
-  printf '{"event":"error","message":"goose binary not installed"}\n' >"${GOOSE_LOG}"
-  cleanup_and_exit 1 "goose binary not installed"
+log "running goose (debug=${RASCAL_GOOSE_DEBUG:-true})"
+goose_args=(run --no-session -i "${INSTRUCTIONS_FILE}" --output-format stream-json)
+case "${RASCAL_GOOSE_DEBUG:-true}" in
+  1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn])
+    goose_args+=(--debug)
+    export GOOSE_CODEX_DEBUG=1
+    ;;
+  *)
+    unset GOOSE_CODEX_DEBUG || true
+    ;;
+esac
+# Capture both stdout and stderr so goose debug logs are available in
+# rascal logs and the PR "Run Details" section.
+if ! goose "${goose_args[@]}" >"${GOOSE_LOG}" 2>&1; then
+  if [[ ! -s "${GOOSE_LOG}" ]]; then
+    printf '{"event":"error","message":"goose run failed"}\n' >"${GOOSE_LOG}"
+  fi
+  cleanup_and_exit 1 "goose run failed"
 fi
 
 if [[ -f Makefile ]]; then
@@ -301,64 +338,44 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   fi
   final_commit_body+="Run: ${RASCAL_RUN_ID}"
   git -c user.name="${commit_author_name}" -c user.email="${commit_author_email}" \
-    commit -m "${commit_title}" -m "${final_commit_body}" || true
+    commit -m "${commit_title}" -m "${final_commit_body}"
 fi
 
-if [[ -n "${GH_TOKEN:-}" ]]; then
-  log "pushing branch"
-  git push -u origin "${RASCAL_HEAD_BRANCH}" || cleanup_and_exit 1 "git push failed"
+log "pushing branch"
+git push -u origin "${RASCAL_HEAD_BRANCH}" || cleanup_and_exit 1 "git push failed"
 
-  if command -v gh >/dev/null 2>&1; then
-    if pr_view_json="$(gh pr view "${RASCAL_HEAD_BRANCH}" --repo "${RASCAL_REPO}" --json number,url 2>/dev/null)"; then
-      pr_number="$(jq -r '.number // 0' <<<"$pr_view_json")"
-      pr_url="$(jq -r '.url // ""' <<<"$pr_view_json")"
-    else
-      log "creating pull request"
-      if [[ -s "${GOOSE_LOG}" ]]; then
-        goose_output="$(cat "${GOOSE_LOG}")"
-      else
-        goose_output="(no goose output captured)"
-      fi
-      goose_section=$'<details><summary>Run Details</summary>\n\n```\n'"${goose_output}"$'\n```\n\n</details>'
-      if [[ "${RASCAL_ISSUE_NUMBER}" =~ ^[0-9]+$ ]] && [[ "${RASCAL_ISSUE_NUMBER}" -gt 0 ]]; then
-        closes_section=$'\n\n'"Closes #${RASCAL_ISSUE_NUMBER}"
-      else
-        closes_section=""
-      fi
-      run_duration_seconds="$(( $(date +%s) - RUN_START_EPOCH ))"
-      run_duration="$(format_duration "${run_duration_seconds}")"
-      if total_tokens="$(extract_total_tokens "${GOOSE_LOG}")"; then
-        goose_section=$'<details><summary>Goose Details</summary>\n\n```\n'"${goose_output}"$'\n```\n\n</details>'
-        pr_body=""
-        if [[ -n "${commit_body}" ]]; then
-          pr_body="${commit_body}"$'\n\n'
-        fi
-        pr_body+="${goose_section}${closes_section}"$'\n\n---\n\n'"Rascal run \`${RASCAL_RUN_ID}\` took ${run_duration} [consumed ${total_tokens} tokens]"
-      else
-        pr_body="Automated changes from Rascal run ${RASCAL_RUN_ID}."
-        if [[ -n "${commit_body}" ]]; then
-          pr_body="${commit_body}"$'\n\n'"${pr_body}"
-        fi
-        pr_body="${pr_body}"$'\n\n'"${goose_section}${closes_section}"$'\n\n---\n\n'"Rascal run took ${run_duration}"
-      fi
-      if ! pr_create_output="$(gh pr create \
-        --repo "${RASCAL_REPO}" \
-        --base "${RASCAL_BASE_BRANCH}" \
-        --head "${RASCAL_HEAD_BRANCH}" \
-        --title "${commit_title}" \
-        --body "${pr_body}" 2>&1)"; then
-        cleanup_and_exit 1 "gh pr create failed: ${pr_create_output}"
-      fi
+if load_pr_view; then
+  :
+else
+  log "creating pull request"
+  if [[ -s "${GOOSE_LOG}" ]]; then
+    goose_output="$(<"${GOOSE_LOG}")"
+  else
+    goose_output="(no goose output captured)"
+  fi
+  if [[ "${RASCAL_ISSUE_NUMBER}" =~ ^[0-9]+$ ]] && [[ "${RASCAL_ISSUE_NUMBER}" -gt 0 ]]; then
+    closes_section=$'\n\n'"Closes #${RASCAL_ISSUE_NUMBER}"
+  else
+    closes_section=""
+  fi
+  run_duration_seconds="$(( $(date +%s) - RUN_START_EPOCH ))"
+  run_duration="$(format_duration "${run_duration_seconds}")"
+  pr_body="$(build_pr_body "${goose_output}" "${run_duration}" "${closes_section}")"
+  if ! pr_create_output="$(gh pr create \
+    --repo "${RASCAL_REPO}" \
+    --base "${RASCAL_BASE_BRANCH}" \
+    --head "${RASCAL_HEAD_BRANCH}" \
+    --title "${commit_title}" \
+    --body "${pr_body}" 2>&1)"; then
+    cleanup_and_exit 1 "gh pr create failed: ${pr_create_output}"
+  fi
 
-      if pr_view_json="$(gh pr view "${RASCAL_HEAD_BRANCH}" --repo "${RASCAL_REPO}" --json number,url 2>/dev/null)"; then
-        pr_number="$(jq -r '.number // 0' <<<"$pr_view_json")"
-        pr_url="$(jq -r '.url // ""' <<<"$pr_view_json")"
-      else
-        pr_url="$(printf '%s\n' "${pr_create_output}" | rg -o 'https://github.com/[^[:space:]]+/pull/[0-9]+' -m1 || true)"
-        if [[ -n "${pr_url}" ]]; then
-          pr_number="${pr_url##*/}"
-        fi
-      fi
+  if load_pr_view; then
+    :
+  else
+    pr_url="$(printf '%s\n' "${pr_create_output}" | rg -o 'https://github.com/[^[:space:]]+/pull/[0-9]+' -m1 || true)"
+    if [[ -n "${pr_url}" ]]; then
+      pr_number="${pr_url##*/}"
     fi
   fi
 fi
