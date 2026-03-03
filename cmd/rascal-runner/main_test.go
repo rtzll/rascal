@@ -354,7 +354,7 @@ func TestRunWithExecutorFailsWhenRequiredCommandMissing(t *testing.T) {
 		},
 	}
 	err := runWithExecutor(ex)
-	if err == nil || !strings.Contains(err.Error(), "required command missing: goose") {
+	if err == nil || !strings.Contains(err.Error(), "stage validate_commands: required command missing: goose") {
 		t.Fatalf("expected missing goose error, got: %v", err)
 	}
 
@@ -372,7 +372,7 @@ func TestRunWithExecutorFailsWhenRequiredCommandMissing(t *testing.T) {
 	if meta.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit code in meta, got %d", meta.ExitCode)
 	}
-	if !strings.Contains(meta.Error, "required command missing: goose") {
+	if !strings.Contains(meta.Error, "stage validate_commands: required command missing: goose") {
 		t.Fatalf("expected missing command in meta error, got %q", meta.Error)
 	}
 }
@@ -422,7 +422,7 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 	}
 
 	err := runWithExecutor(ex)
-	if err == nil || !strings.Contains(err.Error(), "create failed") {
+	if err == nil || !strings.Contains(err.Error(), "stage pr_create: gh pr create failed") {
 		t.Fatalf("expected pr create failure, got: %v", err)
 	}
 
@@ -440,8 +440,24 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 	if meta.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit code in meta, got %d", meta.ExitCode)
 	}
-	if !strings.Contains(meta.Error, "gh pr create failed") {
+	if !strings.Contains(meta.Error, "stage pr_create: gh pr create failed") {
 		t.Fatalf("expected gh pr create failure in meta error, got %q", meta.Error)
+	}
+}
+
+func TestRunStageWrapsError(t *testing.T) {
+	err := runStage("checkout_repo", func() error {
+		return errors.New("boom")
+	})
+	if err == nil {
+		t.Fatal("expected runStage error")
+	}
+	if !strings.Contains(err.Error(), "stage checkout_repo: boom") {
+		t.Fatalf("unexpected wrapped error: %v", err)
+	}
+
+	if err := runStage("ok_stage", func() error { return nil }); err != nil {
+		t.Fatalf("expected nil error on success stage, got %v", err)
 	}
 }
 
