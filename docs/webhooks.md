@@ -34,6 +34,15 @@ curl -i -X POST https://YOUR_DOMAIN/v1/webhooks/github
 
 Without signature, `401/403/405` can be expected. `3xx` redirects are a problem.
 
+Synthetic webhook test from CLI:
+
+```bash
+./bin/rascal github webhook test \
+  --repo OWNER/REPO \
+  --webhook-secret "$WEBHOOK_SECRET" \
+  --dry-run
+```
+
 ## Cloudflare Notes
 
 If using Cloudflare proxy (orange cloud):

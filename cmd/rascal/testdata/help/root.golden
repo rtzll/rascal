@@ -25,7 +25,6 @@ Logs:
 Integrations:
   github      GitHub integration setup and status
   infra       Infrastructure operations (provisioning/deploy)
-  webhook     Webhook helpers
 
 Utilities:
   completion  Generate shell completion scripts

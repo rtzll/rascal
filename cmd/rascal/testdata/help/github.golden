@@ -12,6 +12,7 @@ Available Commands:
   disable     Remove Rascal webhook from a repository
   setup       Ensure rascal label and webhook are configured
   status      Show Rascal label/webhook status
+  webhook     Webhook helpers
 
 Flags:
   -h, --help   help for github

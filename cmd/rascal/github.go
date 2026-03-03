@@ -35,5 +35,7 @@ rascal github status OWNER/REPO --github-token "$GITHUB_TOKEN"
 	statusCmd.Short = "Show Rascal label/webhook status"
 	cmd.AddCommand(statusCmd)
 
+	cmd.AddCommand(a.newWebhookCmd())
+
 	return cmd
 }

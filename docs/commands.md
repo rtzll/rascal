@@ -48,6 +48,7 @@ Issue-driven task:
 ./bin/rascal github status OWNER/REPO
 ./bin/rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$WEBHOOK_SECRET"
 ./bin/rascal github disable OWNER/REPO --github-token "$GITHUB_TOKEN"
+./bin/rascal github webhook test --repo OWNER/REPO --webhook-secret "$WEBHOOK_SECRET" --dry-run
 ```
 
 ## Infra Helpers

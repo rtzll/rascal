@@ -138,6 +138,9 @@ func TestRootHasGitHubAndInfraCommands(t *testing.T) {
 	if _, _, err := root.Find([]string{"github", "setup"}); err != nil {
 		t.Fatalf("github setup command missing: %v", err)
 	}
+	if _, _, err := root.Find([]string{"github", "webhook", "test"}); err != nil {
+		t.Fatalf("github webhook test command missing: %v", err)
+	}
 	if _, _, err := root.Find([]string{"infra"}); err != nil {
 		t.Fatalf("infra command missing: %v", err)
 	}
@@ -155,6 +158,12 @@ func TestRootHasGitHubAndInfraCommands(t *testing.T) {
 	}
 	if _, _, err := root.Find([]string{"logs", "caddy-access"}); err != nil {
 		t.Fatalf("logs caddy-access command missing: %v", err)
+	}
+
+	for _, c := range root.Commands() {
+		if c.Name() == "webhook" {
+			t.Fatal("root webhook command should be removed")
+		}
 	}
 }
 
