@@ -1385,7 +1385,15 @@ func (a *app) streamRascaldServiceLogs(host, sshUser, sshKey string, sshPort int
 	if lines <= 0 {
 		lines = 200
 	}
-	remoteCmd := fmt.Sprintf(strings.Join([]string{
+	remoteCmd := rascaldJournalctlRemoteCmd(lines, follow)
+	return runLocal("ssh", sshArgs(cfg, remoteCmd)...)
+}
+
+func rascaldJournalctlRemoteCmd(lines int, follow bool) string {
+	if lines <= 0 {
+		lines = 200
+	}
+	return fmt.Sprintf(strings.Join([]string{
 		"set -euo pipefail",
 		`slot=""`,
 		`if [ -f /etc/rascal/active_slot ]; then slot=$(tr -d '[:space:]' </etc/rascal/active_slot); fi`,
@@ -1400,11 +1408,11 @@ func (a *app) streamRascaldServiceLogs(host, sshUser, sshKey string, sshPort int
 		`      unit=rascal`,
 		`    else`,
 		`      unit=rascal@green`,
-		`    fi ;;`,
+		`    fi`,
+		`    ;;`,
 		`esac`,
 		"journalctl -u \"$unit\" --no-pager -n %d%s",
-	}, "; "), lines, ternary(follow, " -f", ""))
-	return runLocal("ssh", sshArgs(cfg, remoteCmd)...)
+	}, "\n"), lines, ternary(follow, " -f", ""))
 }
 
 func (a *app) streamRemoteFileLogs(path, host, sshUser, sshKey string, sshPort int, follow bool, lines int) error {

@@ -810,6 +810,33 @@ func TestParseGitHubRepoFromRemote(t *testing.T) {
 	}
 }
 
+func TestRascaldJournalctlRemoteCmd(t *testing.T) {
+	t.Parallel()
+
+	cmd := rascaldJournalctlRemoteCmd(200, false)
+	if strings.Contains(cmd, ";;;") {
+		t.Fatalf("remote command contains malformed case terminator: %q", cmd)
+	}
+	if !strings.Contains(cmd, "fi\n    ;;") {
+		t.Fatalf("expected case fallback branch to terminate cleanly after fi: %q", cmd)
+	}
+	if !strings.Contains(cmd, "journalctl -u \"$unit\" --no-pager -n 200") {
+		t.Fatalf("expected journalctl line count in remote command: %q", cmd)
+	}
+	if strings.Contains(cmd, "journalctl -u \"$unit\" --no-pager -n 200 -f") {
+		t.Fatalf("unexpected follow flag in non-follow command: %q", cmd)
+	}
+
+	followCmd := rascaldJournalctlRemoteCmd(50, true)
+	if !strings.Contains(followCmd, "journalctl -u \"$unit\" --no-pager -n 50 -f") {
+		t.Fatalf("expected follow journalctl command, got: %q", followCmd)
+	}
+
+	defaultLinesCmd := rascaldJournalctlRemoteCmd(0, false)
+	if !strings.Contains(defaultLinesCmd, "journalctl -u \"$unit\" --no-pager -n 200") {
+		t.Fatalf("expected default line count when lines<=0, got: %q", defaultLinesCmd)
+	}
+}
 func TestResolveTransport(t *testing.T) {
 	t.Parallel()
 
