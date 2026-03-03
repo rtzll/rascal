@@ -104,6 +104,9 @@ func TestExecuteRollsBackWhenProxyReadinessFails(t *testing.T) {
 
 func TestExecuteRollsOutRunnerBinaryBeforeImageBuild(t *testing.T) {
 	logDir := setupFakeDeployCommands(t, "")
+	t.Setenv("RASCAL_BUILD_VERSION", "v-test")
+	t.Setenv("RASCAL_BUILD_COMMIT", "deadbee")
+	t.Setenv("RASCAL_BUILD_TIME", "2026-03-03T00:00:00Z")
 
 	if err := Execute(testDeployConfig()); err != nil {
 		t.Fatalf("execute deploy: %v", err)
@@ -115,6 +118,15 @@ func TestExecuteRollsOutRunnerBinaryBeforeImageBuild(t *testing.T) {
 	}
 	if !containsLine(goCalls, "./cmd/rascal-runner") {
 		t.Fatalf("expected go build for rascal-runner, got calls: %v", goCalls)
+	}
+	runnerCall := firstLineContaining(goCalls, "./cmd/rascal-runner")
+	if runnerCall == "" {
+		t.Fatalf("missing runner build call in go calls: %v", goCalls)
+	}
+	for _, needle := range []string{"-ldflags", "main.buildVersion=v-test", "main.buildCommit=deadbee", "main.buildTime=2026-03-03T00:00:00Z"} {
+		if !strings.Contains(runnerCall, needle) {
+			t.Fatalf("expected runner build call to contain %q, got: %s", needle, runnerCall)
+		}
 	}
 
 	scpCalls := readCapturedCommandLines(t, filepath.Join(logDir, "scp_calls.log"))
@@ -304,4 +316,13 @@ func containsLine(lines []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func firstLineContaining(lines []string, needle string) string {
+	for _, line := range lines {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return ""
 }
