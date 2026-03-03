@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -17,7 +15,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -29,6 +26,7 @@ import (
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/logs"
 	"github.com/rtzll/rascal/internal/runner"
+	"github.com/rtzll/rascal/internal/runsummary"
 	"github.com/rtzll/rascal/internal/state"
 )
 
@@ -38,8 +36,6 @@ var errServerDraining = errors.New("orchestrator is draining")
 const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
 const runResponseTargetFile = "response_target.json"
-
-var totalTokensPattern = regexp.MustCompile(`"total_tokens"[[:space:]]*:[[:space:]]*([0-9]+)`)
 
 type githubClient interface {
 	GetIssue(ctx context.Context, repo string, issueNumber int) (ghapi.IssueData, error)
@@ -1652,9 +1648,8 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 	if run.IssueNumber > 0 {
 		closesSection = fmt.Sprintf("\n\nCloses #%d", run.IssueNumber)
 	}
-	runDuration := formatRunDuration(runDurationSeconds(run))
-	totalTokens, hasTokens := extractTotalTokens(gooseOutput)
-	commentBody := buildPRStyleBody(run.ID, commitBody, gooseOutput, runDuration, closesSection, totalTokens, hasTokens)
+	runDuration := runsummary.FormatDuration(runDurationSeconds(run))
+	commentBody := runsummary.BuildPRBody(run.ID, commitBody, gooseOutput, runDuration, closesSection)
 
 	requestedBy := strings.TrimSpace(target.RequestedBy)
 	if requestedBy == "" {
@@ -1682,67 +1677,11 @@ func loadAgentCommitBody(path string) (string, error) {
 		}
 		return "", fmt.Errorf("read commit message: %w", err)
 	}
-
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	sawTitle := false
-	bodyLines := make([]string, 0)
-	for scanner.Scan() {
-		line := strings.TrimSuffix(scanner.Text(), "\r")
-		if !sawTitle {
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			sawTitle = true
-			continue
-		}
-		bodyLines = append(bodyLines, line)
+	commitBody, err := runsummary.ParseCommitBody(data)
+	if err != nil {
+		return "", fmt.Errorf("parse commit body: %w", err)
 	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("scan commit message: %w", err)
-	}
-
-	body := strings.Join(bodyLines, "\n")
-	body = strings.TrimSuffix(body, "\n")
-	for strings.HasPrefix(body, "\n") {
-		body = strings.TrimPrefix(body, "\n")
-	}
-	return body, nil
-}
-
-func buildPRStyleBody(runID, commitBody, gooseOutput, runDuration, closesSection string, totalTokens int64, hasTokens bool) string {
-	gooseSection := "<details><summary>Run Details</summary>\n\n```\n" + gooseOutput + "\n```\n\n</details>"
-	if hasTokens {
-		gooseSection = "<details><summary>Goose Details</summary>\n\n```\n" + gooseOutput + "\n```\n\n</details>"
-		body := ""
-		if strings.TrimSpace(commitBody) != "" {
-			body = commitBody + "\n\n"
-		}
-		body += gooseSection + closesSection + "\n\n---\n\n" + fmt.Sprintf("Rascal run `%s` took %s [consumed %d tokens]", runID, runDuration, totalTokens)
-		return body
-	}
-
-	body := fmt.Sprintf("Automated changes from Rascal run %s.", runID)
-	if strings.TrimSpace(commitBody) != "" {
-		body = commitBody + "\n\n" + body
-	}
-	body += "\n\n" + gooseSection + closesSection + "\n\n---\n\n" + fmt.Sprintf("Rascal run took %s", runDuration)
-	return body
-}
-
-func extractTotalTokens(gooseOutput string) (int64, bool) {
-	matches := totalTokensPattern.FindAllStringSubmatch(gooseOutput, -1)
-	if len(matches) == 0 {
-		return 0, false
-	}
-	last := matches[len(matches)-1]
-	if len(last) < 2 {
-		return 0, false
-	}
-	n, err := strconv.ParseInt(last[1], 10, 64)
-	if err != nil || n < 0 {
-		return 0, false
-	}
-	return n, true
+	return commitBody, nil
 }
 
 func runDurationSeconds(run state.Run) int64 {
@@ -1758,24 +1697,6 @@ func runDurationSeconds(run state.Run) int64 {
 		return 0
 	}
 	return int64(end.Sub(start).Seconds())
-}
-
-func formatRunDuration(totalSeconds int64) string {
-	if totalSeconds < 0 {
-		totalSeconds = 0
-	}
-	hours := totalSeconds / 3600
-	minutes := (totalSeconds % 3600) / 60
-	seconds := totalSeconds % 60
-	parts := make([]string, 0, 3)
-	if hours > 0 {
-		parts = append(parts, fmt.Sprintf("%dh", hours))
-	}
-	if hours > 0 || minutes > 0 {
-		parts = append(parts, fmt.Sprintf("%dm", minutes))
-	}
-	parts = append(parts, fmt.Sprintf("%ds", seconds))
-	return strings.Join(parts, " ")
 }
 
 func (s *server) requeueRun(runID string) error {
