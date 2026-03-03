@@ -20,6 +20,8 @@ Rascal has three runtime parts.
 - Clones repository and checks out target branch.
 - Executes Goose/Codex task loop.
 - Commits changes, pushes branch, opens/updates PR.
+- Runtime logic lives in Go (`cmd/rascal-runner`).
+- `runner/entrypoint.sh` is a thin shim that only executes `/usr/local/bin/rascal-runner`.
 
 ## Flow
 
@@ -38,3 +40,24 @@ Each run stores:
 
 - metadata (`run_id`, task, repo, branches, trigger)
 - artifacts (`context.json`, instructions, logs, `meta.json`)
+
+## Runner Env Contract
+
+Required:
+
+- `RASCAL_RUN_ID`
+- `RASCAL_TASK_ID`
+- `RASCAL_REPO`
+- `GH_TOKEN`
+
+Common optional:
+
+- `RASCAL_TASK`
+- `RASCAL_BASE_BRANCH` (default: `main`)
+- `RASCAL_HEAD_BRANCH` (default: `rascal/<run_id>`)
+- `RASCAL_ISSUE_NUMBER` (default: `0`)
+- `RASCAL_TRIGGER` (default: `cli`)
+- `RASCAL_GOOSE_DEBUG` (default: `true`)
+- `RASCAL_META_DIR` (default: `/rascal-meta`)
+- `RASCAL_WORK_ROOT` (default: `/work`)
+- `RASCAL_REPO_DIR` (default: `${RASCAL_WORK_ROOT}/repo`)

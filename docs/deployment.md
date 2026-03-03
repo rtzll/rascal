@@ -9,6 +9,7 @@ drain.
 Rascal deploy uploads/builds these artifacts on the server:
 
 - `/opt/rascal/rascald` (Linux binary)
+- `/opt/rascal/runner/rascal-runner` (Linux runner binary copied into image build context)
 - `/etc/systemd/system/rascal@.service` (slot unit)
 - `/etc/rascal/rascal.env` (shared runtime env)
 - `/etc/rascal/rascal-blue.env` and `/etc/rascal/rascal-green.env` (slot env)
@@ -33,16 +34,18 @@ It also writes:
 Given active slot `A` and inactive slot `B`, deploy does:
 
 1. Build `rascald` for Linux and upload artifacts.
-2. Ensure base packages (`docker`, `caddy`, `curl`, `sqlite3`) exist.
-3. Build/update runner image on host.
-4. Install/update systemd unit and env files.
-5. Start/restart slot `B`.
-6. Wait for slot `B` readiness (`/readyz` on `B` port).
-7. Update Caddy upstream to slot `B` and reload Caddy.
-8. Verify proxy readiness via Caddy.
-9. Write `/etc/rascal/active_slot = B`.
-10. Stop old slot `A` with `systemctl stop --no-block` (non-blocking).
-11. Disable old slot unit; keep new slot unit enabled/active.
+2. Build `rascal-runner` for Linux and upload artifacts.
+3. Ensure base packages (`docker`, `caddy`, `curl`, `sqlite3`) exist.
+4. Install uploaded `rascal-runner` into `/opt/rascal/runner/rascal-runner`.
+5. Build/update runner image on host.
+6. Install/update systemd unit and env files.
+7. Start/restart slot `B`.
+8. Wait for slot `B` readiness (`/readyz` on `B` port).
+9. Update Caddy upstream to slot `B` and reload Caddy.
+10. Verify proxy readiness via Caddy.
+11. Write `/etc/rascal/active_slot = B`.
+12. Stop old slot `A` with `systemctl stop --no-block` (non-blocking).
+13. Disable old slot unit; keep new slot unit enabled/active.
 
 Important: deploy success is no longer coupled to waiting for old-slot drain.
 
@@ -58,6 +61,12 @@ When old slot gets `SIGTERM`:
 6. Waits a short final window, then exits.
 
 This allows fast cutover while old work winds down in the background.
+
+## Runner Entrypoint
+
+- Container entrypoint script is intentionally minimal (`runner/entrypoint.sh`).
+- It only executes `/usr/local/bin/rascal-runner`.
+- Task workflow behavior (git/goose/PR/meta handling) is implemented in Go in `cmd/rascal-runner`.
 
 ## Overlap Safety (Both Slots Alive Briefly)
 
