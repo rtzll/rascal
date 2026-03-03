@@ -25,7 +25,6 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/rtzll/rascal/internal/config"
 	deployengine "github.com/rtzll/rascal/internal/deploy"
-	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/state"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -688,24 +687,14 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				if hcloudToken == "" {
 					return fmt.Errorf("no host configured: pass --host, configure `host` in config, or set --hcloud-token")
 				}
-				publicKeyPath, err := expandPath("~/.ssh/id_ed25519.pub")
+				cfg, timeout, err := resolveHetznerProvisionConfig(hetznerProvisionInput{
+					Token:         hcloudToken,
+					ApplyFirewall: true,
+				})
 				if err != nil {
 					return fmt.Errorf("expand default ssh public key path: %w", err)
 				}
-				serverName := fmt.Sprintf("rascal-%d", time.Now().UTC().Unix())
-				ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
-				defer cancel()
-				out, err := provisionHetznerServer(ctx, hcloudProvisionConfig{
-					Token:         hcloudToken,
-					ServerName:    serverName,
-					ServerType:    "cx23",
-					Location:      "fsn1",
-					Image:         "ubuntu-24.04",
-					SSHKeyName:    "rascal",
-					SSHPublicPath: publicKeyPath,
-					FirewallName:  "rascal-fw",
-					ApplyFirewall: true,
-				})
+				out, err := runHetznerProvision(cfg, timeout)
 				if err != nil {
 					return fmt.Errorf("hcloud provision: %w", err)
 				}
@@ -730,96 +719,35 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 
 			deployPerformed := false
 			if shouldDeploy {
-				resolvedGoarch := ""
-				switch {
-				case provisionOut != nil:
-					detected, ok := goarchFromHetznerArchitecture(provisionOut.Architecture)
-					if ok {
-						resolvedGoarch = detected
-						a.println("detected goarch: %s (hcloud architecture: %s)", resolvedGoarch, provisionOut.Architecture)
-						break
-					}
-					detected, err := detectRemoteGOARCH(deployConfig{
-						Host:       host,
-						SSHUser:    firstNonEmpty(sshUser, "root"),
-						SSHKeyPath: sshKey,
-						SSHPort:    sshPort,
-					})
-					if err != nil {
-						return fmt.Errorf("auto-detect goarch: unable to map Hetzner architecture %q and ssh detection failed: %w", provisionOut.Architecture, err)
-					}
-					resolvedGoarch = detected
-					a.println("detected goarch: %s (remote host)", resolvedGoarch)
-				default:
-					detected, err := detectRemoteGOARCH(deployConfig{
-						Host:       host,
-						SSHUser:    firstNonEmpty(sshUser, "root"),
-						SSHKeyPath: sshKey,
-						SSHPort:    sshPort,
-					})
-					if err != nil {
-						return fmt.Errorf("auto-detect goarch: %w", err)
-					}
-					resolvedGoarch = detected
-					a.println("detected goarch: %s (remote host)", resolvedGoarch)
-				}
-
-				deployCfg := deployConfig{
+				input := deployExistingInput{
 					Host:               host,
-					SSHUser:            firstNonEmpty(sshUser, "root"),
-					SSHKeyPath:         sshKey,
+					SSHUser:            sshUser,
+					SSHKey:             sshKey,
 					SSHPort:            sshPort,
-					Domain:             domain,
+					ProvisionedArch:    "",
 					APIToken:           apiToken,
-					WebhookSecret:      webhookSecret,
 					GitHubRuntimeToken: githubRuntimeToken,
+					WebhookSecret:      webhookSecret,
 					CodexAuthPath:      expandedAuthPath,
-					RunnerMode:         "docker",
-					RunnerImage:        "rascal-runner:latest",
-					ServerListenAddr:   ":8080",
-					ServerDataDir:      "/var/lib/rascal",
-					ServerStatePath:    "/var/lib/rascal/state.db",
-					ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
-					GOARCH:             resolvedGoarch,
-					UploadEnvFile:      true,
-					UploadCodexAuth:    true,
+					Domain:             domain,
+					SkipEnvUpload:      false,
+					SkipAuthUpload:     false,
+					SkipIfHealthy:      true,
+					RawErrors:          true,
 				}
-				healthyExisting := false
-				if provisionOut == nil {
-					if st, err := runRemoteDoctor(deployConfig{
-						Host:       deployCfg.Host,
-						SSHUser:    deployCfg.SSHUser,
-						SSHKeyPath: deployCfg.SSHKeyPath,
-						SSHPort:    deployCfg.SSHPort,
-					}); err == nil {
-						caddyOK := st.CaddyInstalled || strings.TrimSpace(domain) == ""
-						if caddyOK && strings.TrimSpace(domain) != "" {
-							configured, err := remoteCaddyDomainConfigured(deployConfig{
-								Host:       deployCfg.Host,
-								SSHUser:    deployCfg.SSHUser,
-								SSHKeyPath: deployCfg.SSHKeyPath,
-								SSHPort:    deployCfg.SSHPort,
-							}, domain)
-							if err != nil || !configured {
-								caddyOK = false
-							}
-						}
-						healthyExisting = st.RascalService && st.DockerInstalled && st.SQLiteInstalled && caddyOK && st.EnvFilePresent && st.AuthRuntimeSynced && st.CodexAuthPresent && st.RunnerImagePresent
-					}
+				if provisionOut != nil {
+					input.ProvisionedArch = provisionOut.Architecture
 				}
-				if !healthyExisting {
-					if err := deployToExistingHost(deployCfg); err != nil {
-						return err
-					}
-					deployPerformed = true
-				} else {
-					a.println("existing deployment detected on %s; skipping deploy", host)
+				result, err := a.runDeployExisting(input)
+				if err != nil {
+					return err
 				}
+				deployPerformed = result.DeployPerformed
 				if err := waitForServerHealthSSH(deployConfig{
-					Host:       deployCfg.Host,
-					SSHUser:    deployCfg.SSHUser,
-					SSHKeyPath: deployCfg.SSHKeyPath,
-					SSHPort:    deployCfg.SSHPort,
+					Host:       host,
+					SSHUser:    firstNonEmpty(sshUser, "root"),
+					SSHKeyPath: sshKey,
+					SSHPort:    sshPort,
 				}, 90*time.Second); err != nil {
 					return fmt.Errorf("server health check failed after bootstrap deploy stage: %w", err)
 				}
@@ -843,15 +771,15 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			serverURL = strings.TrimRight(serverURL, "/")
 
 			if !skipWebhook {
-				gh := ghapi.NewAPIClient(githubAdminToken)
-				ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-				defer cancel()
-
-				if err := gh.EnsureLabel(ctx, repo, "rascal", "0e8a16", "Trigger Rascal automation"); err != nil {
-					return fmt.Errorf("ensure label: %w", err)
-				}
-				if err := gh.UpsertWebhook(ctx, repo, serverURL+"/v1/webhooks/github", webhookSecret, nil); err != nil {
-					return fmt.Errorf("upsert webhook: %w", err)
+				if _, err := a.runRepoEnable(repoEnableInput{
+					Repo:          repo,
+					GitHubToken:   githubAdminToken,
+					WebhookSecret: webhookSecret,
+					WebhookURL:    serverURL + "/v1/webhooks/github",
+					Timeout:       45 * time.Second,
+					RawErrors:     true,
+				}); err != nil {
+					return err
 				}
 			}
 

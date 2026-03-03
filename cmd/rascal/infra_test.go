@@ -51,3 +51,57 @@ func TestNormalizeAuthorizedPublicKey(t *testing.T) {
 		}
 	}
 }
+
+func TestRunDeployExistingSkipsHealthyHost(t *testing.T) {
+	origRunRemoteDoctor := runRemoteDoctorFn
+	origDeploy := deployToExistingHostFn
+	origCaddy := remoteCaddyDomainConfiguredFn
+	t.Cleanup(func() {
+		runRemoteDoctorFn = origRunRemoteDoctor
+		deployToExistingHostFn = origDeploy
+		remoteCaddyDomainConfiguredFn = origCaddy
+	})
+
+	runRemoteDoctorFn = func(cfg deployConfig) (remoteDoctorStatus, error) {
+		return remoteDoctorStatus{
+			Host:               cfg.Host,
+			RascalService:      true,
+			DockerInstalled:    true,
+			SQLiteInstalled:    true,
+			CaddyInstalled:     true,
+			EnvFilePresent:     true,
+			AuthRuntimeSynced:  true,
+			CodexAuthPresent:   true,
+			RunnerImagePresent: true,
+		}, nil
+	}
+	remoteCaddyDomainConfiguredFn = func(cfg deployConfig, domain string) (bool, error) {
+		return true, nil
+	}
+	deployCalled := false
+	deployToExistingHostFn = func(cfg deployConfig) error {
+		deployCalled = true
+		return nil
+	}
+
+	a := &app{}
+	result, err := a.runDeployExisting(deployExistingInput{
+		Host:           "203.0.113.10",
+		SSHPort:        22,
+		GOARCH:         "amd64",
+		Domain:         "rascal.example.com",
+		SkipEnvUpload:  true,
+		SkipAuthUpload: true,
+		SkipIfHealthy:  true,
+		RawErrors:      true,
+	})
+	if err != nil {
+		t.Fatalf("runDeployExisting failed: %v", err)
+	}
+	if deployCalled {
+		t.Fatal("expected deploy to be skipped for healthy host")
+	}
+	if result.DeployPerformed {
+		t.Fatal("expected DeployPerformed=false for healthy host")
+	}
+}
