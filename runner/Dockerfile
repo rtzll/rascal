@@ -6,8 +6,10 @@ ARG GO_VERSION=1.26.0
 ARG GOOSE_VERSION=1.26.1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git gh bash jq ripgrep make gcc g++ openssl bzip2 libxcb1 \
-    python3 python3-pip gnupg \
+    ca-certificates curl gnupg bzip2 xz-utils zip unzip \
+    git gh \
+    bash jq ripgrep make patch diffutils file less \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
@@ -24,14 +26,12 @@ RUN set -eux; \
     rm -f /tmp/go.tar.gz
 
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
+    && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g @openai/codex \
     && node --version \
-    && npm --version \
+    && codex --version \
     && rm -rf /var/lib/apt/lists/*
-
-# Expected to provide `codex` in PATH.
-# If your environment uses a different package name/version, adjust this line.
-RUN npm install -g @openai/codex
 
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
