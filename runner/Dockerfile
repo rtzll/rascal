@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg bzip2 xz-utils zip unzip \
     git gh \
     bash jq ripgrep make patch diffutils file less \
-    python3 \
+    python3 libxcb1 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
