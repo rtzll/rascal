@@ -122,16 +122,6 @@ func runWithExecutor(ex commandExecutor) error {
 	}
 	started := time.Now().UTC()
 
-	if err := os.MkdirAll(filepath.Join(cfg.MetaDir, "goose"), 0o755); err != nil {
-		return fmt.Errorf("create goose dir: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Join(cfg.MetaDir, "codex"), 0o755); err != nil {
-		return fmt.Errorf("create codex dir: %w", err)
-	}
-	if err := os.MkdirAll(cfg.WorkRoot, 0o755); err != nil {
-		return fmt.Errorf("create work dir: %w", err)
-	}
-
 	meta := runner.Meta{
 		RunID:      cfg.RunID,
 		TaskID:     cfg.TaskID,
@@ -146,143 +136,194 @@ func runWithExecutor(ex commandExecutor) error {
 		}
 	}()
 
-	if err := ensureInstructions(cfg); err != nil {
+	fail := func(err error) error {
 		meta.Error = err.Error()
 		return err
+	}
+
+	if err := runStage("prepare_workspace", func() error {
+		if err := os.MkdirAll(filepath.Join(cfg.MetaDir, "goose"), 0o755); err != nil {
+			return fmt.Errorf("create goose dir: %w", err)
+		}
+		if err := os.MkdirAll(filepath.Join(cfg.MetaDir, "codex"), 0o755); err != nil {
+			return fmt.Errorf("create codex dir: %w", err)
+		}
+		if err := os.MkdirAll(cfg.WorkRoot, 0o755); err != nil {
+			return fmt.Errorf("create work dir: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return fail(err)
+	}
+
+	if err := runStage("prepare_instructions", func() error {
+		return ensureInstructions(cfg)
+	}); err != nil {
+		return fail(err)
 	}
 	log.Printf("[%s] run started run_id=%s repo=%s", nowUTC(), cfg.RunID, cfg.Repo)
 
-	if err := requireCommands(ex, "git", "gh", "goose"); err != nil {
-		meta.Error = err.Error()
-		return err
+	if err := runStage("validate_commands", func() error {
+		return requireCommands(ex, "git", "gh", "goose")
+	}); err != nil {
+		return fail(err)
 	}
 
-	authorName, authorEmail, err := resolveGitIdentity(ex)
-	if err != nil {
-		meta.Error = err.Error()
+	var authorName string
+	var authorEmail string
+	if err := runStage("resolve_identity", func() error {
+		var err error
+		authorName, authorEmail, err = resolveGitIdentity(ex)
 		return err
+	}); err != nil {
+		return fail(err)
 	}
 	log.Printf("[%s] using commit identity: %s <%s>", nowUTC(), authorName, authorEmail)
 
-	if err := checkoutRepo(ex, cfg); err != nil {
-		meta.Error = err.Error()
-		return err
+	if err := runStage("checkout_repo", func() error {
+		return checkoutRepo(ex, cfg)
+	}); err != nil {
+		return fail(err)
 	}
 
-	gooseOutput, err := runGoose(ex, cfg)
-	if err != nil {
-		meta.Error = err.Error()
+	var gooseOutput string
+	if err := runStage("run_goose", func() error {
+		var err error
+		gooseOutput, err = runGoose(ex, cfg)
 		return err
+	}); err != nil {
+		return fail(err)
 	}
 
 	if _, statErr := os.Stat(filepath.Join(cfg.RepoDir, "Makefile")); statErr == nil {
-		log.Printf("[%s] running lightweight verify: make -n test", nowUTC())
-		_, _ = runCommand(ex, cfg.RepoDir, nil, "make", "-n", "test")
+		_ = runStage("verify", func() error {
+			log.Printf("[%s] running lightweight verify: make -n test", nowUTC())
+			_, _ = runCommand(ex, cfg.RepoDir, nil, "make", "-n", "test")
+			return nil
+		})
 	}
 
 	commitTitle := fmt.Sprintf("chore(rascal): %s", taskSubject(cfg.Task, cfg.TaskID))
 	commitBody := ""
-	if title, body, msgErr := loadAgentCommitMessage(cfg.CommitMsgPath); msgErr != nil {
-		meta.Error = msgErr.Error()
-		return msgErr
-	} else {
-		commitBody = body
-		if title != "" {
-			if isConventionalTitle(title) {
-				commitTitle = title
-			} else {
-				log.Printf("[%s] agent commit title is not conventional; using fallback title", nowUTC())
-			}
-		}
-	}
-
-	statusOut, err := runCommand(ex, cfg.RepoDir, nil, "git", "status", "--porcelain")
-	if err != nil {
-		meta.Error = err.Error()
-		return err
-	}
-	if strings.TrimSpace(statusOut) != "" {
-		if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "add", "-A"); err != nil {
-			meta.Error = err.Error()
-			return err
-		}
-		finalBody := strings.TrimSpace(commitBody)
-		if finalBody != "" {
-			finalBody += "\n\n"
-		}
-		finalBody += "Run: " + cfg.RunID
-
-		commitEnv := []string{
-			"GIT_AUTHOR_NAME=" + authorName,
-			"GIT_AUTHOR_EMAIL=" + authorEmail,
-			"GIT_COMMITTER_NAME=" + authorName,
-			"GIT_COMMITTER_EMAIL=" + authorEmail,
-		}
-		if _, err := runCommand(ex, cfg.RepoDir, commitEnv, "git", "commit", "-m", commitTitle, "-m", finalBody); err != nil {
-			meta.Error = err.Error()
-			return err
-		}
-	}
-
-	log.Printf("[%s] pushing branch", nowUTC())
-	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "push", "-u", "origin", cfg.HeadBranch); err != nil {
-		meta.Error = "git push failed: " + err.Error()
-		return err
-	}
-
-	view, found, err := loadPRView(ex, cfg)
-	if err != nil {
-		meta.Error = err.Error()
-		return err
-	}
-	if !found {
-		log.Printf("[%s] creating pull request", nowUTC())
-		closesSection := ""
-		if cfg.IssueNumber > 0 {
-			closesSection = fmt.Sprintf("\n\nCloses #%d", cfg.IssueNumber)
-		}
-		runDuration := runsummary.FormatDuration(int64(time.Since(started).Seconds()))
-		body := runsummary.BuildPRBody(cfg.RunID, commitBody, gooseOutput, runDuration, closesSection)
-		if err := os.WriteFile(cfg.PRBodyPath, []byte(body), 0o644); err != nil {
-			meta.Error = fmt.Sprintf("write pr body: %v", err)
-			return fmt.Errorf("write pr body: %w", err)
-		}
-
-		out, err := runCommand(ex, cfg.RepoDir, nil, "gh", "pr", "create",
-			"--repo", cfg.Repo,
-			"--base", cfg.BaseBranch,
-			"--head", cfg.HeadBranch,
-			"--title", commitTitle,
-			"--body-file", cfg.PRBodyPath,
-		)
-		if err != nil {
-			meta.Error = "gh pr create failed: " + err.Error()
-			return err
-		}
-
-		if latest, ok, err := loadPRView(ex, cfg); err == nil && ok {
-			view = latest
-			found = true
+	if err := runStage("prepare_commit", func() error {
+		if title, body, msgErr := loadAgentCommitMessage(cfg.CommitMsgPath); msgErr != nil {
+			return msgErr
 		} else {
-			if m := prURLPattern.FindString(out); m != "" {
-				view.URL = m
-				if i := strings.LastIndex(m, "/"); i >= 0 && i+1 < len(m) {
-					if n, convErr := strconv.Atoi(m[i+1:]); convErr == nil {
-						view.Number = n
-					}
+			commitBody = body
+			if title != "" {
+				if isConventionalTitle(title) {
+					commitTitle = title
+				} else {
+					log.Printf("[%s] agent commit title is not conventional; using fallback title", nowUTC())
 				}
 			}
 		}
+
+		statusOut, err := runCommand(ex, cfg.RepoDir, nil, "git", "status", "--porcelain")
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(statusOut) != "" {
+			if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "add", "-A"); err != nil {
+				return err
+			}
+			finalBody := strings.TrimSpace(commitBody)
+			if finalBody != "" {
+				finalBody += "\n\n"
+			}
+			finalBody += "Run: " + cfg.RunID
+
+			commitEnv := []string{
+				"GIT_AUTHOR_NAME=" + authorName,
+				"GIT_AUTHOR_EMAIL=" + authorEmail,
+				"GIT_COMMITTER_NAME=" + authorName,
+				"GIT_COMMITTER_EMAIL=" + authorEmail,
+			}
+			if _, err := runCommand(ex, cfg.RepoDir, commitEnv, "git", "commit", "-m", commitTitle, "-m", finalBody); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return fail(err)
 	}
 
-	headSHA, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-parse", "HEAD")
-	if err != nil {
-		meta.Error = err.Error()
-		return err
+	if err := runStage("push_branch", func() error {
+		log.Printf("[%s] pushing branch", nowUTC())
+		if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "push", "-u", "origin", cfg.HeadBranch); err != nil {
+			return fmt.Errorf("git push failed: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return fail(err)
 	}
-	meta.HeadSHA = strings.TrimSpace(headSHA)
-	meta.PRNumber = view.Number
-	meta.PRURL = strings.TrimSpace(view.URL)
+
+	var view prView
+	var found bool
+	if err := runStage("load_pr", func() error {
+		var err error
+		view, found, err = loadPRView(ex, cfg)
+		return err
+	}); err != nil {
+		return fail(err)
+	}
+
+	if !found {
+		if err := runStage("pr_create", func() error {
+			log.Printf("[%s] creating pull request", nowUTC())
+			closesSection := ""
+			if cfg.IssueNumber > 0 {
+				closesSection = fmt.Sprintf("\n\nCloses #%d", cfg.IssueNumber)
+			}
+			runDuration := runsummary.FormatDuration(int64(time.Since(started).Seconds()))
+			body := runsummary.BuildPRBody(cfg.RunID, commitBody, gooseOutput, runDuration, closesSection)
+			if err := os.WriteFile(cfg.PRBodyPath, []byte(body), 0o644); err != nil {
+				return fmt.Errorf("write pr body: %w", err)
+			}
+
+			out, err := runCommand(ex, cfg.RepoDir, nil, "gh", "pr", "create",
+				"--repo", cfg.Repo,
+				"--base", cfg.BaseBranch,
+				"--head", cfg.HeadBranch,
+				"--title", commitTitle,
+				"--body-file", cfg.PRBodyPath,
+			)
+			if err != nil {
+				return fmt.Errorf("gh pr create failed: %w", err)
+			}
+
+			if latest, ok, err := loadPRView(ex, cfg); err == nil && ok {
+				view = latest
+				found = true
+			} else {
+				if m := prURLPattern.FindString(out); m != "" {
+					view.URL = m
+					if i := strings.LastIndex(m, "/"); i >= 0 && i+1 < len(m) {
+						if n, convErr := strconv.Atoi(m[i+1:]); convErr == nil {
+							view.Number = n
+						}
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			return fail(err)
+		}
+	}
+
+	if err := runStage("finalize_meta", func() error {
+		headSHA, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-parse", "HEAD")
+		if err != nil {
+			return err
+		}
+		meta.HeadSHA = strings.TrimSpace(headSHA)
+		meta.PRNumber = view.Number
+		meta.PRURL = strings.TrimSpace(view.URL)
+		return nil
+	}); err != nil {
+		return fail(err)
+	}
+
 	meta.ExitCode = 0
 	meta.Error = ""
 	log.Printf("[%s] run completed exit_code=0", nowUTC())
@@ -535,6 +576,19 @@ func loadPRView(ex commandExecutor, cfg config) (prView, bool, error) {
 		return prView{}, false, fmt.Errorf("decode gh pr view output: %w", err)
 	}
 	return view, true, nil
+}
+
+func runStage(name string, fn func() error) error {
+	start := time.Now()
+	log.Printf("[%s] stage_start stage=%s", nowUTC(), name)
+	err := fn()
+	duration := time.Since(start).Round(time.Millisecond)
+	if err != nil {
+		log.Printf("[%s] stage_fail stage=%s duration=%s error=%v", nowUTC(), name, duration, err)
+		return fmt.Errorf("stage %s: %w", name, err)
+	}
+	log.Printf("[%s] stage_done stage=%s duration=%s", nowUTC(), name, duration)
+	return nil
 }
 
 func runCommand(ex commandExecutor, dir string, extraEnv []string, name string, args ...string) (string, error) {
