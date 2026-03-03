@@ -102,6 +102,44 @@ func TestExecuteRollsBackWhenProxyReadinessFails(t *testing.T) {
 	}
 }
 
+func TestExecuteRollsOutRunnerBinaryBeforeImageBuild(t *testing.T) {
+	logDir := setupFakeDeployCommands(t, "")
+
+	if err := Execute(testDeployConfig()); err != nil {
+		t.Fatalf("execute deploy: %v", err)
+	}
+
+	goCalls := readCapturedCommandLines(t, filepath.Join(logDir, "go_calls.log"))
+	if !containsLine(goCalls, "./cmd/rascald") {
+		t.Fatalf("expected go build for rascald, got calls: %v", goCalls)
+	}
+	if !containsLine(goCalls, "./cmd/rascal-runner") {
+		t.Fatalf("expected go build for rascal-runner, got calls: %v", goCalls)
+	}
+
+	scpCalls := readCapturedCommandLines(t, filepath.Join(logDir, "scp_calls.log"))
+	if !containsLine(scpCalls, "/tmp/rascal-bootstrap/rascal-runner") {
+		t.Fatalf("expected scp upload of rascal-runner binary, got calls: %v", scpCalls)
+	}
+
+	scripts := readCapturedSSHScripts(t, logDir)
+	foundBuildScript := false
+	for _, script := range scripts {
+		installIdx := strings.Index(script, "install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner")
+		dockerIdx := strings.Index(script, "docker build -t")
+		if installIdx < 0 || dockerIdx < 0 {
+			continue
+		}
+		foundBuildScript = true
+		if installIdx > dockerIdx {
+			t.Fatalf("expected rascal-runner install before docker build, script:\n%s", script)
+		}
+	}
+	if !foundBuildScript {
+		t.Fatalf("expected deploy script containing rascal-runner install and docker build, got %d scripts", len(scripts))
+	}
+}
+
 func testDeployConfig() Config {
 	return Config{
 		Host:               "example-host",
@@ -130,6 +168,8 @@ func setupFakeDeployCommands(t *testing.T, failMode string) string {
 
 	writeExe(t, filepath.Join(binDir, "go"), `#!/usr/bin/env bash
 set -eu
+log_dir="${RASCAL_TEST_LOG_DIR:?}"
+printf '%s\n' "$*" >> "$log_dir/go_calls.log"
 out=""
 prev=""
 for arg in "$@"; do
@@ -166,6 +206,8 @@ exit 0
 
 	writeExe(t, filepath.Join(binDir, "scp"), `#!/usr/bin/env bash
 set -eu
+log_dir="${RASCAL_TEST_LOG_DIR:?}"
+printf '%s\n' "$*" >> "$log_dir/scp_calls.log"
 exit 0
 `)
 
@@ -236,6 +278,28 @@ func readCapturedSSHScripts(t *testing.T, logDir string) []string {
 func containsScript(scripts []string, needle string) bool {
 	for _, script := range scripts {
 		if strings.Contains(script, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func readCapturedCommandLines(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read command log %s: %v", path, err)
+	}
+	text := strings.TrimSpace(string(data))
+	if text == "" {
+		return nil
+	}
+	return strings.Split(text, "\n")
+}
+
+func containsLine(lines []string, needle string) bool {
+	for _, line := range lines {
+		if strings.Contains(line, needle) {
 			return true
 		}
 	}
