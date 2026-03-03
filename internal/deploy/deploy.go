@@ -402,21 +402,7 @@ func buildLinuxRascalRunner(outputPath, goarch string) error {
 func resolveRunnerBuildInfo() (version, commit, builtAt string) {
 	version = normalizeBuildMeta(strings.TrimSpace(os.Getenv("RASCAL_BUILD_VERSION")), "dev")
 	commit = normalizeBuildMeta(strings.TrimSpace(os.Getenv("RASCAL_BUILD_COMMIT")), "unknown")
-	builtAt = normalizeBuildMeta(strings.TrimSpace(os.Getenv("RASCAL_BUILD_TIME")), "")
-
-	if version == "dev" {
-		if out, err := runLocalCapture("git", "-C", repoRootPath(), "describe", "--tags", "--always", "--dirty"); err == nil {
-			version = normalizeBuildMeta(out, version)
-		}
-	}
-	if commit == "unknown" {
-		if out, err := runLocalCapture("git", "-C", repoRootPath(), "rev-parse", "--short", "HEAD"); err == nil {
-			commit = normalizeBuildMeta(out, commit)
-		}
-	}
-	if builtAt == "" {
-		builtAt = time.Now().UTC().Format(time.RFC3339)
-	}
+	builtAt = normalizeBuildMeta(strings.TrimSpace(os.Getenv("RASCAL_BUILD_TIME")), time.Now().UTC().Format(time.RFC3339))
 	return version, commit, builtAt
 }
 

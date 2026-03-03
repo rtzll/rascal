@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGoarchFromUnameMachine(t *testing.T) {
@@ -149,6 +150,43 @@ func TestExecuteRollsOutRunnerBinaryBeforeImageBuild(t *testing.T) {
 	}
 	if !foundBuildScript {
 		t.Fatalf("expected deploy script containing rascal-runner install and docker build, got %d scripts", len(scripts))
+	}
+}
+
+func TestResolveRunnerBuildInfoUsesEnv(t *testing.T) {
+	t.Setenv("RASCAL_BUILD_VERSION", "v1.2.3")
+	t.Setenv("RASCAL_BUILD_COMMIT", "abc1234")
+	t.Setenv("RASCAL_BUILD_TIME", "2026-03-03T00:00:00Z")
+
+	version, commit, builtAt := resolveRunnerBuildInfo()
+	if version != "v1.2.3" {
+		t.Fatalf("version = %q, want v1.2.3", version)
+	}
+	if commit != "abc1234" {
+		t.Fatalf("commit = %q, want abc1234", commit)
+	}
+	if builtAt != "2026-03-03T00:00:00Z" {
+		t.Fatalf("builtAt = %q, want 2026-03-03T00:00:00Z", builtAt)
+	}
+}
+
+func TestResolveRunnerBuildInfoDefaults(t *testing.T) {
+	t.Setenv("RASCAL_BUILD_VERSION", "")
+	t.Setenv("RASCAL_BUILD_COMMIT", "")
+	t.Setenv("RASCAL_BUILD_TIME", "")
+
+	version, commit, builtAt := resolveRunnerBuildInfo()
+	if version != "dev" {
+		t.Fatalf("version = %q, want dev", version)
+	}
+	if commit != "unknown" {
+		t.Fatalf("commit = %q, want unknown", commit)
+	}
+	if builtAt == "" {
+		t.Fatal("builtAt should not be empty")
+	}
+	if _, err := time.Parse(time.RFC3339, builtAt); err != nil {
+		t.Fatalf("builtAt is not RFC3339: %q (%v)", builtAt, err)
 	}
 }
 
