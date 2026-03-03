@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -61,6 +62,47 @@ type prView struct {
 	URL    string `json:"url"`
 }
 
+type commandExecutor interface {
+	LookPath(name string) error
+	CombinedOutput(dir string, extraEnv []string, name string, args ...string) (string, error)
+	Run(dir string, extraEnv []string, stdout, stderr io.Writer, name string, args ...string) error
+}
+
+type osExecutor struct{}
+
+func (osExecutor) LookPath(name string) error {
+	_, err := exec.LookPath(name)
+	return err
+}
+
+func (osExecutor) CombinedOutput(dir string, extraEnv []string, name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	if strings.TrimSpace(dir) != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = append(os.Environ(), extraEnv...)
+	out, err := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err != nil {
+		if text == "" {
+			return "", fmt.Errorf("%s %s failed: %w", name, strings.Join(args, " "), err)
+		}
+		return text, fmt.Errorf("%s %s failed: %w (%s)", name, strings.Join(args, " "), err, text)
+	}
+	return text, nil
+}
+
+func (osExecutor) Run(dir string, extraEnv []string, stdout, stderr io.Writer, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	if strings.TrimSpace(dir) != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = append(os.Environ(), extraEnv...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	return cmd.Run()
+}
+
 func main() {
 	log.SetFlags(0)
 	if err := run(); err != nil {
@@ -70,6 +112,10 @@ func main() {
 }
 
 func run() error {
+	return runWithExecutor(osExecutor{})
+}
+
+func runWithExecutor(ex commandExecutor) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -106,24 +152,24 @@ func run() error {
 	}
 	log.Printf("[%s] run started run_id=%s repo=%s", nowUTC(), cfg.RunID, cfg.Repo)
 
-	if err := requireCommands("git", "gh", "goose"); err != nil {
+	if err := requireCommands(ex, "git", "gh", "goose"); err != nil {
 		meta.Error = err.Error()
 		return err
 	}
 
-	authorName, authorEmail, err := resolveGitIdentity()
+	authorName, authorEmail, err := resolveGitIdentity(ex)
 	if err != nil {
 		meta.Error = err.Error()
 		return err
 	}
 	log.Printf("[%s] using commit identity: %s <%s>", nowUTC(), authorName, authorEmail)
 
-	if err := checkoutRepo(cfg); err != nil {
+	if err := checkoutRepo(ex, cfg); err != nil {
 		meta.Error = err.Error()
 		return err
 	}
 
-	gooseOutput, err := runGoose(cfg)
+	gooseOutput, err := runGoose(ex, cfg)
 	if err != nil {
 		meta.Error = err.Error()
 		return err
@@ -131,7 +177,7 @@ func run() error {
 
 	if _, statErr := os.Stat(filepath.Join(cfg.RepoDir, "Makefile")); statErr == nil {
 		log.Printf("[%s] running lightweight verify: make -n test", nowUTC())
-		_, _ = runCommand(cfg.RepoDir, nil, "make", "-n", "test")
+		_, _ = runCommand(ex, cfg.RepoDir, nil, "make", "-n", "test")
 	}
 
 	commitTitle := fmt.Sprintf("chore(rascal): %s", taskSubject(cfg.Task, cfg.TaskID))
@@ -150,13 +196,13 @@ func run() error {
 		}
 	}
 
-	statusOut, err := runCommand(cfg.RepoDir, nil, "git", "status", "--porcelain")
+	statusOut, err := runCommand(ex, cfg.RepoDir, nil, "git", "status", "--porcelain")
 	if err != nil {
 		meta.Error = err.Error()
 		return err
 	}
 	if strings.TrimSpace(statusOut) != "" {
-		if _, err := runCommand(cfg.RepoDir, nil, "git", "add", "-A"); err != nil {
+		if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "add", "-A"); err != nil {
 			meta.Error = err.Error()
 			return err
 		}
@@ -172,19 +218,19 @@ func run() error {
 			"GIT_COMMITTER_NAME=" + authorName,
 			"GIT_COMMITTER_EMAIL=" + authorEmail,
 		}
-		if _, err := runCommand(cfg.RepoDir, commitEnv, "git", "commit", "-m", commitTitle, "-m", finalBody); err != nil {
+		if _, err := runCommand(ex, cfg.RepoDir, commitEnv, "git", "commit", "-m", commitTitle, "-m", finalBody); err != nil {
 			meta.Error = err.Error()
 			return err
 		}
 	}
 
 	log.Printf("[%s] pushing branch", nowUTC())
-	if _, err := runCommand(cfg.RepoDir, nil, "git", "push", "-u", "origin", cfg.HeadBranch); err != nil {
+	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "push", "-u", "origin", cfg.HeadBranch); err != nil {
 		meta.Error = "git push failed: " + err.Error()
 		return err
 	}
 
-	view, found, err := loadPRView(cfg)
+	view, found, err := loadPRView(ex, cfg)
 	if err != nil {
 		meta.Error = err.Error()
 		return err
@@ -202,7 +248,7 @@ func run() error {
 			return fmt.Errorf("write pr body: %w", err)
 		}
 
-		out, err := runCommand(cfg.RepoDir, nil, "gh", "pr", "create",
+		out, err := runCommand(ex, cfg.RepoDir, nil, "gh", "pr", "create",
 			"--repo", cfg.Repo,
 			"--base", cfg.BaseBranch,
 			"--head", cfg.HeadBranch,
@@ -214,7 +260,7 @@ func run() error {
 			return err
 		}
 
-		if latest, ok, err := loadPRView(cfg); err == nil && ok {
+		if latest, ok, err := loadPRView(ex, cfg); err == nil && ok {
 			view = latest
 			found = true
 		} else {
@@ -229,7 +275,7 @@ func run() error {
 		}
 	}
 
-	headSHA, err := runCommand(cfg.RepoDir, nil, "git", "rev-parse", "HEAD")
+	headSHA, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-parse", "HEAD")
 	if err != nil {
 		meta.Error = err.Error()
 		return err
@@ -359,17 +405,17 @@ func requiredEnv(key string) (string, error) {
 	return v, nil
 }
 
-func requireCommands(names ...string) error {
+func requireCommands(ex commandExecutor, names ...string) error {
 	for _, name := range names {
-		if _, err := exec.LookPath(name); err != nil {
+		if err := ex.LookPath(name); err != nil {
 			return fmt.Errorf("required command missing: %s", name)
 		}
 	}
 	return nil
 }
 
-func resolveGitIdentity() (string, string, error) {
-	out, err := runCommand("", nil, "gh", "api", "user")
+func resolveGitIdentity(ex commandExecutor) (string, string, error) {
+	out, err := runCommand(ex, "", nil, "gh", "api", "user")
 	if err != nil {
 		return "", "", fmt.Errorf("query GitHub user: %w", err)
 	}
@@ -386,41 +432,41 @@ func resolveGitIdentity() (string, string, error) {
 	return login, login + "@users.noreply.github.com", nil
 }
 
-func checkoutRepo(cfg config) error {
+func checkoutRepo(ex commandExecutor, cfg config) error {
 	repoURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", cfg.GitHubToken, cfg.Repo)
 	if _, err := os.Stat(filepath.Join(cfg.RepoDir, ".git")); err == nil {
 		log.Printf("[%s] repo already present, refreshing", nowUTC())
-		if _, err := runCommand("", nil, "git", "-C", cfg.RepoDir, "fetch", "--all", "--prune"); err != nil {
+		if _, err := runCommand(ex, "", nil, "git", "-C", cfg.RepoDir, "fetch", "--all", "--prune"); err != nil {
 			return err
 		}
 	} else {
 		log.Printf("[%s] cloning %s", nowUTC(), cfg.Repo)
-		if _, err := runCommand("", nil, "git", "clone", repoURL, cfg.RepoDir); err != nil {
+		if _, err := runCommand(ex, "", nil, "git", "clone", repoURL, cfg.RepoDir); err != nil {
 			return err
 		}
 	}
 
-	_, _ = runCommand(cfg.RepoDir, nil, "git", "fetch", "origin", cfg.BaseBranch, cfg.HeadBranch)
-	if _, err := runCommand(cfg.RepoDir, nil, "git", "checkout", cfg.BaseBranch); err != nil {
-		if _, createErr := runCommand(cfg.RepoDir, nil, "git", "checkout", "-b", cfg.BaseBranch, "origin/"+cfg.BaseBranch); createErr != nil {
+	_, _ = runCommand(ex, cfg.RepoDir, nil, "git", "fetch", "origin", cfg.BaseBranch, cfg.HeadBranch)
+	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "checkout", cfg.BaseBranch); err != nil {
+		if _, createErr := runCommand(ex, cfg.RepoDir, nil, "git", "checkout", "-b", cfg.BaseBranch, "origin/"+cfg.BaseBranch); createErr != nil {
 			return createErr
 		}
 	}
-	_, _ = runCommand(cfg.RepoDir, nil, "git", "pull", "--ff-only", "origin", cfg.BaseBranch)
+	_, _ = runCommand(ex, cfg.RepoDir, nil, "git", "pull", "--ff-only", "origin", cfg.BaseBranch)
 
-	if _, err := runCommand(cfg.RepoDir, nil, "git", "rev-parse", "--verify", cfg.HeadBranch); err == nil {
-		_, err = runCommand(cfg.RepoDir, nil, "git", "checkout", cfg.HeadBranch)
+	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-parse", "--verify", cfg.HeadBranch); err == nil {
+		_, err = runCommand(ex, cfg.RepoDir, nil, "git", "checkout", cfg.HeadBranch)
 		return err
 	}
-	if _, err := runCommand(cfg.RepoDir, nil, "git", "ls-remote", "--exit-code", "--heads", "origin", cfg.HeadBranch); err == nil {
-		_, err = runCommand(cfg.RepoDir, nil, "git", "checkout", "-b", cfg.HeadBranch, "origin/"+cfg.HeadBranch)
+	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "ls-remote", "--exit-code", "--heads", "origin", cfg.HeadBranch); err == nil {
+		_, err = runCommand(ex, cfg.RepoDir, nil, "git", "checkout", "-b", cfg.HeadBranch, "origin/"+cfg.HeadBranch)
 		return err
 	}
-	_, err := runCommand(cfg.RepoDir, nil, "git", "checkout", "-b", cfg.HeadBranch)
+	_, err := runCommand(ex, cfg.RepoDir, nil, "git", "checkout", "-b", cfg.HeadBranch)
 	return err
 }
 
-func runGoose(cfg config) (string, error) {
+func runGoose(ex commandExecutor, cfg config) (string, error) {
 	log.Printf("[%s] running goose (debug=%t)", nowUTC(), cfg.GooseDebug)
 
 	logFile, err := os.OpenFile(cfg.GooseLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
@@ -436,12 +482,7 @@ func runGoose(cfg config) (string, error) {
 		env = append(env, "GOOSE_CODEX_DEBUG=1")
 	}
 
-	cmd := exec.Command("goose", args...)
-	cmd.Dir = cfg.RepoDir
-	cmd.Env = append(os.Environ(), env...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	if err := cmd.Run(); err != nil {
+	if err := ex.Run(cfg.RepoDir, env, logFile, logFile, "goose", args...); err != nil {
 		if stat, statErr := os.Stat(cfg.GooseLogPath); statErr == nil && stat.Size() == 0 {
 			_ = os.WriteFile(cfg.GooseLogPath, []byte(`{"event":"error","message":"goose run failed"}`+"\n"), 0o644)
 		}
@@ -484,8 +525,8 @@ func firstNonEmptyLine(s string) string {
 	return ""
 }
 
-func loadPRView(cfg config) (prView, bool, error) {
-	out, err := runCommand(cfg.RepoDir, nil, "gh", "pr", "view", cfg.HeadBranch, "--repo", cfg.Repo, "--json", "number,url")
+func loadPRView(ex commandExecutor, cfg config) (prView, bool, error) {
+	out, err := runCommand(ex, cfg.RepoDir, nil, "gh", "pr", "view", cfg.HeadBranch, "--repo", cfg.Repo, "--json", "number,url")
 	if err != nil {
 		return prView{}, false, nil
 	}
@@ -496,21 +537,8 @@ func loadPRView(cfg config) (prView, bool, error) {
 	return view, true, nil
 }
 
-func runCommand(dir string, extraEnv []string, name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
-	if strings.TrimSpace(dir) != "" {
-		cmd.Dir = dir
-	}
-	cmd.Env = append(os.Environ(), extraEnv...)
-	out, err := cmd.CombinedOutput()
-	text := strings.TrimSpace(string(out))
-	if err != nil {
-		if text == "" {
-			return "", fmt.Errorf("%s %s failed: %w", name, strings.Join(args, " "), err)
-		}
-		return text, fmt.Errorf("%s %s failed: %w (%s)", name, strings.Join(args, " "), err, text)
-	}
-	return text, nil
+func runCommand(ex commandExecutor, dir string, extraEnv []string, name string, args ...string) (string, error) {
+	return ex.CombinedOutput(dir, extraEnv, name, args...)
 }
 
 func taskSubject(task, fallback string) string {

@@ -2,12 +2,41 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+type fakeExecutor struct {
+	lookPathFn func(name string) error
+	combinedFn func(dir string, extraEnv []string, name string, args ...string) (string, error)
+	runFn      func(dir string, extraEnv []string, stdout, stderr io.Writer, name string, args ...string) error
+}
+
+func (f fakeExecutor) LookPath(name string) error {
+	if f.lookPathFn != nil {
+		return f.lookPathFn(name)
+	}
+	return nil
+}
+
+func (f fakeExecutor) CombinedOutput(dir string, extraEnv []string, name string, args ...string) (string, error) {
+	if f.combinedFn != nil {
+		return f.combinedFn(dir, extraEnv, name, args...)
+	}
+	return "", nil
+}
+
+func (f fakeExecutor) Run(dir string, extraEnv []string, stdout, stderr io.Writer, name string, args ...string) error {
+	if f.runFn != nil {
+		return f.runFn(dir, extraEnv, stdout, stderr, name, args...)
+	}
+	return nil
+}
 
 func TestTaskSubject(t *testing.T) {
 	t.Run("uses fallback when task is empty", func(t *testing.T) {
@@ -296,6 +325,123 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 	}
 	if !strings.Contains(prBody, "consumed 321 tokens") {
 		t.Fatalf("expected token summary in pr body:\n%s", prBody)
+	}
+}
+
+func TestRunWithExecutorFailsWhenRequiredCommandMissing(t *testing.T) {
+	metaDir := filepath.Join(t.TempDir(), "meta")
+	workRoot := filepath.Join(t.TempDir(), "work")
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatalf("mkdir meta dir: %v", err)
+	}
+	if err := os.MkdirAll(workRoot, 0o755); err != nil {
+		t.Fatalf("mkdir work dir: %v", err)
+	}
+
+	t.Setenv("RASCAL_RUN_ID", "run_missing_cmd")
+	t.Setenv("RASCAL_TASK_ID", "task_missing_cmd")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_META_DIR", metaDir)
+	t.Setenv("RASCAL_WORK_ROOT", workRoot)
+
+	ex := fakeExecutor{
+		lookPathFn: func(name string) error {
+			if name == "goose" {
+				return errors.New("missing")
+			}
+			return nil
+		},
+	}
+	err := runWithExecutor(ex)
+	if err == nil || !strings.Contains(err.Error(), "required command missing: goose") {
+		t.Fatalf("expected missing goose error, got: %v", err)
+	}
+
+	metaData, readErr := os.ReadFile(filepath.Join(metaDir, "meta.json"))
+	if readErr != nil {
+		t.Fatalf("read meta.json: %v", readErr)
+	}
+	var meta struct {
+		ExitCode int    `json:"exit_code"`
+		Error    string `json:"error"`
+	}
+	if err := json.Unmarshal(metaData, &meta); err != nil {
+		t.Fatalf("decode meta: %v", err)
+	}
+	if meta.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit code in meta, got %d", meta.ExitCode)
+	}
+	if !strings.Contains(meta.Error, "required command missing: goose") {
+		t.Fatalf("expected missing command in meta error, got %q", meta.Error)
+	}
+}
+
+func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
+	metaDir := filepath.Join(t.TempDir(), "meta")
+	workRoot := filepath.Join(t.TempDir(), "work")
+	repoDir := filepath.Join(workRoot, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir repo git dir: %v", err)
+	}
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatalf("mkdir meta dir: %v", err)
+	}
+
+	t.Setenv("RASCAL_RUN_ID", "run_pr_create_fail")
+	t.Setenv("RASCAL_TASK_ID", "task_pr_create_fail")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_TASK", "Address PR feedback")
+	t.Setenv("RASCAL_META_DIR", metaDir)
+	t.Setenv("RASCAL_WORK_ROOT", workRoot)
+	t.Setenv("RASCAL_REPO_DIR", repoDir)
+
+	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			if name == "gh" && len(args) >= 2 && args[0] == "api" && args[1] == "user" {
+				return `{"login":"rascalbot"}`, nil
+			}
+			if name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "view" {
+				return "", errors.New("not found")
+			}
+			if name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "create" {
+				return "", errors.New("create failed")
+			}
+			if name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain" {
+				return " M changed.txt\n", nil
+			}
+			return "", nil
+		},
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, _ ...string) error {
+			if name == "goose" {
+				_, _ = io.WriteString(stdout, `{"event":"message","usage":{"total_tokens":7}}`+"\n")
+			}
+			return nil
+		},
+	}
+
+	err := runWithExecutor(ex)
+	if err == nil || !strings.Contains(err.Error(), "create failed") {
+		t.Fatalf("expected pr create failure, got: %v", err)
+	}
+
+	metaData, readErr := os.ReadFile(filepath.Join(metaDir, "meta.json"))
+	if readErr != nil {
+		t.Fatalf("read meta.json: %v", readErr)
+	}
+	var meta struct {
+		ExitCode int    `json:"exit_code"`
+		Error    string `json:"error"`
+	}
+	if err := json.Unmarshal(metaData, &meta); err != nil {
+		t.Fatalf("decode meta: %v", err)
+	}
+	if meta.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit code in meta, got %d", meta.ExitCode)
+	}
+	if !strings.Contains(meta.Error, "gh pr create failed") {
+		t.Fatalf("expected gh pr create failure in meta error, got %q", meta.Error)
 	}
 }
 
