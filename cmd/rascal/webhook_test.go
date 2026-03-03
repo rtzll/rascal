@@ -117,6 +117,33 @@ func TestBuildWebhookTestPayloadTemplates(t *testing.T) {
 			},
 		},
 		{
+			event: "pull_request_review_comment",
+			check: func(t *testing.T, payload []byte) {
+				var ev ghapi.PullRequestReviewCommentEvent
+				if err := json.Unmarshal(payload, &ev); err != nil {
+					t.Fatalf("unmarshal pull_request_review_comment: %v", err)
+				}
+				if ev.Action != "created" {
+					t.Fatalf("unexpected action: %q", ev.Action)
+				}
+				if ev.Comment.ID == 0 {
+					t.Fatal("expected review comment id")
+				}
+				if ev.Comment.Path == "" {
+					t.Fatal("expected review comment path")
+				}
+				if ev.Comment.Line == nil || *ev.Comment.Line <= 0 {
+					t.Fatal("expected review comment line")
+				}
+				if ev.PullRequest.Number == 0 {
+					t.Fatal("expected pull request number")
+				}
+				if ev.Repository.FullName != repo {
+					t.Fatalf("unexpected repo: %q", ev.Repository.FullName)
+				}
+			},
+		},
+		{
 			event: "pull_request",
 			check: func(t *testing.T, payload []byte) {
 				var ev ghapi.PullRequestEvent

@@ -3,12 +3,21 @@ package main
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/spf13/cobra"
 )
+
+var requiredWebhookEvents = []string{
+	"issues",
+	"issue_comment",
+	"pull_request_review",
+	"pull_request_review_comment",
+	"pull_request",
+}
 
 func (a *app) newRepoCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -174,11 +183,18 @@ func (a *app) newRepoStatusCmd() *cobra.Command {
 			if err != nil {
 				return &cliError{Code: exitRuntime, Message: "failed to check webhook", Cause: err}
 			}
+			missingEvents := []string{}
+			if hook != nil {
+				missingEvents = missingRequiredWebhookEvents(hook.Events)
+			}
 			out := map[string]any{
-				"repo":         repo,
-				"label_exists": labelExists,
-				"webhook_url":  webhookURL,
-				"webhook":      hook,
+				"repo":                   repo,
+				"label_exists":           labelExists,
+				"webhook_url":            webhookURL,
+				"webhook":                hook,
+				"required_events":        requiredWebhookEvents,
+				"missing_events":         missingEvents,
+				"webhook_events_healthy": hook != nil && len(missingEvents) == 0,
 			}
 			return a.emit(out, func() error {
 				a.println("repo: %s", repo)
@@ -190,6 +206,9 @@ func (a *app) newRepoStatusCmd() *cobra.Command {
 				a.println("webhook: id=%d active=%t url=%s", hook.ID, hook.Active, hook.URL)
 				if len(hook.Events) > 0 {
 					a.println("events: %s", strings.Join(hook.Events, ","))
+				}
+				if len(missingEvents) > 0 {
+					a.println("warning: webhook missing required events: %s", strings.Join(missingEvents, ","))
 				}
 				return nil
 			})
@@ -206,4 +225,23 @@ func resolveRepoArg(args []string, def string) string {
 		return strings.TrimSpace(args[0])
 	}
 	return strings.TrimSpace(def)
+}
+
+func missingRequiredWebhookEvents(events []string) []string {
+	normalized := make([]string, 0, len(events))
+	for _, event := range events {
+		event = strings.ToLower(strings.TrimSpace(event))
+		if event == "" || slices.Contains(normalized, event) {
+			continue
+		}
+		normalized = append(normalized, event)
+	}
+
+	missing := make([]string, 0)
+	for _, want := range requiredWebhookEvents {
+		if !slices.Contains(normalized, want) {
+			missing = append(missing, want)
+		}
+	}
+	return missing
 }

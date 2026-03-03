@@ -26,6 +26,7 @@ var webhookTestEvents = []string{
 	"issues",
 	"issue_comment",
 	"pull_request_review",
+	"pull_request_review_comment",
 	"pull_request",
 }
 
@@ -212,7 +213,7 @@ func (a *app) newWebhookTestCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret (or RASCAL_GITHUB_WEBHOOK_SECRET)")
 	cmd.Flags().StringVar(&repo, "repo", "", "repository in OWNER/REPO form")
-	cmd.Flags().StringVar(&event, "event", webhookTestDefaultEvent, "event template: issues|issue_comment|pull_request_review|pull_request")
+	cmd.Flags().StringVar(&event, "event", webhookTestDefaultEvent, "event template: issues|issue_comment|pull_request_review|pull_request_review_comment|pull_request")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print payload/signature without sending")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "print full request/response")
 	return cmd
@@ -367,6 +368,26 @@ func buildWebhookTestEvent(event, repo string) (any, error) {
 				Body:  "Synthetic review from rascal webhook test.",
 				State: "commented",
 				User:  ghapi.User{Login: actorLogin},
+			},
+			PullRequest: pr,
+			Repository:  ghapi.Repository{FullName: repo},
+			Sender:      ghapi.User{Login: actorLogin},
+		}, nil
+	case "pull_request_review_comment":
+		pr := ghapi.PullRequest{Number: prNumber, Merged: false}
+		pr.Base.Ref = baseBranch
+		pr.Head.Ref = headBranch
+		line := 42
+		startLine := 40
+		return ghapi.PullRequestReviewCommentEvent{
+			Action: "created",
+			Comment: ghapi.ReviewComment{
+				ID:        commentID,
+				Body:      "Synthetic inline review comment from rascal webhook test.",
+				Path:      "cmd/rascald/main.go",
+				Line:      &line,
+				StartLine: &startLine,
+				User:      ghapi.User{Login: actorLogin},
 			},
 			PullRequest: pr,
 			Repository:  ghapi.Repository{FullName: repo},
