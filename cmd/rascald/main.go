@@ -36,6 +36,7 @@ var errServerDraining = errors.New("orchestrator is draining")
 const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
 const runResponseTargetFile = "response_target.json"
+const runCompletionCommentMarkerFile = "completion_comment_posted.json"
 
 type githubClient interface {
 	GetIssue(ctx context.Context, repo string, issueNumber int) (ghapi.IssueData, error)
@@ -81,6 +82,13 @@ type runResponseTarget struct {
 	IssueNumber int    `json:"issue_number"`
 	RequestedBy string `json:"requested_by,omitempty"`
 	Trigger     string `json:"trigger"`
+}
+
+type runCompletionCommentMarker struct {
+	RunID       string `json:"run_id"`
+	Repo        string `json:"repo"`
+	IssueNumber int    `json:"issue_number"`
+	PostedAt    string `json:"posted_at"`
 }
 
 type createTaskRequest struct {
@@ -1586,6 +1594,74 @@ func loadRunResponseTarget(runDir string) (runResponseTarget, bool, error) {
 	return target, true, nil
 }
 
+func runCompletionCommentMarkerPath(runDir string) string {
+	return filepath.Join(strings.TrimSpace(runDir), runCompletionCommentMarkerFile)
+}
+
+func runCompletionCommentMarkerExists(runDir string) (bool, error) {
+	path := runCompletionCommentMarkerPath(runDir)
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat completion comment marker: %w", err)
+	}
+	if info.IsDir() {
+		return false, fmt.Errorf("completion comment marker path is a directory: %s", path)
+	}
+	return true, nil
+}
+
+func writeRunCompletionCommentMarker(run state.Run, repo string, issueNumber int) error {
+	marker := runCompletionCommentMarker{
+		RunID:       run.ID,
+		Repo:        strings.TrimSpace(repo),
+		IssueNumber: issueNumber,
+		PostedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	data, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode completion comment marker: %w", err)
+	}
+	path := runCompletionCommentMarkerPath(run.RunDir)
+	if err := writeFileAtomically(path, data, 0o644); err != nil {
+		return fmt.Errorf("write completion comment marker: %w", err)
+	}
+	return nil
+}
+
+func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tempFile, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := tempFile.Name()
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if _, err := tempFile.Write(data); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Chmod(mode); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
+	removeTemp = false
+	return nil
+}
+
 func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 	if !isCommentTriggeredRun(run.Trigger) {
 		return
@@ -1600,6 +1676,12 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 		return
 	}
 	if !ok {
+		return
+	}
+	if markerExists, err := runCompletionCommentMarkerExists(run.RunDir); err != nil {
+		log.Printf("failed to check completion comment marker for run %s: %v", run.ID, err)
+		return
+	} else if markerExists {
 		return
 	}
 
@@ -1625,6 +1707,10 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 	defer cancel()
 	if err := s.gh.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
 		log.Printf("failed to post completion comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
+		return
+	}
+	if err := writeRunCompletionCommentMarker(run, repo, issueNumber); err != nil {
+		log.Printf("failed to persist completion comment marker for run %s: %v", run.ID, err)
 	}
 }
 

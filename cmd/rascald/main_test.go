@@ -54,7 +54,10 @@ type fakeGitHubClient struct {
 	issueData ghapi.IssueData
 	issueErr  error
 
-	issueComments []postedIssueComment
+	issueComments            []postedIssueComment
+	createIssueCommentErr    error
+	createIssueCommentErrSeq []error
+	createIssueCommentCalls  int
 }
 
 func (f *fakeLauncher) Start(ctx context.Context, spec runner.Spec) (runner.Result, error) {
@@ -118,6 +121,15 @@ func (f *fakeGitHubClient) AddPullRequestReviewCommentReaction(_ context.Context
 func (f *fakeGitHubClient) CreateIssueComment(_ context.Context, repo string, issueNumber int, body string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	callIdx := f.createIssueCommentCalls
+	f.createIssueCommentCalls++
+	err := f.createIssueCommentErr
+	if callIdx < len(f.createIssueCommentErrSeq) {
+		err = f.createIssueCommentErrSeq[callIdx]
+	}
+	if err != nil {
+		return err
+	}
 	f.issueComments = append(f.issueComments, postedIssueComment{
 		repo:        repo,
 		issueNumber: issueNumber,
@@ -132,6 +144,12 @@ func (f *fakeGitHubClient) postedComments() []postedIssueComment {
 	out := make([]postedIssueComment, len(f.issueComments))
 	copy(out, f.issueComments)
 	return out
+}
+
+func (f *fakeGitHubClient) createCommentCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.createIssueCommentCalls
 }
 
 func (f *fakeLauncher) Calls() int {
@@ -774,6 +792,122 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	}
 	if !strings.Contains(comment.body, "Rascal run `run_comment_completion` took ") || !strings.Contains(comment.body, "[consumed 123 tokens]") {
 		t.Fatalf("expected runtime and token summary, got:\n%s", comment.body)
+	}
+}
+
+func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_comment_dedupe",
+		TaskID:     "owner/repo#88",
+		Repo:       "owner/repo",
+		Task:       "Address PR #88 feedback",
+		BaseBranch: "main",
+		HeadBranch: "rascal/pr-88",
+		Trigger:    "pr_comment",
+		RunDir:     t.TempDir(),
+		PRNumber:   88,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 88,
+		RequestedBy: "alice",
+		Trigger:     "pr_comment",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+
+	s.postRunCompletionCommentBestEffort(run)
+	s.postRunCompletionCommentBestEffort(run)
+
+	if calls := fakeGH.createCommentCalls(); calls != 1 {
+		t.Fatalf("expected a single github comment call, got %d", calls)
+	}
+	comments := fakeGH.postedComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted comment, got %d", len(comments))
+	}
+	markerPath := runCompletionCommentMarkerPath(run.RunDir)
+	markerData, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("read completion marker: %v", err)
+	}
+	var marker runCompletionCommentMarker
+	if err := json.Unmarshal(markerData, &marker); err != nil {
+		t.Fatalf("decode completion marker: %v", err)
+	}
+	if marker.RunID != run.ID {
+		t.Fatalf("marker run_id = %q, want %q", marker.RunID, run.ID)
+	}
+}
+
+func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{
+		createIssueCommentErrSeq: []error{
+			errors.New("transient github failure"),
+			nil,
+		},
+	}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_comment_retry",
+		TaskID:     "owner/repo#89",
+		Repo:       "owner/repo",
+		Task:       "Address PR #89 feedback",
+		BaseBranch: "main",
+		HeadBranch: "rascal/pr-89",
+		Trigger:    "pr_comment",
+		RunDir:     t.TempDir(),
+		PRNumber:   89,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 89,
+		RequestedBy: "alice",
+		Trigger:     "pr_comment",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+
+	s.postRunCompletionCommentBestEffort(run)
+
+	if calls := fakeGH.createCommentCalls(); calls != 1 {
+		t.Fatalf("expected one github comment call after first attempt, got %d", calls)
+	}
+	if comments := fakeGH.postedComments(); len(comments) != 0 {
+		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
+	}
+	if _, err := os.Stat(runCompletionCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
+		t.Fatalf("expected marker to be absent after failed post, stat err=%v", err)
+	}
+
+	s.postRunCompletionCommentBestEffort(run)
+
+	if calls := fakeGH.createCommentCalls(); calls != 2 {
+		t.Fatalf("expected second github comment call on retry, got %d", calls)
+	}
+	if comments := fakeGH.postedComments(); len(comments) != 1 {
+		t.Fatalf("expected one posted comment after retry, got %d", len(comments))
+	}
+	if _, err := os.Stat(runCompletionCommentMarkerPath(run.RunDir)); err != nil {
+		t.Fatalf("expected marker after successful retry: %v", err)
 	}
 }
 
