@@ -91,19 +91,11 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
-	stopCtx, stopCancel := context.WithCancel(context.Background())
-	defer stopCancel()
-	go func() {
-		select {
-		case <-ctx.Done():
-			forceStopContainer(containerName, logFile)
-		case <-stopCtx.Done():
-		}
-	}()
-
 	err = cmd.Run()
-	stopCancel()
 	if ctx.Err() != nil {
+		// Context cancellation can terminate the local docker client before the
+		// remote container is fully cleaned up, so force cleanup deterministically.
+		forceStopContainer(containerName, logFile)
 		err = context.Canceled
 	}
 	exitCode := 0
