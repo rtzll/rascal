@@ -188,6 +188,9 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := bootstrapCmd.Flags().Lookup("hcloud-server-type"); got != nil {
 		t.Fatalf("bootstrap should not expose hcloud-server-type flag, got %q", got.Name)
 	}
+	if got := bootstrapCmd.Flags().Lookup("print-plan"); got == nil {
+		t.Fatal("bootstrap should expose print-plan flag")
+	}
 
 	deployCmd, _, err := root.Find([]string{"deploy"})
 	if err != nil {
@@ -229,6 +232,160 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	}
 	if got := infraDeployCmd.Flags().Lookup("skip-auth-upload").DefValue; got != "false" {
 		t.Fatalf("infra deploy-existing default skip-auth-upload = %q, want false", got)
+	}
+}
+
+func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
+	tmp := t.TempDir()
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://127.0.0.1:8080",
+		},
+		output:     "json",
+		configPath: filepath.Join(tmp, "config.toml"),
+	}
+	for _, k := range []string{
+		"RASCAL_API_TOKEN",
+		"GITHUB_ADMIN_TOKEN",
+		"GITHUB_TOKEN",
+		"GITHUB_RUNTIME_TOKEN",
+		"RASCAL_GITHUB_RUNTIME_TOKEN",
+		"RASCAL_GITHUB_WEBHOOK_SECRET",
+		"GITHUB_WEBHOOK_SECRET",
+		"HCLOUD_TOKEN",
+	} {
+		t.Setenv(k, "")
+	}
+
+	missingAuthPath := filepath.Join(tmp, "missing-auth.json")
+	cmd := a.newBootstrapCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--print-plan",
+		"--host", "203.0.113.10",
+		"--repo", "owner/repo",
+		"--codex-auth", missingAuthPath,
+	})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("bootstrap --print-plan failed: %v", err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
+	}
+	if out["status"] != "bootstrap_plan" {
+		t.Fatalf("unexpected status: %v", out["status"])
+	}
+	if ready, ok := out["ready"].(bool); !ok || ready {
+		t.Fatalf("expected ready=false, got %v", out["ready"])
+	}
+	missing := anySliceToStrings(out["missing"])
+	if !containsSubstring(missing, "GitHub admin token is required") {
+		t.Fatalf("missing list should include admin token requirement, got %v", missing)
+	}
+	if !containsSubstring(missing, "GitHub runtime token is required") {
+		t.Fatalf("missing list should include runtime token requirement, got %v", missing)
+	}
+	if !containsSubstring(missing, "codex auth file not found") {
+		t.Fatalf("missing list should include codex auth file check, got %v", missing)
+	}
+
+	actions := anySliceToStrings(out["actions"])
+	if !containsExact(actions, "deploy rascald to 203.0.113.10 over SSH") {
+		t.Fatalf("actions should include deploy step, got %v", actions)
+	}
+	if !containsExact(actions, "configure GitHub webhook and label for owner/repo") {
+		t.Fatalf("actions should include webhook step, got %v", actions)
+	}
+}
+
+func TestBootstrapPrintPlanReadyForProvisionFlow(t *testing.T) {
+	tmp := t.TempDir()
+	authPath := filepath.Join(tmp, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://127.0.0.1:8080",
+		},
+		output:     "json",
+		configPath: filepath.Join(tmp, "config.toml"),
+	}
+	cmd := a.newBootstrapCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--print-plan",
+		"--repo", "owner/repo",
+		"--provision-new",
+		"--hcloud-token", "hcloud-token",
+		"--github-admin-token", "admin-token",
+		"--github-runtime-token", "runtime-token",
+		"--codex-auth", authPath,
+	})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("bootstrap --print-plan failed: %v", err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
+	}
+	if ready, ok := out["ready"].(bool); !ok || !ready {
+		t.Fatalf("expected ready=true, got %v", out["ready"])
+	}
+	missing := anySliceToStrings(out["missing"])
+	if len(missing) != 0 {
+		t.Fatalf("expected no missing prerequisites, got %v", missing)
+	}
+
+	resolved, ok := out["resolved"].(map[string]any)
+	if !ok {
+		t.Fatalf("resolved section missing: %v", out["resolved"])
+	}
+	if got := resolved["server_url"]; got != "http://<provisioned-host>:8080" {
+		t.Fatalf("unexpected server_url: %v", got)
+	}
+	if got := resolved["server_url_source"]; got != "provisioned_host" {
+		t.Fatalf("unexpected server_url_source: %v", got)
+	}
+}
+
+func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://127.0.0.1:8080",
+		},
+		configPath: filepath.Join(t.TempDir(), "config.toml"),
+	}
+	for _, k := range []string{
+		"GITHUB_ADMIN_TOKEN",
+		"GITHUB_TOKEN",
+		"GITHUB_RUNTIME_TOKEN",
+		"RASCAL_GITHUB_RUNTIME_TOKEN",
+	} {
+		t.Setenv(k, "")
+	}
+
+	cmd := a.newBootstrapCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--host", "203.0.113.10",
+		"--repo", "owner/repo",
+		"--github-runtime-token", "runtime-token",
+	})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected bootstrap to fail when webhook admin token is missing")
+	}
+	if !strings.Contains(err.Error(), "--github-admin-token is required") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -783,4 +940,36 @@ func normalizeHelpOutput(s string) string {
 		s = strings.ReplaceAll(s, home, "$HOME")
 	}
 	return strings.TrimSpace(s) + "\n"
+}
+
+func anySliceToStrings(v any) []string {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func containsSubstring(items []string, needle string) bool {
+	for _, item := range items {
+		if strings.Contains(item, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsExact(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
+			return true
+		}
+	}
+	return false
 }

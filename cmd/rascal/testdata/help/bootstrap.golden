@@ -12,6 +12,7 @@ Flags:
       --hcloud-token string           Hetzner Cloud token (or HCLOUD_TOKEN) for provisioning
   -h, --help                          help for bootstrap
       --host host                     existing server host (defaults to config host if set)
+      --print-plan                    print resolved bootstrap actions and prerequisites without executing
       --provision-new                 force provisioning a new host when --hcloud-token is set
       --repo string                   default repository in OWNER/REPO form
       --server-url string             orchestrator URL (overrides --domain)

@@ -519,6 +519,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 		provisionNew       bool
 		codexAuthPath      string
 		hcloudToken        string
+		printPlan          bool
 	)
 
 	cmd := &cobra.Command{
@@ -540,11 +541,114 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 
 			if provisionNew {
 				host = ""
-				if hcloudToken == "" {
-					return fmt.Errorf("--hcloud-token is required when --provision-new is set")
-				}
 			}
 			shouldDeploy := !skipDeploy && (host != "" || hcloudToken != "")
+			willProvision := shouldDeploy && host == ""
+			resolvedServerURL, resolvedServerURLSource := resolveBootstrapServerURL(serverURL, domain, host, a.cfg.ServerURL, willProvision)
+			missing := make([]string, 0, 8)
+			if provisionNew && hcloudToken == "" {
+				missing = append(missing, "Hetzner token is required with --provision-new (--hcloud-token or HCLOUD_TOKEN)")
+			}
+			if shouldDeploy && sshPort <= 0 {
+				missing = append(missing, "SSH port must be positive (--ssh-port)")
+			}
+			if !skipWebhook && repo == "" {
+				missing = append(missing, "repository is required when webhook setup is enabled (--repo OWNER/REPO)")
+			}
+			if !skipWebhook && githubAdminToken == "" {
+				missing = append(missing, "GitHub admin token is required for webhook setup (--github-admin-token or GITHUB_ADMIN_TOKEN)")
+			}
+			if shouldDeploy && githubRuntimeToken == "" {
+				missing = append(missing, "GitHub runtime token is required for deployment (--github-runtime-token or GITHUB_RUNTIME_TOKEN)")
+			}
+			if err := validateDistinctGitHubTokens(githubAdminToken, githubRuntimeToken, !skipWebhook && shouldDeploy); err != nil {
+				missing = append(missing, err.Error())
+			}
+			if shouldDeploy {
+				if strings.TrimSpace(codexAuthPath) == "" {
+					missing = append(missing, "codex auth file path is required for deployment (--codex-auth)")
+				} else if expandedAuthPath, err := expandPath(codexAuthPath); err != nil {
+					missing = append(missing, fmt.Sprintf("codex auth path cannot be expanded (%s): %v", codexAuthPath, err))
+				} else if _, err := os.Stat(expandedAuthPath); err != nil {
+					missing = append(missing, fmt.Sprintf("codex auth file not found: %s", expandedAuthPath))
+				}
+			}
+			if resolvedServerURL == "" {
+				missing = append(missing, "server URL cannot be derived (set --server-url, --domain, --host, or config server_url)")
+			}
+			actions := make([]string, 0, 4)
+			if shouldDeploy {
+				if willProvision {
+					actions = append(actions, "provision a new Hetzner host")
+				}
+				deployHost := host
+				if deployHost == "" {
+					deployHost = "<provisioned-host>"
+				}
+				actions = append(actions, fmt.Sprintf("deploy rascald to %s over SSH", deployHost))
+			}
+			if !skipWebhook {
+				webhookRepo := firstNonEmpty(repo, "<missing repo>")
+				actions = append(actions, fmt.Sprintf("configure GitHub webhook and label for %s", webhookRepo))
+			}
+			if writeConfig {
+				actions = append(actions, fmt.Sprintf("write local config: %s", a.configPath))
+			}
+			if len(actions) == 0 {
+				actions = append(actions, "no-op (deploy and webhook setup are both disabled)")
+			}
+			if printPlan {
+				ready := len(missing) == 0
+				planOut := map[string]any{
+					"status":  "bootstrap_plan",
+					"ready":   ready,
+					"actions": actions,
+					"missing": missing,
+					"resolved": map[string]any{
+						"repo":                         repo,
+						"host":                         host,
+						"domain":                       domain,
+						"server_url":                   resolvedServerURL,
+						"server_url_source":            resolvedServerURLSource,
+						"deploy_enabled":               shouldDeploy,
+						"provision_new_host":           willProvision,
+						"webhook_enabled":              !skipWebhook,
+						"write_config":                 writeConfig,
+						"ssh_user":                     firstNonEmpty(sshUser, "root"),
+						"ssh_port":                     sshPort,
+						"api_token_present":            strings.TrimSpace(apiToken) != "",
+						"github_admin_token_present":   strings.TrimSpace(githubAdminToken) != "",
+						"github_runtime_token_present": strings.TrimSpace(githubRuntimeToken) != "",
+						"webhook_secret_present":       strings.TrimSpace(webhookSecret) != "",
+						"hcloud_token_present":         strings.TrimSpace(hcloudToken) != "",
+						"codex_auth_path":              codexAuthPath,
+					},
+				}
+				return a.emit(planOut, func() error {
+					a.println("bootstrap plan")
+					if ready {
+						a.println("ready: yes")
+					} else {
+						a.println("ready: no")
+					}
+					a.println("server_url: %s (%s)", firstNonEmpty(resolvedServerURL, "<unresolved>"), resolvedServerURLSource)
+					a.println("actions:")
+					for _, action := range actions {
+						a.println("- %s", action)
+					}
+					if len(missing) > 0 {
+						a.println("missing prerequisites:")
+						for _, item := range missing {
+							a.println("- %s", item)
+						}
+					}
+					return nil
+				})
+			}
+
+			if provisionNew && hcloudToken == "" {
+				return fmt.Errorf("--hcloud-token is required when --provision-new is set")
+			}
 			if shouldDeploy && sshPort <= 0 {
 				return fmt.Errorf("--ssh-port must be positive")
 			}
@@ -831,6 +935,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&provisionNew, "provision-new", false, "force provisioning a new host when --hcloud-token is set")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path copied to the server")
 	cmd.Flags().StringVar(&hcloudToken, "hcloud-token", "", "Hetzner Cloud token (or HCLOUD_TOKEN) for provisioning")
+	cmd.Flags().BoolVar(&printPlan, "print-plan", false, "print resolved bootstrap actions and prerequisites without executing")
 
 	return cmd
 }
@@ -2609,6 +2714,23 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func resolveBootstrapServerURL(serverURL, domain, host, configServerURL string, willProvision bool) (string, string) {
+	switch {
+	case strings.TrimSpace(serverURL) != "":
+		return strings.TrimRight(strings.TrimSpace(serverURL), "/"), "flag"
+	case strings.TrimSpace(domain) != "":
+		return "https://" + strings.TrimSpace(domain), "domain"
+	case strings.TrimSpace(host) != "":
+		return "http://" + strings.TrimSpace(host) + ":8080", "host"
+	case willProvision:
+		return "http://<provisioned-host>:8080", "provisioned_host"
+	case strings.TrimSpace(configServerURL) != "" && strings.TrimSpace(configServerURL) != "http://127.0.0.1:8080":
+		return strings.TrimRight(strings.TrimSpace(configServerURL), "/"), "config"
+	default:
+		return "", "unresolved"
+	}
 }
 
 func firstPositive(values ...int) int {
