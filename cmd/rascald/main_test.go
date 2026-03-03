@@ -1425,6 +1425,46 @@ func TestHandleRunLogsJSONIncludesStatusAndDone(t *testing.T) {
 	}
 }
 
+func TestHandleRunLogsMissingGooseFileStillReturnsRunnerLogs(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	runDir := t.TempDir()
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_logs_missing_goose",
+		TaskID:     "task_logs_missing_goose",
+		Repo:       "owner/repo",
+		Task:       "show logs without goose output",
+		BaseBranch: "main",
+		RunDir:     runDir,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(run.RunDir, "runner.log"), []byte("runner-1\nrunner-2\n"), 0o644); err != nil {
+		t.Fatalf("write runner log: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/logs?lines=5", nil)
+	rec := httptest.NewRecorder()
+	s.handleRunSubresources(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "runner-2") {
+		t.Fatalf("expected runner logs in response, got:\n%s", body)
+	}
+	if !strings.Contains(body, "== goose.ndjson ==") {
+		t.Fatalf("expected goose section header in response, got:\n%s", body)
+	}
+	if !strings.Contains(body, "(goose.ndjson not found)") {
+		t.Fatalf("expected missing goose note, got:\n%s", body)
+	}
+}
+
 func TestHandleRunLogsRejectsInvalidFormat(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)

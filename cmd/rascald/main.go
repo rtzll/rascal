@@ -759,14 +759,22 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 	}
 
 	runnerLines, err := logs.Tail(filepath.Join(run.RunDir, "runner.log"), lines)
-	if err != nil && !os.IsNotExist(err) {
-		http.Error(w, "failed to read runner logs", http.StatusInternalServerError)
-		return
+	runnerNote := ""
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			runnerNote = "(runner.log not found)"
+		} else {
+			runnerNote = "(runner.log unavailable)"
+		}
 	}
 	gooseLines, err := logs.Tail(filepath.Join(run.RunDir, "goose.ndjson"), lines)
-	if err != nil && !os.IsNotExist(err) {
-		http.Error(w, "failed to read goose logs", http.StatusInternalServerError)
-		return
+	gooseNote := ""
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			gooseNote = "(goose.ndjson not found)"
+		} else {
+			gooseNote = "(goose.ndjson unavailable)"
+		}
 	}
 
 	var body strings.Builder
@@ -774,9 +782,15 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 	for _, line := range runnerLines {
 		_, _ = fmt.Fprintln(&body, line)
 	}
+	if runnerNote != "" {
+		_, _ = fmt.Fprintln(&body, runnerNote)
+	}
 	_, _ = fmt.Fprintln(&body, "\n== goose.ndjson ==")
 	for _, line := range gooseLines {
 		_, _ = fmt.Fprintln(&body, line)
+	}
+	if gooseNote != "" {
+		_, _ = fmt.Fprintln(&body, gooseNote)
 	}
 
 	logsText := body.String()
