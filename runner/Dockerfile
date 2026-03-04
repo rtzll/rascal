@@ -1,38 +1,20 @@
-FROM node:24-bookworm-slim AS node-runtime
-
-FROM ubuntu:24.04
-
-ARG DEBIAN_FRONTEND=noninteractive
 ARG GO_VERSION=1.26.0
 ARG GOOSE_VERSION=1.26.1
 
-RUN apt-get -qq update && apt-get -y -qq install --no-install-recommends \
-    ca-certificates curl gnupg bzip2 xz-utils zip unzip \
-    git gh \
-    bash jq ripgrep make patch diffutils file less \
-    python3 libxcb1 libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+FROM golang:${GO_VERSION}-bookworm AS go-runtime
 
-RUN set -eux; \
-    arch="$(dpkg --print-architecture)"; \
-    case "${arch}" in \
-      amd64) go_arch="amd64" ;; \
-      arm64) go_arch="arm64" ;; \
-      *) echo "unsupported architecture: ${arch}" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" -o /tmp/go.tar.gz; \
-    rm -rf /usr/local/go; \
-    tar -C /usr/local -xzf /tmp/go.tar.gz; \
-    /usr/local/go/bin/go version; \
-    rm -f /tmp/go.tar.gz
-
-COPY --from=node-runtime /usr/local/ /usr/local/
-
+FROM node:24-bookworm-slim AS codex-runtime
 RUN npm install -g --silent --no-progress --no-fund --no-audit @openai/codex \
     && node --version \
     && npm --version \
     && codex --version
 
+FROM ubuntu:24.04 AS goose-runtime
+ARG DEBIAN_FRONTEND=noninteractive
+ARG GOOSE_VERSION
+RUN apt-get -qq update \
+    && apt-get -y -qq install --no-install-recommends ca-certificates curl bzip2 \
+    && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "${arch}" in \
@@ -45,6 +27,25 @@ RUN set -eux; \
     install -m 0755 /tmp/goose /usr/local/bin/goose; \
     goose --version; \
     rm -f /tmp/goose.tar.bz2 /tmp/goose
+
+FROM ubuntu:24.04
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get -qq update && apt-get -y -qq install --no-install-recommends \
+    ca-certificates curl gnupg bzip2 xz-utils zip unzip \
+    git gh \
+    bash jq ripgrep make patch diffutils file less \
+    python3 libxcb1 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=codex-runtime /usr/local/ /usr/local/
+COPY --from=go-runtime /usr/local/go/ /usr/local/go/
+COPY --from=goose-runtime /usr/local/bin/goose /usr/local/bin/goose
+
+RUN node --version \
+    && npm --version \
+    && codex --version \
+    && go version \
+    && goose --version
 
 ENV GOOSE_PROVIDER=codex \
     GOOSE_MODEL=gpt-5.2-codex \
