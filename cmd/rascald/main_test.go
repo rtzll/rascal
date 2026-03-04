@@ -918,7 +918,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(run.RunDir, "commit_message.txt"), []byte("fix(rascal): address feedback\n\n- updated handlers\n- added tests\n"), 0o644); err != nil {
 		t.Fatalf("write commit message: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(`{"event":"x","usage":{"total_tokens":123}}`+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(`{"event":"x","usage":{"total_tokens":123000}}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write goose log: %v", err)
 	}
 
@@ -941,7 +941,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	if !strings.Contains(comment.body, "<details><summary>Goose Details</summary>") {
 		t.Fatalf("expected goose details section, got:\n%s", comment.body)
 	}
-	if !strings.Contains(comment.body, "Rascal run `run_comment_completion` took ") || !strings.Contains(comment.body, "[consumed 123 tokens]") {
+	if !strings.Contains(comment.body, "Rascal run `run_comment_completion` completed in ") || !strings.Contains(comment.body, "123K tokens") {
 		t.Fatalf("expected runtime and token summary, got:\n%s", comment.body)
 	}
 }

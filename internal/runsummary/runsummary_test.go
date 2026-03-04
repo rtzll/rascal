@@ -74,19 +74,39 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
+func TestFormatTokenCount(t *testing.T) {
+	cases := []struct {
+		tokens int64
+		want   string
+	}{
+		{42, "42"},
+		{20_000, "20K"},
+		{100_999, "100K"},
+		{1_000_000, "1.00M"},
+		{1_010_000, "1.01M"},
+		{5_470_139, "5.47M"},
+	}
+	for _, tc := range cases {
+		got := formatTokenCount(tc.tokens)
+		if got != tc.want {
+			t.Fatalf("formatTokenCount(%d) = %q, want %q", tc.tokens, got, tc.want)
+		}
+	}
+}
+
 func TestBuildPRBody(t *testing.T) {
 	t.Run("includes goose details and token summary when tokens are present", func(t *testing.T) {
 		body := BuildPRBody(
 			"run_1",
 			"- updated code",
-			`{"usage":{"total_tokens":123}}`,
+			`{"usage":{"total_tokens":123000}}`,
 			"1m 2s",
 			"",
 		)
 		if !strings.Contains(body, "<details><summary>Goose Details</summary>") {
 			t.Fatalf("missing goose details section:\n%s", body)
 		}
-		if !strings.Contains(body, "Rascal run `run_1` took 1m 2s [consumed 123 tokens]") {
+		if !strings.Contains(body, "Rascal run `run_1` completed in 1m 2s · 123K tokens") {
 			t.Fatalf("missing token summary:\n%s", body)
 		}
 		if !strings.Contains(body, "- updated code") {
@@ -125,7 +145,7 @@ func TestBuildCompletionComment(t *testing.T) {
 			RequestedBy:     "alice",
 			HeadSHA:         "0123456789abcdef0123456789abcdef01234567",
 			IssueNumber:     12,
-			GooseOutput:     `{"usage":{"total_tokens":42}}`,
+			GooseOutput:     `{"usage":{"total_tokens":42000}}`,
 			CommitMessage:   []byte("feat(rascal): update\n\n- item\n"),
 			DurationSeconds: 65,
 		})
@@ -138,7 +158,7 @@ func TestBuildCompletionComment(t *testing.T) {
 		if !strings.Contains(body, "Closes #12") {
 			t.Fatalf("expected closes section:\n%s", body)
 		}
-		if !strings.Contains(body, "Rascal run `run_1` took 1m 5s [consumed 42 tokens]") {
+		if !strings.Contains(body, "Rascal run `run_1` completed in 1m 5s · 42K tokens") {
 			t.Fatalf("expected duration + tokens:\n%s", body)
 		}
 	})

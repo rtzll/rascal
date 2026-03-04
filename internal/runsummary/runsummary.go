@@ -87,6 +87,19 @@ func FormatDuration(totalSeconds int64) string {
 	return strings.Join(parts, " ")
 }
 
+func formatTokenCount(totalTokens int64) string {
+	if totalTokens < 0 {
+		return "0"
+	}
+	if totalTokens >= 1_000_000 {
+		return fmt.Sprintf("%.2fM", float64(totalTokens)/1_000_000.0)
+	}
+	if totalTokens >= 1_000 {
+		return fmt.Sprintf("%dK", totalTokens/1_000)
+	}
+	return strconv.FormatInt(totalTokens, 10)
+}
+
 func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection string) string {
 	gooseSection := "<details><summary>Run Details</summary>\n\n```\n" + gooseOutput + "\n```\n\n</details>"
 	if totalTokens, ok := ExtractTotalTokens(gooseOutput); ok {
@@ -95,7 +108,12 @@ func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection stri
 		if strings.TrimSpace(commitBody) != "" {
 			body = commitBody + "\n\n"
 		}
-		body += gooseSection + closesSection + "\n\n---\n\n" + fmt.Sprintf("Rascal run `%s` took %s [consumed %d tokens]", runID, runDuration, totalTokens)
+		body += gooseSection + closesSection + "\n\n---\n\n" + fmt.Sprintf(
+			"Rascal run `%s` completed in %s · %s tokens",
+			runID,
+			runDuration,
+			formatTokenCount(totalTokens),
+		)
 		return body
 	}
 
