@@ -62,11 +62,20 @@ type IssuesEvent struct {
 }
 
 type IssueCommentEvent struct {
-	Action     string     `json:"action"`
-	Issue      Issue      `json:"issue"`
-	Comment    Comment    `json:"comment"`
-	Repository Repository `json:"repository"`
-	Sender     User       `json:"sender"`
+	Action     string              `json:"action"`
+	Issue      Issue               `json:"issue"`
+	Comment    Comment             `json:"comment"`
+	Changes    IssueCommentChanges `json:"changes"`
+	Repository Repository          `json:"repository"`
+	Sender     User                `json:"sender"`
+}
+
+type IssueCommentChanges struct {
+	Body *IssueCommentBodyChange `json:"body"`
+}
+
+type IssueCommentBodyChange struct {
+	From string `json:"from"`
 }
 
 type PullRequestReviewEvent struct {

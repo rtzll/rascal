@@ -577,7 +577,16 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return fmt.Errorf("decode issue_comment event: %w", err)
 		}
-		if ev.Action != "created" || ev.Issue.PullRequest == nil {
+		if ev.Issue.PullRequest == nil {
+			return nil
+		}
+		switch ev.Action {
+		case "created":
+		case "edited":
+			if !issueCommentBodyChanged(ev) {
+				return nil
+			}
+		default:
 			return nil
 		}
 		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
@@ -1385,6 +1394,15 @@ func issueHasLabel(labels []ghapi.Label, name string) bool {
 		}
 	}
 	return false
+}
+
+func issueCommentBodyChanged(ev ghapi.IssueCommentEvent) bool {
+	if ev.Changes.Body == nil {
+		return false
+	}
+	newBody := strings.TrimSpace(ev.Comment.Body)
+	oldBody := strings.TrimSpace(ev.Changes.Body.From)
+	return newBody != oldBody
 }
 
 func (s *server) isBotActor(login string) bool {
