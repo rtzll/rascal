@@ -665,7 +665,9 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if contextText == "" {
 				contextText = fmt.Sprintf("inline review comment at %s", location)
 			} else {
-				contextText = contextText + "\n\nInline comment location: " + location
+				contextText = fmt.Sprintf(`%s
+
+Inline comment location: %s`, contextText, location)
 			}
 		}
 		_, err := s.createAndQueueRun(runRequest{
@@ -851,7 +853,8 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 	if runnerNote != "" {
 		_, _ = fmt.Fprintln(&body, runnerNote)
 	}
-	_, _ = fmt.Fprintln(&body, "\n== goose.ndjson ==")
+	_, _ = fmt.Fprintln(&body, `
+== goose.ndjson ==`)
 	for _, line := range gooseLines {
 		_, _ = fmt.Fprintln(&body, line)
 	}
@@ -1445,7 +1448,9 @@ func issueTaskFromIssue(title, body string) string {
 	if body == "" {
 		return title
 	}
-	return fmt.Sprintf("%s\n\n%s", title, body)
+	return fmt.Sprintf(`%s
+
+%s`, title, body)
 }
 
 func formatReviewCommentLocation(path string, startLine, line *int) string {
@@ -1467,29 +1472,42 @@ func formatReviewCommentLocation(path string, startLine, line *int) string {
 
 func instructionText(run state.Run) string {
 	var b strings.Builder
-	b.WriteString("# Rascal Run Instructions\n\n")
-	b.WriteString(fmt.Sprintf("Run ID: %s\n", run.ID))
-	b.WriteString(fmt.Sprintf("Task ID: %s\n", run.TaskID))
-	b.WriteString(fmt.Sprintf("Repository: %s\n", run.Repo))
+	_, _ = fmt.Fprintf(&b, `# Rascal Run Instructions
+
+Run ID: %s
+Task ID: %s
+Repository: %s
+`, run.ID, run.TaskID, run.Repo)
 	if run.IssueNumber > 0 {
 		b.WriteString(fmt.Sprintf("Issue: #%d\n", run.IssueNumber))
 	}
 	if run.PRNumber > 0 {
 		b.WriteString(fmt.Sprintf("Pull Request: #%d\n", run.PRNumber))
 	}
-	b.WriteString("\n## Task\n\n")
+	b.WriteString(`
+## Task
+
+`)
 	b.WriteString(run.Task)
-	b.WriteString("\n\n## Constraints\n\n")
-	b.WriteString("- Do not ask for interactive input.\n")
-	b.WriteString("- Do not require MCP tools.\n")
-	b.WriteString("- Keep changes minimal and scoped to the requested task.\n")
-	b.WriteString("- Run tests or explain why tests could not run.\n")
-	b.WriteString("- If you make changes, write /rascal-meta/commit_message.txt using a conventional commit title on the first line.\n")
-	b.WriteString("- Optionally add a commit body after a blank line in /rascal-meta/commit_message.txt.\n")
+	b.WriteString(`
+
+## Constraints
+
+- Do not ask for interactive input.
+- Do not require MCP tools.
+- Keep changes minimal and scoped to the requested task.
+- Run tests or explain why tests could not run.
+- If you make changes, write /rascal-meta/commit_message.txt using a conventional commit title on the first line.
+- Optionally add a commit body after a blank line in /rascal-meta/commit_message.txt.
+`)
 	if strings.TrimSpace(run.Context) != "" {
-		b.WriteString("\n## Additional Context\n\n")
+		b.WriteString(`
+## Additional Context
+
+`)
 		b.WriteString(run.Context)
-		b.WriteString("\n")
+		b.WriteString(`
+`)
 	}
 	return b.String()
 }
