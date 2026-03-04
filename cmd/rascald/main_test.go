@@ -273,6 +273,68 @@ func TestHandleWebhookIgnoresIssueLabeledOnPR(t *testing.T) {
 	}
 }
 
+func TestHandleWebhookIssueClosedCancelsRunsAndCompletesTask(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+	taskID := "owner/repo#7"
+
+	runningRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "work", IssueNumber: 7})
+	if err != nil {
+		t.Fatalf("create running run: %v", err)
+	}
+	queuedRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "queued", IssueNumber: 7})
+	if err != nil {
+		t.Fatalf("create queued run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to be active")
+
+	payload := []byte(`{"action":"closed","issue":{"number":7,"title":"Title","body":"Body","labels":[{"name":"rascal"}]},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "issues", "delivery-closed", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for closed issue event, got %d", rec.Code)
+	}
+
+	waitFor(t, time.Second, func() bool { return s.store.IsTaskCompleted(taskID) }, "task marked completed")
+	waitFor(t, time.Second, func() bool {
+		r, ok := s.store.GetRun(queuedRun.ID)
+		return ok && r.Status == state.StatusCanceled
+	}, "queued run canceled")
+	waitFor(t, time.Second, func() bool {
+		r, ok := s.store.GetRun(runningRun.ID)
+		return ok && r.Status == state.StatusCanceled
+	}, "running run canceled")
+
+	close(waitCh)
+}
+
+func TestHandleWebhookIssueReopenedReenablesTask(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+	taskID := "owner/repo#7"
+
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", IssueNumber: 7}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	if err := s.store.MarkTaskCompleted(taskID); err != nil {
+		t.Fatalf("mark task completed: %v", err)
+	}
+
+	payload := []byte(`{"action":"reopened","issue":{"number":7,"title":"Title","body":"Body","labels":[{"name":"rascal"}]},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "issues", "delivery-reopened", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for reopened issue event, got %d", rec.Code)
+	}
+
+	waitFor(t, time.Second, func() bool { return !s.store.IsTaskCompleted(taskID) }, "task reopened")
+	waitFor(t, time.Second, func() bool { return len(s.store.ListRuns(10)) == 1 }, "run queued")
+}
+
 func TestHandleWebhookInactiveSlotIsSkipped(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)

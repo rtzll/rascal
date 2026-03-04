@@ -16,6 +16,7 @@ type Issue struct {
 	Number      int         `json:"number"`
 	Title       string      `json:"title"`
 	Body        string      `json:"body"`
+	Labels      []Label     `json:"labels"`
 	PullRequest interface{} `json:"pull_request"`
 }
 

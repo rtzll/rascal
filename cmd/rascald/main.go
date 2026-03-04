@@ -482,30 +482,82 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return fmt.Errorf("decode issues event: %w", err)
 		}
-		if ev.Action != "labeled" || !strings.EqualFold(ev.Label.Name, "rascal") {
-			return nil
-		}
 		if ev.Issue.PullRequest != nil {
 			return nil
 		}
 		if s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
-
-		taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
-		_, err := s.createAndQueueRun(runRequest{
-			TaskID:      taskID,
-			Repo:        ev.Repository.FullName,
-			Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
-			Trigger:     "issue_label",
-			IssueNumber: ev.Issue.Number,
-			Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number),
-			Debug:       boolPtr(true),
-		})
-		if errors.Is(err, errTaskCompleted) {
+		switch ev.Action {
+		case "labeled":
+			if !strings.EqualFold(ev.Label.Name, "rascal") {
+				return nil
+			}
+			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
+			_, err := s.createAndQueueRun(runRequest{
+				TaskID:      taskID,
+				Repo:        ev.Repository.FullName,
+				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Trigger:     "issue_label",
+				IssueNumber: ev.Issue.Number,
+				Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number),
+				Debug:       boolPtr(true),
+			})
+			if errors.Is(err, errTaskCompleted) {
+				return nil
+			}
+			return err
+		case "closed":
+			if !issueHasLabel(ev.Issue.Labels, "rascal") {
+				return nil
+			}
+			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
+			if _, err := s.store.UpsertTask(state.UpsertTaskInput{
+				ID:          taskID,
+				Repo:        ev.Repository.FullName,
+				IssueNumber: ev.Issue.Number,
+			}); err != nil {
+				return err
+			}
+			if err := s.store.MarkTaskCompleted(taskID); err != nil {
+				return err
+			}
+			if err := s.store.CancelQueuedRuns(taskID, "issue closed"); err != nil {
+				return err
+			}
+			s.cancelRunningTaskRuns(taskID, "issue closed")
+			return nil
+		case "reopened":
+			if !issueHasLabel(ev.Issue.Labels, "rascal") {
+				return nil
+			}
+			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
+			if _, err := s.store.UpsertTask(state.UpsertTaskInput{
+				ID:          taskID,
+				Repo:        ev.Repository.FullName,
+				IssueNumber: ev.Issue.Number,
+			}); err != nil {
+				return err
+			}
+			if err := s.store.MarkTaskOpen(taskID); err != nil {
+				return err
+			}
+			_, err := s.createAndQueueRun(runRequest{
+				TaskID:      taskID,
+				Repo:        ev.Repository.FullName,
+				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Trigger:     "issue_reopened",
+				IssueNumber: ev.Issue.Number,
+				Context:     fmt.Sprintf("Triggered by issue reopen on issue #%d", ev.Issue.Number),
+				Debug:       boolPtr(true),
+			})
+			if errors.Is(err, errTaskCompleted) {
+				return nil
+			}
+			return err
+		default:
 			return nil
 		}
-		return err
 	case "issue_comment":
 		var ev ghapi.IssueCommentEvent
 		if err := json.Unmarshal(payload, &ev); err != nil {
@@ -1305,6 +1357,19 @@ func (s *server) defaultHeadBranchForTask(taskID string) string {
 	return ""
 }
 
+func issueHasLabel(labels []ghapi.Label, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, label := range labels {
+		if strings.EqualFold(strings.TrimSpace(label.Name), name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *server) isBotActor(login string) bool {
 	login = strings.TrimSpace(strings.ToLower(login))
 	if login == "" {
@@ -1524,6 +1589,32 @@ func (s *server) waitForNoActiveRuns(timeout time.Duration) error {
 
 func (s *server) activeRunCount() int {
 	return s.store.CountRunLeasesByOwner(s.instanceID)
+}
+
+func (s *server) cancelRunningTaskRuns(taskID, reason string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "canceled"
+	}
+	for _, run := range s.store.ListRunningRuns() {
+		if run.TaskID != taskID {
+			continue
+		}
+		if err := s.store.RequestRunCancel(run.ID, reason, "issue"); err != nil {
+			log.Printf("failed to request run cancel for %s: %v", run.ID, err)
+			continue
+		}
+		s.mu.Lock()
+		if cancel, ok := s.runCancels[run.ID]; ok {
+			s.runCancelNote[run.ID] = reason
+			cancel()
+		}
+		s.mu.Unlock()
+	}
 }
 
 func (s *server) cancelActiveRuns(reason string) {
