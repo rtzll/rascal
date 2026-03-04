@@ -14,7 +14,7 @@ fmt:
 build: build-cli build-daemon
 
 codegen:
-	go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
+	CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
 
 build-cli: codegen
 	go build -o bin/rascal ./cmd/rascal
