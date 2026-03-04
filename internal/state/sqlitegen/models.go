@@ -34,6 +34,7 @@ type Run struct {
 	IssueNumber int64         `json:"issue_number"`
 	PrNumber    int64         `json:"pr_number"`
 	PrUrl       string        `json:"pr_url"`
+	PrStatus    string        `json:"pr_status"`
 	HeadSha     string        `json:"head_sha"`
 	Context     string        `json:"context"`
 	Error       string        `json:"error"`

@@ -71,6 +71,7 @@ type runRequest struct {
 	Trigger     string
 	IssueNumber int
 	PRNumber    int
+	PRStatus    state.PRStatus
 	Context     string
 	Debug       *bool
 
@@ -583,6 +584,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
 				Trigger:     "issue_reopened",
 				IssueNumber: ev.Issue.Number,
+				PRStatus:    state.PRStatusNone,
 				Context:     fmt.Sprintf("Triggered by issue reopen on issue #%d", ev.Issue.Number),
 				Debug:       boolPtr(true),
 			})
@@ -614,6 +616,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			Trigger:     "pr_comment",
 			IssueNumber: ev.Issue.Number,
 			PRNumber:    ev.Issue.Number,
+			PRStatus:    state.PRStatusOpen,
 			Context:     strings.TrimSpace(ev.Comment.Body),
 			BaseBranch:  s.defaultBaseBranchForTask(taskID),
 			HeadBranch:  s.defaultHeadBranchForTask(taskID),
@@ -654,6 +657,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			Trigger:     "pr_review",
 			IssueNumber: ev.PullRequest.Number,
 			PRNumber:    ev.PullRequest.Number,
+			PRStatus:    state.PRStatusOpen,
 			Context:     contextText,
 			BaseBranch:  s.defaultBaseBranchForTask(taskID),
 			HeadBranch:  s.defaultHeadBranchForTask(taskID),
@@ -700,6 +704,7 @@ Inline comment location: %s`, contextText, location)
 			Trigger:     "pr_review_comment",
 			IssueNumber: ev.PullRequest.Number,
 			PRNumber:    ev.PullRequest.Number,
+			PRStatus:    state.PRStatusOpen,
 			Context:     contextText,
 			BaseBranch:  s.defaultBaseBranchForTask(taskID),
 			HeadBranch:  s.defaultHeadBranchForTask(taskID),
@@ -736,6 +741,9 @@ Inline comment location: %s`, contextText, location)
 				s.reconcileClosedPRRuns(ev.Repository.FullName, ev.PullRequest.Number, false)
 				s.addIssueReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ghapi.ReactionMinusOne)
 			}
+		}
+		if ev.Action == "reopened" {
+			s.reconcileReopenedPRRuns(ev.Repository.FullName, ev.PullRequest.Number)
 		}
 		return nil
 	default:
@@ -934,6 +942,13 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if req.Trigger == "" {
 		req.Trigger = "cli"
 	}
+	if req.PRStatus == "" {
+		if req.PRNumber > 0 {
+			req.PRStatus = state.PRStatusOpen
+		} else {
+			req.PRStatus = state.PRStatusNone
+		}
+	}
 	debugEnabled := true
 	if req.Debug != nil {
 		debugEnabled = *req.Debug
@@ -992,6 +1007,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		RunDir:      runDir,
 		IssueNumber: req.IssueNumber,
 		PRNumber:    req.PRNumber,
+		PRStatus:    req.PRStatus,
 		Context:     req.Context,
 		Debug:       boolPtr(debugEnabled),
 	})
@@ -1211,8 +1227,10 @@ func (s *server) executeRun(runID string) {
 
 	now := time.Now().UTC()
 	status := state.StatusSucceeded
-	if result.PRNumber > 0 || strings.TrimSpace(result.PRURL) != "" {
+	prStatus := state.PRStatusNone
+	if result.PRNumber > 0 || strings.TrimSpace(result.PRURL) != "" || run.PRNumber > 0 || strings.TrimSpace(run.PRURL) != "" {
 		status = state.StatusAwaitingFeedback
+		prStatus = state.PRStatusOpen
 	}
 	var errRunCanceled = errors.New("run already canceled")
 	updated, uErr := s.store.UpdateRun(run.ID, func(r *state.Run) error {
@@ -1228,6 +1246,7 @@ func (s *server) executeRun(runID string) {
 		if strings.TrimSpace(result.HeadSHA) != "" {
 			r.HeadSHA = strings.TrimSpace(result.HeadSHA)
 		}
+		r.PRStatus = prStatus
 		r.CompletedAt = &now
 		return nil
 	})
@@ -1400,12 +1419,42 @@ func (s *server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {
 		if run.Repo != repo || run.PRNumber != prNumber {
 			continue
 		}
-		switch {
-		case merged && run.Status == state.StatusAwaitingFeedback:
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusSucceeded, "")
-		case !merged && run.Status == state.StatusAwaitingFeedback:
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, "pull request closed without merge")
+		_, _ = s.store.UpdateRun(run.ID, func(r *state.Run) error {
+			now := time.Now().UTC()
+			if merged {
+				r.PRStatus = state.PRStatusMerged
+				if r.Status == state.StatusAwaitingFeedback {
+					r.Status = state.StatusSucceeded
+					r.Error = ""
+					r.CompletedAt = &now
+				}
+				return nil
+			}
+			r.PRStatus = state.PRStatusClosedUnmerged
+			if r.Status == state.StatusAwaitingFeedback {
+				r.Status = state.StatusCanceled
+				r.Error = "pull request closed without merge"
+				r.CompletedAt = &now
+			}
+			return nil
+		})
+	}
+}
+
+func (s *server) reconcileReopenedPRRuns(repo string, prNumber int) {
+	repo = strings.TrimSpace(repo)
+	if repo == "" || prNumber <= 0 {
+		return
+	}
+	runs := s.store.ListRuns(10000)
+	for _, run := range runs {
+		if run.Repo != repo || run.PRNumber != prNumber {
+			continue
 		}
+		_, _ = s.store.UpdateRun(run.ID, func(r *state.Run) error {
+			r.PRStatus = state.PRStatusOpen
+			return nil
+		})
 	}
 }
 

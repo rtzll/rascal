@@ -998,21 +998,21 @@ func (a *app) newPSCmd() *cobra.Command {
 				return &cliError{Code: exitInput, Message: "--watch is only supported with --output table"}
 			}
 
-				render := func(runs []state.Run) error {
-					return a.emit(map[string]any{"runs": runs}, func() error {
-						tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-						fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tPR\tCREATED")
-						for _, run := range runs {
-							fmt.Fprintf(
-								tw,
-								"%s\t%s\t%s\t%s\t%s\n",
-								run.ID,
-								psStatusLabel(run),
-								run.Repo,
-								psPRLabel(run),
-								run.CreatedAt.Format(time.RFC3339),
-							)
-						}
+			render := func(runs []state.Run) error {
+				return a.emit(map[string]any{"runs": runs}, func() error {
+					tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+					fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tPR\tCREATED")
+					for _, run := range runs {
+						fmt.Fprintf(
+							tw,
+							"%s\t%s\t%s\t%s\t%s\n",
+							run.ID,
+							psStatusLabel(run),
+							run.Repo,
+							psPRLabel(run),
+							run.CreatedAt.Format(time.RFC3339),
+						)
+					}
 					return tw.Flush()
 				})
 			}
@@ -2206,21 +2206,45 @@ func psStatusLabel(run state.Run) string {
 }
 
 func psPRLabel(run state.Run) string {
+	prStatus := effectivePRStatus(run)
 	if run.PRNumber <= 0 {
 		if strings.TrimSpace(run.PRURL) == "" {
 			return "-"
 		}
+		if prStatus == state.PRStatusOpen {
+			return "open"
+		}
 		return "link"
 	}
-	switch run.Status {
-	case state.StatusAwaitingFeedback:
+	switch prStatus {
+	case state.PRStatusOpen:
 		return fmt.Sprintf("#%d open", run.PRNumber)
-	case state.StatusSucceeded:
+	case state.PRStatusMerged:
 		return fmt.Sprintf("#%d merged", run.PRNumber)
-	case state.StatusCanceled:
+	case state.PRStatusClosedUnmerged:
 		return fmt.Sprintf("#%d closed", run.PRNumber)
 	default:
 		return fmt.Sprintf("#%d", run.PRNumber)
+	}
+}
+
+func effectivePRStatus(run state.Run) state.PRStatus {
+	switch run.PRStatus {
+	case state.PRStatusOpen, state.PRStatusMerged, state.PRStatusClosedUnmerged:
+		return run.PRStatus
+	}
+	if run.PRNumber <= 0 && strings.TrimSpace(run.PRURL) == "" {
+		return state.PRStatusNone
+	}
+	switch run.Status {
+	case state.StatusAwaitingFeedback:
+		return state.PRStatusOpen
+	case state.StatusSucceeded:
+		return state.PRStatusMerged
+	case state.StatusCanceled:
+		return state.PRStatusClosedUnmerged
+	default:
+		return state.PRStatusOpen
 	}
 }
 

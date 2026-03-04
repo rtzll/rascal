@@ -233,6 +233,10 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	if in.Debug != nil {
 		debugEnabled = *in.Debug
 	}
+	prStatus := normalizePRStatus(in.PRStatus)
+	if prStatus == PRStatusNone && in.PRNumber > 0 {
+		prStatus = PRStatusOpen
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -271,6 +275,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		IssueNumber: int64(in.IssueNumber),
 		PrNumber:    int64(in.PRNumber),
 		PrUrl:       "",
+		PrStatus:    string(prStatus),
 		HeadSha:     "",
 		Context:     in.Context,
 		Error:       "",
@@ -787,6 +792,7 @@ func fromDBRun(r sqlitegen.Run) Run {
 		IssueNumber: int(r.IssueNumber),
 		PRNumber:    int(r.PrNumber),
 		PRURL:       r.PrUrl,
+		PRStatus:    normalizePRStatus(PRStatus(r.PrStatus)),
 		HeadSHA:     r.HeadSha,
 		Context:     r.Context,
 		Error:       r.Error,
@@ -805,6 +811,17 @@ func fromDBRun(r sqlitegen.Run) Run {
 }
 
 func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
+	prStatus := normalizePRStatus(r.PRStatus)
+	if prStatus == PRStatusNone && r.PRNumber > 0 {
+		switch r.Status {
+		case StatusSucceeded:
+			prStatus = PRStatusMerged
+		case StatusCanceled:
+			prStatus = PRStatusClosedUnmerged
+		default:
+			prStatus = PRStatusOpen
+		}
+	}
 	return sqlitegen.UpdateRunParams{
 		TaskID:      r.TaskID,
 		Repo:        r.Repo,
@@ -818,6 +835,7 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 		IssueNumber: int64(r.IssueNumber),
 		PrNumber:    int64(r.PRNumber),
 		PrUrl:       r.PRURL,
+		PrStatus:    string(prStatus),
 		HeadSha:     r.HeadSHA,
 		Context:     r.Context,
 		Error:       r.Error,
@@ -826,6 +844,15 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 		StartedAt:   toNullInt64(r.StartedAt),
 		CompletedAt: toNullInt64(r.CompletedAt),
 		ID:          r.ID,
+	}
+}
+
+func normalizePRStatus(in PRStatus) PRStatus {
+	switch in {
+	case PRStatusOpen, PRStatusMerged, PRStatusClosedUnmerged:
+		return in
+	default:
+		return PRStatusNone
 	}
 }
 

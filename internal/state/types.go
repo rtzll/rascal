@@ -13,6 +13,15 @@ const (
 	StatusCanceled         RunStatus = "canceled"
 )
 
+type PRStatus string
+
+const (
+	PRStatusNone           PRStatus = "none"
+	PRStatusOpen           PRStatus = "open"
+	PRStatusMerged         PRStatus = "merged"
+	PRStatusClosedUnmerged PRStatus = "closed_unmerged"
+)
+
 type TaskStatus string
 
 const (
@@ -32,12 +41,13 @@ type Run struct {
 	Status     RunStatus `json:"status"`
 	RunDir     string    `json:"run_dir"`
 
-	IssueNumber int    `json:"issue_number,omitempty"`
-	PRNumber    int    `json:"pr_number,omitempty"`
-	PRURL       string `json:"pr_url,omitempty"`
-	HeadSHA     string `json:"head_sha,omitempty"`
-	Context     string `json:"context,omitempty"`
-	Error       string `json:"error,omitempty"`
+	IssueNumber int      `json:"issue_number,omitempty"`
+	PRNumber    int      `json:"pr_number,omitempty"`
+	PRURL       string   `json:"pr_url,omitempty"`
+	PRStatus    PRStatus `json:"pr_status"`
+	HeadSHA     string   `json:"head_sha,omitempty"`
+	Context     string   `json:"context,omitempty"`
+	Error       string   `json:"error,omitempty"`
 
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
@@ -84,6 +94,7 @@ type CreateRunInput struct {
 	RunDir      string
 	IssueNumber int
 	PRNumber    int
+	PRStatus    PRStatus
 	Context     string
 }
 

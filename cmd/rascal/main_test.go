@@ -625,8 +625,8 @@ func TestPSStatusAndPRLabels(t *testing.T) {
 	}
 
 	run = state.Run{Status: state.StatusQueued, PRURL: "https://example.com/pr/77"}
-	if got := psPRLabel(run); got != "link" {
-		t.Fatalf("psPRLabel pr_url-only = %q, want link", got)
+	if got := psPRLabel(run); got != "open" {
+		t.Fatalf("psPRLabel pr_url-only = %q, want open", got)
 	}
 }
 

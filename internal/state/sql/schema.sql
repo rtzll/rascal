@@ -26,6 +26,7 @@ CREATE TABLE runs (
   issue_number INTEGER NOT NULL DEFAULT 0,
   pr_number INTEGER NOT NULL DEFAULT 0,
   pr_url TEXT NOT NULL DEFAULT '',
+  pr_status TEXT NOT NULL DEFAULT 'none',
   head_sha TEXT NOT NULL DEFAULT '',
   context TEXT NOT NULL DEFAULT '',
   error TEXT NOT NULL DEFAULT '',
