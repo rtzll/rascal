@@ -1,7 +1,8 @@
+FROM node:24-bookworm-slim AS node-runtime
+
 FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG NODE_MAJOR=24
 ARG GO_VERSION=1.26.0
 ARG GOOSE_VERSION=1.26.1
 
@@ -25,13 +26,12 @@ RUN set -eux; \
     /usr/local/go/bin/go version; \
     rm -f /tmp/go.tar.gz
 
-RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >/dev/null \
-    && apt-get -qq update \
-    && apt-get -y -qq install --no-install-recommends nodejs \
-    && npm install -g --silent --no-progress --no-fund --no-audit @openai/codex \
+COPY --from=node-runtime /usr/local/ /usr/local/
+
+RUN npm install -g --silent --no-progress --no-fund --no-audit @openai/codex \
     && node --version \
-    && codex --version \
-    && rm -rf /var/lib/apt/lists/*
+    && npm --version \
+    && codex --version
 
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
