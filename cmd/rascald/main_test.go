@@ -335,6 +335,60 @@ func TestHandleWebhookIssueReopenedReenablesTask(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return len(s.store.ListRuns(10)) == 1 }, "run queued")
 }
 
+func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+	defer close(waitCh)
+	taskID := "owner/repo#7"
+
+	runningRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "work", IssueNumber: 7})
+	if err != nil {
+		t.Fatalf("create running run: %v", err)
+	}
+	queuedRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "stale", IssueNumber: 7})
+	if err != nil {
+		t.Fatalf("create queued run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to be active")
+
+	payload := []byte(`{"action":"edited","issue":{"number":7,"title":"New Title","body":"New Body","labels":[{"name":"rascal"}]},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "issues", "delivery-edited", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for edited issue event, got %d", rec.Code)
+	}
+
+	waitFor(t, time.Second, func() bool {
+		r, ok := s.store.GetRun(queuedRun.ID)
+		return ok && r.Status == state.StatusCanceled
+	}, "queued run canceled")
+
+	var editedRun state.Run
+	waitFor(t, time.Second, func() bool {
+		for _, run := range s.store.ListRuns(20) {
+			if run.Trigger == "issue_edited" {
+				editedRun = run
+				return true
+			}
+		}
+		return false
+	}, "issue edited run queued")
+
+	if editedRun.Task != "New Title\n\nNew Body" {
+		t.Fatalf("expected updated task text, got %q", editedRun.Task)
+	}
+	if editedRun.TaskID != taskID {
+		t.Fatalf("expected edited run task id %q, got %q", taskID, editedRun.TaskID)
+	}
+	if editedRun.ID == runningRun.ID || editedRun.ID == queuedRun.ID {
+		t.Fatalf("expected new run for edit, got existing run id %q", editedRun.ID)
+	}
+
+}
+
 func TestHandleListRunsSupportsAllQuery(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	for i := 1; i <= 3; i++ {
