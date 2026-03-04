@@ -13,7 +13,7 @@ runtime prerequisites.
 
 - `queued`: accepted, waiting for execution
 - `running`: currently executing in runner
-- `awaiting_feedback`: run created/updated PR and is waiting for reviewer input
+- `review`: run created/updated PR and is waiting for reviewer input
 - `succeeded`: finished without requiring feedback
 - `failed`: execution failed
 - `canceled`: canceled by user or superseded flow

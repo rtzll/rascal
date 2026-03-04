@@ -413,7 +413,7 @@ func (s *Store) SetRunStatus(runID string, status RunStatus, errText string) (Ru
 		if status == StatusRunning {
 			r.StartedAt = &now
 		}
-		if status == StatusSucceeded || status == StatusFailed || status == StatusCanceled || status == StatusAwaitingFeedback {
+		if status == StatusSucceeded || status == StatusFailed || status == StatusCanceled || status == StatusReview {
 			r.CompletedAt = &now
 		}
 		r.Error = errText
@@ -787,7 +787,7 @@ func fromDBRun(r sqlitegen.Run) Run {
 		HeadBranch:  r.HeadBranch,
 		Trigger:     r.Trigger,
 		Debug:       r.Debug,
-		Status:      RunStatus(r.Status),
+		Status:      normalizeRunStatus(RunStatus(r.Status)),
 		RunDir:      r.RunDir,
 		IssueNumber: int(r.IssueNumber),
 		PRNumber:    int(r.PrNumber),
@@ -830,7 +830,7 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 		HeadBranch:  r.HeadBranch,
 		Trigger:     r.Trigger,
 		Debug:       r.Debug,
-		Status:      string(r.Status),
+		Status:      string(normalizeRunStatus(r.Status)),
 		RunDir:      r.RunDir,
 		IssueNumber: int64(r.IssueNumber),
 		PrNumber:    int64(r.PRNumber),
@@ -853,6 +853,15 @@ func normalizePRStatus(in PRStatus) PRStatus {
 		return in
 	default:
 		return PRStatusNone
+	}
+}
+
+func normalizeRunStatus(in RunStatus) RunStatus {
+	switch in {
+	case "awaiting_feedback":
+		return StatusReview
+	default:
+		return in
 	}
 }
 

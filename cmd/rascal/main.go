@@ -2198,8 +2198,10 @@ func (a *app) fetchRun(runID string) (state.Run, error) {
 
 func psStatusLabel(run state.Run) string {
 	switch run.Status {
-	case state.StatusAwaitingFeedback:
-		return "awaiting_review"
+	case state.StatusReview:
+		return "review"
+	case "awaiting_feedback":
+		return "review"
 	default:
 		return string(run.Status)
 	}
@@ -2237,7 +2239,9 @@ func effectivePRStatus(run state.Run) state.PRStatus {
 		return state.PRStatusNone
 	}
 	switch run.Status {
-	case state.StatusAwaitingFeedback:
+	case state.StatusReview:
+		return state.PRStatusOpen
+	case "awaiting_feedback":
 		return state.PRStatusOpen
 	case state.StatusSucceeded:
 		return state.PRStatusMerged

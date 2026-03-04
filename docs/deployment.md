@@ -88,7 +88,7 @@ Additional safeguards:
 - Active cancellation propagates to runner context.
 - Docker launcher explicitly stops and removes the run container on cancel.
 - Final success write is guarded so canceled runs cannot later become
-  `succeeded` or `awaiting_feedback`.
+  `succeeded` or `review`.
 - Cancel reason distinguishes user cancel vs shutdown/drain timeout.
 
 ## Rollback Behavior

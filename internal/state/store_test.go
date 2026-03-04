@@ -62,7 +62,7 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 	}
 
 	if _, err := store.UpdateRun(run.ID, func(r *Run) error {
-		r.Status = StatusAwaitingFeedback
+		r.Status = StatusReview
 		r.PRNumber = 123
 		return nil
 	}); err != nil {

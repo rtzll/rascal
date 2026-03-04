@@ -5,12 +5,12 @@ import "time"
 type RunStatus string
 
 const (
-	StatusQueued           RunStatus = "queued"
-	StatusRunning          RunStatus = "running"
-	StatusAwaitingFeedback RunStatus = "awaiting_feedback"
-	StatusSucceeded        RunStatus = "succeeded"
-	StatusFailed           RunStatus = "failed"
-	StatusCanceled         RunStatus = "canceled"
+	StatusQueued    RunStatus = "queued"
+	StatusRunning   RunStatus = "running"
+	StatusReview    RunStatus = "review"
+	StatusSucceeded RunStatus = "succeeded"
+	StatusFailed    RunStatus = "failed"
+	StatusCanceled  RunStatus = "canceled"
 )
 
 type PRStatus string

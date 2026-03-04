@@ -928,7 +928,7 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 
 func runStatusIsDone(status state.RunStatus) bool {
 	switch status {
-	case state.StatusSucceeded, state.StatusFailed, state.StatusCanceled, state.StatusAwaitingFeedback:
+	case state.StatusSucceeded, state.StatusFailed, state.StatusCanceled, state.StatusReview:
 		return true
 	default:
 		return false
@@ -1238,7 +1238,7 @@ func (s *server) executeRun(runID string) {
 	status := state.StatusSucceeded
 	prStatus := state.PRStatusNone
 	if result.PRNumber > 0 || strings.TrimSpace(result.PRURL) != "" || run.PRNumber > 0 || strings.TrimSpace(run.PRURL) != "" {
-		status = state.StatusAwaitingFeedback
+		status = state.StatusReview
 		prStatus = state.PRStatusOpen
 	}
 	var errRunCanceled = errors.New("run already canceled")
@@ -1274,7 +1274,7 @@ func (s *server) executeRun(runID string) {
 	switch updated.Status {
 	case state.StatusSucceeded:
 		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionRocket)
-	case state.StatusAwaitingFeedback:
+	case state.StatusReview:
 		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionHooray)
 	case state.StatusFailed:
 		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionConfused)
@@ -1284,7 +1284,7 @@ func (s *server) executeRun(runID string) {
 	if updated.PRNumber > 0 {
 		_ = s.store.SetTaskPR(updated.TaskID, updated.Repo, updated.PRNumber)
 	}
-	if updated.Status == state.StatusSucceeded || updated.Status == state.StatusAwaitingFeedback {
+	if updated.Status == state.StatusSucceeded || updated.Status == state.StatusReview {
 		s.postRunCompletionCommentBestEffort(updated)
 	}
 	s.finishRun(updated)
@@ -1352,7 +1352,7 @@ func (s *server) setRunStatusWithFallback(run state.Run, status state.RunStatus,
 	if status == state.StatusRunning {
 		run.StartedAt = &now
 	}
-	if status == state.StatusSucceeded || status == state.StatusFailed || status == state.StatusCanceled || status == state.StatusAwaitingFeedback {
+	if status == state.StatusSucceeded || status == state.StatusFailed || status == state.StatusCanceled || status == state.StatusReview {
 		run.CompletedAt = &now
 	}
 	return run
@@ -1432,7 +1432,7 @@ func (s *server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {
 			now := time.Now().UTC()
 			if merged {
 				r.PRStatus = state.PRStatusMerged
-				if r.Status == state.StatusAwaitingFeedback {
+				if r.Status == state.StatusReview {
 					r.Status = state.StatusSucceeded
 					r.Error = ""
 					r.CompletedAt = &now
@@ -1440,7 +1440,7 @@ func (s *server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {
 				return nil
 			}
 			r.PRStatus = state.PRStatusClosedUnmerged
-			if r.Status == state.StatusAwaitingFeedback {
+			if r.Status == state.StatusReview {
 				r.Status = state.StatusCanceled
 				r.Error = "pull request closed without merge"
 				r.CompletedAt = &now

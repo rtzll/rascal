@@ -1015,7 +1015,7 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add awaiting run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(awaitingRun.ID, state.StatusAwaitingFeedback, ""); err != nil {
+	if _, err := s.store.SetRunStatus(awaitingRun.ID, state.StatusReview, ""); err != nil {
 		t.Fatalf("set awaiting status: %v", err)
 	}
 
@@ -1073,7 +1073,7 @@ func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(run.ID, state.StatusAwaitingFeedback, ""); err != nil {
+	if _, err := s.store.SetRunStatus(run.ID, state.StatusReview, ""); err != nil {
 		t.Fatalf("set awaiting status: %v", err)
 	}
 

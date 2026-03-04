@@ -601,12 +601,12 @@ func TestPSAllCannotBeCombinedWithLimit(t *testing.T) {
 }
 
 func TestPSStatusAndPRLabels(t *testing.T) {
-	run := state.Run{Status: state.StatusAwaitingFeedback, PRNumber: 77}
-	if got := psStatusLabel(run); got != "awaiting_review" {
-		t.Fatalf("psStatusLabel awaiting_feedback = %q, want awaiting_review", got)
+	run := state.Run{Status: state.StatusReview, PRNumber: 77}
+	if got := psStatusLabel(run); got != "review" {
+		t.Fatalf("psStatusLabel review = %q, want review", got)
 	}
 	if got := psPRLabel(run); got != "#77 open" {
-		t.Fatalf("psPRLabel awaiting_feedback = %q, want #77 open", got)
+		t.Fatalf("psPRLabel review = %q, want #77 open", got)
 	}
 
 	run = state.Run{Status: state.StatusSucceeded, PRNumber: 77}
