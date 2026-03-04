@@ -706,6 +706,9 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return fmt.Errorf("decode pull_request_review_comment event: %w", err)
 		}
+		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
+			return nil
+		}
 		switch ev.Action {
 		case "created":
 		case "edited":
@@ -715,48 +718,42 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		default:
 			return nil
 		}
-		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
-			return nil
-		}
 		taskID, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
 		if !ok {
 			return nil
 		}
-		s.addPullRequestReviewCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
-
-		contextText := strings.TrimSpace(ev.Comment.Body)
-		if location := formatReviewCommentLocation(ev.Comment.Path, ev.Comment.StartLine, ev.Comment.Line); location != "" {
-			if contextText == "" {
-				contextText = fmt.Sprintf("inline review comment at %s", location)
-			} else {
-				contextText = fmt.Sprintf(`%s
-
-Inline comment location: %s`, contextText, location)
-			}
-		}
-		_, err := s.createAndQueueRun(runRequest{
-			TaskID:      taskID,
-			Repo:        ev.Repository.FullName,
-			Task:        fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
-			Trigger:     "pr_review_comment",
-			IssueNumber: ev.PullRequest.Number,
-			PRNumber:    ev.PullRequest.Number,
-			PRStatus:    state.PRStatusOpen,
-			Context:     contextText,
-			BaseBranch:  s.defaultBaseBranchForTask(taskID),
-			HeadBranch:  s.defaultHeadBranchForTask(taskID),
-			Debug:       boolPtr(true),
-			ResponseTarget: &runResponseTarget{
+		contextText := reviewCommentContext(ev.Comment)
+		switch ev.Action {
+		case "created":
+			s.addPullRequestReviewCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
+			_, err := s.createAndQueueRun(runRequest{
+				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
-				IssueNumber: ev.PullRequest.Number,
-				RequestedBy: strings.TrimSpace(ev.Sender.Login),
+				Task:        fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
 				Trigger:     "pr_review_comment",
-			},
-		})
-		if errors.Is(err, errTaskCompleted) {
+				IssueNumber: ev.PullRequest.Number,
+				PRNumber:    ev.PullRequest.Number,
+				PRStatus:    state.PRStatusOpen,
+				Context:     contextText,
+				BaseBranch:  s.defaultBaseBranchForTask(taskID),
+				HeadBranch:  s.defaultHeadBranchForTask(taskID),
+				Debug:       boolPtr(true),
+				ResponseTarget: &runResponseTarget{
+					Repo:        ev.Repository.FullName,
+					IssueNumber: ev.PullRequest.Number,
+					RequestedBy: strings.TrimSpace(ev.Sender.Login),
+					Trigger:     "pr_review_comment",
+				},
+			})
+			if errors.Is(err, errTaskCompleted) {
+				return nil
+			}
+			return err
+		case "edited":
+			return s.refreshReviewCommentContext(taskID, ev.PullRequest.Number, contextText)
+		default:
 			return nil
 		}
-		return err
 	case "pull_request":
 		var ev ghapi.PullRequestEvent
 		if err := json.Unmarshal(payload, &ev); err != nil {
@@ -789,6 +786,32 @@ Inline comment location: %s`, contextText, location)
 	default:
 		return nil
 	}
+}
+
+func (s *server) refreshReviewCommentContext(taskID string, prNumber int, contextText string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	run, ok := s.store.LastRunForTask(taskID)
+	if !ok {
+		return nil
+	}
+	if run.Trigger != "pr_review_comment" || run.PRNumber != prNumber {
+		return nil
+	}
+	contextText = strings.TrimSpace(contextText)
+	if run.Context == contextText {
+		return nil
+	}
+	updated, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
+		r.Context = contextText
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return s.writeRunContextFiles(updated)
 }
 
 func (s *server) handleRunSubresources(w http.ResponseWriter, r *http.Request) {
@@ -1074,27 +1097,7 @@ func (s *server) writeRunFiles(run state.Run) error {
 		}
 	}
 
-	ctxPayload := map[string]any{
-		"run_id":       run.ID,
-		"task_id":      run.TaskID,
-		"repo":         run.Repo,
-		"task":         run.Task,
-		"trigger":      run.Trigger,
-		"issue_number": run.IssueNumber,
-		"pr_number":    run.PRNumber,
-		"context":      run.Context,
-		"debug":        run.Debug,
-	}
-	ctxData, err := json.MarshalIndent(ctxPayload, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(run.RunDir, "context.json"), ctxData, 0o644); err != nil {
-		return err
-	}
-
-	instructions := instructionText(run)
-	if err := os.WriteFile(filepath.Join(run.RunDir, "instructions.md"), []byte(instructions), 0o644); err != nil {
+	if err := s.writeRunContextFiles(run); err != nil {
 		return err
 	}
 
@@ -1138,6 +1141,36 @@ func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget
 	path := filepath.Join(run.RunDir, runResponseTargetFile)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write run response target: %w", err)
+	}
+	return nil
+}
+
+func (s *server) writeRunContextFiles(run state.Run) error {
+	if err := os.MkdirAll(run.RunDir, 0o755); err != nil {
+		return err
+	}
+	ctxPayload := map[string]any{
+		"run_id":       run.ID,
+		"task_id":      run.TaskID,
+		"repo":         run.Repo,
+		"task":         run.Task,
+		"trigger":      run.Trigger,
+		"issue_number": run.IssueNumber,
+		"pr_number":    run.PRNumber,
+		"context":      run.Context,
+		"debug":        run.Debug,
+	}
+	ctxData, err := json.MarshalIndent(ctxPayload, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, "context.json"), ctxData, 0o644); err != nil {
+		return err
+	}
+
+	instructions := instructionText(run)
+	if err := os.WriteFile(filepath.Join(run.RunDir, "instructions.md"), []byte(instructions), 0o644); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1653,6 +1686,20 @@ func issueTaskFromIssue(title, body string) string {
 	return fmt.Sprintf(`%s
 
 %s`, title, body)
+}
+
+func reviewCommentContext(comment ghapi.ReviewComment) string {
+	contextText := strings.TrimSpace(comment.Body)
+	if location := formatReviewCommentLocation(comment.Path, comment.StartLine, comment.Line); location != "" {
+		if contextText == "" {
+			contextText = fmt.Sprintf("inline review comment at %s", location)
+		} else {
+			contextText = fmt.Sprintf(`%s
+
+Inline comment location: %s`, contextText, location)
+		}
+	}
+	return contextText
 }
 
 func formatReviewCommentLocation(path string, startLine, line *int) string {
