@@ -618,6 +618,94 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 	}
 }
 
+func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	const (
+		repo    = "owner/repo"
+		taskID  = "owner/repo#17"
+		prNum   = 17
+		baseRef = "main"
+		headRef = "rascal/pr-17"
+	)
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, PRNumber: prNum}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	seedRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "seed_run_edited",
+		TaskID:     taskID,
+		Repo:       repo,
+		Task:       "seed",
+		BaseBranch: baseRef,
+		HeadBranch: headRef,
+		Trigger:    "seed",
+		RunDir:     filepath.Join(t.TempDir(), "seed_run_edited"),
+		PRNumber:   prNum,
+	})
+	if err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(seedRun.ID, state.StatusSucceeded, ""); err != nil {
+		t.Fatalf("mark seed run succeeded: %v", err)
+	}
+
+	payload := []byte(`{"action":"edited","issue":{"number":17,"pull_request":{}},"comment":{"id":202,"body":"  updated feedback  ","user":{"login":"alice"}},"changes":{"body":{"from":"prior feedback"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-edited", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var got state.Run
+	waitFor(t, time.Second, func() bool {
+		runs := s.store.ListRuns(20)
+		for _, run := range runs {
+			if run.Trigger == "pr_comment" {
+				got = run
+				return true
+			}
+		}
+		return false
+	}, "pr_comment run created")
+
+	if got.TaskID != taskID {
+		t.Fatalf("task id = %q, want %q", got.TaskID, taskID)
+	}
+	if got.PRNumber != prNum {
+		t.Fatalf("pr number = %d, want %d", got.PRNumber, prNum)
+	}
+	if got.BaseBranch != baseRef {
+		t.Fatalf("base branch = %q, want %q", got.BaseBranch, baseRef)
+	}
+	if got.HeadBranch != headRef {
+		t.Fatalf("head branch = %q, want %q", got.HeadBranch, headRef)
+	}
+	if got.Context != "updated feedback" {
+		t.Fatalf("context = %q, want trimmed updated comment body", got.Context)
+	}
+}
+
+func TestHandleWebhookIssueCommentEditedSkipsUnchangedBody(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	payload := []byte(`{"action":"edited","issue":{"number":9,"pull_request":{}},"comment":{"id":303,"body":"  same feedback  ","user":{"login":"alice"}},"changes":{"body":{"from":"same feedback"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-nochange", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	for _, run := range s.store.ListRuns(10) {
+		if run.Trigger == "pr_comment" {
+			t.Fatalf("expected no pr_comment run for unchanged edit")
+		}
+	}
+}
+
 func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
