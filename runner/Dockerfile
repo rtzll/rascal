@@ -25,7 +25,6 @@ RUN set -eux; \
     curl -fsSL "https://github.com/block/goose/releases/download/v${GOOSE_VERSION}/${goose_asset}" -o /tmp/goose.tar.bz2; \
     tar -xjf /tmp/goose.tar.bz2 -C /tmp; \
     install -m 0755 /tmp/goose /usr/local/bin/goose; \
-    goose --version; \
     rm -f /tmp/goose.tar.bz2 /tmp/goose
 
 FROM ubuntu:24.04
@@ -44,7 +43,7 @@ COPY --from=goose-runtime /usr/local/bin/goose /usr/local/bin/goose
 RUN node --version \
     && npm --version \
     && codex --version \
-    && go version \
+    && /usr/local/go/bin/go version \
     && goose --version
 
 ENV GOOSE_PROVIDER=codex \
