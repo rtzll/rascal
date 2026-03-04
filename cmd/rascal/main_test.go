@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/config"
+	"github.com/rtzll/rascal/internal/state"
 )
 
 func TestMaskSecret(t *testing.T) {
@@ -596,6 +597,36 @@ func TestPSAllCannotBeCombinedWithLimit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--all cannot be combined with --limit") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPSStatusAndPRLabels(t *testing.T) {
+	run := state.Run{Status: state.StatusAwaitingFeedback, PRNumber: 77}
+	if got := psStatusLabel(run); got != "awaiting_review" {
+		t.Fatalf("psStatusLabel awaiting_feedback = %q, want awaiting_review", got)
+	}
+	if got := psPRLabel(run); got != "#77 open" {
+		t.Fatalf("psPRLabel awaiting_feedback = %q, want #77 open", got)
+	}
+
+	run = state.Run{Status: state.StatusSucceeded, PRNumber: 77}
+	if got := psPRLabel(run); got != "#77 merged" {
+		t.Fatalf("psPRLabel succeeded = %q, want #77 merged", got)
+	}
+
+	run = state.Run{Status: state.StatusCanceled, PRNumber: 77}
+	if got := psPRLabel(run); got != "#77 closed" {
+		t.Fatalf("psPRLabel canceled = %q, want #77 closed", got)
+	}
+
+	run = state.Run{Status: state.StatusQueued}
+	if got := psPRLabel(run); got != "-" {
+		t.Fatalf("psPRLabel no pr = %q, want -", got)
+	}
+
+	run = state.Run{Status: state.StatusQueued, PRURL: "https://example.com/pr/77"}
+	if got := psPRLabel(run); got != "link" {
+		t.Fatalf("psPRLabel pr_url-only = %q, want link", got)
 	}
 }
 

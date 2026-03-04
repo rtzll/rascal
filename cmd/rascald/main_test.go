@@ -48,11 +48,19 @@ type postedIssueComment struct {
 	body        string
 }
 
+type postedIssueReaction struct {
+	repo        string
+	issueNumber int
+	content     string
+}
+
 type fakeGitHubClient struct {
 	mu sync.Mutex
 
 	issueData ghapi.IssueData
 	issueErr  error
+
+	issueReactions []postedIssueReaction
 
 	issueComments            []postedIssueComment
 	createIssueCommentErr    error
@@ -102,7 +110,18 @@ func (f *fakeGitHubClient) GetIssue(_ context.Context, _ string, _ int) (ghapi.I
 	return f.issueData, nil
 }
 
-func (f *fakeGitHubClient) AddIssueReaction(_ context.Context, _ string, _ int, _ string) error {
+func (f *fakeGitHubClient) addIssueReaction(repo string, issueNumber int, content string) {
+	f.issueReactions = append(f.issueReactions, postedIssueReaction{
+		repo:        repo,
+		issueNumber: issueNumber,
+		content:     content,
+	})
+}
+
+func (f *fakeGitHubClient) AddIssueReaction(_ context.Context, repo string, issueNumber int, content string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addIssueReaction(repo, issueNumber, content)
 	return nil
 }
 
@@ -150,6 +169,14 @@ func (f *fakeGitHubClient) createCommentCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.createIssueCommentCalls
+}
+
+func (f *fakeGitHubClient) postedReactions() []postedIssueReaction {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]postedIssueReaction, len(f.issueReactions))
+	copy(out, f.issueReactions)
+	return out
 }
 
 func (f *fakeLauncher) Calls() int {
@@ -869,6 +896,9 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
 	taskID := "owner/repo#123"
 
 	_, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "first", PRNumber: 55})
@@ -884,6 +914,22 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	if err := s.store.SetTaskPR(taskID, "owner/repo", 55); err != nil {
 		t.Fatalf("set task pr: %v", err)
 	}
+	awaitingRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_awaiting_merge",
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Task:        "await merge",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		IssueNumber: 55,
+		PRNumber:    55,
+	})
+	if err != nil {
+		t.Fatalf("add awaiting run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(awaitingRun.ID, state.StatusAwaitingFeedback, ""); err != nil {
+		t.Fatalf("set awaiting status: %v", err)
+	}
 
 	payload := []byte(`{"action":"closed","pull_request":{"number":55,"merged":true},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
 	req := webhookRequest(t, payload, "pull_request", "delivery-merged", "")
@@ -898,8 +944,80 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 		r, ok := s.store.GetRun(queuedRun.ID)
 		return ok && r.Status == state.StatusCanceled
 	}, "queued run canceled")
+	waitFor(t, time.Second, func() bool {
+		r, ok := s.store.GetRun(awaitingRun.ID)
+		return ok && r.Status == state.StatusSucceeded
+	}, "awaiting-feedback run marked succeeded on merge")
+	reactions := fakeGH.postedReactions()
+	foundRocket := false
+	for _, r := range reactions {
+		if r.repo == "owner/repo" && r.issueNumber == 55 && r.content == ghapi.ReactionRocket {
+			foundRocket = true
+			break
+		}
+	}
+	if !foundRocket {
+		t.Fatalf("expected merged PR rocket reaction, got %+v", reactions)
+	}
 
 	close(waitCh)
+}
+
+func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+	taskID := "owner/repo#987"
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 99}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_unmerged",
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Task:        "wait for merge",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		IssueNumber: 99,
+		PRNumber:    99,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(run.ID, state.StatusAwaitingFeedback, ""); err != nil {
+		t.Fatalf("set awaiting status: %v", err)
+	}
+
+	payload := []byte(`{"action":"closed","pull_request":{"number":99,"merged":false},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "pull_request", "delivery-closed-unmerged", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for closed unmerged pr event, got %d", rec.Code)
+	}
+
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("run %s not found", run.ID)
+	}
+	if updated.Status != state.StatusCanceled {
+		t.Fatalf("expected canceled status, got %s", updated.Status)
+	}
+	if !strings.Contains(updated.Error, "without merge") {
+		t.Fatalf("expected unmerged close reason, got %q", updated.Error)
+	}
+	reactions := fakeGH.postedReactions()
+	foundMinus := false
+	for _, r := range reactions {
+		if r.repo == "owner/repo" && r.issueNumber == 99 && r.content == ghapi.ReactionMinusOne {
+			foundMinus = true
+			break
+		}
+	}
+	if !foundMinus {
+		t.Fatalf("expected -1 reaction on closed unmerged PR, got %+v", reactions)
+	}
 }
 
 func TestExecuteRunRetriesLauncherFailure(t *testing.T) {

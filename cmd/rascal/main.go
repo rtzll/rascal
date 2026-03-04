@@ -998,13 +998,21 @@ func (a *app) newPSCmd() *cobra.Command {
 				return &cliError{Code: exitInput, Message: "--watch is only supported with --output table"}
 			}
 
-			render := func(runs []state.Run) error {
-				return a.emit(map[string]any{"runs": runs}, func() error {
-					tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-					fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tTASK ID\tCREATED")
-					for _, run := range runs {
-						fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", run.ID, run.Status, run.Repo, run.TaskID, run.CreatedAt.Format(time.RFC3339))
-					}
+				render := func(runs []state.Run) error {
+					return a.emit(map[string]any{"runs": runs}, func() error {
+						tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+						fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tPR\tCREATED")
+						for _, run := range runs {
+							fmt.Fprintf(
+								tw,
+								"%s\t%s\t%s\t%s\t%s\n",
+								run.ID,
+								psStatusLabel(run),
+								run.Repo,
+								psPRLabel(run),
+								run.CreatedAt.Format(time.RFC3339),
+							)
+						}
 					return tw.Flush()
 				})
 			}
@@ -2186,6 +2194,34 @@ func (a *app) fetchRun(runID string) (state.Run, error) {
 		return state.Run{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 	}
 	return out.Run, nil
+}
+
+func psStatusLabel(run state.Run) string {
+	switch run.Status {
+	case state.StatusAwaitingFeedback:
+		return "awaiting_review"
+	default:
+		return string(run.Status)
+	}
+}
+
+func psPRLabel(run state.Run) string {
+	if run.PRNumber <= 0 {
+		if strings.TrimSpace(run.PRURL) == "" {
+			return "-"
+		}
+		return "link"
+	}
+	switch run.Status {
+	case state.StatusAwaitingFeedback:
+		return fmt.Sprintf("#%d open", run.PRNumber)
+	case state.StatusSucceeded:
+		return fmt.Sprintf("#%d merged", run.PRNumber)
+	case state.StatusCanceled:
+		return fmt.Sprintf("#%d closed", run.PRNumber)
+	default:
+		return fmt.Sprintf("#%d", run.PRNumber)
+	}
 }
 
 func (a *app) fetchTask(taskID string) (state.Task, error) {

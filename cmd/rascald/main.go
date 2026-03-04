@@ -608,15 +608,16 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 
 		taskID := s.resolveTaskForPR(ev.Repository.FullName, ev.Issue.Number)
 		_, err := s.createAndQueueRun(runRequest{
-			TaskID:     taskID,
-			Repo:       ev.Repository.FullName,
-			Task:       fmt.Sprintf("Address PR #%d feedback", ev.Issue.Number),
-			Trigger:    "pr_comment",
-			PRNumber:   ev.Issue.Number,
-			Context:    strings.TrimSpace(ev.Comment.Body),
-			BaseBranch: s.defaultBaseBranchForTask(taskID),
-			HeadBranch: s.defaultHeadBranchForTask(taskID),
-			Debug:      boolPtr(true),
+			TaskID:      taskID,
+			Repo:        ev.Repository.FullName,
+			Task:        fmt.Sprintf("Address PR #%d feedback", ev.Issue.Number),
+			Trigger:     "pr_comment",
+			IssueNumber: ev.Issue.Number,
+			PRNumber:    ev.Issue.Number,
+			Context:     strings.TrimSpace(ev.Comment.Body),
+			BaseBranch:  s.defaultBaseBranchForTask(taskID),
+			HeadBranch:  s.defaultHeadBranchForTask(taskID),
+			Debug:       boolPtr(true),
 			ResponseTarget: &runResponseTarget{
 				Repo:        ev.Repository.FullName,
 				IssueNumber: ev.Issue.Number,
@@ -647,15 +648,16 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			contextText = fmt.Sprintf("review state: %s", ev.Review.State)
 		}
 		_, err := s.createAndQueueRun(runRequest{
-			TaskID:     taskID,
-			Repo:       ev.Repository.FullName,
-			Task:       fmt.Sprintf("Address PR #%d review feedback", ev.PullRequest.Number),
-			Trigger:    "pr_review",
-			PRNumber:   ev.PullRequest.Number,
-			Context:    contextText,
-			BaseBranch: s.defaultBaseBranchForTask(taskID),
-			HeadBranch: s.defaultHeadBranchForTask(taskID),
-			Debug:      boolPtr(true),
+			TaskID:      taskID,
+			Repo:        ev.Repository.FullName,
+			Task:        fmt.Sprintf("Address PR #%d review feedback", ev.PullRequest.Number),
+			Trigger:     "pr_review",
+			IssueNumber: ev.PullRequest.Number,
+			PRNumber:    ev.PullRequest.Number,
+			Context:     contextText,
+			BaseBranch:  s.defaultBaseBranchForTask(taskID),
+			HeadBranch:  s.defaultHeadBranchForTask(taskID),
+			Debug:       boolPtr(true),
 			ResponseTarget: &runResponseTarget{
 				Repo:        ev.Repository.FullName,
 				IssueNumber: ev.PullRequest.Number,
@@ -692,15 +694,16 @@ Inline comment location: %s`, contextText, location)
 			}
 		}
 		_, err := s.createAndQueueRun(runRequest{
-			TaskID:     taskID,
-			Repo:       ev.Repository.FullName,
-			Task:       fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
-			Trigger:    "pr_review_comment",
-			PRNumber:   ev.PullRequest.Number,
-			Context:    contextText,
-			BaseBranch: s.defaultBaseBranchForTask(taskID),
-			HeadBranch: s.defaultHeadBranchForTask(taskID),
-			Debug:      boolPtr(true),
+			TaskID:      taskID,
+			Repo:        ev.Repository.FullName,
+			Task:        fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
+			Trigger:     "pr_review_comment",
+			IssueNumber: ev.PullRequest.Number,
+			PRNumber:    ev.PullRequest.Number,
+			Context:     contextText,
+			BaseBranch:  s.defaultBaseBranchForTask(taskID),
+			HeadBranch:  s.defaultHeadBranchForTask(taskID),
+			Debug:       boolPtr(true),
 			ResponseTarget: &runResponseTarget{
 				Repo:        ev.Repository.FullName,
 				IssueNumber: ev.PullRequest.Number,
@@ -717,14 +720,21 @@ Inline comment location: %s`, contextText, location)
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return fmt.Errorf("decode pull_request event: %w", err)
 		}
-		if ev.Action == "closed" && ev.PullRequest.Merged {
+		if ev.Action == "closed" {
 			taskID := s.resolveTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
 			_, _ = s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: ev.Repository.FullName, PRNumber: ev.PullRequest.Number})
-			if err := s.store.MarkTaskCompleted(taskID); err != nil {
-				return err
-			}
-			if err := s.store.CancelQueuedRuns(taskID, "task completed by merged PR"); err != nil {
-				return err
+			if ev.PullRequest.Merged {
+				if err := s.store.MarkTaskCompleted(taskID); err != nil {
+					return err
+				}
+				if err := s.store.CancelQueuedRuns(taskID, "task completed by merged PR"); err != nil {
+					return err
+				}
+				s.reconcileClosedPRRuns(ev.Repository.FullName, ev.PullRequest.Number, true)
+				s.addIssueReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ghapi.ReactionRocket)
+			} else {
+				s.reconcileClosedPRRuns(ev.Repository.FullName, ev.PullRequest.Number, false)
+				s.addIssueReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ghapi.ReactionMinusOne)
 			}
 		}
 		return nil
@@ -1189,8 +1199,11 @@ func (s *server) executeRun(runID string) {
 		if !ok || updated.Status != state.StatusCanceled {
 			updated = s.setRunStatusWithFallback(run, status, errText)
 		}
-		if updated.Status == state.StatusFailed {
+		switch updated.Status {
+		case state.StatusFailed:
 			s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionConfused)
+		case state.StatusCanceled:
+			s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionMinusOne)
 		}
 		s.finishRun(updated)
 		return
@@ -1231,10 +1244,14 @@ func (s *server) executeRun(runID string) {
 		updated = s.setRunStatusWithFallback(run, state.StatusFailed, uErr.Error())
 	}
 	switch updated.Status {
-	case state.StatusSucceeded, state.StatusAwaitingFeedback:
+	case state.StatusSucceeded:
 		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionRocket)
+	case state.StatusAwaitingFeedback:
+		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionHooray)
 	case state.StatusFailed:
 		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionConfused)
+	case state.StatusCanceled:
+		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionMinusOne)
 	}
 	if updated.PRNumber > 0 {
 		_ = s.store.SetTaskPR(updated.TaskID, updated.Repo, updated.PRNumber)
@@ -1370,6 +1387,25 @@ func (s *server) scheduleRuns(preferredTaskID string) {
 		}
 
 		go s.executeRun(run.ID)
+	}
+}
+
+func (s *server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {
+	repo = strings.TrimSpace(repo)
+	if repo == "" || prNumber <= 0 {
+		return
+	}
+	runs := s.store.ListRuns(10000)
+	for _, run := range runs {
+		if run.Repo != repo || run.PRNumber != prNumber {
+			continue
+		}
+		switch {
+		case merged && run.Status == state.StatusAwaitingFeedback:
+			_, _ = s.store.SetRunStatus(run.ID, state.StatusSucceeded, "")
+		case !merged && run.Status == state.StatusAwaitingFeedback:
+			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, "pull request closed without merge")
+		}
 	}
 }
 
