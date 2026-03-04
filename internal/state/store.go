@@ -185,6 +185,25 @@ func (s *Store) MarkTaskCompleted(taskID string) error {
 	return nil
 }
 
+func (s *Store) MarkTaskOpen(taskID string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("task id is required")
+	}
+	res, err := s.db.ExecContext(context.Background(), "UPDATE tasks SET status = 'open', updated_at = ? WHERE id = ?", time.Now().UTC().UnixNano(), taskID)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("task %q not found", taskID)
+	}
+	return nil
+}
+
 func (s *Store) IsTaskCompleted(taskID string) bool {
 	ok, err := s.q.IsTaskCompleted(context.Background(), strings.TrimSpace(taskID))
 	if err != nil {
