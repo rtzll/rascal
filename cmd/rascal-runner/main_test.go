@@ -339,7 +339,7 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 	if !strings.Contains(prBody, "<details><summary>Goose Details</summary>") {
 		t.Fatalf("expected goose details block in pr body:\n%s", prBody)
 	}
-	if !strings.Contains(prBody, "consumed 321 tokens") {
+	if !strings.Contains(prBody, "Rascal run `run_fake` completed in ") || !strings.Contains(prBody, "· 321 tokens") {
 		t.Fatalf("expected token summary in pr body:\n%s", prBody)
 	}
 }
