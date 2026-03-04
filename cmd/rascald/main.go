@@ -521,6 +521,27 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				return nil
 			}
 			return err
+		case "edited":
+			if !issueHasLabel(ev.Issue.Labels, "rascal") {
+				return nil
+			}
+			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
+			if err := s.store.CancelQueuedRuns(taskID, "issue edited"); err != nil {
+				return err
+			}
+			_, err := s.createAndQueueRun(runRequest{
+				TaskID:      taskID,
+				Repo:        ev.Repository.FullName,
+				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Trigger:     "issue_edited",
+				IssueNumber: ev.Issue.Number,
+				Context:     fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number),
+				Debug:       boolPtr(true),
+			})
+			if errors.Is(err, errTaskCompleted) {
+				return nil
+			}
+			return err
 		case "closed":
 			if !issueHasLabel(ev.Issue.Labels, "rascal") {
 				return nil
