@@ -474,6 +474,131 @@ func TestRunRetryDebugDefaults(t *testing.T) {
 	}
 }
 
+func TestPSDefaults(t *testing.T) {
+	root := newRootCmd()
+
+	psCmd, _, err := root.Find([]string{"ps"})
+	if err != nil {
+		t.Fatalf("ps command missing: %v", err)
+	}
+	if got := psCmd.Flags().Lookup("limit").DefValue; got != "10" {
+		t.Fatalf("ps default limit = %q, want 10", got)
+	}
+	if got := psCmd.Flags().Lookup("all").DefValue; got != "false" {
+		t.Fatalf("ps default all = %q, want false", got)
+	}
+}
+
+func TestPSUsesDefaultLimitQuery(t *testing.T) {
+	var gotLimit, gotAll string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/v1/runs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		gotLimit = r.URL.Query().Get("limit")
+		gotAll = r.URL.Query().Get("all")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{}})
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "json",
+	}
+
+	cmd := a.newPSCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
+		t.Fatalf("ps execute: %v", err)
+	}
+	if gotLimit != "10" {
+		t.Fatalf("expected limit=10, got %q", gotLimit)
+	}
+	if gotAll != "" {
+		t.Fatalf("expected all query empty, got %q", gotAll)
+	}
+}
+
+func TestPSAllUsesAllQuery(t *testing.T) {
+	var gotLimit, gotAll string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/v1/runs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		gotLimit = r.URL.Query().Get("limit")
+		gotAll = r.URL.Query().Get("all")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{}})
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "json",
+	}
+
+	cmd := a.newPSCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--all"})
+	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
+		t.Fatalf("ps --all execute: %v", err)
+	}
+	if gotAll != "1" {
+		t.Fatalf("expected all=1, got %q", gotAll)
+	}
+	if gotLimit != "" {
+		t.Fatalf("expected limit query empty when --all is used, got %q", gotLimit)
+	}
+}
+
+func TestPSAllCannotBeCombinedWithLimit(t *testing.T) {
+	a := &app{
+		cfg: config.ClientConfig{
+			APIToken: "test-token",
+		},
+	}
+	cmd := a.newPSCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--all", "--limit", "25"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --all and --limit are combined")
+	}
+	if !strings.Contains(err.Error(), "--all cannot be combined with --limit") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
 	var payload map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

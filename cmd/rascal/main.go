@@ -972,6 +972,7 @@ rascal run --issue OWNER/REPO#123
 func (a *app) newPSCmd() *cobra.Command {
 	var (
 		limit    int
+		all      bool
 		watch    bool
 		interval time.Duration
 	)
@@ -979,10 +980,13 @@ func (a *app) newPSCmd() *cobra.Command {
 		Use:     "ps",
 		Aliases: []string{"ls"},
 		Short:   "List recent runs",
-		Example: "  rascal ps\n  rascal ps --watch\n  rascal ps --output json",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		Example: "  rascal ps\n  rascal ps --limit 25\n  rascal ps --all\n  rascal ps --watch\n  rascal ps --output json",
+		RunE: func(c *cobra.Command, _ []string) error {
 			if err := a.requireServerAuth(); err != nil {
 				return err
+			}
+			if all && c.Flags().Changed("limit") {
+				return &cliError{Code: exitInput, Message: "--all cannot be combined with --limit"}
 			}
 			if watch && a.output != "table" {
 				return &cliError{Code: exitInput, Message: "--watch is only supported with --output table"}
@@ -1000,7 +1004,7 @@ func (a *app) newPSCmd() *cobra.Command {
 			}
 
 			if !watch {
-				runs, err := a.fetchRuns(limit)
+				runs, err := a.fetchRuns(limit, all)
 				if err != nil {
 					return err
 				}
@@ -1014,7 +1018,7 @@ func (a *app) newPSCmd() *cobra.Command {
 			defer stop()
 
 			for {
-				runs, err := a.fetchRuns(limit)
+				runs, err := a.fetchRuns(limit, all)
 				if err != nil {
 					return err
 				}
@@ -1030,7 +1034,8 @@ func (a *app) newPSCmd() *cobra.Command {
 			}
 		},
 	}
-	cmd.Flags().IntVar(&limit, "limit", 50, "max number of runs")
+	cmd.Flags().IntVar(&limit, "limit", 10, "max number of runs")
+	cmd.Flags().BoolVar(&all, "all", false, "show all retained runs")
 	cmd.Flags().BoolVar(&watch, "watch", false, "refresh continuously")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "refresh interval when --watch is enabled")
 	return cmd
@@ -2102,7 +2107,7 @@ func (a *app) runIDCompletion(_ *cobra.Command, args []string, toComplete string
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	runs, err := a.fetchRuns(100)
+	runs, err := a.fetchRuns(100, false)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -2116,11 +2121,17 @@ func (a *app) runIDCompletion(_ *cobra.Command, args []string, toComplete string
 	return out, cobra.ShellCompDirectiveNoFileComp
 }
 
-func (a *app) fetchRuns(limit int) ([]state.Run, error) {
+func (a *app) fetchRuns(limit int, all bool) ([]state.Run, error) {
 	if limit <= 0 {
-		limit = 50
+		limit = 10
 	}
-	resp, err := a.client.do(http.MethodGet, fmt.Sprintf("/v1/runs?limit=%d", limit), nil)
+	path := "/v1/runs"
+	if all {
+		path += "?all=1"
+	} else {
+		path += fmt.Sprintf("?limit=%d", limit)
+	}
+	resp, err := a.client.do(http.MethodGet, path, nil)
 	if err != nil {
 		return nil, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}

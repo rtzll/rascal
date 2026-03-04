@@ -276,14 +276,28 @@ func (s *server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := 50
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed <= 0 {
-			http.Error(w, "invalid limit", http.StatusBadRequest)
+	all := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("all")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			http.Error(w, "invalid all", http.StatusBadRequest)
 			return
 		}
-		limit = parsed
+		all = parsed
+	}
+
+	limit := 50
+	if !all {
+		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed <= 0 {
+				http.Error(w, "invalid limit", http.StatusBadRequest)
+				return
+			}
+			limit = parsed
+		}
+	} else {
+		limit = 0
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"runs": s.store.ListRuns(limit)})

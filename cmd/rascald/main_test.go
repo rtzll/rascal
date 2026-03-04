@@ -335,6 +335,95 @@ func TestHandleWebhookIssueReopenedReenablesTask(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return len(s.store.ListRuns(10)) == 1 }, "run queued")
 }
 
+func TestHandleListRunsSupportsAllQuery(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	for i := 1; i <= 3; i++ {
+		_, err := s.store.AddRun(state.CreateRunInput{
+			ID:     fmt.Sprintf("run_%d", i),
+			TaskID: fmt.Sprintf("task_%d", i),
+			Repo:   "owner/repo",
+			Task:   fmt.Sprintf("Task %d", i),
+		})
+		if err != nil {
+			t.Fatalf("add run %d: %v", i, err)
+		}
+	}
+
+	limitReq := httptest.NewRequest(http.MethodGet, "/v1/runs?limit=2", nil)
+	limitRec := httptest.NewRecorder()
+	s.handleListRuns(limitRec, limitReq)
+	if limitRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for limit query, got %d", limitRec.Code)
+	}
+	var limitOut struct {
+		Runs []state.Run `json:"runs"`
+	}
+	if err := json.NewDecoder(limitRec.Body).Decode(&limitOut); err != nil {
+		t.Fatalf("decode limit response: %v", err)
+	}
+	if len(limitOut.Runs) != 2 {
+		t.Fatalf("expected 2 runs with limit=2, got %d", len(limitOut.Runs))
+	}
+
+	allReq := httptest.NewRequest(http.MethodGet, "/v1/runs?all=1", nil)
+	allRec := httptest.NewRecorder()
+	s.handleListRuns(allRec, allReq)
+	if allRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for all query, got %d", allRec.Code)
+	}
+	var allOut struct {
+		Runs []state.Run `json:"runs"`
+	}
+	if err := json.NewDecoder(allRec.Body).Decode(&allOut); err != nil {
+		t.Fatalf("decode all response: %v", err)
+	}
+	if len(allOut.Runs) != 3 {
+		t.Fatalf("expected 3 runs with all=1, got %d", len(allOut.Runs))
+	}
+}
+
+func TestHandleListRunsAllIgnoresLimitValue(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	for i := 1; i <= 2; i++ {
+		_, err := s.store.AddRun(state.CreateRunInput{
+			ID:     fmt.Sprintf("run_all_%d", i),
+			TaskID: fmt.Sprintf("task_all_%d", i),
+			Repo:   "owner/repo",
+			Task:   fmt.Sprintf("Task all %d", i),
+		})
+		if err != nil {
+			t.Fatalf("add run %d: %v", i, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs?all=true&limit=bad", nil)
+	rec := httptest.NewRecorder()
+	s.handleListRuns(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for all=true with bad limit, got %d", rec.Code)
+	}
+	var out struct {
+		Runs []state.Run `json:"runs"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode all+limit response: %v", err)
+	}
+	if len(out.Runs) != 2 {
+		t.Fatalf("expected all runs when all=true, got %d", len(out.Runs))
+	}
+}
+
+func TestHandleListRunsInvalidAllReturnsBadRequest(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs?all=notabool", nil)
+	rec := httptest.NewRecorder()
+	s.handleListRuns(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid all query, got %d", rec.Code)
+	}
+}
+
 func TestHandleWebhookInactiveSlotIsSkipped(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
