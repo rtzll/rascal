@@ -980,7 +980,13 @@ func (a *app) newPSCmd() *cobra.Command {
 		Use:     "ps",
 		Aliases: []string{"ls"},
 		Short:   "List recent runs",
-		Example: "  rascal ps\n  rascal ps --limit 25\n  rascal ps --all\n  rascal ps --watch\n  rascal ps --output json",
+		Example: strings.TrimSpace(`
+  rascal ps
+  rascal ps --limit 25
+  rascal ps --all
+  rascal ps --watch
+  rascal ps --output json
+`),
 		RunE: func(c *cobra.Command, _ []string) error {
 			if err := a.requireServerAuth(); err != nil {
 				return err
@@ -1379,9 +1385,13 @@ func (a *app) newDoctorCmd() *cobra.Command {
 		sshPort int
 	)
 	cmd := &cobra.Command{
-		Use:     "doctor",
-		Short:   "Inspect local config and optional remote server readiness",
-		Example: "  rascal doctor\n  rascal doctor --fix\n  rascal doctor --host 203.0.113.10",
+		Use:   "doctor",
+		Short: "Inspect local config and optional remote server readiness",
+		Example: strings.TrimSpace(`
+  rascal doctor
+  rascal doctor --fix
+  rascal doctor --host 203.0.113.10
+`),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			_, statErr := os.Stat(a.configPath)
 			cfgExists := statErr == nil
@@ -1712,8 +1722,12 @@ func (a *app) newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Inspect effective config and manage local file values",
-		Long: "Inspect effective config and manage values in the local config file.\n\n" +
-			"Supported keys:\n" + keys,
+		Long: fmt.Sprintf(strings.TrimSpace(`
+Inspect effective config and manage values in the local config file.
+
+Supported keys:
+%s
+`), keys),
 		Example: strings.TrimSpace(`
 rascal config view
 rascal config get default_repo
@@ -1761,8 +1775,12 @@ rascal config view --output json
 	cmd.AddCommand(&cobra.Command{
 		Use:   "get <key>",
 		Short: "Get a config key from the local config file",
-		Long: "Get one value from the local config file.\n\n" +
-			"Supported keys:\n" + keys,
+		Long: fmt.Sprintf(strings.TrimSpace(`
+Get one value from the local config file.
+
+Supported keys:
+%s
+`), keys),
 		Example: strings.TrimSpace(`
 rascal config get server_url
 rascal config get default_repo
@@ -1804,8 +1822,12 @@ rascal config get default_repo
 	cmd.AddCommand(&cobra.Command{
 		Use:   "set <key> <value>",
 		Short: "Set a config key in the local config file",
-		Long: "Set one value in the local config file.\n\n" +
-			"Supported keys:\n" + keys,
+		Long: fmt.Sprintf(strings.TrimSpace(`
+Set one value in the local config file.
+
+Supported keys:
+%s
+`), keys),
 		Example: strings.TrimSpace(`
 rascal config set default_repo OWNER/REPO
 rascal config set transport ssh
