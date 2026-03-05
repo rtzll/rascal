@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/config"
+	"github.com/rtzll/rascal/internal/state"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -1385,6 +1386,38 @@ func normalizeHelpOutput(s string) string {
 		s = strings.ReplaceAll(s, home, "$HOME")
 	}
 	return strings.TrimSpace(s) + "\n"
+}
+
+func anySliceToStrings(v any) []string {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func containsSubstring(items []string, needle string) bool {
+	for _, item := range items {
+		if strings.Contains(item, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsExact(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func readConfigMap(t *testing.T, path string) map[string]any {
