@@ -630,6 +630,13 @@ func TestPSStatusAndPRLabels(t *testing.T) {
 	}
 }
 
+func TestPSCreatedLabelFormatsUTC(t *testing.T) {
+	createdAt := time.Date(2026, 3, 5, 20, 15, 42, 0, time.FixedZone("UTC+1", 1*60*60))
+	if got := psCreatedLabel(createdAt); got != "2026-03-05 19:15" {
+		t.Fatalf("psCreatedLabel = %q, want 2026-03-05 19:15", got)
+	}
+}
+
 func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
 	var payload map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

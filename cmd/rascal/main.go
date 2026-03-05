@@ -1001,7 +1001,7 @@ func (a *app) newPSCmd() *cobra.Command {
 			render := func(runs []state.Run) error {
 				return a.emit(map[string]any{"runs": runs}, func() error {
 					tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-					fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tPR\tCREATED")
+					fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tPR\tCREATED (UTC)")
 					for _, run := range runs {
 						fmt.Fprintf(
 							tw,
@@ -1010,7 +1010,7 @@ func (a *app) newPSCmd() *cobra.Command {
 							psStatusLabel(run),
 							run.Repo,
 							psPRLabel(run),
-							run.CreatedAt.Format(time.RFC3339),
+							psCreatedLabel(run.CreatedAt),
 						)
 					}
 					return tw.Flush()
@@ -2226,6 +2226,10 @@ func psPRLabel(run state.Run) string {
 	default:
 		return fmt.Sprintf("#%d", run.PRNumber)
 	}
+}
+
+func psCreatedLabel(createdAt time.Time) string {
+	return createdAt.UTC().Format("2006-01-02 15:04")
 }
 
 func effectivePRStatus(run state.Run) state.PRStatus {

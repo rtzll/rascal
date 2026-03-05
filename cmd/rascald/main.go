@@ -1946,6 +1946,8 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 	} else if markerExists {
 		return
 	}
+	// TODO: This per-run JSON marker deduplicates within a shared run directory.
+	// Revisit a SQLite-backed guard if we need cross-instance/global dedupe guarantees.
 
 	repo := strings.TrimSpace(target.Repo)
 	if repo == "" {
