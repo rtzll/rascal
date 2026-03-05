@@ -16,6 +16,15 @@ const (
 	StatusCanceled  RunStatus = "canceled"
 )
 
+type CompletionCommentState string
+
+const (
+	CompletionCommentPending CompletionCommentState = "pending"
+	CompletionCommentPosting CompletionCommentState = "posting"
+	CompletionCommentPosted  CompletionCommentState = "posted"
+	CompletionCommentFailed  CompletionCommentState = "failed"
+)
+
 var runStatusTransitions = map[RunStatus]map[RunStatus]struct{}{
 	StatusQueued: {
 		StatusQueued:   {},
@@ -101,13 +110,18 @@ type Run struct {
 	Status     RunStatus `json:"status"`
 	RunDir     string    `json:"run_dir"`
 
-	IssueNumber int      `json:"issue_number,omitempty"`
-	PRNumber    int      `json:"pr_number,omitempty"`
-	PRURL       string   `json:"pr_url,omitempty"`
-	PRStatus    PRStatus `json:"pr_status"`
-	HeadSHA     string   `json:"head_sha,omitempty"`
-	Context     string   `json:"context,omitempty"`
-	Error       string   `json:"error,omitempty"`
+	IssueNumber                int                    `json:"issue_number,omitempty"`
+	PRNumber                   int                    `json:"pr_number,omitempty"`
+	PRURL                      string                 `json:"pr_url,omitempty"`
+	PRStatus                   PRStatus               `json:"pr_status"`
+	HeadSHA                    string                 `json:"head_sha,omitempty"`
+	Context                    string                 `json:"context,omitempty"`
+	Error                      string                 `json:"error,omitempty"`
+	CompletionCommentState     CompletionCommentState `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string                 `json:"completion_comment_claimed_by,omitempty"`
+	CompletionCommentClaimedAt *time.Time             `json:"completion_comment_claimed_at,omitempty"`
+	CompletionCommentPostedAt  *time.Time             `json:"completion_comment_posted_at,omitempty"`
+	CompletionCommentError     string                 `json:"completion_comment_error,omitempty"`
 
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`

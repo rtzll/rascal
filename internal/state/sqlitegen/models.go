@@ -20,28 +20,33 @@ type Delivery struct {
 }
 
 type Run struct {
-	Seq         int64         `json:"seq"`
-	ID          string        `json:"id"`
-	TaskID      string        `json:"task_id"`
-	Repo        string        `json:"repo"`
-	Task        string        `json:"task"`
-	BaseBranch  string        `json:"base_branch"`
-	HeadBranch  string        `json:"head_branch"`
-	Trigger     string        `json:"trigger"`
-	Debug       bool          `json:"debug"`
-	Status      string        `json:"status"`
-	RunDir      string        `json:"run_dir"`
-	IssueNumber int64         `json:"issue_number"`
-	PrNumber    int64         `json:"pr_number"`
-	PrUrl       string        `json:"pr_url"`
-	PrStatus    string        `json:"pr_status"`
-	HeadSha     string        `json:"head_sha"`
-	Context     string        `json:"context"`
-	Error       string        `json:"error"`
-	CreatedAt   int64         `json:"created_at"`
-	UpdatedAt   int64         `json:"updated_at"`
-	StartedAt   sql.NullInt64 `json:"started_at"`
-	CompletedAt sql.NullInt64 `json:"completed_at"`
+	Seq                        int64         `json:"seq"`
+	ID                         string        `json:"id"`
+	TaskID                     string        `json:"task_id"`
+	Repo                       string        `json:"repo"`
+	Task                       string        `json:"task"`
+	BaseBranch                 string        `json:"base_branch"`
+	HeadBranch                 string        `json:"head_branch"`
+	Trigger                    string        `json:"trigger"`
+	Debug                      bool          `json:"debug"`
+	Status                     string        `json:"status"`
+	RunDir                     string        `json:"run_dir"`
+	IssueNumber                int64         `json:"issue_number"`
+	PrNumber                   int64         `json:"pr_number"`
+	PrUrl                      string        `json:"pr_url"`
+	PrStatus                   string        `json:"pr_status"`
+	HeadSha                    string        `json:"head_sha"`
+	Context                    string        `json:"context"`
+	Error                      string        `json:"error"`
+	CompletionCommentState     string        `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string        `json:"completion_comment_claimed_by"`
+	CompletionCommentClaimedAt int64         `json:"completion_comment_claimed_at"`
+	CompletionCommentPostedAt  sql.NullInt64 `json:"completion_comment_posted_at"`
+	CompletionCommentError     string        `json:"completion_comment_error"`
+	CreatedAt                  int64         `json:"created_at"`
+	UpdatedAt                  int64         `json:"updated_at"`
+	StartedAt                  sql.NullInt64 `json:"started_at"`
+	CompletedAt                sql.NullInt64 `json:"completed_at"`
 }
 
 type RunCancel struct {

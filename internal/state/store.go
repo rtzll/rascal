@@ -262,27 +262,32 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	}
 
 	row, err := qtx.InsertRun(context.Background(), sqlitegen.InsertRunParams{
-		ID:          in.ID,
-		TaskID:      in.TaskID,
-		Repo:        in.Repo,
-		Task:        in.Task,
-		BaseBranch:  baseBranch,
-		HeadBranch:  in.HeadBranch,
-		Trigger:     trigger,
-		Debug:       debugEnabled,
-		Status:      string(StatusQueued),
-		RunDir:      in.RunDir,
-		IssueNumber: int64(in.IssueNumber),
-		PrNumber:    int64(in.PRNumber),
-		PrUrl:       "",
-		PrStatus:    string(prStatus),
-		HeadSha:     "",
-		Context:     in.Context,
-		Error:       "",
-		CreatedAt:   now.UnixNano(),
-		UpdatedAt:   now.UnixNano(),
-		StartedAt:   sql.NullInt64{},
-		CompletedAt: sql.NullInt64{},
+		ID:                         in.ID,
+		TaskID:                     in.TaskID,
+		Repo:                       in.Repo,
+		Task:                       in.Task,
+		BaseBranch:                 baseBranch,
+		HeadBranch:                 in.HeadBranch,
+		Trigger:                    trigger,
+		Debug:                      debugEnabled,
+		Status:                     string(StatusQueued),
+		RunDir:                     in.RunDir,
+		IssueNumber:                int64(in.IssueNumber),
+		PrNumber:                   int64(in.PRNumber),
+		PrUrl:                      "",
+		PrStatus:                   string(prStatus),
+		HeadSha:                    "",
+		Context:                    in.Context,
+		Error:                      "",
+		CompletionCommentState:     string(CompletionCommentPending),
+		CompletionCommentClaimedBy: "",
+		CompletionCommentClaimedAt: 0,
+		CompletionCommentPostedAt:  sql.NullInt64{},
+		CompletionCommentError:     "",
+		CreatedAt:                  now.UnixNano(),
+		UpdatedAt:                  now.UnixNano(),
+		StartedAt:                  sql.NullInt64{},
+		CompletedAt:                sql.NullInt64{},
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: runs.id") {
@@ -409,6 +414,60 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 		return Run{}, err
 	}
 	return r, nil
+}
+
+func (s *Store) ClaimRunCompletionComment(runID, claimedBy string) (bool, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return false, fmt.Errorf("run id is required")
+	}
+	claimedBy = strings.TrimSpace(claimedBy)
+	now := time.Now().UTC().UnixNano()
+	rows, err := s.q.ClaimRunCompletionComment(context.Background(), sqlitegen.ClaimRunCompletionCommentParams{
+		ClaimedBy: claimedBy,
+		ClaimedAt: now,
+		ID:        runID,
+	})
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+func (s *Store) MarkRunCompletionCommentPosted(runID string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id is required")
+	}
+	rows, err := s.q.MarkRunCompletionCommentPosted(context.Background(), sqlitegen.MarkRunCompletionCommentPostedParams{
+		PostedAt: time.Now().UTC().UnixNano(),
+		ID:       runID,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("run %q not found", runID)
+	}
+	return nil
+}
+
+func (s *Store) MarkRunCompletionCommentFailed(runID, errText string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id is required")
+	}
+	rows, err := s.q.MarkRunCompletionCommentFailed(context.Background(), sqlitegen.MarkRunCompletionCommentFailedParams{
+		CompletionCommentError: strings.TrimSpace(errText),
+		ID:                     runID,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("run %q not found", runID)
+	}
+	return nil
 }
 
 func (s *Store) SetRunStatus(runID string, status RunStatus, errText string) (Run, error) {
@@ -784,25 +843,36 @@ func fromDBFindTaskByPRRow(t sqlitegen.FindTaskByPRRow) Task {
 
 func fromDBRun(r sqlitegen.Run) Run {
 	out := Run{
-		ID:          r.ID,
-		TaskID:      r.TaskID,
-		Repo:        r.Repo,
-		Task:        r.Task,
-		BaseBranch:  r.BaseBranch,
-		HeadBranch:  r.HeadBranch,
-		Trigger:     r.Trigger,
-		Debug:       r.Debug,
-		Status:      CanonicalRunStatus(RunStatus(r.Status)),
-		RunDir:      r.RunDir,
-		IssueNumber: int(r.IssueNumber),
-		PRNumber:    int(r.PrNumber),
-		PRURL:       r.PrUrl,
-		PRStatus:    normalizePRStatus(PRStatus(r.PrStatus)),
-		HeadSHA:     r.HeadSha,
-		Context:     r.Context,
-		Error:       r.Error,
-		CreatedAt:   time.Unix(0, r.CreatedAt).UTC(),
-		UpdatedAt:   time.Unix(0, r.UpdatedAt).UTC(),
+		ID:                         r.ID,
+		TaskID:                     r.TaskID,
+		Repo:                       r.Repo,
+		Task:                       r.Task,
+		BaseBranch:                 r.BaseBranch,
+		HeadBranch:                 r.HeadBranch,
+		Trigger:                    r.Trigger,
+		Debug:                      r.Debug,
+		Status:                     CanonicalRunStatus(RunStatus(r.Status)),
+		RunDir:                     r.RunDir,
+		IssueNumber:                int(r.IssueNumber),
+		PRNumber:                   int(r.PrNumber),
+		PRURL:                      r.PrUrl,
+		PRStatus:                   normalizePRStatus(PRStatus(r.PrStatus)),
+		HeadSHA:                    r.HeadSha,
+		Context:                    r.Context,
+		Error:                      r.Error,
+		CompletionCommentState:     normalizeCompletionCommentState(CompletionCommentState(r.CompletionCommentState)),
+		CompletionCommentClaimedBy: r.CompletionCommentClaimedBy,
+		CompletionCommentError:     r.CompletionCommentError,
+		CreatedAt:                  time.Unix(0, r.CreatedAt).UTC(),
+		UpdatedAt:                  time.Unix(0, r.UpdatedAt).UTC(),
+	}
+	if r.CompletionCommentClaimedAt > 0 {
+		t := time.Unix(0, r.CompletionCommentClaimedAt).UTC()
+		out.CompletionCommentClaimedAt = &t
+	}
+	if r.CompletionCommentPostedAt.Valid {
+		t := time.Unix(0, r.CompletionCommentPostedAt.Int64).UTC()
+		out.CompletionCommentPostedAt = &t
 	}
 	if r.StartedAt.Valid {
 		t := time.Unix(0, r.StartedAt.Int64).UTC()
@@ -828,27 +898,32 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 		}
 	}
 	return sqlitegen.UpdateRunParams{
-		TaskID:      r.TaskID,
-		Repo:        r.Repo,
-		Task:        r.Task,
-		BaseBranch:  r.BaseBranch,
-		HeadBranch:  r.HeadBranch,
-		Trigger:     r.Trigger,
-		Debug:       r.Debug,
-		Status:      string(CanonicalRunStatus(r.Status)),
-		RunDir:      r.RunDir,
-		IssueNumber: int64(r.IssueNumber),
-		PrNumber:    int64(r.PRNumber),
-		PrUrl:       r.PRURL,
-		PrStatus:    string(prStatus),
-		HeadSha:     r.HeadSHA,
-		Context:     r.Context,
-		Error:       r.Error,
-		CreatedAt:   fallbackUnixNano(r.CreatedAt, time.Now().UTC()),
-		UpdatedAt:   fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
-		StartedAt:   toNullInt64(r.StartedAt),
-		CompletedAt: toNullInt64(r.CompletedAt),
-		ID:          r.ID,
+		TaskID:                     r.TaskID,
+		Repo:                       r.Repo,
+		Task:                       r.Task,
+		BaseBranch:                 r.BaseBranch,
+		HeadBranch:                 r.HeadBranch,
+		Trigger:                    r.Trigger,
+		Debug:                      r.Debug,
+		Status:                     string(CanonicalRunStatus(r.Status)),
+		RunDir:                     r.RunDir,
+		IssueNumber:                int64(r.IssueNumber),
+		PrNumber:                   int64(r.PRNumber),
+		PrUrl:                      r.PRURL,
+		PrStatus:                   string(prStatus),
+		HeadSha:                    r.HeadSHA,
+		Context:                    r.Context,
+		Error:                      r.Error,
+		CompletionCommentState:     string(normalizeCompletionCommentState(r.CompletionCommentState)),
+		CompletionCommentClaimedBy: r.CompletionCommentClaimedBy,
+		CompletionCommentClaimedAt: toUnixNanoOrZero(r.CompletionCommentClaimedAt),
+		CompletionCommentPostedAt:  toNullInt64(r.CompletionCommentPostedAt),
+		CompletionCommentError:     r.CompletionCommentError,
+		CreatedAt:                  fallbackUnixNano(r.CreatedAt, time.Now().UTC()),
+		UpdatedAt:                  fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
+		StartedAt:                  toNullInt64(r.StartedAt),
+		CompletedAt:                toNullInt64(r.CompletedAt),
+		ID:                         r.ID,
 	}
 }
 
@@ -861,11 +936,27 @@ func normalizePRStatus(in PRStatus) PRStatus {
 	}
 }
 
+func normalizeCompletionCommentState(in CompletionCommentState) CompletionCommentState {
+	switch in {
+	case CompletionCommentPending, CompletionCommentPosting, CompletionCommentPosted, CompletionCommentFailed:
+		return in
+	default:
+		return CompletionCommentPending
+	}
+}
+
 func toNullInt64(t *time.Time) sql.NullInt64 {
 	if t == nil || t.IsZero() {
 		return sql.NullInt64{}
 	}
 	return sql.NullInt64{Int64: t.UTC().UnixNano(), Valid: true}
+}
+
+func toUnixNanoOrZero(t *time.Time) int64 {
+	if t == nil || t.IsZero() {
+		return 0
+	}
+	return t.UTC().UnixNano()
 }
 
 func fallbackUnixNano(t time.Time, fallback time.Time) int64 {

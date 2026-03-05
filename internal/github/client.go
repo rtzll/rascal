@@ -286,6 +286,52 @@ func (c *APIClient) CreateIssueComment(ctx context.Context, repo string, issueNu
 	return nil
 }
 
+func (c *APIClient) IssueCommentHasToken(ctx context.Context, repo string, issueNumber int, token string) (bool, error) {
+	if issueNumber <= 0 {
+		return false, fmt.Errorf("issue number must be positive")
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false, fmt.Errorf("token is required")
+	}
+	owner, repoName, err := splitRepo(repo)
+	if err != nil {
+		return false, err
+	}
+
+	const perPage = 100
+	for page := 1; ; page++ {
+		path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments?per_page=%d&page=%d", owner, repoName, issueNumber, perPage, page)
+		resp, err := c.do(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return false, err
+		}
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return false, fmt.Errorf("read issue comments: %w", readErr)
+		}
+		if resp.StatusCode >= 300 {
+			return false, fmt.Errorf("github list issue comments failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+		}
+		var out []struct {
+			Body string `json:"body"`
+		}
+		if err := json.Unmarshal(bodyBytes, &out); err != nil {
+			return false, fmt.Errorf("decode issue comments: %w", err)
+		}
+		for _, comment := range out {
+			if strings.Contains(comment.Body, token) {
+				return true, nil
+			}
+		}
+		if len(out) < perPage {
+			break
+		}
+	}
+	return false, nil
+}
+
 func (c *APIClient) AddPullRequestReviewReaction(ctx context.Context, repo string, pullNumber int, reviewID int64, content string) error {
 	if pullNumber <= 0 {
 		return fmt.Errorf("pull number must be positive")

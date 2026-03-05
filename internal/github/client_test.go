@@ -257,6 +257,58 @@ func TestCreateIssueComment(t *testing.T) {
 	})
 }
 
+func TestIssueCommentHasToken(t *testing.T) {
+	t.Run("finds token in comments", func(t *testing.T) {
+		token := "<!-- rascal:run_id=run_123 -->"
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			if r.URL.Path != "/repos/owner/repo/issues/42/comments" {
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+			if got := r.URL.Query().Get("per_page"); got != "100" {
+				t.Fatalf("unexpected per_page: %s", got)
+			}
+			if got := r.URL.Query().Get("page"); got != "1" {
+				t.Fatalf("unexpected page: %s", got)
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]string{
+				{"body": "first comment"},
+				{"body": "second " + token},
+			})
+		}))
+		defer srv.Close()
+
+		client := newTestAPIClient(srv.URL)
+		found, err := client.IssueCommentHasToken(context.Background(), "owner/repo", 42, token)
+		if err != nil {
+			t.Fatalf("IssueCommentHasToken returned error: %v", err)
+		}
+		if !found {
+			t.Fatalf("expected token to be found in comments")
+		}
+	})
+
+	t.Run("returns false when missing", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode([]map[string]string{
+				{"body": "first comment"},
+			})
+		}))
+		defer srv.Close()
+
+		client := newTestAPIClient(srv.URL)
+		found, err := client.IssueCommentHasToken(context.Background(), "owner/repo", 42, "missing")
+		if err != nil {
+			t.Fatalf("IssueCommentHasToken returned error: %v", err)
+		}
+		if found {
+			t.Fatalf("expected token to be absent")
+		}
+	})
+}
+
 func TestAddPullRequestReviewReaction(t *testing.T) {
 	t.Run("posts reaction", func(t *testing.T) {
 		client := newGitHubMockClient(t,

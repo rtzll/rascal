@@ -42,6 +42,11 @@ CREATE TABLE runs (
   head_sha TEXT NOT NULL DEFAULT '',
   context TEXT NOT NULL DEFAULT '',
   error TEXT NOT NULL DEFAULT '',
+  completion_comment_state TEXT NOT NULL DEFAULT 'pending',
+  completion_comment_claimed_by TEXT NOT NULL DEFAULT '',
+  completion_comment_claimed_at INTEGER NOT NULL DEFAULT 0,
+  completion_comment_posted_at INTEGER,
+  completion_comment_error TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   started_at INTEGER,
@@ -168,52 +173,62 @@ func TestQueriesCoverage(t *testing.T) {
 	}
 
 	run1, err := q.InsertRun(ctx, InsertRunParams{
-		ID:          "run_1",
-		TaskID:      "task_1",
-		Repo:        "owner/repo",
-		Task:        "first",
-		BaseBranch:  "main",
-		HeadBranch:  "rascal/task-1-run-1",
-		Trigger:     "cli",
-		Debug:       true,
-		Status:      "queued",
-		RunDir:      "/tmp/run_1",
-		IssueNumber: 1,
-		PrNumber:    77,
-		PrUrl:       "",
-		HeadSha:     "",
-		Context:     "",
-		Error:       "",
-		CreatedAt:   later + 10,
-		UpdatedAt:   later + 10,
-		StartedAt:   sql.NullInt64{},
-		CompletedAt: sql.NullInt64{},
+		ID:                         "run_1",
+		TaskID:                     "task_1",
+		Repo:                       "owner/repo",
+		Task:                       "first",
+		BaseBranch:                 "main",
+		HeadBranch:                 "rascal/task-1-run-1",
+		Trigger:                    "cli",
+		Debug:                      true,
+		Status:                     "queued",
+		RunDir:                     "/tmp/run_1",
+		IssueNumber:                1,
+		PrNumber:                   77,
+		PrUrl:                      "",
+		HeadSha:                    "",
+		Context:                    "",
+		Error:                      "",
+		CompletionCommentState:     "pending",
+		CompletionCommentClaimedBy: "",
+		CompletionCommentClaimedAt: 0,
+		CompletionCommentPostedAt:  sql.NullInt64{},
+		CompletionCommentError:     "",
+		CreatedAt:                  later + 10,
+		UpdatedAt:                  later + 10,
+		StartedAt:                  sql.NullInt64{},
+		CompletedAt:                sql.NullInt64{},
 	})
 	if err != nil {
 		t.Fatalf("InsertRun run_1: %v", err)
 	}
 
 	run2, err := q.InsertRun(ctx, InsertRunParams{
-		ID:          "run_2",
-		TaskID:      "task_1",
-		Repo:        "owner/repo",
-		Task:        "second",
-		BaseBranch:  "main",
-		HeadBranch:  "rascal/task-1-run-2",
-		Trigger:     "cli",
-		Debug:       true,
-		Status:      "queued",
-		RunDir:      "/tmp/run_2",
-		IssueNumber: 1,
-		PrNumber:    77,
-		PrUrl:       "",
-		HeadSha:     "",
-		Context:     "",
-		Error:       "",
-		CreatedAt:   later + 20,
-		UpdatedAt:   later + 20,
-		StartedAt:   sql.NullInt64{},
-		CompletedAt: sql.NullInt64{},
+		ID:                         "run_2",
+		TaskID:                     "task_1",
+		Repo:                       "owner/repo",
+		Task:                       "second",
+		BaseBranch:                 "main",
+		HeadBranch:                 "rascal/task-1-run-2",
+		Trigger:                    "cli",
+		Debug:                      true,
+		Status:                     "queued",
+		RunDir:                     "/tmp/run_2",
+		IssueNumber:                1,
+		PrNumber:                   77,
+		PrUrl:                      "",
+		HeadSha:                    "",
+		Context:                    "",
+		Error:                      "",
+		CompletionCommentState:     "pending",
+		CompletionCommentClaimedBy: "",
+		CompletionCommentClaimedAt: 0,
+		CompletionCommentPostedAt:  sql.NullInt64{},
+		CompletionCommentError:     "",
+		CreatedAt:                  later + 20,
+		UpdatedAt:                  later + 20,
+		StartedAt:                  sql.NullInt64{},
+		CompletedAt:                sql.NullInt64{},
 	})
 	if err != nil {
 		t.Fatalf("InsertRun run_2: %v", err)
@@ -271,28 +286,61 @@ func TestQueriesCoverage(t *testing.T) {
 	}
 
 	if _, err := q.UpdateRun(ctx, UpdateRunParams{
-		TaskID:      run2.TaskID,
-		Repo:        run2.Repo,
-		Task:        run2.Task,
-		BaseBranch:  run2.BaseBranch,
-		HeadBranch:  run2.HeadBranch,
-		Trigger:     run2.Trigger,
-		Debug:       run2.Debug,
-		Status:      "queued",
-		RunDir:      run2.RunDir,
-		IssueNumber: run2.IssueNumber,
-		PrNumber:    run2.PrNumber,
-		PrUrl:       run2.PrUrl,
-		HeadSha:     run2.HeadSha,
-		Context:     run2.Context,
-		Error:       run2.Error,
-		CreatedAt:   run2.CreatedAt,
-		UpdatedAt:   run2.UpdatedAt + 2,
-		StartedAt:   sql.NullInt64{},
-		CompletedAt: sql.NullInt64{},
-		ID:          run2.ID,
+		TaskID:                     run2.TaskID,
+		Repo:                       run2.Repo,
+		Task:                       run2.Task,
+		BaseBranch:                 run2.BaseBranch,
+		HeadBranch:                 run2.HeadBranch,
+		Trigger:                    run2.Trigger,
+		Debug:                      run2.Debug,
+		Status:                     "queued",
+		RunDir:                     run2.RunDir,
+		IssueNumber:                run2.IssueNumber,
+		PrNumber:                   run2.PrNumber,
+		PrUrl:                      run2.PrUrl,
+		HeadSha:                    run2.HeadSha,
+		Context:                    run2.Context,
+		Error:                      run2.Error,
+		CompletionCommentState:     run2.CompletionCommentState,
+		CompletionCommentClaimedBy: run2.CompletionCommentClaimedBy,
+		CompletionCommentClaimedAt: run2.CompletionCommentClaimedAt,
+		CompletionCommentPostedAt:  run2.CompletionCommentPostedAt,
+		CompletionCommentError:     run2.CompletionCommentError,
+		CreatedAt:                  run2.CreatedAt,
+		UpdatedAt:                  run2.UpdatedAt + 2,
+		StartedAt:                  sql.NullInt64{},
+		CompletedAt:                sql.NullInt64{},
+		ID:                         run2.ID,
 	}); err != nil {
 		t.Fatalf("UpdateRun: %v", err)
+	}
+
+	if rows, err := q.ClaimRunCompletionComment(ctx, ClaimRunCompletionCommentParams{
+		ClaimedBy: "instance-a",
+		ClaimedAt: later + 30,
+		ID:        run2.ID,
+	}); err != nil {
+		t.Fatalf("ClaimRunCompletionComment: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected completion comment claim rows=1, got %d", rows)
+	}
+
+	if rows, err := q.MarkRunCompletionCommentFailed(ctx, MarkRunCompletionCommentFailedParams{
+		CompletionCommentError: "failed post",
+		ID:                     run2.ID,
+	}); err != nil {
+		t.Fatalf("MarkRunCompletionCommentFailed: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected completion comment failed rows=1, got %d", rows)
+	}
+
+	if rows, err := q.MarkRunCompletionCommentPosted(ctx, MarkRunCompletionCommentPostedParams{
+		PostedAt: later + 31,
+		ID:       run2.ID,
+	}); err != nil {
+		t.Fatalf("MarkRunCompletionCommentPosted: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected completion comment posted rows=1, got %d", rows)
 	}
 
 	if err := q.UpsertTask(ctx, UpsertTaskParams{
@@ -309,26 +357,31 @@ func TestQueriesCoverage(t *testing.T) {
 	}
 
 	if _, err := q.InsertRun(ctx, InsertRunParams{
-		ID:          "run_3",
-		TaskID:      "task_2",
-		Repo:        "owner/repo",
-		Task:        "third task",
-		BaseBranch:  "main",
-		HeadBranch:  "rascal/task-2",
-		Trigger:     "cli",
-		Debug:       true,
-		Status:      "queued",
-		RunDir:      "/tmp/run_3",
-		IssueNumber: 0,
-		PrNumber:    0,
-		PrUrl:       "",
-		HeadSha:     "",
-		Context:     "",
-		Error:       "",
-		CreatedAt:   later + 22,
-		UpdatedAt:   later + 22,
-		StartedAt:   sql.NullInt64{},
-		CompletedAt: sql.NullInt64{},
+		ID:                         "run_3",
+		TaskID:                     "task_2",
+		Repo:                       "owner/repo",
+		Task:                       "third task",
+		BaseBranch:                 "main",
+		HeadBranch:                 "rascal/task-2",
+		Trigger:                    "cli",
+		Debug:                      true,
+		Status:                     "queued",
+		RunDir:                     "/tmp/run_3",
+		IssueNumber:                0,
+		PrNumber:                   0,
+		PrUrl:                      "",
+		HeadSha:                    "",
+		Context:                    "",
+		Error:                      "",
+		CompletionCommentState:     "pending",
+		CompletionCommentClaimedBy: "",
+		CompletionCommentClaimedAt: 0,
+		CompletionCommentPostedAt:  sql.NullInt64{},
+		CompletionCommentError:     "",
+		CreatedAt:                  later + 22,
+		UpdatedAt:                  later + 22,
+		StartedAt:                  sql.NullInt64{},
+		CompletedAt:                sql.NullInt64{},
 	}); err != nil {
 		t.Fatalf("InsertRun run_3: %v", err)
 	}

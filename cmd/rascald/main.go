@@ -36,7 +36,6 @@ var errServerDraining = errors.New("orchestrator is draining")
 const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
 const runResponseTargetFile = "response_target.json"
-const runCompletionCommentMarkerFile = "completion_comment_posted.json"
 const runCompletionCommentBodyMarker = "<!-- rascal:completion-comment -->"
 
 type githubClient interface {
@@ -47,6 +46,7 @@ type githubClient interface {
 	AddPullRequestReviewReaction(ctx context.Context, repo string, pullNumber int, reviewID int64, content string) error
 	AddPullRequestReviewCommentReaction(ctx context.Context, repo string, commentID int64, content string) error
 	CreateIssueComment(ctx context.Context, repo string, issueNumber int, body string) error
+	IssueCommentHasToken(ctx context.Context, repo string, issueNumber int, token string) (bool, error)
 }
 
 type server struct {
@@ -85,13 +85,6 @@ type runResponseTarget struct {
 	IssueNumber int    `json:"issue_number"`
 	RequestedBy string `json:"requested_by,omitempty"`
 	Trigger     string `json:"trigger"`
-}
-
-type runCompletionCommentMarker struct {
-	RunID       string `json:"run_id"`
-	Repo        string `json:"repo"`
-	IssueNumber int    `json:"issue_number"`
-	PostedAt    string `json:"posted_at"`
 }
 
 type createTaskRequest struct {
@@ -1977,72 +1970,32 @@ func loadRunResponseTarget(runDir string) (runResponseTarget, bool, error) {
 	return target, true, nil
 }
 
-func runCompletionCommentMarkerPath(runDir string) string {
-	return filepath.Join(strings.TrimSpace(runDir), runCompletionCommentMarkerFile)
+func completionCommentIdempotencyToken(runID string) string {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return ""
+	}
+	return fmt.Sprintf("<!-- rascal:run_id=%s -->", runID)
 }
 
-func runCompletionCommentMarkerExists(runDir string) (bool, error) {
-	path := runCompletionCommentMarkerPath(runDir)
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("stat completion comment marker: %w", err)
+func appendCompletionCommentToken(body, runID string) string {
+	token := completionCommentIdempotencyToken(runID)
+	body = strings.TrimSpace(body)
+	if token == "" || strings.Contains(body, token) {
+		return body
 	}
-	if info.IsDir() {
-		return false, fmt.Errorf("completion comment marker path is a directory: %s", path)
+	if body == "" {
+		return token
 	}
-	return true, nil
+	return body + "\n\n" + token
 }
 
-func writeRunCompletionCommentMarker(run state.Run, repo string, issueNumber int) error {
-	marker := runCompletionCommentMarker{
-		RunID:       run.ID,
-		Repo:        strings.TrimSpace(repo),
-		IssueNumber: issueNumber,
-		PostedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+func (s *server) completionCommentTokenSeen(ctx context.Context, repo string, issueNumber int, runID string) (bool, error) {
+	token := completionCommentIdempotencyToken(runID)
+	if token == "" {
+		return false, nil
 	}
-	data, err := json.MarshalIndent(marker, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode completion comment marker: %w", err)
-	}
-	path := runCompletionCommentMarkerPath(run.RunDir)
-	if err := writeFileAtomically(path, data, 0o644); err != nil {
-		return fmt.Errorf("write completion comment marker: %w", err)
-	}
-	return nil
-}
-
-func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(path)
-	tempFile, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tempPath := tempFile.Name()
-	removeTemp := true
-	defer func() {
-		if removeTemp {
-			_ = os.Remove(tempPath)
-		}
-	}()
-	if _, err := tempFile.Write(data); err != nil {
-		_ = tempFile.Close()
-		return err
-	}
-	if err := tempFile.Chmod(mode); err != nil {
-		_ = tempFile.Close()
-		return err
-	}
-	if err := tempFile.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return err
-	}
-	removeTemp = false
-	return nil
+	return s.gh.IssueCommentHasToken(ctx, repo, issueNumber, token)
 }
 
 func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
@@ -2061,14 +2014,6 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 	if !ok {
 		return
 	}
-	if markerExists, err := runCompletionCommentMarkerExists(run.RunDir); err != nil {
-		log.Printf("failed to check completion comment marker for run %s: %v", run.ID, err)
-		return
-	} else if markerExists {
-		return
-	}
-	// TODO: This per-run JSON marker deduplicates within a shared run directory.
-	// Revisit a SQLite-backed guard if we need cross-instance/global dedupe guarantees.
 
 	repo := strings.TrimSpace(target.Repo)
 	if repo == "" {
@@ -2082,20 +2027,71 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 		return
 	}
 
-	body, err := buildRunCompletionComment(run, target, repo)
+	claimed, err := s.store.ClaimRunCompletionComment(run.ID, s.instanceID)
 	if err != nil {
-		log.Printf("failed to build completion comment for %s: %v", run.ID, err)
+		log.Printf("failed to claim completion comment for run %s: %v", run.ID, err)
+		return
+	}
+	if !claimed {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := s.gh.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
-		log.Printf("failed to post completion comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
+	tokenCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	tokenFound, err := s.completionCommentTokenSeen(tokenCtx, repo, issueNumber, run.ID)
+	cancel()
+	if err != nil {
+		log.Printf("failed to check completion comment token for run %s: %v", run.ID, err)
+		if err := s.store.MarkRunCompletionCommentFailed(run.ID, err.Error()); err != nil {
+			log.Printf("failed to mark completion comment failed for run %s: %v", run.ID, err)
+		}
 		return
 	}
-	if err := writeRunCompletionCommentMarker(run, repo, issueNumber); err != nil {
-		log.Printf("failed to persist completion comment marker for run %s: %v", run.ID, err)
+	if tokenFound {
+		if err := s.store.MarkRunCompletionCommentPosted(run.ID); err != nil {
+			log.Printf("failed to mark completion comment posted for run %s: %v", run.ID, err)
+		}
+		return
+	}
+
+	body, err := buildRunCompletionComment(run, target, repo)
+	if err != nil {
+		log.Printf("failed to build completion comment for %s: %v", run.ID, err)
+		if err := s.store.MarkRunCompletionCommentFailed(run.ID, err.Error()); err != nil {
+			log.Printf("failed to mark completion comment failed for run %s: %v", run.ID, err)
+		}
+		return
+	}
+	body = appendCompletionCommentToken(body, run.ID)
+
+	postCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	err = s.gh.CreateIssueComment(postCtx, repo, issueNumber, body)
+	cancel()
+	if err != nil {
+		log.Printf("failed to post completion comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
+		verifyCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		tokenFound, tokenErr := s.completionCommentTokenSeen(verifyCtx, repo, issueNumber, run.ID)
+		cancel()
+		if tokenErr != nil {
+			log.Printf("failed to verify completion comment token for run %s: %v", run.ID, tokenErr)
+			if err := s.store.MarkRunCompletionCommentFailed(run.ID, err.Error()); err != nil {
+				log.Printf("failed to mark completion comment failed for run %s: %v", run.ID, err)
+			}
+			return
+		}
+		if tokenFound {
+			if err := s.store.MarkRunCompletionCommentPosted(run.ID); err != nil {
+				log.Printf("failed to mark completion comment posted for run %s: %v", run.ID, err)
+			}
+			return
+		}
+		if err := s.store.MarkRunCompletionCommentFailed(run.ID, err.Error()); err != nil {
+			log.Printf("failed to mark completion comment failed for run %s: %v", run.ID, err)
+		}
+		return
+	}
+
+	if err := s.store.MarkRunCompletionCommentPosted(run.ID); err != nil {
+		log.Printf("failed to mark completion comment posted for run %s: %v", run.ID, err)
 	}
 }
 
