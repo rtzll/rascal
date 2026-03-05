@@ -927,12 +927,7 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 }
 
 func runStatusIsDone(status state.RunStatus) bool {
-	switch status {
-	case state.StatusSucceeded, state.StatusFailed, state.StatusCanceled, state.StatusReview:
-		return true
-	default:
-		return false
-	}
+	return state.IsFinalRunStatus(status)
 }
 
 func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
@@ -1352,7 +1347,7 @@ func (s *server) setRunStatusWithFallback(run state.Run, status state.RunStatus,
 	if status == state.StatusRunning {
 		run.StartedAt = &now
 	}
-	if status == state.StatusSucceeded || status == state.StatusFailed || status == state.StatusCanceled || status == state.StatusReview {
+	if state.IsFinalRunStatus(status) {
 		run.CompletedAt = &now
 	}
 	return run
@@ -1439,6 +1434,9 @@ func (s *server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {
 				}
 				return nil
 			}
+			if r.PRStatus == state.PRStatusMerged {
+				return nil
+			}
 			r.PRStatus = state.PRStatusClosedUnmerged
 			if r.Status == state.StatusReview {
 				r.Status = state.StatusCanceled
@@ -1461,6 +1459,9 @@ func (s *server) reconcileReopenedPRRuns(repo string, prNumber int) {
 			continue
 		}
 		_, _ = s.store.UpdateRun(run.ID, func(r *state.Run) error {
+			if r.PRStatus == state.PRStatusMerged {
+				return nil
+			}
 			r.PRStatus = state.PRStatusOpen
 			return nil
 		})

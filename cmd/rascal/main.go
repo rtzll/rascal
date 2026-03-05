@@ -2200,8 +2200,6 @@ func psStatusLabel(run state.Run) string {
 	switch run.Status {
 	case state.StatusReview:
 		return "review"
-	case "awaiting_feedback":
-		return "review"
 	default:
 		return string(run.Status)
 	}
@@ -2240,8 +2238,6 @@ func effectivePRStatus(run state.Run) state.PRStatus {
 	}
 	switch run.Status {
 	case state.StatusReview:
-		return state.PRStatusOpen
-	case "awaiting_feedback":
 		return state.PRStatusOpen
 	case state.StatusSucceeded:
 		return state.PRStatusMerged

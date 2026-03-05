@@ -1,6 +1,9 @@
 package state
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type RunStatus string
 
@@ -12,6 +15,63 @@ const (
 	StatusFailed    RunStatus = "failed"
 	StatusCanceled  RunStatus = "canceled"
 )
+
+var runStatusTransitions = map[RunStatus]map[RunStatus]struct{}{
+	StatusQueued: {
+		StatusQueued:   {},
+		StatusRunning:  {},
+		StatusFailed:   {},
+		StatusCanceled: {},
+	},
+	StatusRunning: {
+		StatusQueued:    {}, // allow lease recovery requeue
+		StatusRunning:   {},
+		StatusReview:    {},
+		StatusSucceeded: {},
+		StatusFailed:    {},
+		StatusCanceled:  {},
+	},
+	StatusReview: {
+		StatusReview:    {},
+		StatusSucceeded: {},
+		StatusCanceled:  {},
+	},
+	StatusSucceeded: {
+		StatusSucceeded: {},
+	},
+	StatusFailed: {
+		StatusFailed: {},
+	},
+	StatusCanceled: {
+		StatusCanceled: {},
+	},
+}
+
+func CanonicalRunStatus(status RunStatus) RunStatus {
+	return status
+}
+
+func IsFinalRunStatus(status RunStatus) bool {
+	switch CanonicalRunStatus(status) {
+	case StatusReview, StatusSucceeded, StatusFailed, StatusCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidateRunStatusTransition(from, to RunStatus) error {
+	from = CanonicalRunStatus(from)
+	to = CanonicalRunStatus(to)
+	next, ok := runStatusTransitions[from]
+	if !ok {
+		return fmt.Errorf("invalid current run status %q", from)
+	}
+	if _, ok := next[to]; !ok {
+		return fmt.Errorf("invalid run status transition %q -> %q", from, to)
+	}
+	return nil
+}
 
 type PRStatus string
 

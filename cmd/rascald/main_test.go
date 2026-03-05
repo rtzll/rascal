@@ -244,6 +244,26 @@ func waitForServerIdle(t *testing.T, s *server) {
 	}, "server idle")
 }
 
+func markRunSucceeded(t *testing.T, s *server, runID string) {
+	t.Helper()
+	if _, err := s.store.SetRunStatus(runID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set run running before success: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(runID, state.StatusSucceeded, ""); err != nil {
+		t.Fatalf("set run succeeded: %v", err)
+	}
+}
+
+func markRunReview(t *testing.T, s *server, runID string) {
+	t.Helper()
+	if _, err := s.store.SetRunStatus(runID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set run running before review: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(runID, state.StatusReview, ""); err != nil {
+		t.Fatalf("set run review: %v", err)
+	}
+}
+
 func TestHandleWebhookRecordsDeliveryOnlyAfterSuccess(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
@@ -577,9 +597,7 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 	if err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(seedRun.ID, state.StatusSucceeded, ""); err != nil {
-		t.Fatalf("mark seed run succeeded: %v", err)
-	}
+	markRunSucceeded(t, s, seedRun.ID)
 
 	payload := []byte(`{"action":"created","issue":{"number":7,"pull_request":{}},"comment":{"id":101,"body":"  please address review notes  ","user":{"login":"alice"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment", "")
@@ -646,9 +664,7 @@ func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(seedRun.ID, state.StatusSucceeded, ""); err != nil {
-		t.Fatalf("mark seed run succeeded: %v", err)
-	}
+	markRunSucceeded(t, s, seedRun.ID)
 
 	payload := []byte(`{"action":"edited","issue":{"number":17,"pull_request":{}},"comment":{"id":202,"body":"  updated feedback  ","user":{"login":"alice"}},"changes":{"body":{"from":"prior feedback"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-edited", "")
@@ -734,9 +750,7 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(seedRun.ID, state.StatusSucceeded, ""); err != nil {
-		t.Fatalf("mark seed run succeeded: %v", err)
-	}
+	markRunSucceeded(t, s, seedRun.ID)
 
 	payload := []byte(`{"action":"submitted","review":{"id":303,"body":"   ","state":"changes_requested","user":{"login":"bob"}},"pull_request":{"number":11},"repository":{"full_name":"owner/repo"},"sender":{"login":"bob"}}`)
 	req := webhookRequest(t, payload, "pull_request_review", "delivery-review", "")
@@ -803,9 +817,7 @@ func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.
 	if err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(seedRun.ID, state.StatusSucceeded, ""); err != nil {
-		t.Fatalf("mark seed run succeeded: %v", err)
-	}
+	markRunSucceeded(t, s, seedRun.ID)
 
 	payload := []byte(`{"action":"created","comment":{"id":404,"body":"Please rename this helper","path":"cmd/rascald/main.go","line":515,"start_line":512,"user":{"login":"eve"}},"pull_request":{"number":12},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
 	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment", "")
@@ -984,6 +996,7 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
+	defer close(waitCh)
 	fakeGH := &fakeGitHubClient{}
 	s.gh = fakeGH
 	s.cfg.GitHubToken = "token"
@@ -1015,9 +1028,7 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add awaiting run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(awaitingRun.ID, state.StatusReview, ""); err != nil {
-		t.Fatalf("set awaiting status: %v", err)
-	}
+	markRunReview(t, s, awaitingRun.ID)
 
 	payload := []byte(`{"action":"closed","pull_request":{"number":55,"merged":true},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
 	req := webhookRequest(t, payload, "pull_request", "delivery-merged", "")
@@ -1048,7 +1059,6 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 		t.Fatalf("expected merged PR rocket reaction, got %+v", reactions)
 	}
 
-	close(waitCh)
 }
 
 func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
@@ -1073,9 +1083,7 @@ func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(run.ID, state.StatusReview, ""); err != nil {
-		t.Fatalf("set awaiting status: %v", err)
-	}
+	markRunReview(t, s, run.ID)
 
 	payload := []byte(`{"action":"closed","pull_request":{"number":99,"merged":false},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
 	req := webhookRequest(t, payload, "pull_request", "delivery-closed-unmerged", "")
@@ -1105,6 +1113,102 @@ func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
 	}
 	if !foundMinus {
 		t.Fatalf("expected -1 reaction on closed unmerged PR, got %+v", reactions)
+	}
+}
+
+func TestClosedUnmergedEventDoesNotDowngradeMergedRunState(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	taskID := "owner/repo#321"
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 321}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_merged_guard",
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Task:        "already merged",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		IssueNumber: 321,
+		PRNumber:    321,
+		PRStatus:    state.PRStatusMerged,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	markRunSucceeded(t, s, run.ID)
+	if _, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
+		r.PRStatus = state.PRStatusMerged
+		return nil
+	}); err != nil {
+		t.Fatalf("set merged pr status: %v", err)
+	}
+
+	payload := []byte(`{"action":"closed","pull_request":{"number":321,"merged":false},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "pull_request", "delivery-stale-closed", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for stale closed event, got %d", rec.Code)
+	}
+
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("run %s not found", run.ID)
+	}
+	if updated.Status != state.StatusSucceeded {
+		t.Fatalf("status = %s, want succeeded", updated.Status)
+	}
+	if updated.PRStatus != state.PRStatusMerged {
+		t.Fatalf("pr status = %s, want merged", updated.PRStatus)
+	}
+}
+
+func TestReopenedEventDoesNotDowngradeMergedRunState(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	taskID := "owner/repo#654"
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 654}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_reopened_guard",
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Task:        "already merged",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		IssueNumber: 654,
+		PRNumber:    654,
+		PRStatus:    state.PRStatusMerged,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	markRunSucceeded(t, s, run.ID)
+	if _, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
+		r.PRStatus = state.PRStatusMerged
+		return nil
+	}); err != nil {
+		t.Fatalf("set merged pr status: %v", err)
+	}
+
+	payload := []byte(`{"action":"reopened","pull_request":{"number":654},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "pull_request", "delivery-stale-reopened", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for stale reopened event, got %d", rec.Code)
+	}
+
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("run %s not found", run.ID)
+	}
+	if updated.Status != state.StatusSucceeded {
+		t.Fatalf("status = %s, want succeeded", updated.Status)
+	}
+	if updated.PRStatus != state.PRStatusMerged {
+		t.Fatalf("pr status = %s, want merged", updated.PRStatus)
 	}
 }
 
@@ -1794,9 +1898,7 @@ func TestHandleRunLogsJSONIncludesStatusAndDone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(run.ID, state.StatusSucceeded, ""); err != nil {
-		t.Fatalf("set run status: %v", err)
-	}
+	markRunSucceeded(t, s, run.ID)
 
 	if err := os.WriteFile(filepath.Join(run.RunDir, "runner.log"), []byte("runner-1\nrunner-2\n"), 0o644); err != nil {
 		t.Fatalf("write runner log: %v", err)

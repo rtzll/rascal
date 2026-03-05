@@ -2,6 +2,7 @@ package state
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,6 +87,88 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 	}
 	if !store.IsTaskCompleted("repo#1") {
 		t.Fatal("expected task to be completed")
+	}
+}
+
+func TestStoreAllowsRecoveryTransitionRunningToQueued(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-recovery", Repo: "owner/repo"}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := store.AddRun(CreateRunInput{
+		ID:         "run_recovery",
+		TaskID:     "task-recovery",
+		Repo:       "owner/repo",
+		Task:       "recovery",
+		BaseBranch: "main",
+		RunDir:     "/tmp/run_recovery",
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+
+	if _, err := store.SetRunStatus(run.ID, StatusRunning, ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	updated, err := store.UpdateRun(run.ID, func(r *Run) error {
+		r.Status = StatusQueued
+		r.Error = ""
+		r.StartedAt = nil
+		r.CompletedAt = nil
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("requeue running run: %v", err)
+	}
+	if updated.Status != StatusQueued {
+		t.Fatalf("status = %s, want queued", updated.Status)
+	}
+}
+
+func TestStoreRejectsInvalidRunStatusTransition(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-transition", Repo: "owner/repo"}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := store.AddRun(CreateRunInput{
+		ID:         "run_transition",
+		TaskID:     "task-transition",
+		Repo:       "owner/repo",
+		Task:       "transition",
+		BaseBranch: "main",
+		RunDir:     "/tmp/run_transition",
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if _, err := store.SetRunStatus(run.ID, StatusRunning, ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	if _, err := store.SetRunStatus(run.ID, StatusSucceeded, ""); err != nil {
+		t.Fatalf("set succeeded: %v", err)
+	}
+	if _, err := store.SetRunStatus(run.ID, StatusRunning, "retrying"); err == nil {
+		t.Fatal("expected invalid transition error")
+	} else if !strings.Contains(err.Error(), "invalid run status transition") {
+		t.Fatalf("unexpected transition error: %v", err)
+	}
+
+	got, ok := store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("run %s not found", run.ID)
+	}
+	if got.Status != StatusSucceeded {
+		t.Fatalf("status = %s, want succeeded", got.Status)
 	}
 }
 
