@@ -37,13 +37,10 @@ Resync webhook/label (no deploy):
 
 ```bash
 set -a; source ./.rascal.env; set +a
-./bin/rascal bootstrap \
-  --repo "$REPO" \
-  --server-url "https://${DOMAIN}" \
-  --skip-deploy \
-  --api-token "$API_TOKEN" \
-  --webhook-secret "$WEBHOOK_SECRET" \
-  --github-admin-token "$GITHUB_ADMIN_TOKEN"
+./bin/rascal config set server_url "https://${DOMAIN}"
+./bin/rascal github setup "$REPO" \
+  --github-token "$GITHUB_ADMIN_TOKEN" \
+  --webhook-secret "$WEBHOOK_SECRET"
 ```
 
 If behind Cloudflare, use:

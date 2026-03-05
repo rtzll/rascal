@@ -146,6 +146,20 @@ func TestRootHasGitHubAndInfraCommands(t *testing.T) {
 	if _, _, err := root.Find([]string{"infra"}); err != nil {
 		t.Fatalf("infra command missing: %v", err)
 	}
+	for _, c := range root.Commands() {
+		if c.Name() == "bootstrap" {
+			t.Fatal("bootstrap command should be removed")
+		}
+	}
+	infraCmd, _, err := root.Find([]string{"infra"})
+	if err != nil {
+		t.Fatalf("infra command missing: %v", err)
+	}
+	for _, c := range infraCmd.Commands() {
+		if c.Name() == "up" {
+			t.Fatal("infra up command should be removed")
+		}
+	}
 	if _, _, err := root.Find([]string{"logs", "run"}); err != nil {
 		t.Fatalf("logs run command missing: %v", err)
 	}
@@ -189,21 +203,28 @@ func TestLogsFollowIntervalDefaults(t *testing.T) {
 	}
 }
 
-func TestBootstrapAndInfraDefaults(t *testing.T) {
+func TestInitAndInfraDefaults(t *testing.T) {
 	root := newRootCmd()
 
-	bootstrapCmd, _, err := root.Find([]string{"bootstrap"})
+	initCmd, _, err := root.Find([]string{"init"})
 	if err != nil {
-		t.Fatalf("bootstrap command missing: %v", err)
+		t.Fatalf("init command missing: %v", err)
 	}
-	if got := bootstrapCmd.Flags().Lookup("goarch"); got != nil {
-		t.Fatalf("bootstrap should not expose goarch flag, got %q", got.Name)
-	}
-	if got := bootstrapCmd.Flags().Lookup("hcloud-server-type"); got != nil {
-		t.Fatalf("bootstrap should not expose hcloud-server-type flag, got %q", got.Name)
-	}
-	if got := bootstrapCmd.Flags().Lookup("print-plan"); got == nil {
-		t.Fatal("bootstrap should expose print-plan flag")
+	for _, name := range []string{
+		"host",
+		"provision",
+		"hcloud-token",
+		"repo",
+		"github-admin-token",
+		"github-runtime-token",
+		"non-interactive",
+		"print-plan",
+		"skip-deploy",
+		"skip-github",
+	} {
+		if got := initCmd.Flags().Lookup(name); got == nil {
+			t.Fatalf("init should expose %s flag", name)
+		}
 	}
 
 	deployCmd, _, err := root.Find([]string{"deploy"})
@@ -247,18 +268,11 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := infraDeployCmd.Flags().Lookup("upload-auth").DefValue; got != "false" {
 		t.Fatalf("infra deploy-existing default upload-auth = %q, want false", got)
 	}
-
-	infraUpCmd, _, err := root.Find([]string{"infra", "up"})
-	if err != nil {
-		t.Fatalf("infra up command missing: %v", err)
-	}
-	if got := infraUpCmd.Flags().Lookup("provision").DefValue; got != "false" {
-		t.Fatalf("infra up default provision = %q, want false", got)
-	}
 }
 
-func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
+func TestInitPrintPlanShowsMissingPrerequisites(t *testing.T) {
 	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
 	a := &app{
 		cfg: config.ClientConfig{
 			ServerURL: "http://127.0.0.1:8080",
@@ -279,26 +293,24 @@ func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
 		t.Setenv(k, "")
 	}
 
-	missingAuthPath := filepath.Join(tmp, "missing-auth.json")
-	cmd := a.newBootstrapCmd()
+	cmd := a.newInitCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{
 		"--print-plan",
 		"--host", "203.0.113.10",
 		"--repo", "owner/repo",
-		"--codex-auth", missingAuthPath,
 	})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
-		t.Fatalf("bootstrap --print-plan failed: %v", err)
+		t.Fatalf("init --print-plan failed: %v", err)
 	}
 
 	var out map[string]any
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
 	}
-	if out["status"] != "bootstrap_plan" {
+	if out["status"] != "init_plan" {
 		t.Fatalf("unexpected status: %v", out["status"])
 	}
 	if ready, ok := out["ready"].(bool); !ok || ready {
@@ -324,9 +336,14 @@ func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
 	}
 }
 
-func TestBootstrapPrintPlanReadyForProvisionFlow(t *testing.T) {
+func TestInitPrintPlanReadyForProvisionFlow(t *testing.T) {
 	tmp := t.TempDir()
-	authPath := filepath.Join(tmp, "auth.json")
+	t.Setenv("HOME", tmp)
+	authDir := filepath.Join(tmp, ".codex")
+	if err := os.MkdirAll(authDir, 0o700); err != nil {
+		t.Fatalf("create auth dir: %v", err)
+	}
+	authPath := filepath.Join(authDir, "auth.json")
 	if err := os.WriteFile(authPath, []byte(`{"ok":true}`), 0o600); err != nil {
 		t.Fatalf("write auth file: %v", err)
 	}
@@ -337,21 +354,20 @@ func TestBootstrapPrintPlanReadyForProvisionFlow(t *testing.T) {
 		output:     "json",
 		configPath: filepath.Join(tmp, "config.toml"),
 	}
-	cmd := a.newBootstrapCmd()
+	cmd := a.newInitCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{
 		"--print-plan",
 		"--repo", "owner/repo",
-		"--provision-new",
+		"--provision",
 		"--hcloud-token", "hcloud-token",
 		"--github-admin-token", "admin-token",
 		"--github-runtime-token", "runtime-token",
-		"--codex-auth", authPath,
 	})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
-		t.Fatalf("bootstrap --print-plan failed: %v", err)
+		t.Fatalf("init --print-plan failed: %v", err)
 	}
 
 	var out map[string]any
@@ -378,12 +394,21 @@ func TestBootstrapPrintPlanReadyForProvisionFlow(t *testing.T) {
 	}
 }
 
-func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
+func TestInitStillValidatesWithoutPrintPlan(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	authDir := filepath.Join(tmp, ".codex")
+	if err := os.MkdirAll(authDir, 0o700); err != nil {
+		t.Fatalf("create auth dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(authDir, "auth.json"), []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
 	a := &app{
 		cfg: config.ClientConfig{
 			ServerURL: "http://127.0.0.1:8080",
 		},
-		configPath: filepath.Join(t.TempDir(), "config.toml"),
+		configPath: filepath.Join(tmp, "config.toml"),
 	}
 	for _, k := range []string{
 		"GITHUB_ADMIN_TOKEN",
@@ -394,7 +419,7 @@ func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
 		t.Setenv(k, "")
 	}
 
-	cmd := a.newBootstrapCmd()
+	cmd := a.newInitCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{
@@ -404,54 +429,9 @@ func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
 	})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected bootstrap to fail when webhook admin token is missing")
+		t.Fatal("expected init to fail when webhook admin token is missing")
 	}
 	if !strings.Contains(err.Error(), "--github-admin-token is required") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestInfraUpValidatesRequiredInputs(t *testing.T) {
-	a := &app{
-		cfg: config.ClientConfig{
-			ServerURL: "http://127.0.0.1:8080",
-		},
-	}
-	cmd := a.newInfraUpCmd()
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
-
-	cmd.SetArgs([]string{})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected infra up to fail without host/provision")
-	}
-	if !strings.Contains(err.Error(), "--host is required unless --provision is set") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	cmd = a.newInfraUpCmd()
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"--host", "203.0.113.10", "--provision"})
-	err = cmd.Execute()
-	if err == nil {
-		t.Fatal("expected infra up to fail when host and provision are combined")
-	}
-	if !strings.Contains(err.Error(), "--host cannot be combined with --provision") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	cmd = a.newInfraUpCmd()
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
-	t.Setenv("HCLOUD_TOKEN", "")
-	cmd.SetArgs([]string{"--provision"})
-	err = cmd.Execute()
-	if err == nil {
-		t.Fatal("expected infra up to fail without hcloud token in provision mode")
-	}
-	if !strings.Contains(err.Error(), "missing Hetzner token") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -1093,9 +1073,9 @@ func TestHelpGoldenSnapshots(t *testing.T) {
 		args []string
 	}{
 		{name: "root", args: nil},
+		{name: "init", args: []string{"init"}},
 		{name: "run", args: []string{"run"}},
 		{name: "logs", args: []string{"logs"}},
-		{name: "bootstrap", args: []string{"bootstrap"}},
 		{name: "deploy", args: []string{"deploy"}},
 		{name: "auth", args: []string{"auth"}},
 		{name: "github", args: []string{"github"}},

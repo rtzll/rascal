@@ -9,7 +9,7 @@
 
 ## Tokens
 
-Rascal uses three tokens for production bootstrap.
+Rascal uses three tokens for production init.
 
 1. `HCLOUD_TOKEN`
 
@@ -61,18 +61,15 @@ You can also set a custom env file via `--env-file` or `RASCAL_ENV_FILE`.
 ### A) Provision + Deploy + Webhook (recommended)
 
 ```bash
-./bin/rascal bootstrap \
-  --repo OWNER/REPO \
-  --domain rascal.example.com
+./bin/rascal config set domain rascal.example.com
+./bin/rascal init --provision --repo OWNER/REPO
 ```
 
 ### B) Existing Host
 
 ```bash
-./bin/rascal bootstrap \
-  --repo OWNER/REPO \
-  --host YOUR_SERVER_IP \
-  --domain rascal.example.com
+./bin/rascal config set domain rascal.example.com
+./bin/rascal init --host YOUR_SERVER_IP --repo OWNER/REPO
 ```
 
 ### C) No Domain
