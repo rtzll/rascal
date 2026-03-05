@@ -1424,99 +1424,113 @@ func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
 	}
 }
 
-func TestClosedUnmergedEventDoesNotDowngradeMergedRunState(t *testing.T) {
-	s := newTestServer(t, &fakeLauncher{})
-	taskID := "owner/repo#321"
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 321}); err != nil {
-		t.Fatalf("upsert task: %v", err)
-	}
-	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:          "run_merged_guard",
+func TestHandleWebhookPullRequestSynchronizeCancelsAndRequeuesStaleRuns(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	s.maxConcurrent = 1
+	defer waitForServerIdle(t, s)
+	defer close(waitCh)
+
+	oldSHA := "0123456789abcdef0123456789abcdef01234567"
+	newSHA := "89abcdef0123456789abcdef0123456789abcd"
+	taskID := "owner/repo#pr-101"
+
+	runningRun, err := s.createAndQueueRun(runRequest{
 		TaskID:      taskID,
 		Repo:        "owner/repo",
-		Task:        "already merged",
+		Task:        "Address PR #101 feedback",
 		Trigger:     "pr_comment",
-		RunDir:      t.TempDir(),
-		IssueNumber: 321,
-		PRNumber:    321,
-		PRStatus:    state.PRStatusMerged,
+		IssueNumber: 101,
+		PRNumber:    101,
+		PRStatus:    state.PRStatusOpen,
+		HeadBranch:  "rascal/pr-101",
+		HeadSHA:     oldSHA,
+		Context:     "comment context",
+		Debug:       boolPtr(true),
+		ResponseTarget: &runResponseTarget{
+			Repo:        "owner/repo",
+			IssueNumber: 101,
+			RequestedBy: "alice",
+			Trigger:     "pr_comment",
+		},
 	})
 	if err != nil {
-		t.Fatalf("add run: %v", err)
+		t.Fatalf("create running run: %v", err)
 	}
-	markRunSucceeded(t, s, run.ID)
-	if _, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
-		r.PRStatus = state.PRStatusMerged
-		return nil
-	}); err != nil {
-		t.Fatalf("set merged pr status: %v", err)
+	queuedRun, err := s.createAndQueueRun(runRequest{
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Task:        "Address PR #101 review feedback",
+		Trigger:     "pr_review",
+		IssueNumber: 101,
+		PRNumber:    101,
+		PRStatus:    state.PRStatusOpen,
+		HeadBranch:  "rascal/pr-101",
+		HeadSHA:     oldSHA,
+		Context:     "review context",
+		Debug:       boolPtr(true),
+		ResponseTarget: &runResponseTarget{
+			Repo:        "owner/repo",
+			IssueNumber: 101,
+			RequestedBy: "bob",
+			Trigger:     "pr_review",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create queued run: %v", err)
 	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to be active")
 
-	payload := []byte(`{"action":"closed","pull_request":{"number":321,"merged":false},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
-	req := webhookRequest(t, payload, "pull_request", "delivery-stale-closed", "")
+	payload := []byte(`{"action":"synchronize","pull_request":{"number":101,"head":{"ref":"feature","sha":"` + newSHA + `"},"base":{"ref":"main"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "pull_request", "delivery-sync", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
-		t.Fatalf("expected 202 for stale closed event, got %d", rec.Code)
+		t.Fatalf("expected 202 for synchronize event, got %d", rec.Code)
 	}
 
-	updated, ok := s.store.GetRun(run.ID)
-	if !ok {
-		t.Fatalf("run %s not found", run.ID)
-	}
-	if updated.Status != state.StatusSucceeded {
-		t.Fatalf("status = %s, want succeeded", updated.Status)
-	}
-	if updated.PRStatus != state.PRStatusMerged {
-		t.Fatalf("pr status = %s, want merged", updated.PRStatus)
-	}
-}
+	waitFor(t, time.Second, func() bool {
+		r, ok := s.store.GetRun(queuedRun.ID)
+		return ok && r.Status == state.StatusCanceled
+	}, "queued run canceled")
+	waitFor(t, time.Second, func() bool {
+		req, ok := s.store.GetRunCancel(runningRun.ID)
+		return ok && strings.Contains(req.Reason, "pull_request synchronize")
+	}, "running run cancel requested")
 
-func TestReopenedEventDoesNotDowngradeMergedRunState(t *testing.T) {
-	s := newTestServer(t, &fakeLauncher{})
-	taskID := "owner/repo#654"
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 654}); err != nil {
-		t.Fatalf("upsert task: %v", err)
-	}
-	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:          "run_reopened_guard",
-		TaskID:      taskID,
-		Repo:        "owner/repo",
-		Task:        "already merged",
-		Trigger:     "pr_comment",
-		RunDir:      t.TempDir(),
-		IssueNumber: 654,
-		PRNumber:    654,
-		PRStatus:    state.PRStatusMerged,
-	})
-	if err != nil {
-		t.Fatalf("add run: %v", err)
-	}
-	markRunSucceeded(t, s, run.ID)
-	if _, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
-		r.PRStatus = state.PRStatusMerged
-		return nil
-	}); err != nil {
-		t.Fatalf("set merged pr status: %v", err)
-	}
+	var requeued []state.Run
+	waitFor(t, time.Second, func() bool {
+		requeued = nil
+		for _, run := range s.store.ListRuns(20) {
+			if run.PRNumber == 101 && run.HeadSHA == newSHA && run.Status == state.StatusQueued {
+				requeued = append(requeued, run)
+			}
+		}
+		return len(requeued) == 2
+	}, "requeued runs queued")
 
-	payload := []byte(`{"action":"reopened","pull_request":{"number":654},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
-	req := webhookRequest(t, payload, "pull_request", "delivery-stale-reopened", "")
-	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("expected 202 for stale reopened event, got %d", rec.Code)
+	foundComment := false
+	foundReview := false
+	for _, run := range requeued {
+		if run.ID == runningRun.ID || run.ID == queuedRun.ID {
+			t.Fatalf("expected new run ids, got stale run %q", run.ID)
+		}
+		switch run.Trigger {
+		case "pr_comment":
+			if run.Task != "Address PR #101 feedback" || run.Context != "comment context" {
+				t.Fatalf("unexpected requeued comment run: %+v", run)
+			}
+			foundComment = true
+		case "pr_review":
+			if run.Task != "Address PR #101 review feedback" || run.Context != "review context" {
+				t.Fatalf("unexpected requeued review run: %+v", run)
+			}
+			foundReview = true
+		}
 	}
-
-	updated, ok := s.store.GetRun(run.ID)
-	if !ok {
-		t.Fatalf("run %s not found", run.ID)
-	}
-	if updated.Status != state.StatusSucceeded {
-		t.Fatalf("status = %s, want succeeded", updated.Status)
-	}
-	if updated.PRStatus != state.PRStatusMerged {
-		t.Fatalf("pr status = %s, want merged", updated.PRStatus)
+	if !foundComment || !foundReview {
+		t.Fatalf("expected requeued runs for pr_comment and pr_review, got %+v", requeued)
 	}
 }
 

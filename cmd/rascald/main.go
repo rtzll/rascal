@@ -70,6 +70,7 @@ type runRequest struct {
 	Task        string
 	BaseBranch  string
 	HeadBranch  string
+	HeadSHA     string
 	Trigger     string
 	IssueNumber int
 	PRNumber    int
@@ -682,6 +683,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			TaskID:      taskID,
 			Repo:        ev.Repository.FullName,
 			Task:        fmt.Sprintf("Address PR #%d review feedback", ev.PullRequest.Number),
+			HeadSHA:     ev.PullRequest.Head.SHA,
 			Trigger:     "pr_review",
 			IssueNumber: ev.PullRequest.Number,
 			PRNumber:    ev.PullRequest.Number,
@@ -738,6 +740,7 @@ Inline comment location: %s`, contextText, location)
 			TaskID:      taskID,
 			Repo:        ev.Repository.FullName,
 			Task:        fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
+			HeadSHA:     ev.PullRequest.Head.SHA,
 			Trigger:     "pr_review_comment",
 			IssueNumber: ev.PullRequest.Number,
 			PRNumber:    ev.PullRequest.Number,
@@ -761,6 +764,9 @@ Inline comment location: %s`, contextText, location)
 		var ev ghapi.PullRequestEvent
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return fmt.Errorf("decode pull_request event: %w", err)
+		}
+		if ev.Action == "synchronize" {
+			return s.handlePullRequestSynchronize(ev.Repository.FullName, ev.PullRequest.Number, ev.PullRequest.Head.SHA)
 		}
 		task, ok := s.taskForPR(ev.Repository.FullName, ev.PullRequest.Number)
 		if !ok {
@@ -970,6 +976,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	req.TaskID = strings.TrimSpace(req.TaskID)
 	req.BaseBranch = strings.TrimSpace(req.BaseBranch)
 	req.HeadBranch = strings.TrimSpace(req.HeadBranch)
+	req.HeadSHA = strings.TrimSpace(req.HeadSHA)
 	req.Context = strings.TrimSpace(req.Context)
 	if req.Repo == "" || req.Task == "" {
 		return state.Run{}, fmt.Errorf("repo and task are required")
@@ -1048,6 +1055,16 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	})
 	if err != nil {
 		return state.Run{}, fmt.Errorf("persist run: %w", err)
+	}
+	if req.HeadSHA != "" {
+		updated, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
+			r.HeadSHA = req.HeadSHA
+			return nil
+		})
+		if err != nil {
+			return state.Run{}, fmt.Errorf("set run head sha: %w", err)
+		}
+		run = updated
 	}
 
 	if err := s.writeRunFiles(run); err != nil {
@@ -1533,7 +1550,95 @@ func (s *server) taskForPR(repo string, prNumber int) (state.Task, bool) {
 	if strings.TrimSpace(repo) == "" || prNumber <= 0 {
 		return state.Task{}, false
 	}
-	return s.store.FindTaskByPR(repo, prNumber)
+	task, ok := s.store.FindTaskByPR(repo, prNumber)
+	if !ok {
+		return state.Task{}, false
+	}
+	return task, true
+}
+
+func (s *server) handlePullRequestSynchronize(repo string, prNumber int, headSHA string) error {
+	repo = strings.TrimSpace(repo)
+	headSHA = strings.TrimSpace(headSHA)
+	if repo == "" || prNumber <= 0 || headSHA == "" {
+		return nil
+	}
+
+	runs := s.store.ListRuns(10000)
+	staleRuns := make([]state.Run, 0)
+	for _, run := range runs {
+		if run.Repo != repo || run.PRNumber != prNumber {
+			continue
+		}
+		if run.Status != state.StatusQueued && run.Status != state.StatusRunning {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(run.HeadSHA), headSHA) {
+			continue
+		}
+		staleRuns = append(staleRuns, run)
+	}
+	if len(staleRuns) == 0 {
+		return nil
+	}
+
+	reason := fmt.Sprintf("pull_request synchronize: head SHA updated to %s", headSHA)
+	for _, run := range staleRuns {
+		switch run.Status {
+		case state.StatusQueued:
+			if _, err := s.store.SetRunStatus(run.ID, state.StatusCanceled, reason); err != nil {
+				return err
+			}
+		case state.StatusRunning:
+			if err := s.store.RequestRunCancel(run.ID, reason, "pull_request"); err != nil {
+				return err
+			}
+		}
+	}
+
+	for _, run := range staleRuns {
+		if err := s.requeueStaleRun(run, headSHA); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *server) requeueStaleRun(run state.Run, headSHA string) error {
+	var target *runResponseTarget
+	if loaded, ok, err := loadRunResponseTarget(run.RunDir); err != nil {
+		log.Printf("failed to load run response target for %s: %v", run.ID, err)
+	} else if ok {
+		target = &loaded
+	}
+	debug := run.Debug
+	_, err := s.createAndQueueRun(runRequest{
+		TaskID:         run.TaskID,
+		Repo:           run.Repo,
+		Task:           run.Task,
+		BaseBranch:     run.BaseBranch,
+		HeadBranch:     run.HeadBranch,
+		HeadSHA:        headSHA,
+		Trigger:        run.Trigger,
+		IssueNumber:    run.IssueNumber,
+		PRNumber:       run.PRNumber,
+		PRStatus:       run.PRStatus,
+		Context:        run.Context,
+		Debug:          &debug,
+		ResponseTarget: target,
+	})
+	if errors.Is(err, errTaskCompleted) {
+		return nil
+	}
+	return err
+}
+
+func (s *server) resolveTaskForPR(repo string, prNumber int) string {
+	task, ok := s.store.FindTaskByPR(repo, prNumber)
+	if ok {
+		return task.ID
+	}
+	return fmt.Sprintf("%s#pr-%d", repo, prNumber)
 }
 
 func (s *server) activeTaskForPR(repo string, prNumber int) (string, bool) {
