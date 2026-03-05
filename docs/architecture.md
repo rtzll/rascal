@@ -44,7 +44,15 @@ There is no always-on background worker.
 Each run stores:
 
 - metadata (`run_id`, task, repo, branches, trigger)
+- runtime metadata (`runtime_kind`, `runtime_ref`)
 - artifacts (`context.json`, instructions, logs, `meta.json`)
+
+## Runtime Selection
+
+Rascald selects a runtime via `RASCAL_RUNNER_RUNTIME` (for example, `docker` or
+`noop`) and passes a runtime-specific artifact reference through
+`RASCAL_RUNNER_ARTIFACT_REF`. Legacy env keys `RASCAL_RUNNER_MODE` and
+`RASCAL_RUNNER_IMAGE` remain supported for backward compatibility.
 
 ## Runner Env Contract
 

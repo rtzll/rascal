@@ -32,6 +32,11 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	if l.Image == "" {
 		return Result{}, fmt.Errorf("docker image is required")
 	}
+	if spec.TimeoutSeconds > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(spec.TimeoutSeconds)*time.Second)
+		defer cancel()
+	}
 	if err := os.MkdirAll(spec.RunDir, 0o755); err != nil {
 		return Result{}, fmt.Errorf("create run dir: %w", err)
 	}
@@ -58,36 +63,7 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 
 	_, _ = fmt.Fprintf(logFile, "[%s] starting docker runner image=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), l.Image, spec.RunID)
 
-	envPairs := map[string]string{
-		"RASCAL_RUN_ID":                spec.RunID,
-		"RASCAL_TASK_ID":               spec.TaskID,
-		"RASCAL_TASK":                  spec.Task,
-		"RASCAL_REPO":                  spec.Repo,
-		"RASCAL_BASE_BRANCH":           spec.BaseBranch,
-		"RASCAL_HEAD_BRANCH":           spec.HeadBranch,
-		"RASCAL_TRIGGER":               spec.Trigger,
-		"RASCAL_GOOSE_DEBUG":           strconv.FormatBool(spec.Debug),
-		"RASCAL_CONTEXT":               spec.Context,
-		"RASCAL_CONTEXT_JSON":          "/rascal-meta/context.json",
-		"RASCAL_ISSUE_NUMBER":          strconv.Itoa(spec.IssueNumber),
-		"RASCAL_PR_NUMBER":             strconv.Itoa(spec.PRNumber),
-		"RASCAL_GOOSE_SESSION_MODE":    NormalizeGooseSessionMode(spec.GooseSessionMode),
-		"RASCAL_GOOSE_SESSION_RESUME":  strconv.FormatBool(spec.GooseSessionResume),
-		"RASCAL_GOOSE_SESSION_KEY":     strings.TrimSpace(spec.GooseSessionTaskKey),
-		"RASCAL_GOOSE_SESSION_NAME":    strings.TrimSpace(spec.GooseSessionName),
-		"CODEX_HOME":                   "/rascal-meta/codex",
-		"GOOSE_PROVIDER":               "codex",
-		"GOOSE_MODEL":                  "gpt-5.4",
-		"GOOSE_MODE":                   "auto",
-		"GOOSE_DISABLE_KEYRING":        "1",
-		"GOOSE_DISABLE_SESSION_NAMING": "true",
-		"GOOSE_CONTEXT_STRATEGY":       "summarize",
-		"GH_PROMPT_DISABLED":           "1",
-		"GIT_TERMINAL_PROMPT":          "0",
-	}
-	if strings.TrimSpace(l.GitHubToken) != "" {
-		envPairs["GH_TOKEN"] = l.GitHubToken
-	}
+	envPairs := runnerEnv(spec, l.GitHubToken)
 
 	goosePathRoot := "/rascal-meta/goose"
 	if spec.GooseSessionResume && sessionDir != "" {
@@ -97,6 +73,21 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 
 	containerName := sanitizeContainerName("rascal-" + spec.RunID)
 	args := []string{"run", "--rm", "--name", containerName}
+	if spec.NetworkMode != "" {
+		args = append(args, "--network", spec.NetworkMode)
+	}
+	if spec.ReadonlyRoot {
+		args = append(args, "--read-only")
+	}
+	if spec.MemoryMB > 0 {
+		args = append(args, "--memory", fmt.Sprintf("%dm", spec.MemoryMB))
+	}
+	if spec.CPUShares > 0 {
+		args = append(args, "--cpu-shares", strconv.Itoa(spec.CPUShares))
+	}
+	if spec.CPUQuota > 0 {
+		args = append(args, "--cpu-quota", strconv.Itoa(spec.CPUQuota))
+	}
 	envKeys := make([]string, 0, len(envPairs))
 	for k := range envPairs {
 		envKeys = append(envKeys, k)

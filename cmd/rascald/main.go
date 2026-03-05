@@ -125,7 +125,7 @@ func main() {
 	s := &server{
 		cfg:           cfg,
 		store:         store,
-		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken),
+		launcher:      runner.NewLauncher(runner.LauncherConfig{Runtime: runner.RuntimeKindFromString(cfg.RunnerRuntime), ArtifactRef: cfg.RunnerArtifactRef, GitHubToken: cfg.GitHubToken}),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
 		runCancels:    make(map[string]context.CancelFunc),
 		runCancelNote: make(map[string]string),
@@ -152,7 +152,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("rascald listening on %s (runner=%s)", cfg.ListenAddr, cfg.RunnerMode)
+	log.Printf("rascald listening on %s (runtime=%s)", cfg.ListenAddr, cfg.RunnerRuntime)
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- httpServer.ListenAndServe()
@@ -1032,6 +1032,8 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		PRNumber:    req.PRNumber,
 		PRStatus:    req.PRStatus,
 		Context:     req.Context,
+		RuntimeKind: string(runner.RuntimeKindFromString(s.cfg.RunnerRuntime)),
+		RuntimeRef:  s.cfg.RunnerArtifactRef,
 		Debug:       boolPtr(debugEnabled),
 	})
 	if err != nil {

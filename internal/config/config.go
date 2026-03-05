@@ -21,8 +21,8 @@ type ServerConfig struct {
 	GitHubToken         string
 	GitHubWebhookSecret string
 	BotLogin            string
-	RunnerMode          string
-	RunnerImage         string
+	RunnerRuntime       string
+	RunnerArtifactRef   string
 	RunnerMaxAttempts   int
 	CodexAuthPath       string
 	GooseSessionMode    string
@@ -49,6 +49,15 @@ func LoadServerConfig() ServerConfig {
 	dataDir := envOrDefault("RASCAL_DATA_DIR", "./var/lib/rascal")
 	statePath := envOrDefault("RASCAL_STATE_PATH", filepath.Join(dataDir, "state.db"))
 
+	runtime := strings.TrimSpace(os.Getenv("RASCAL_RUNNER_RUNTIME"))
+	if runtime == "" {
+		runtime = envOrDefault("RASCAL_RUNNER_MODE", "noop")
+	}
+	artifactRef := strings.TrimSpace(os.Getenv("RASCAL_RUNNER_ARTIFACT_REF"))
+	if artifactRef == "" {
+		artifactRef = envOrDefault("RASCAL_RUNNER_IMAGE", "rascal-runner:latest")
+	}
+
 	return ServerConfig{
 		ListenAddr:          envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
 		DataDir:             dataDir,
@@ -59,8 +68,8 @@ func LoadServerConfig() ServerConfig {
 		GitHubToken:         strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")),
 		GitHubWebhookSecret: strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
 		BotLogin:            strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
-		RunnerMode:          envOrDefault("RASCAL_RUNNER_MODE", "noop"),
-		RunnerImage:         envOrDefault("RASCAL_RUNNER_IMAGE", "rascal-runner:latest"),
+		RunnerRuntime:       runtime,
+		RunnerArtifactRef:   artifactRef,
 		RunnerMaxAttempts:   envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
 		CodexAuthPath:       envOrDefault("RASCAL_CODEX_AUTH_PATH", "/etc/rascal/codex_auth.json"),
 		GooseSessionMode:    normalizeGooseSessionMode(envOrDefault("RASCAL_GOOSE_SESSION_MODE", "all")),

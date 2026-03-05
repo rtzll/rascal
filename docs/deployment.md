@@ -14,7 +14,7 @@ Rascal deploy uploads/builds these artifacts on the server:
 - `/etc/rascal/rascal.env` (shared runtime env)
 - `/etc/rascal/rascal-blue.env` and `/etc/rascal/rascal-green.env` (slot env)
 - `/etc/caddy/Caddyfile` + `/etc/caddy/rascal-upstream.caddy` (proxy target)
-- Docker image `rascal-runner:latest`
+- Runtime artifact (Docker image tag by default, e.g. `rascal-runner:latest`)
 
 It also writes:
 
@@ -44,7 +44,7 @@ Given active slot `A` and inactive slot `B`, deploy does:
 2. Build `rascal-runner` for Linux and upload artifacts.
 3. Ensure base packages (`docker`, `caddy`, `curl`, `sqlite3`) exist.
 4. Install uploaded `rascal-runner` into `/opt/rascal/runner/rascal-runner`.
-5. Build/update runner image on host.
+5. Build/update runtime artifact on host (Docker image for `docker` runtime).
 6. Install/update systemd unit and env files.
 7. Start/restart slot `B`.
 8. Wait for slot `B` readiness (`/readyz` on `B` port).
@@ -74,6 +74,16 @@ This allows fast cutover while old work winds down in the background.
 - Container entrypoint script is intentionally minimal (`runner/entrypoint.sh`).
 - It only executes `/usr/local/bin/rascal-runner`.
 - Task workflow behavior (git/goose/PR/meta handling) is implemented in Go in `cmd/rascal-runner`.
+
+## Runtime Config
+
+Runtime selection is runtime-neutral:
+
+- `RASCAL_RUNNER_RUNTIME` (default `noop`, set to `docker` for host deployments)
+- `RASCAL_RUNNER_ARTIFACT_REF` (Docker image tag for `docker` runtime)
+
+Legacy aliases `RASCAL_RUNNER_MODE` and `RASCAL_RUNNER_IMAGE` are still
+accepted for backward compatibility.
 
 ## Overlap Safety (Both Slots Alive Briefly)
 

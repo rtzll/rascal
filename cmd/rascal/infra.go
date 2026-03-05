@@ -251,7 +251,7 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 				WebhookSecret:      webhookSecret,
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
-				RunnerImage:        runnerImage,
+				RunnerArtifactRef:  runnerImage,
 				SkipEnvUpload:      skipEnvUpload,
 				SkipAuthUpload:     skipAuthUpload,
 			})
@@ -330,7 +330,7 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 				WebhookSecret:      webhookSecret,
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
-				RunnerImage:        runnerImage,
+				RunnerArtifactRef:  runnerImage,
 				SkipEnvUpload:      !uploadEnv,
 				SkipAuthUpload:     !uploadAuth,
 			})
@@ -381,7 +381,7 @@ type deployExistingInput struct {
 	WebhookSecret      string
 	CodexAuthPath      string
 	Domain             string
-	RunnerImage        string
+	RunnerArtifactRef  string
 	SkipEnvUpload      bool
 	SkipAuthUpload     bool
 	SkipIfHealthy      bool
@@ -409,7 +409,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	provisionedArch := strings.TrimSpace(input.ProvisionedArch)
 	codexAuthPath := strings.TrimSpace(input.CodexAuthPath)
 	domain := firstNonEmpty(strings.TrimSpace(input.Domain), strings.TrimSpace(a.cfg.Domain))
-	runnerImage := firstNonEmpty(strings.TrimSpace(input.RunnerImage), "rascal-runner:latest")
+	runnerImage := firstNonEmpty(strings.TrimSpace(input.RunnerArtifactRef), "rascal-runner:latest")
 	sshPort := input.SSHPort
 	apiToken := strings.TrimSpace(input.APIToken)
 	githubRuntimeToken := strings.TrimSpace(input.GitHubRuntimeToken)
@@ -507,8 +507,8 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		WebhookSecret:      webhookSecret,
 		GitHubRuntimeToken: githubRuntimeToken,
 		CodexAuthPath:      expandedAuthPath,
-		RunnerMode:         "docker",
-		RunnerImage:        runnerImage,
+		RunnerRuntime:      "docker",
+		RunnerArtifactRef:  runnerImage,
 		ServerListenAddr:   ":8080",
 		ServerDataDir:      "/var/lib/rascal",
 		ServerStatePath:    "/var/lib/rascal/state.db",

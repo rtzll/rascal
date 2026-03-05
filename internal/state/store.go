@@ -229,6 +229,8 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	if trigger == "" {
 		trigger = "cli"
 	}
+	runtimeKind := strings.TrimSpace(in.RuntimeKind)
+	runtimeRef := strings.TrimSpace(in.RuntimeRef)
 	debugEnabled := true
 	if in.Debug != nil {
 		debugEnabled = *in.Debug
@@ -278,6 +280,8 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		PrStatus:    string(prStatus),
 		HeadSha:     "",
 		Context:     in.Context,
+		RuntimeKind: runtimeKind,
+		RuntimeRef:  runtimeRef,
 		Error:       "",
 		CreatedAt:   now.UnixNano(),
 		UpdatedAt:   now.UnixNano(),
@@ -800,6 +804,8 @@ func fromDBRun(r sqlitegen.Run) Run {
 		PRStatus:    normalizePRStatus(PRStatus(r.PrStatus)),
 		HeadSHA:     r.HeadSha,
 		Context:     r.Context,
+		RuntimeKind: r.RuntimeKind,
+		RuntimeRef:  r.RuntimeRef,
 		Error:       r.Error,
 		CreatedAt:   time.Unix(0, r.CreatedAt).UTC(),
 		UpdatedAt:   time.Unix(0, r.UpdatedAt).UTC(),
@@ -843,6 +849,8 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 		PrStatus:    string(prStatus),
 		HeadSha:     r.HeadSHA,
 		Context:     r.Context,
+		RuntimeKind: r.RuntimeKind,
+		RuntimeRef:  r.RuntimeRef,
 		Error:       r.Error,
 		CreatedAt:   fallbackUnixNano(r.CreatedAt, time.Now().UTC()),
 		UpdatedAt:   fallbackUnixNano(r.UpdatedAt, r.CreatedAt),

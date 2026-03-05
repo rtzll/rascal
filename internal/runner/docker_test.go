@@ -292,3 +292,58 @@ exit 0
 		t.Fatalf("expected no-new-privileges:true in docker args, got: %s", string(logData))
 	}
 }
+
+func TestDockerLauncherWritesMetaOnFailure(t *testing.T) {
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "docker_calls.log")
+
+	fakeDocker := filepath.Join(tmp, "docker")
+	script := `#!/bin/sh
+set -eu
+echo "$@" >> "` + logPath + `"
+exit 7
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+oldPath)
+
+	runDir := filepath.Join(tmp, "run")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("create run dir: %v", err)
+	}
+
+	launcher := DockerLauncher{Image: "rascal-runner:latest"}
+	res, err := launcher.Start(context.Background(), Spec{
+		RunID:      "run_meta",
+		TaskID:     "task_meta",
+		Repo:       "owner/repo",
+		Task:       "meta",
+		BaseBranch: "main",
+		HeadBranch: "rascal/task_meta",
+		Trigger:    "cli",
+		RunDir:     runDir,
+	})
+	if err == nil {
+		t.Fatal("expected error from docker launcher")
+	}
+	if res.ExitCode != 7 {
+		t.Fatalf("exit code = %d, want 7", res.ExitCode)
+	}
+
+	meta, metaErr := ReadMeta(filepath.Join(runDir, "meta.json"))
+	if metaErr != nil {
+		t.Fatalf("read meta: %v", metaErr)
+	}
+	if meta.RunID != "run_meta" {
+		t.Fatalf("meta run_id = %q, want run_meta", meta.RunID)
+	}
+	if meta.ExitCode != 7 {
+		t.Fatalf("meta exit_code = %d, want 7", meta.ExitCode)
+	}
+	if meta.Error == "" {
+		t.Fatal("meta error should be set")
+	}
+}

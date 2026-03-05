@@ -90,6 +90,47 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 	}
 }
 
+func TestStorePersistsRuntimeMetadata(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	run, err := store.AddRun(CreateRunInput{
+		ID:          "run_meta",
+		TaskID:      "task_meta",
+		Repo:        "owner/repo",
+		Task:        "metadata",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/task_meta/run_meta",
+		RunDir:      "/tmp/run_meta",
+		RuntimeKind: "docker",
+		RuntimeRef:  "rascal-runner:latest",
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if run.RuntimeKind != "docker" {
+		t.Fatalf("runtime kind = %q, want docker", run.RuntimeKind)
+	}
+	if run.RuntimeRef != "rascal-runner:latest" {
+		t.Fatalf("runtime ref = %q, want rascal-runner:latest", run.RuntimeRef)
+	}
+
+	stored, ok := store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("run %s not found", run.ID)
+	}
+	if stored.RuntimeKind != "docker" {
+		t.Fatalf("stored runtime kind = %q, want docker", stored.RuntimeKind)
+	}
+	if stored.RuntimeRef != "rascal-runner:latest" {
+		t.Fatalf("stored runtime ref = %q, want rascal-runner:latest", stored.RuntimeRef)
+	}
+}
+
 func TestStoreAllowsRecoveryTransitionRunningToQueued(t *testing.T) {
 	t.Parallel()
 

@@ -30,8 +30,8 @@ type Config struct {
 	WebhookSecret      string
 	GitHubRuntimeToken string
 	CodexAuthPath      string
-	RunnerMode         string
-	RunnerImage        string
+	RunnerRuntime      string
+	RunnerArtifactRef  string
 	ServerListenAddr   string
 	ServerDataDir      string
 	ServerStatePath    string
@@ -52,7 +52,7 @@ type plan struct {
 	Host            string   `json:"host"`
 	Domain          string   `json:"domain,omitempty"`
 	GOARCH          string   `json:"goarch"`
-	RunnerImage     string   `json:"runner_image"`
+	RunnerArtifact  string   `json:"runner_artifact_ref"`
 	UploadEnvFile   bool     `json:"upload_env_file"`
 	UploadCodexAuth bool     `json:"upload_codex_auth"`
 	Steps           []string `json:"steps"`
@@ -88,12 +88,13 @@ func Execute(cfg Config) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	binaryPath := filepath.Join(tmpDir, "rascald")
-	if err := buildLinuxRascald(binaryPath, cfg.GOARCH); err != nil {
+	installer, err := runtimeInstallerFor(cfg)
+	if err != nil {
 		return err
 	}
-	runnerBinaryPath := filepath.Join(tmpDir, "rascal-runner")
-	if err := buildLinuxRascalRunner(runnerBinaryPath, cfg.GOARCH); err != nil {
+
+	binaryPath := filepath.Join(tmpDir, "rascald")
+	if err := buildLinuxRascald(binaryPath, cfg.GOARCH); err != nil {
 		return err
 	}
 
@@ -110,18 +111,9 @@ func Execute(cfg Config) error {
 		return fmt.Errorf("write systemd service: %w", err)
 	}
 
-	runnerArchivePath := filepath.Join(tmpDir, "runner.tgz")
-	if err := runLocalInDir(repoRootPath(), "tar", "-C", repoRootPath(), "-czf", runnerArchivePath, "runner"); err != nil {
-		return fmt.Errorf("package runner assets: %w", err)
-	}
-
-	installDocker, err := assetsFS.ReadFile("assets/install_docker.sh")
+	runtimeArtifacts, err := installer.PrepareArtifacts(cfg, tmpDir)
 	if err != nil {
-		return fmt.Errorf("read embedded install_docker.sh: %w", err)
-	}
-	installDockerPath := filepath.Join(tmpDir, "install_docker.sh")
-	if err := os.WriteFile(installDockerPath, installDocker, 0o700); err != nil {
-		return fmt.Errorf("write install_docker.sh: %w", err)
+		return err
 	}
 
 	caddyPath := filepath.Join(tmpDir, "Caddyfile")
@@ -133,25 +125,24 @@ func Execute(cfg Config) error {
 		return fmt.Errorf("write caddyfile: %w", err)
 	}
 
+	steps := []string{
+		"prepare_remote_dirs",
+		"upload_artifacts",
+	}
+	steps = append(steps, installer.PlanSteps()...)
+	steps = append(steps, "install_rascal_files", "switch_blue_green_slot", "reload_caddy")
+
 	planPath := filepath.Join(tmpDir, "plan.json")
 	data, err := json.MarshalIndent(plan{
 		Version:         1,
 		Host:            cfg.Host,
 		Domain:          strings.TrimSpace(cfg.Domain),
 		GOARCH:          strings.TrimSpace(cfg.GOARCH),
-		RunnerImage:     strings.TrimSpace(cfg.RunnerImage),
+		RunnerArtifact:  strings.TrimSpace(cfg.RunnerArtifactRef),
 		UploadEnvFile:   cfg.UploadEnvFile,
 		UploadCodexAuth: cfg.UploadCodexAuth,
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339),
-		Steps: []string{
-			"prepare_remote_dirs",
-			"upload_artifacts",
-			"ensure_dependencies",
-			"build_runner_image",
-			"install_rascal_files",
-			"switch_blue_green_slot",
-			"reload_caddy",
-		},
+		Steps:           steps,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode deploy plan: %w", err)
@@ -166,13 +157,11 @@ func Execute(cfg Config) error {
 
 	uploads := []remoteUpload{
 		{LocalPath: binaryPath, RemotePath: "/tmp/rascal-bootstrap/rascald"},
-		{LocalPath: runnerBinaryPath, RemotePath: "/tmp/rascal-bootstrap/rascal-runner"},
 		{LocalPath: servicePath, RemotePath: "/tmp/rascal-bootstrap/rascal@.service"},
-		{LocalPath: installDockerPath, RemotePath: "/tmp/rascal-bootstrap/install_docker.sh"},
-		{LocalPath: runnerArchivePath, RemotePath: "/tmp/rascal-bootstrap/runner.tgz"},
 		{LocalPath: caddyPath, RemotePath: "/tmp/rascal-bootstrap/Caddyfile"},
 		{LocalPath: planPath, RemotePath: "/tmp/rascal-bootstrap/plan.json"},
 	}
+	uploads = append(uploads, installer.Uploads(runtimeArtifacts)...)
 	if cfg.UploadEnvFile {
 		uploads = append(uploads, remoteUpload{LocalPath: envPath, RemotePath: "/tmp/rascal-bootstrap/rascal.env"})
 	}
@@ -185,8 +174,12 @@ func Execute(cfg Config) error {
 		}
 	}
 
-	if err := runRemoteScript(cfg, "set -eu\nchmod +x /tmp/rascal-bootstrap/install_docker.sh\n/tmp/rascal-bootstrap/install_docker.sh\n"); err != nil {
+	if depScript, err := installer.EnsureDependenciesScript(cfg, runtimeArtifacts); err != nil {
 		return err
+	} else if strings.TrimSpace(depScript) != "" {
+		if err := runRemoteScript(cfg, depScript); err != nil {
+			return err
+		}
 	}
 	if err := runRemoteScript(cfg, strings.TrimSpace(`
 set -eu
@@ -206,16 +199,17 @@ fi
 `)+"\n"); err != nil {
 		return err
 	}
-	if err := runRemoteScript(cfg, fmt.Sprintf(strings.TrimSpace(`
-set -eu
-mkdir -p /opt/rascal /etc/rascal
-tar -xzf /tmp/rascal-bootstrap/runner.tgz -C /opt/rascal
-install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner
-docker build -t %s /opt/rascal/runner
-install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald
-install -m 0644 /tmp/rascal-bootstrap/rascal@.service /etc/systemd/system/rascal@.service
-`)+"\n", shellSingleQuote(cfg.RunnerImage))); err != nil {
+	installScript, err := installer.InstallScript(cfg, baseArtifacts{
+		RascaldRemotePath: "/tmp/rascal-bootstrap/rascald",
+		ServiceRemotePath: "/tmp/rascal-bootstrap/rascal@.service",
+	}, runtimeArtifacts)
+	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(installScript) != "" {
+		if err := runRemoteScript(cfg, installScript); err != nil {
+			return err
+		}
 	}
 	if cfg.UploadEnvFile {
 		if err := runRemoteScript(cfg, "set -eu\ninstall -m 0600 /tmp/rascal-bootstrap/rascal.env /etc/rascal/rascal.env\n"); err != nil {
@@ -639,6 +633,8 @@ RASCAL_STATE_PATH=%s
 RASCAL_API_TOKEN=%s
 RASCAL_GITHUB_TOKEN=%s
 RASCAL_GITHUB_WEBHOOK_SECRET=%s
+RASCAL_RUNNER_RUNTIME=%s
+RASCAL_RUNNER_ARTIFACT_REF=%s
 RASCAL_RUNNER_MODE=%s
 RASCAL_RUNNER_IMAGE=%s
 RASCAL_RUNNER_MAX_ATTEMPTS=1
@@ -653,8 +649,10 @@ RASCAL_CODEX_AUTH_PATH=%s
 		cfg.APIToken,
 		cfg.GitHubRuntimeToken,
 		cfg.WebhookSecret,
-		cfg.RunnerMode,
-		cfg.RunnerImage,
+		cfg.RunnerRuntime,
+		cfg.RunnerArtifactRef,
+		cfg.RunnerRuntime,
+		cfg.RunnerArtifactRef,
 		filepath.Join(cfg.ServerDataDir, "goose-sessions"),
 		cfg.ServerCodexAuthDst,
 	)

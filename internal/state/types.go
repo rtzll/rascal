@@ -107,6 +107,8 @@ type Run struct {
 	PRStatus    PRStatus `json:"pr_status"`
 	HeadSHA     string   `json:"head_sha,omitempty"`
 	Context     string   `json:"context,omitempty"`
+	RuntimeKind string   `json:"runtime_kind"`
+	RuntimeRef  string   `json:"runtime_ref"`
 	Error       string   `json:"error,omitempty"`
 
 	CreatedAt   time.Time  `json:"created_at"`
@@ -156,6 +158,8 @@ type CreateRunInput struct {
 	PRNumber    int
 	PRStatus    PRStatus
 	Context     string
+	RuntimeKind string
+	RuntimeRef  string
 }
 
 type UpsertTaskInput struct {

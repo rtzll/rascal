@@ -33,4 +33,21 @@ func TestNoopLauncherWritesArtifacts(t *testing.T) {
 			t.Fatalf("expected %s: %v", name, err)
 		}
 	}
+
+	meta, err := ReadMeta(filepath.Join(runDir, "meta.json"))
+	if err != nil {
+		t.Fatalf("read meta: %v", err)
+	}
+	if meta.RunID != spec.RunID {
+		t.Fatalf("meta run_id = %q, want %q", meta.RunID, spec.RunID)
+	}
+	if meta.TaskID != spec.TaskID {
+		t.Fatalf("meta task_id = %q, want %q", meta.TaskID, spec.TaskID)
+	}
+	if meta.Repo != spec.Repo {
+		t.Fatalf("meta repo = %q, want %q", meta.Repo, spec.Repo)
+	}
+	if meta.ExitCode != 0 {
+		t.Fatalf("meta exit_code = %d, want 0", meta.ExitCode)
+	}
 }

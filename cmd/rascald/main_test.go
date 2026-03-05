@@ -214,10 +214,11 @@ func newTestServer(t *testing.T, launcher runner.Launcher) *server {
 
 	dataDir := t.TempDir()
 	cfg := config.ServerConfig{
-		DataDir:    dataDir,
-		StatePath:  filepath.Join(dataDir, "state.db"),
-		MaxRuns:    200,
-		RunnerMode: "noop",
+		DataDir:           dataDir,
+		StatePath:         filepath.Join(dataDir, "state.db"),
+		MaxRuns:           200,
+		RunnerRuntime:     "noop",
+		RunnerArtifactRef: "rascal-runner:latest",
 	}
 	store, err := state.New(cfg.StatePath, cfg.MaxRuns)
 	if err != nil {

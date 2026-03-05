@@ -11,7 +11,7 @@ import (
 )
 
 const activeRunForTask = `-- name: ActiveRunForTask :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ? AND status IN ('queued', 'running')
 ORDER BY seq DESC
@@ -39,6 +39,8 @@ func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (Run, err
 		&i.PrStatus,
 		&i.HeadSha,
 		&i.Context,
+		&i.RuntimeKind,
+		&i.RuntimeRef,
 		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -194,6 +196,8 @@ RETURNING
   pr_status,
   head_sha,
   context,
+  runtime_kind,
+  runtime_ref,
   error,
   created_at,
   updated_at,
@@ -227,6 +231,8 @@ func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRun
 		&i.PrStatus,
 		&i.HeadSha,
 		&i.Context,
+		&i.RuntimeKind,
+		&i.RuntimeRef,
 		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -284,6 +290,8 @@ RETURNING
   pr_status,
   head_sha,
   context,
+  runtime_kind,
+  runtime_ref,
   error,
   created_at,
   updated_at,
@@ -318,6 +326,8 @@ func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQu
 		&i.PrStatus,
 		&i.HeadSha,
 		&i.Context,
+		&i.RuntimeKind,
+		&i.RuntimeRef,
 		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -520,7 +530,7 @@ func (q *Queries) FindTaskByPR(ctx context.Context, arg FindTaskByPRParams) (Fin
 }
 
 const getRun = `-- name: GetRun :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?
 `
@@ -546,6 +556,8 @@ func (q *Queries) GetRun(ctx context.Context, id string) (Run, error) {
 		&i.PrStatus,
 		&i.HeadSha,
 		&i.Context,
+		&i.RuntimeKind,
+		&i.RuntimeRef,
 		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -658,14 +670,16 @@ INSERT INTO runs (
   pr_status,
   head_sha,
   context,
+  runtime_kind,
+  runtime_ref,
   error,
   created_at,
   updated_at,
   started_at,
   completed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at
 `
 
 type InsertRunParams struct {
@@ -685,6 +699,8 @@ type InsertRunParams struct {
 	PrStatus    string        `json:"pr_status"`
 	HeadSha     string        `json:"head_sha"`
 	Context     string        `json:"context"`
+	RuntimeKind string        `json:"runtime_kind"`
+	RuntimeRef  string        `json:"runtime_ref"`
 	Error       string        `json:"error"`
 	CreatedAt   int64         `json:"created_at"`
 	UpdatedAt   int64         `json:"updated_at"`
@@ -710,6 +726,8 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (Run, erro
 		arg.PrStatus,
 		arg.HeadSha,
 		arg.Context,
+		arg.RuntimeKind,
+		arg.RuntimeRef,
 		arg.Error,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -735,6 +753,8 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (Run, erro
 		&i.PrStatus,
 		&i.HeadSha,
 		&i.Context,
+		&i.RuntimeKind,
+		&i.RuntimeRef,
 		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -758,7 +778,7 @@ func (q *Queries) IsTaskCompleted(ctx context.Context, id string) (bool, error) 
 }
 
 const lastRunForTask = `-- name: LastRunForTask :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ?
 ORDER BY seq DESC
@@ -786,6 +806,8 @@ func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (Run, error
 		&i.PrStatus,
 		&i.HeadSha,
 		&i.Context,
+		&i.RuntimeKind,
+		&i.RuntimeRef,
 		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -796,7 +818,7 @@ func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (Run, error
 }
 
 const listRunningRuns = `-- name: ListRunningRuns :many
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE status = 'running'
 ORDER BY seq DESC
@@ -829,6 +851,8 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]Run, error) {
 			&i.PrStatus,
 			&i.HeadSha,
 			&i.Context,
+			&i.RuntimeKind,
+			&i.RuntimeRef,
 			&i.Error,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -849,7 +873,7 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]Run, error) {
 }
 
 const listRuns = `-- name: ListRuns :many
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at
 FROM runs
 ORDER BY seq DESC
 LIMIT ?
@@ -882,6 +906,8 @@ func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]Run, error) {
 			&i.PrStatus,
 			&i.HeadSha,
 			&i.Context,
+			&i.RuntimeKind,
+			&i.RuntimeRef,
 			&i.Error,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -1076,6 +1102,8 @@ SET
   pr_status = ?,
   head_sha = ?,
   context = ?,
+  runtime_kind = ?,
+  runtime_ref = ?,
   error = ?,
   created_at = ?,
   updated_at = ?,
@@ -1100,6 +1128,8 @@ type UpdateRunParams struct {
 	PrStatus    string        `json:"pr_status"`
 	HeadSha     string        `json:"head_sha"`
 	Context     string        `json:"context"`
+	RuntimeKind string        `json:"runtime_kind"`
+	RuntimeRef  string        `json:"runtime_ref"`
 	Error       string        `json:"error"`
 	CreatedAt   int64         `json:"created_at"`
 	UpdatedAt   int64         `json:"updated_at"`
@@ -1125,6 +1155,8 @@ func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (int64, er
 		arg.PrStatus,
 		arg.HeadSha,
 		arg.Context,
+		arg.RuntimeKind,
+		arg.RuntimeRef,
 		arg.Error,
 		arg.CreatedAt,
 		arg.UpdatedAt,

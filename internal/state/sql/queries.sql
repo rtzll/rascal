@@ -96,41 +96,43 @@ INSERT INTO runs (
   pr_status,
   head_sha,
   context,
+  runtime_kind,
+  runtime_ref,
   error,
   created_at,
   updated_at,
   started_at,
   completed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at;
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at;
 
 -- name: GetRun :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?;
 
 -- name: ListRuns :many
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at
 FROM runs
 ORDER BY seq DESC
 LIMIT ?;
 
 -- name: ListRunningRuns :many
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE status = 'running'
 ORDER BY seq DESC;
 
 -- name: LastRunForTask :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ?
 ORDER BY seq DESC
 LIMIT 1;
 
 -- name: ActiveRunForTask :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, runtime_kind, runtime_ref, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ? AND status IN ('queued', 'running')
 ORDER BY seq DESC
@@ -154,6 +156,8 @@ SET
   pr_status = ?,
   head_sha = ?,
   context = ?,
+  runtime_kind = ?,
+  runtime_ref = ?,
   error = ?,
   created_at = ?,
   updated_at = ?,
@@ -227,6 +231,8 @@ RETURNING
   pr_status,
   head_sha,
   context,
+  runtime_kind,
+  runtime_ref,
   error,
   created_at,
   updated_at,
@@ -280,6 +286,8 @@ RETURNING
   pr_status,
   head_sha,
   context,
+  runtime_kind,
+  runtime_ref,
   error,
   created_at,
   updated_at,

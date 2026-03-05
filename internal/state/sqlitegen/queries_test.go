@@ -41,6 +41,8 @@ CREATE TABLE runs (
   pr_status TEXT NOT NULL DEFAULT 'none',
   head_sha TEXT NOT NULL DEFAULT '',
   context TEXT NOT NULL DEFAULT '',
+  runtime_kind TEXT NOT NULL DEFAULT '',
+  runtime_ref TEXT NOT NULL DEFAULT '',
   error TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,

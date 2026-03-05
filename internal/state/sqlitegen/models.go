@@ -37,6 +37,8 @@ type Run struct {
 	PrStatus    string        `json:"pr_status"`
 	HeadSha     string        `json:"head_sha"`
 	Context     string        `json:"context"`
+	RuntimeKind string        `json:"runtime_kind"`
+	RuntimeRef  string        `json:"runtime_ref"`
 	Error       string        `json:"error"`
 	CreatedAt   int64         `json:"created_at"`
 	UpdatedAt   int64         `json:"updated_at"`

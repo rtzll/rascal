@@ -73,5 +73,6 @@ suspected.
 
 1. Run `doctor` first.
 2. Confirm server URL and API token in `config view`.
-3. Follow logs for run-level errors.
-4. Verify webhook health/signature if GitHub triggers fail.
+3. Inspect `runtime_kind`/`runtime_ref` in `rascal ps --output json` to confirm the runtime and artifact used for a run.
+4. Follow logs for run-level errors.
+5. Verify webhook health/signature if GitHub triggers fail.
