@@ -47,7 +47,7 @@ RUN node --version \
     && goose --version
 
 ENV GOOSE_PROVIDER=codex \
-    GOOSE_MODEL=gpt-5.2-codex \
+    GOOSE_MODEL=gpt-5.4 \
     GOOSE_MODE=auto \
     GOOSE_DISABLE_KEYRING=1 \
     GOOSE_DISABLE_SESSION_NAMING=true \

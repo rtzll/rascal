@@ -58,7 +58,7 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 		"CODEX_HOME":                   "/rascal-meta/codex",
 		"GOOSE_PATH_ROOT":              "/rascal-meta/goose",
 		"GOOSE_PROVIDER":               "codex",
-		"GOOSE_MODEL":                  "gpt-5.2-codex",
+		"GOOSE_MODEL":                  "gpt-5.4",
 		"GOOSE_MODE":                   "auto",
 		"GOOSE_DISABLE_KEYRING":        "1",
 		"GOOSE_DISABLE_SESSION_NAMING": "true",
