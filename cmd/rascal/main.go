@@ -869,8 +869,8 @@ func (a *app) newDeployCmd() *cobra.Command {
 	cmd := a.newDeployExistingCmd("deploy", "Deploy rascald to an existing host")
 	cmd.Long = "Deploy or redeploy rascald to an existing Linux host over SSH without running provisioning or webhook setup."
 	cmd.Example = strings.TrimSpace(`
-rascal deploy --host 203.0.113.10 --codex-auth ~/.codex/auth.json --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
-rascal deploy --host 203.0.113.10 --skip-env-upload --skip-auth-upload
+rascal deploy --host 203.0.113.10
+rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$GITHUB_RUNTIME_TOKEN" --upload-auth --codex-auth ~/.codex/auth.json
 `)
 	return cmd
 }

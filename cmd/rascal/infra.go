@@ -311,8 +311,8 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 		codexAuthPath      string
 		domain             string
 		runnerImage        string
-		skipEnvUpload      bool
-		skipAuthUpload     bool
+		uploadEnv          bool
+		uploadAuth         bool
 	)
 
 	cmd := &cobra.Command{
@@ -331,8 +331,8 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
 				RunnerImage:        runnerImage,
-				SkipEnvUpload:      skipEnvUpload,
-				SkipAuthUpload:     skipAuthUpload,
+				SkipEnvUpload:      !uploadEnv,
+				SkipAuthUpload:     !uploadAuth,
 			})
 			if err != nil {
 				return err
@@ -364,8 +364,8 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	cmd.Flags().StringVar(&runnerImage, "runner-image", "rascal-runner:latest", "runner docker image tag")
-	cmd.Flags().BoolVar(&skipEnvUpload, "skip-env-upload", false, "keep existing /etc/rascal/rascal.env on server")
-	cmd.Flags().BoolVar(&skipAuthUpload, "skip-auth-upload", false, "keep existing codex auth file on server")
+	cmd.Flags().BoolVar(&uploadEnv, "upload-env", false, "upload/update /etc/rascal/rascal.env on server")
+	cmd.Flags().BoolVar(&uploadAuth, "upload-auth", false, "upload/update codex auth file on server")
 	return cmd
 }
 
@@ -425,7 +425,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	expandedAuthPath := ""
 	if !input.SkipAuthUpload {
 		if codexAuthPath == "" {
-			return deployExistingResult{}, &cliError{Code: exitInput, Message: "--codex-auth must be set (or pass --skip-auth-upload)"}
+			return deployExistingResult{}, &cliError{Code: exitInput, Message: "--codex-auth must be set when --upload-auth is used"}
 		}
 		var err error
 		expandedAuthPath, err = expandPath(codexAuthPath)
@@ -448,7 +448,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		}
 		githubRuntimeToken = firstNonEmpty(githubRuntimeToken, strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
 		if githubRuntimeToken == "" {
-			return deployExistingResult{}, &cliError{Code: exitInput, Message: "--github-runtime-token is required (or pass --skip-env-upload)"}
+			return deployExistingResult{}, &cliError{Code: exitInput, Message: "--github-runtime-token is required when --upload-env is used"}
 		}
 		if webhookSecret == "" {
 			created, err := randomToken(32)

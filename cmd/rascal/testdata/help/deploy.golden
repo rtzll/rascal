@@ -4,8 +4,8 @@ Usage:
   rascal deploy [flags]
 
 Examples:
-rascal deploy --host 203.0.113.10 --codex-auth ~/.codex/auth.json --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
-rascal deploy --host 203.0.113.10 --skip-env-upload --skip-auth-upload
+rascal deploy --host 203.0.113.10
+rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$GITHUB_RUNTIME_TOKEN" --upload-auth --codex-auth ~/.codex/auth.json
 
 Flags:
       --api-token string              orchestrator API token
@@ -16,11 +16,11 @@ Flags:
   -h, --help                          help for deploy
       --host string                   existing server host (defaults to config host/ssh_host)
       --runner-image string           runner docker image tag (default "rascal-runner:latest")
-      --skip-auth-upload              keep existing codex auth file on server
-      --skip-env-upload               keep existing /etc/rascal/rascal.env on server
       --ssh-key string                SSH private key path
       --ssh-port int                  SSH target port (default 22)
       --ssh-user string               SSH target user (default "root")
+      --upload-auth                   upload/update codex auth file on server
+      --upload-env                    upload/update /etc/rascal/rascal.env on server
       --webhook-secret string         GitHub webhook secret
 
 Global Flags:

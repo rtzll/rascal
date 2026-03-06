@@ -216,11 +216,11 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := deployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner:latest" {
 		t.Fatalf("deploy default runner-image = %q, want rascal-runner:latest", got)
 	}
-	if got := deployCmd.Flags().Lookup("skip-env-upload").DefValue; got != "false" {
-		t.Fatalf("deploy default skip-env-upload = %q, want false", got)
+	if got := deployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
+		t.Fatalf("deploy default upload-env = %q, want false", got)
 	}
-	if got := deployCmd.Flags().Lookup("skip-auth-upload").DefValue; got != "false" {
-		t.Fatalf("deploy default skip-auth-upload = %q, want false", got)
+	if got := deployCmd.Flags().Lookup("upload-auth").DefValue; got != "false" {
+		t.Fatalf("deploy default upload-auth = %q, want false", got)
 	}
 
 	provisionCmd, _, err := root.Find([]string{"infra", "provision-hetzner"})
@@ -241,11 +241,11 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := infraDeployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner:latest" {
 		t.Fatalf("infra deploy-existing default runner-image = %q, want rascal-runner:latest", got)
 	}
-	if got := infraDeployCmd.Flags().Lookup("skip-env-upload").DefValue; got != "false" {
-		t.Fatalf("infra deploy-existing default skip-env-upload = %q, want false", got)
+	if got := infraDeployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
+		t.Fatalf("infra deploy-existing default upload-env = %q, want false", got)
 	}
-	if got := infraDeployCmd.Flags().Lookup("skip-auth-upload").DefValue; got != "false" {
-		t.Fatalf("infra deploy-existing default skip-auth-upload = %q, want false", got)
+	if got := infraDeployCmd.Flags().Lookup("upload-auth").DefValue; got != "false" {
+		t.Fatalf("infra deploy-existing default upload-auth = %q, want false", got)
 	}
 
 	infraUpCmd, _, err := root.Find([]string{"infra", "up"})
