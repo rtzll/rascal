@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.26.0
+ARG GO_VERSION=1.26.1
 ARG GOOSE_VERSION=1.27.0
 
 FROM golang:${GO_VERSION}-bookworm AS go-runtime
