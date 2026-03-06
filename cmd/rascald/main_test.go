@@ -857,6 +857,80 @@ func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.
 	}
 }
 
+func TestHandleWebhookPullRequestReviewCommentEditedBodyChangedQueuesRun(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	const (
+		repo    = "owner/repo"
+		taskID  = "owner/repo#13"
+		prNum   = 13
+		baseRef = "main"
+		headRef = "rascal/pr-13"
+	)
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, PRNumber: prNum}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	seedRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "seed_review_comment_edited",
+		TaskID:     taskID,
+		Repo:       repo,
+		Task:       "seed",
+		BaseBranch: baseRef,
+		HeadBranch: headRef,
+		Trigger:    "seed",
+		RunDir:     filepath.Join(t.TempDir(), "seed_review_comment_edited"),
+		PRNumber:   prNum,
+	})
+	if err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	markRunSucceeded(t, s, seedRun.ID)
+
+	payload := []byte(`{"action":"edited","comment":{"id":505,"body":"Refined inline feedback","path":"cmd/rascald/main.go","line":600,"user":{"login":"eve"}},"changes":{"body":{"from":"Old inline feedback"}},"pull_request":{"number":13},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-edited", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var got state.Run
+	waitFor(t, time.Second, func() bool {
+		runs := s.store.ListRuns(20)
+		for _, run := range runs {
+			if run.Trigger == "pr_review_comment" {
+				got = run
+				return true
+			}
+		}
+		return false
+	}, "pr_review_comment run created for edited review comment")
+
+	if got.Context != "Refined inline feedback\n\nInline comment location: cmd/rascald/main.go:600" {
+		t.Fatalf("context = %q, want edited inline comment body with location", got.Context)
+	}
+}
+
+func TestHandleWebhookPullRequestReviewCommentEditedSkipsUnchangedBody(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	payload := []byte(`{"action":"edited","comment":{"id":506,"body":"  same inline feedback  ","path":"cmd/rascald/main.go","line":601,"user":{"login":"eve"}},"changes":{"body":{"from":"same inline feedback"}},"pull_request":{"number":13},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-nochange", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	for _, run := range s.store.ListRuns(10) {
+		if run.Trigger == "pr_review_comment" {
+			t.Fatalf("expected no pr_review_comment run for unchanged edit")
+		}
+	}
+}
+
 func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)

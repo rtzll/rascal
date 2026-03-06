@@ -87,11 +87,16 @@ type PullRequestReviewEvent struct {
 }
 
 type PullRequestReviewCommentEvent struct {
-	Action      string        `json:"action"`
-	Comment     ReviewComment `json:"comment"`
-	PullRequest PullRequest   `json:"pull_request"`
-	Repository  Repository    `json:"repository"`
-	Sender      User          `json:"sender"`
+	Action      string               `json:"action"`
+	Comment     ReviewComment        `json:"comment"`
+	Changes     ReviewCommentChanges `json:"changes"`
+	PullRequest PullRequest          `json:"pull_request"`
+	Repository  Repository           `json:"repository"`
+	Sender      User                 `json:"sender"`
+}
+
+type ReviewCommentChanges struct {
+	Body *IssueCommentBodyChange `json:"body"`
 }
 
 type PullRequestEvent struct {
