@@ -58,3 +58,16 @@ Tip: use `doctor` to confirm both local and remote resolution.
 ```bash
 ./bin/rascal doctor --host YOUR_SERVER_IP
 ```
+
+## Server Runner Egress Policy
+
+`rascald` supports runner egress modes via environment variables:
+
+- `RASCAL_RUNNER_EGRESS_MODE=open|safe-default|allowlist`
+- `RASCAL_RUNNER_EGRESS_ALLOWLIST` (comma/space/newline-separated domains, IPs, or CIDRs; required for `allowlist`)
+
+Mode behavior:
+
+- `open`: no egress filtering (legacy behavior)
+- `safe-default`: blocks metadata and private/local targets (`127.0.0.0/8`, `169.254.169.254/32`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, and IPv6 local/link-local ranges)
+- `allowlist`: blocks all outbound destinations except the configured allowlist

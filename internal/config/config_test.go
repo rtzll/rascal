@@ -151,3 +151,29 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 		t.Fatalf("GooseSessionTTLDays = %d, want 0", cfg.GooseSessionTTLDays)
 	}
 }
+
+func TestServerConfigEnsureValidatesEgressMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := ServerConfig{
+		DataDir:           t.TempDir(),
+		RunnerEgressMode:  "invalid",
+		RunnerEgressAllow: nil,
+	}
+	if err := cfg.Ensure(); err == nil {
+		t.Fatal("expected invalid egress mode error")
+	}
+}
+
+func TestServerConfigEnsureAllowlistRequiresEntries(t *testing.T) {
+	t.Parallel()
+
+	cfg := ServerConfig{
+		DataDir:           t.TempDir(),
+		RunnerEgressMode:  "allowlist",
+		RunnerEgressAllow: nil,
+	}
+	if err := cfg.Ensure(); err == nil {
+		t.Fatal("expected allowlist validation error")
+	}
+}

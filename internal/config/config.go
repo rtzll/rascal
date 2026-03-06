@@ -24,6 +24,8 @@ type ServerConfig struct {
 	RunnerMode          string
 	RunnerImage         string
 	RunnerMaxAttempts   int
+	RunnerEgressMode    string
+	RunnerEgressAllow   []string
 	CodexAuthPath       string
 	GooseSessionMode    string
 	GooseSessionRoot    string
@@ -62,6 +64,8 @@ func LoadServerConfig() ServerConfig {
 		RunnerMode:          envOrDefault("RASCAL_RUNNER_MODE", "noop"),
 		RunnerImage:         envOrDefault("RASCAL_RUNNER_IMAGE", "rascal-runner:latest"),
 		RunnerMaxAttempts:   envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
+		RunnerEgressMode:    envOrDefault("RASCAL_RUNNER_EGRESS_MODE", "open"),
+		RunnerEgressAllow:   envList("RASCAL_RUNNER_EGRESS_ALLOWLIST"),
 		CodexAuthPath:       envOrDefault("RASCAL_CODEX_AUTH_PATH", "/etc/rascal/codex_auth.json"),
 		GooseSessionMode:    normalizeGooseSessionMode(envOrDefault("RASCAL_GOOSE_SESSION_MODE", "all")),
 		GooseSessionRoot:    envOrDefault("RASCAL_GOOSE_SESSION_ROOT", filepath.Join(dataDir, "goose-sessions")),
@@ -88,6 +92,15 @@ func (c ServerConfig) Ensure() error {
 		if err := os.MkdirAll(root, 0o755); err != nil {
 			return fmt.Errorf("create goose sessions directory: %w", err)
 		}
+	}
+	switch strings.ToLower(strings.TrimSpace(c.RunnerEgressMode)) {
+	case "", "open", "safe-default":
+	case "allowlist":
+		if len(c.RunnerEgressAllow) == 0 {
+			return fmt.Errorf("runner egress allowlist mode requires RASCAL_RUNNER_EGRESS_ALLOWLIST")
+		}
+	default:
+		return fmt.Errorf("invalid RASCAL_RUNNER_EGRESS_MODE %q (expected open, safe-default, or allowlist)", c.RunnerEgressMode)
 	}
 	return nil
 }
@@ -233,4 +246,23 @@ func normalizeGooseSessionMode(mode string) string {
 	default:
 		return "off"
 	}
+}
+
+func envList(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\t' || r == '\r' || r == ' '
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
 }

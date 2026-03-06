@@ -125,7 +125,7 @@ func main() {
 	s := &server{
 		cfg:           cfg,
 		store:         store,
-		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken),
+		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken, cfg.RunnerEgressMode, cfg.RunnerEgressAllow),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
 		runCancels:    make(map[string]context.CancelFunc),
 		runCancelNote: make(map[string]string),
@@ -152,7 +152,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("rascald listening on %s (runner=%s)", cfg.ListenAddr, cfg.RunnerMode)
+	log.Printf("rascald listening on %s (runner=%s egress=%s)", cfg.ListenAddr, cfg.RunnerMode, strings.TrimSpace(cfg.RunnerEgressMode))
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- httpServer.ListenAndServe()

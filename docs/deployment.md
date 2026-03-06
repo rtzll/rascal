@@ -20,6 +20,14 @@ It also writes:
 
 - `/etc/rascal/active_slot` with `blue` or `green`
 
+## Runner Egress Guardrails
+
+- New deploy env templates set `RASCAL_RUNNER_EGRESS_MODE=safe-default`.
+- `safe-default` allows normal internet egress but denies metadata/local/private targets from runner containers.
+- `allowlist` mode enforces `RASCAL_RUNNER_EGRESS_ALLOWLIST` (domains/IPs/CIDRs only).
+- Enforcement uses host firewall rules (`iptables`/`ip6tables`) attached to run container lifecycle and cleaned up when runs complete or cancel.
+- Denied egress attempts are logged through firewall LOG targets (for example via `journalctl -k` on the host).
+
 ## Runtime Topology
 
 - `rascal@blue` listens on `127.0.0.1:18080`

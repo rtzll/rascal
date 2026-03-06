@@ -39,10 +39,15 @@ type Launcher interface {
 	Start(ctx context.Context, spec Spec) (Result, error)
 }
 
-func NewLauncher(mode, image, githubToken string) Launcher {
+func NewLauncher(mode, image, githubToken, egressMode string, egressAllowlist []string) Launcher {
 	switch mode {
 	case "docker":
-		return DockerLauncher{Image: image, GitHubToken: githubToken}
+		return DockerLauncher{
+			Image:           image,
+			GitHubToken:     githubToken,
+			EgressMode:      egressMode,
+			EgressAllowlist: append([]string(nil), egressAllowlist...),
+		}
 	default:
 		return NoopLauncher{}
 	}

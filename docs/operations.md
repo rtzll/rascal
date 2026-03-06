@@ -28,6 +28,7 @@ Log output includes:
 
 - `runner.log`: orchestration, git, push, PR operations
 - `goose.ndjson`: agent-side stream events
+- host kernel firewall logs (`journalctl -k`) for denied runner egress attempts when egress policy is enabled
 
 ## Recovery Patterns
 

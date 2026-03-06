@@ -18,8 +18,10 @@ import (
 
 // DockerLauncher runs a task inside a Docker container.
 type DockerLauncher struct {
-	Image       string
-	GitHubToken string
+	Image           string
+	GitHubToken     string
+	EgressMode      string
+	EgressAllowlist []string
 }
 
 const (
@@ -130,7 +132,30 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
-	err = cmd.Run()
+	started := false
+	err = cmd.Start()
+	egressCleanup := func() {}
+	egressApplied := false
+	if err == nil {
+		started = true
+		egressCleanup, err = applyContainerEgressPolicy(ctx, containerName, spec.RunID, l.EgressMode, l.EgressAllowlist, logFile)
+		if err == nil {
+			egressApplied = true
+		}
+	}
+	if err != nil {
+		forceStopContainer(containerName, logFile)
+		if started {
+			if waitErr := cmd.Wait(); waitErr != nil {
+				_ = waitErr
+			}
+		}
+	} else {
+		err = cmd.Wait()
+	}
+	if egressApplied {
+		defer egressCleanup()
+	}
 	if ctx.Err() != nil {
 		// Context cancellation can terminate the local docker client before the
 		// remote container is fully cleaned up, so force cleanup deterministically.
