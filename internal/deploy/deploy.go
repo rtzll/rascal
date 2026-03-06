@@ -125,7 +125,11 @@ func Execute(cfg Config) error {
 	}
 
 	caddyPath := filepath.Join(tmpDir, "Caddyfile")
-	if err := os.WriteFile(caddyPath, []byte(renderCaddyfile(cfg.Domain)), 0o644); err != nil {
+	caddyfile, err := renderCaddyfile(cfg.Domain)
+	if err != nil {
+		return fmt.Errorf("render caddyfile: %w", err)
+	}
+	if err := os.WriteFile(caddyPath, []byte(caddyfile), 0o644); err != nil {
 		return fmt.Errorf("write caddyfile: %w", err)
 	}
 
@@ -676,7 +680,7 @@ WantedBy=multi-user.target
 `) + "\n"
 }
 
-func renderCaddyfile(domain string) string {
+func renderCaddyfile(domain string) (string, error) {
 	domain = strings.TrimSpace(domain)
 	localProxyBlock := fmt.Sprintf(`
 :%d {
@@ -696,25 +700,12 @@ func renderCaddyfile(domain string) string {
 	}
 
 	templateBytes, err := assetsFS.ReadFile("assets/Caddyfile.tmpl")
-	if err == nil {
-		out := strings.ReplaceAll(string(templateBytes), "{{DOMAIN_BLOCK}}", strings.TrimSpace(domainBlock))
-		out = strings.ReplaceAll(out, "{{LOCAL_PROXY_BLOCK}}", strings.TrimSpace(localProxyBlock))
-		return strings.TrimSpace(out) + "\n"
+	if err != nil {
+		return "", fmt.Errorf("read embedded caddy template: %w", err)
 	}
-
-	return strings.TrimSpace(fmt.Sprintf(`
-(rascal_common) {
-  encode gzip zstd
-  import /etc/caddy/rascal-upstream.caddy
-  log {
-    output file /var/log/caddy/rascal-access.log
-    format json
-  }
-}
-
-%s
-%s
-`, strings.TrimSpace(localProxyBlock), strings.TrimSpace(domainBlock))) + "\n"
+	out := strings.ReplaceAll(string(templateBytes), "{{DOMAIN_BLOCK}}", strings.TrimSpace(domainBlock))
+	out = strings.ReplaceAll(out, "{{LOCAL_PROXY_BLOCK}}", strings.TrimSpace(localProxyBlock))
+	return strings.TrimSpace(out) + "\n", nil
 }
 
 func expandPath(path string) (string, error) {

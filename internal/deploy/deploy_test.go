@@ -52,7 +52,10 @@ func TestGoarchFromHetznerArchitecture(t *testing.T) {
 }
 
 func TestRenderCaddyfileVariants(t *testing.T) {
-	local := renderCaddyfile("")
+	local, err := renderCaddyfile("")
+	if err != nil {
+		t.Fatalf("render local caddyfile: %v", err)
+	}
 	if !strings.Contains(local, ":8080 {") {
 		t.Fatalf("local caddyfile missing :8080 site:\n%s", local)
 	}
@@ -60,12 +63,32 @@ func TestRenderCaddyfileVariants(t *testing.T) {
 		t.Fatalf("local caddyfile unexpectedly includes domain block:\n%s", local)
 	}
 
-	domain := renderCaddyfile("example.com")
+	domain, err := renderCaddyfile("example.com")
+	if err != nil {
+		t.Fatalf("render domain caddyfile: %v", err)
+	}
 	if strings.Contains(domain, ":8080 {") {
 		t.Fatalf("domain caddyfile should not include local :8080 block:\n%s", domain)
 	}
 	if !strings.Contains(domain, "example.com {") {
 		t.Fatalf("domain caddyfile missing domain block:\n%s", domain)
+	}
+	for _, want := range []string{
+		"@allowed_health",
+		"@allowed_api",
+		"@allowed_webhook",
+		"path /v1/webhooks/github",
+		"header X-GitHub-Event *",
+		"header X-GitHub-Delivery *",
+		"header X-Hub-Signature-256 *",
+		"respond 404",
+	} {
+		if !strings.Contains(local, want) {
+			t.Fatalf("local caddyfile missing %q:\n%s", want, local)
+		}
+		if !strings.Contains(domain, want) {
+			t.Fatalf("domain caddyfile missing %q:\n%s", want, domain)
+		}
 	}
 }
 
