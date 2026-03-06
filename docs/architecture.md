@@ -36,6 +36,11 @@ Rascal has three runtime parts.
 Persistent state is stored on the server in a SQLite database file under Rascal
 data dir.
 
+When Goose session persistence is enabled, Rascal also stores task-scoped Goose
+session state on disk under `${RASCAL_DATA_DIR}/goose-sessions/<task-key>/`.
+Runs stay short-lived; each run mounts this directory, uses it, then exits.
+There is no always-on background worker.
+
 Each run stores:
 
 - metadata (`run_id`, task, repo, branches, trigger)
@@ -61,3 +66,8 @@ Common optional:
 - `RASCAL_META_DIR` (default: `/rascal-meta`)
 - `RASCAL_WORK_ROOT` (default: `/work`)
 - `RASCAL_REPO_DIR` (default: `${RASCAL_WORK_ROOT}/repo`)
+- `RASCAL_GOOSE_SESSION_MODE` (`off`, `pr-only`, `all`; default: `off`)
+- `RASCAL_GOOSE_SESSION_RESUME` (set by orchestrator per run)
+- `RASCAL_GOOSE_SESSION_KEY` (stable task-scoped key when resume is enabled)
+- `RASCAL_GOOSE_SESSION_NAME` (stable Goose session name when resume is enabled)
+- `GOOSE_PATH_ROOT` (run-scoped `/rascal-meta/goose` in stateless mode, or task-scoped mount in resume mode)

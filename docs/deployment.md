@@ -29,6 +29,13 @@ It also writes:
   - `rascal@blue` gets `RASCAL_SLOT=blue`
   - `rascal@green` gets `RASCAL_SLOT=green`
 
+Default deployed env also includes Goose session persistence knobs (enabled by
+default):
+
+- `RASCAL_GOOSE_SESSION_MODE=all`
+- `RASCAL_GOOSE_SESSION_ROOT=/var/lib/rascal/goose-sessions`
+- `RASCAL_GOOSE_SESSION_TTL_DAYS=14`
+
 ## Blue/Green Sequence
 
 Given active slot `A` and inactive slot `B`, deploy does:

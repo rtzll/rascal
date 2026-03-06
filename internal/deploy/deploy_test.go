@@ -226,6 +226,13 @@ func TestSystemdServiceContentUsesMixedKillModeForDrain(t *testing.T) {
 	}
 }
 
+func TestServerEnvFileEnablesGooseSessionsByDefault(t *testing.T) {
+	content := serverEnvFile(testDeployConfig())
+	if !strings.Contains(content, "RASCAL_GOOSE_SESSION_MODE=all") {
+		t.Fatalf("expected goose sessions enabled by default, got:\n%s", content)
+	}
+}
+
 func testDeployConfig() Config {
 	return Config{
 		Host:               "example-host",

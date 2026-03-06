@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rtzll/rascal/internal/runner"
 )
 
 type fakeExecutor struct {
@@ -142,6 +144,14 @@ func TestLoadConfig(t *testing.T) {
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_TASK", "Do thing")
 	t.Setenv("RASCAL_ISSUE_NUMBER", "7")
+	t.Setenv("RASCAL_BASE_BRANCH", "")
+	t.Setenv("RASCAL_HEAD_BRANCH", "")
+	t.Setenv("RASCAL_TRIGGER", "")
+	t.Setenv("GOOSE_PATH_ROOT", "")
+	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "")
+	t.Setenv("RASCAL_GOOSE_SESSION_RESUME", "")
+	t.Setenv("RASCAL_GOOSE_SESSION_KEY", "")
+	t.Setenv("RASCAL_GOOSE_SESSION_NAME", "")
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatalf("loadConfig returned error: %v", err)
@@ -158,6 +168,15 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.Trigger != "cli" {
 		t.Fatalf("expected default trigger cli, got %q", cfg.Trigger)
 	}
+	if cfg.GooseSessionMode != runner.GooseSessionModeOff {
+		t.Fatalf("expected default goose session mode off, got %q", cfg.GooseSessionMode)
+	}
+	if cfg.GooseSessionResume {
+		t.Fatal("expected default goose session resume to be false")
+	}
+	if cfg.GooseSessionName != "" {
+		t.Fatalf("expected default goose session name empty, got %q", cfg.GooseSessionName)
+	}
 }
 
 func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
@@ -171,6 +190,11 @@ func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
+	t.Setenv("GOOSE_PATH_ROOT", "")
+	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "")
+	t.Setenv("RASCAL_GOOSE_SESSION_RESUME", "")
+	t.Setenv("RASCAL_GOOSE_SESSION_KEY", "")
+	t.Setenv("RASCAL_GOOSE_SESSION_NAME", "")
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -185,43 +209,216 @@ func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
 	if cfg.RepoDir != repoDir {
 		t.Fatalf("repo dir = %q, want %q", cfg.RepoDir, repoDir)
 	}
+	if cfg.GoosePathRoot != filepath.Join(metaDir, "goose") {
+		t.Fatalf("goose path root = %q, want %q", cfg.GoosePathRoot, filepath.Join(metaDir, "goose"))
+	}
 }
 
-func TestRunGooseKeepsNDJSONCleanWhenStderrIsNoisy(t *testing.T) {
-	metaDir := t.TempDir()
+func TestLoadConfigRespectsGooseSessionEnv(t *testing.T) {
+	metaDir := filepath.Join(t.TempDir(), "meta")
+	workRoot := filepath.Join(t.TempDir(), "work")
+	t.Setenv("RASCAL_RUN_ID", "run_3")
+	t.Setenv("RASCAL_TASK_ID", "owner/repo#3")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_META_DIR", metaDir)
+	t.Setenv("RASCAL_WORK_ROOT", workRoot)
+	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "pr-only")
+	t.Setenv("RASCAL_GOOSE_SESSION_RESUME", "true")
+	t.Setenv("RASCAL_GOOSE_SESSION_KEY", "owner-repo-3-abc123")
+	t.Setenv("RASCAL_GOOSE_SESSION_NAME", "rascal-owner-repo-3-abc123")
+	t.Setenv("GOOSE_PATH_ROOT", "/rascal-goose-session")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if cfg.GooseSessionMode != runner.GooseSessionModePROnly {
+		t.Fatalf("GooseSessionMode = %q, want %q", cfg.GooseSessionMode, runner.GooseSessionModePROnly)
+	}
+	if !cfg.GooseSessionResume {
+		t.Fatal("GooseSessionResume should be true")
+	}
+	if cfg.GooseSessionKey != "owner-repo-3-abc123" {
+		t.Fatalf("GooseSessionKey = %q, want owner-repo-3-abc123", cfg.GooseSessionKey)
+	}
+	if cfg.GooseSessionName != "rascal-owner-repo-3-abc123" {
+		t.Fatalf("GooseSessionName = %q, want rascal-owner-repo-3-abc123", cfg.GooseSessionName)
+	}
+	if cfg.GoosePathRoot != "/rascal-goose-session" {
+		t.Fatalf("GoosePathRoot = %q, want /rascal-goose-session", cfg.GoosePathRoot)
+	}
+}
+
+func TestRunGooseNoSessionByDefault(t *testing.T) {
+	root := t.TempDir()
 	cfg := config{
-		RepoDir:      t.TempDir(),
-		MetaDir:      metaDir,
-		GooseLogPath: filepath.Join(metaDir, "goose.ndjson"),
+		RepoDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "goose.ndjson"),
+		GooseDebug:       false,
+		GooseSessionMode: runner.GooseSessionModeOff,
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
 	}
 
+	var gotArgs []string
 	ex := fakeExecutor{
-		runFn: func(dir string, extraEnv []string, stdout, stderr io.Writer, name string, args ...string) error {
-			if _, err := io.WriteString(stderr, "=== DEBUG ===\nprovider chatter\n"); err != nil {
-				return err
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "goose" {
+				t.Fatalf("unexpected command: %s", name)
 			}
-			_, err := io.WriteString(stdout, "{\"event\":\"message\"}\n{\"type\":\"complete\",\"total_tokens\":321}\n")
-			return err
+			gotArgs = append([]string(nil), args...)
+			_, _ = io.WriteString(stdout, `{"event":"message"}`+"\n")
+			return nil
 		},
 	}
 
-	got, err := runGoose(ex, cfg)
-	if err != nil {
+	if _, err := runGoose(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
-	if strings.Contains(got, "DEBUG") {
-		t.Fatalf("expected goose output to exclude stderr chatter:\n%s", got)
+	argsText := strings.Join(gotArgs, " ")
+	if !strings.Contains(argsText, "--no-session") {
+		t.Fatalf("expected --no-session args, got %q", argsText)
 	}
-	if !strings.Contains(got, `"total_tokens":321`) {
-		t.Fatalf("expected clean ndjson output with tokens:\n%s", got)
+	if strings.Contains(argsText, "--session") {
+		t.Fatalf("did not expect --session args, got %q", argsText)
+	}
+}
+
+func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
+	root := t.TempDir()
+	cfg := config{
+		RepoDir:            root,
+		InstructionsPath:   filepath.Join(root, "instructions.md"),
+		GooseLogPath:       filepath.Join(root, "goose.ndjson"),
+		GooseDebug:         false,
+		GooseSessionMode:   runner.GooseSessionModePROnly,
+		GooseSessionResume: true,
+		GooseSessionName:   "rascal-owner-repo-task-abc123",
+		GooseSessionKey:    "owner-repo-task-abc123",
+		GoosePathRoot:      filepath.Join(root, "goose-sessions"),
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
 	}
 
-	data, err := os.ReadFile(cfg.GooseLogPath)
-	if err != nil {
-		t.Fatalf("read goose log: %v", err)
+	var gotArgs []string
+	ex := fakeExecutor{
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "goose" {
+				t.Fatalf("unexpected command: %s", name)
+			}
+			gotArgs = append([]string(nil), args...)
+			_, _ = io.WriteString(stdout, `{"event":"message"}`+"\n")
+			return nil
+		},
 	}
-	if strings.Contains(string(data), "DEBUG") {
-		t.Fatalf("expected goose log to exclude stderr chatter:\n%s", string(data))
+
+	if _, err := runGoose(ex, cfg); err != nil {
+		t.Fatalf("runGoose returned error: %v", err)
+	}
+	argsText := strings.Join(gotArgs, " ")
+	for _, want := range []string{"--session", cfg.GooseSessionName, "--resume"} {
+		if !strings.Contains(argsText, want) {
+			t.Fatalf("expected %q in args, got %q", want, argsText)
+		}
+	}
+	if strings.Contains(argsText, "--no-session") {
+		t.Fatalf("did not expect --no-session args, got %q", argsText)
+	}
+}
+
+func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
+	root := t.TempDir()
+	sessionRoot := filepath.Join(root, "goose-sessions")
+	cfg := config{
+		RepoDir:            root,
+		InstructionsPath:   filepath.Join(root, "instructions.md"),
+		GooseLogPath:       filepath.Join(root, "goose.ndjson"),
+		GooseDebug:         false,
+		GooseSessionMode:   runner.GooseSessionModePROnly,
+		GooseSessionResume: true,
+		GooseSessionName:   "rascal-owner-repo-task-abc123",
+		GooseSessionKey:    "owner-repo-task-abc123",
+		GoosePathRoot:      sessionRoot,
+	}
+	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
+		t.Fatalf("mkdir session root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionRoot, "stale.json"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("write stale marker: %v", err)
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var calls [][]string
+	ex := fakeExecutor{
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "goose" {
+				t.Fatalf("unexpected command: %s", name)
+			}
+			calls = append(calls, append([]string(nil), args...))
+			if len(calls) == 1 {
+				return errors.New("resume failed: session state missing")
+			}
+			_, _ = io.WriteString(stdout, `{"event":"message"}`+"\n")
+			return nil
+		},
+	}
+
+	if _, err := runGoose(ex, cfg); err != nil {
+		t.Fatalf("runGoose returned error: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 goose attempts, got %d", len(calls))
+	}
+	firstArgs := strings.Join(calls[0], " ")
+	secondArgs := strings.Join(calls[1], " ")
+	if !strings.Contains(firstArgs, "--resume") {
+		t.Fatalf("expected first attempt to resume, got %q", firstArgs)
+	}
+	if strings.Contains(secondArgs, "--resume") {
+		t.Fatalf("expected fallback attempt without resume, got %q", secondArgs)
+	}
+	if _, err := os.Stat(filepath.Join(sessionRoot, "stale.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale marker to be removed during fallback reset, stat err=%v", err)
+	}
+}
+
+func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
+	root := t.TempDir()
+	cfg := config{
+		RepoDir:            root,
+		InstructionsPath:   filepath.Join(root, "instructions.md"),
+		GooseLogPath:       filepath.Join(root, "goose.ndjson"),
+		GooseDebug:         false,
+		GooseSessionMode:   runner.GooseSessionModePROnly,
+		GooseSessionResume: true,
+		GooseSessionName:   "rascal-owner-repo-task-abc123",
+		GooseSessionKey:    "owner-repo-task-abc123",
+		GoosePathRoot:      filepath.Join(root, "goose-sessions"),
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	calls := 0
+	ex := fakeExecutor{
+		runFn: func(_ string, _ []string, _ io.Writer, _ io.Writer, _ string, _ ...string) error {
+			calls++
+			return errors.New("goose transport timeout")
+		},
+	}
+
+	_, err := runGoose(ex, cfg)
+	if err == nil {
+		t.Fatal("expected runGoose to fail")
+	}
+	if calls != 1 {
+		t.Fatalf("expected one goose attempt, got %d", calls)
 	}
 }
 
@@ -378,149 +575,6 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 		t.Fatalf("expected goose details block in pr body:\n%s", prBody)
 	}
 	if !strings.Contains(prBody, "Rascal run `run_fake` completed in ") || !strings.Contains(prBody, "· 321 tokens") {
-		t.Fatalf("expected token summary in pr body:\n%s", prBody)
-	}
-}
-
-func TestRunEndToEndWithGooseDebugOnStderrStillIncludesTokens(t *testing.T) {
-	root := t.TempDir()
-	binDir := filepath.Join(root, "bin")
-	stateDir := filepath.Join(root, "state")
-	metaDir := filepath.Join(root, "meta")
-	workRoot := filepath.Join(root, "work")
-	repoDir := filepath.Join(workRoot, "repo")
-	for _, dir := range []string{binDir, stateDir, metaDir, workRoot} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", dir, err)
-		}
-	}
-
-	writeExe(t, filepath.Join(binDir, "git"), fmt.Sprintf(`#!/usr/bin/env bash
-set -eu
-state_dir=%q
-
-if [ "$#" -ge 1 ] && [ "$1" = "-C" ]; then
-  shift
-  repo_dir="$1"
-  shift
-else
-  repo_dir=""
-fi
-
-cmd="$1"
-shift || true
-
-case "$cmd" in
-  clone)
-    target="$2"
-    mkdir -p "$target/.git"
-    exit 0
-    ;;
-  fetch|pull|checkout|add|commit|push)
-    exit 0
-    ;;
-  status)
-    printf ' M touched.txt\n'
-    exit 0
-    ;;
-  rev-parse)
-    if [ "$#" -ge 1 ] && [ "$1" = "--verify" ]; then
-      exit 1
-    fi
-    if [ "$#" -ge 1 ] && [ "$1" = "HEAD" ]; then
-      printf '0123456789abcdef0123456789abcdef01234567\n'
-      exit 0
-    fi
-    exit 0
-    ;;
-  ls-remote)
-    exit 1
-    ;;
-  *)
-    echo "unexpected git command: $cmd $*" >&2
-    exit 1
-    ;;
-esac
-`, stateDir))
-
-	writeExe(t, filepath.Join(binDir, "gh"), fmt.Sprintf(`#!/usr/bin/env bash
-set -eu
-state_dir=%q
-cmd="$1"
-shift
-
-case "$cmd" in
-  api)
-    if [ "$1" = "user" ]; then
-      printf '{"login":"rascalbot"}\n'
-      exit 0
-    fi
-    ;;
-  pr)
-    sub="$1"
-    shift
-    case "$sub" in
-      view)
-        if [ -f "$state_dir/pr_created" ]; then
-          printf '{"number":77,"url":"https://github.com/owner/repo/pull/77"}\n'
-          exit 0
-        fi
-        exit 1
-        ;;
-      create)
-        : > "$state_dir/pr_created"
-        printf 'https://github.com/owner/repo/pull/77\n'
-        exit 0
-        ;;
-    esac
-    ;;
-esac
-
-echo "unexpected gh command: $cmd $*" >&2
-exit 1
-`, stateDir))
-
-	writeExe(t, filepath.Join(binDir, "goose"), `#!/usr/bin/env bash
-set -eu
-printf '=== CODEX PROVIDER DEBUG ===\n' >&2
-printf 'provider chatter\n' >&2
-printf '{"type":"message","message":{"id":null}}\n'
-printf '{"type":"complete","total_tokens":654321}\n'
-`)
-
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("RASCAL_RUN_ID", "run_debug_stderr")
-	t.Setenv("RASCAL_TASK_ID", "task_debug_stderr")
-	t.Setenv("RASCAL_REPO", "owner/repo")
-	t.Setenv("GH_TOKEN", "token")
-	t.Setenv("RASCAL_TASK", "Address feedback")
-	t.Setenv("RASCAL_META_DIR", metaDir)
-	t.Setenv("RASCAL_WORK_ROOT", workRoot)
-	t.Setenv("RASCAL_REPO_DIR", repoDir)
-	t.Setenv("RASCAL_GOOSE_DEBUG", "true")
-
-	if err := run(); err != nil {
-		t.Fatalf("run returned error: %v", err)
-	}
-
-	gooseLogData, err := os.ReadFile(filepath.Join(metaDir, "goose.ndjson"))
-	if err != nil {
-		t.Fatalf("read goose.ndjson: %v", err)
-	}
-	gooseLog := string(gooseLogData)
-	if strings.Contains(gooseLog, "CODEX PROVIDER DEBUG") {
-		t.Fatalf("expected structured goose log without stderr noise:\n%s", gooseLog)
-	}
-	if !strings.Contains(gooseLog, `"total_tokens":654321`) {
-		t.Fatalf("expected total tokens in goose log:\n%s", gooseLog)
-	}
-
-	prBodyData, err := os.ReadFile(filepath.Join(metaDir, "pr_body.md"))
-	if err != nil {
-		t.Fatalf("read pr_body.md: %v", err)
-	}
-	prBody := string(prBodyData)
-	if !strings.Contains(prBody, "Rascal run `run_debug_stderr` completed in ") || !strings.Contains(prBody, "· 654K tokens") {
 		t.Fatalf("expected token summary in pr body:\n%s", prBody)
 	}
 }

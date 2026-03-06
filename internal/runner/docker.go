@@ -65,8 +65,11 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 		"RASCAL_CONTEXT_JSON":          "/rascal-meta/context.json",
 		"RASCAL_ISSUE_NUMBER":          strconv.Itoa(spec.IssueNumber),
 		"RASCAL_PR_NUMBER":             strconv.Itoa(spec.PRNumber),
+		"RASCAL_GOOSE_SESSION_MODE":    NormalizeGooseSessionMode(spec.GooseSessionMode),
+		"RASCAL_GOOSE_SESSION_RESUME":  strconv.FormatBool(spec.GooseSessionResume),
+		"RASCAL_GOOSE_SESSION_KEY":     strings.TrimSpace(spec.GooseSessionTaskKey),
+		"RASCAL_GOOSE_SESSION_NAME":    strings.TrimSpace(spec.GooseSessionName),
 		"CODEX_HOME":                   "/rascal-meta/codex",
-		"GOOSE_PATH_ROOT":              "/rascal-meta/goose",
 		"GOOSE_PROVIDER":               "codex",
 		"GOOSE_MODEL":                  "gpt-5.4",
 		"GOOSE_MODE":                   "auto",
@@ -79,6 +82,16 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	if strings.TrimSpace(l.GitHubToken) != "" {
 		envPairs["GH_TOKEN"] = l.GitHubToken
 	}
+
+	goosePathRoot := "/rascal-meta/goose"
+	sessionDir := strings.TrimSpace(spec.GooseSessionTaskDir)
+	if spec.GooseSessionResume && sessionDir != "" {
+		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+			return Result{}, fmt.Errorf("create goose session dir: %w", err)
+		}
+		goosePathRoot = "/rascal-goose-session"
+	}
+	envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
 
 	containerName := sanitizeContainerName("rascal-" + spec.RunID)
 	args := []string{"run", "--rm", "--name", containerName}
@@ -96,7 +109,19 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 		"--security-opt", "no-new-privileges:true",
 		"-v", fmt.Sprintf("%s:/rascal-meta", spec.RunDir),
 		"-v", fmt.Sprintf("%s:/work", workspaceDir),
-		l.Image,
+	)
+	if spec.GooseSessionResume && sessionDir != "" {
+		args = append(args, "-v", fmt.Sprintf("%s:%s", sessionDir, goosePathRoot))
+	}
+	args = append(args, l.Image)
+
+	_, _ = fmt.Fprintf(logFile, "[%s] goose session mode=%s resume=%t key=%s name=%s path_root=%s\n",
+		time.Now().UTC().Format(time.RFC3339),
+		NormalizeGooseSessionMode(spec.GooseSessionMode),
+		spec.GooseSessionResume,
+		strings.TrimSpace(spec.GooseSessionTaskKey),
+		strings.TrimSpace(spec.GooseSessionName),
+		goosePathRoot,
 	)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)

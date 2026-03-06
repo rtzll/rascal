@@ -98,6 +98,7 @@ type createTaskRequest struct {
 	Repo       string `json:"repo"`
 	Task       string `json:"task"`
 	BaseBranch string `json:"base_branch"`
+	Trigger    string `json:"trigger,omitempty"`
 	Debug      *bool  `json:"debug,omitempty"`
 }
 
@@ -324,6 +325,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	req.Repo = strings.TrimSpace(req.Repo)
 	req.Task = strings.TrimSpace(req.Task)
 	req.BaseBranch = strings.TrimSpace(req.BaseBranch)
+	req.Trigger = strings.TrimSpace(req.Trigger)
 	if req.Repo == "" || req.Task == "" {
 		http.Error(w, "repo and task are required", http.StatusBadRequest)
 		return
@@ -334,7 +336,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Repo:       req.Repo,
 		Task:       req.Task,
 		BaseBranch: req.BaseBranch,
-		Trigger:    "cli",
+		Trigger:    req.Trigger,
 		Debug:      req.Debug,
 	})
 	if err != nil {
@@ -1179,20 +1181,50 @@ func (s *server) executeRun(runID string) {
 		return
 	}
 
-	spec := runner.Spec{
-		RunID:       run.ID,
-		TaskID:      run.TaskID,
-		Repo:        run.Repo,
-		Task:        run.Task,
-		BaseBranch:  run.BaseBranch,
-		HeadBranch:  run.HeadBranch,
-		Trigger:     run.Trigger,
-		RunDir:      run.RunDir,
-		IssueNumber: run.IssueNumber,
-		PRNumber:    run.PRNumber,
-		Context:     run.Context,
-		Debug:       run.Debug,
+	sessionMode := runner.NormalizeGooseSessionMode(s.cfg.GooseSessionMode)
+	if sessionMode != runner.GooseSessionModeOff {
+		s.cleanupGooseSessionsBestEffort()
 	}
+
+	sessionResume := runner.GooseSessionEnabled(sessionMode, run.Trigger)
+	sessionTaskKey := ""
+	sessionTaskDir := ""
+	sessionName := ""
+	sessionRoot := strings.TrimSpace(s.cfg.GooseSessionRoot)
+	if sessionRoot == "" {
+		sessionRoot = filepath.Join(s.cfg.DataDir, "goose-sessions")
+	}
+	if sessionResume {
+		sessionTaskKey = runner.GooseSessionTaskKey(run.Repo, run.TaskID)
+		sessionTaskDir = filepath.Join(sessionRoot, sessionTaskKey)
+		sessionName = runner.GooseSessionName(run.Repo, run.TaskID)
+		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {
+			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("create goose session dir: %v", err))
+			s.finishRun(updated)
+			return
+		}
+	}
+
+	spec := runner.Spec{
+		RunID:               run.ID,
+		TaskID:              run.TaskID,
+		Repo:                run.Repo,
+		Task:                run.Task,
+		BaseBranch:          run.BaseBranch,
+		HeadBranch:          run.HeadBranch,
+		Trigger:             run.Trigger,
+		RunDir:              run.RunDir,
+		IssueNumber:         run.IssueNumber,
+		PRNumber:            run.PRNumber,
+		Context:             run.Context,
+		Debug:               run.Debug,
+		GooseSessionMode:    sessionMode,
+		GooseSessionResume:  sessionResume,
+		GooseSessionTaskDir: sessionTaskDir,
+		GooseSessionTaskKey: sessionTaskKey,
+		GooseSessionName:    sessionName,
+	}
+	log.Printf("run %s goose session mode=%s resume=%t key=%s name=%s", run.ID, sessionMode, sessionResume, sessionTaskKey, sessionName)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.mu.Lock()
@@ -1854,6 +1886,69 @@ func isCommentTriggeredRun(trigger string) bool {
 	default:
 		return false
 	}
+}
+
+func (s *server) cleanupGooseSessionsBestEffort() {
+	ttlDays := s.cfg.GooseSessionTTLDays
+	if ttlDays <= 0 {
+		return
+	}
+	root := strings.TrimSpace(s.cfg.GooseSessionRoot)
+	if root == "" {
+		root = filepath.Join(s.cfg.DataDir, "goose-sessions")
+	}
+	removed, err := cleanupStaleGooseSessionDirs(root, ttlDays, time.Now().UTC())
+	if err != nil {
+		log.Printf("goose session cleanup warning: root=%s ttl_days=%d error=%v", root, ttlDays, err)
+		return
+	}
+	if removed > 0 {
+		log.Printf("goose session cleanup: root=%s ttl_days=%d removed=%d", root, ttlDays, removed)
+	}
+}
+
+func cleanupStaleGooseSessionDirs(root string, ttlDays int, now time.Time) (int, error) {
+	if ttlDays <= 0 {
+		return 0, nil
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return 0, nil
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	cutoff := now.AddDate(0, 0, -ttlDays)
+	removed := 0
+	var firstErr error
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			if firstErr == nil {
+				firstErr = infoErr
+			}
+			continue
+		}
+		if info.ModTime().After(cutoff) {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		if rmErr := os.RemoveAll(path); rmErr != nil {
+			if firstErr == nil {
+				firstErr = rmErr
+			}
+			continue
+		}
+		removed++
+	}
+	return removed, firstErr
 }
 
 func loadRunResponseTarget(runDir string) (runResponseTarget, bool, error) {

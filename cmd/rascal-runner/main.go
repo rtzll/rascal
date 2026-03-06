@@ -59,6 +59,12 @@ type config struct {
 	PRBodyPath       string
 
 	GooseDebug bool
+
+	GoosePathRoot      string
+	GooseSessionMode   string
+	GooseSessionResume bool
+	GooseSessionKey    string
+	GooseSessionName   string
 }
 
 type prView struct {
@@ -149,6 +155,9 @@ func runWithExecutor(ex commandExecutor) error {
 	if err := runStage("prepare_workspace", func() error {
 		if err := os.MkdirAll(filepath.Join(cfg.MetaDir, "goose"), 0o755); err != nil {
 			return fmt.Errorf("create goose dir: %w", err)
+		}
+		if err := os.MkdirAll(cfg.GoosePathRoot, 0o755); err != nil {
+			return fmt.Errorf("create goose path root: %w", err)
 		}
 		if err := os.MkdirAll(filepath.Join(cfg.MetaDir, "codex"), 0o755); err != nil {
 			return fmt.Errorf("create codex dir: %w", err)
@@ -392,25 +401,47 @@ func loadConfig() (config, error) {
 		}
 	}
 
+	gooseSessionMode := runner.NormalizeGooseSessionMode(os.Getenv("RASCAL_GOOSE_SESSION_MODE"))
+	gooseSessionResume := parseBoolEnv(strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_RESUME")), false)
+	if gooseSessionMode == runner.GooseSessionModeOff {
+		gooseSessionResume = false
+	}
+	gooseSessionKey := strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_KEY"))
+	gooseSessionName := strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_NAME"))
+	if gooseSessionResume {
+		if gooseSessionKey == "" {
+			gooseSessionKey = runner.GooseSessionTaskKey(repo, taskID)
+		}
+		if gooseSessionName == "" {
+			gooseSessionName = runner.GooseSessionName(repo, taskID)
+		}
+	}
+	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))
+
 	return config{
-		RunID:            runID,
-		TaskID:           taskID,
-		Task:             strings.TrimSpace(os.Getenv("RASCAL_TASK")),
-		Repo:             repo,
-		BaseBranch:       baseBranch,
-		HeadBranch:       headBranch,
-		IssueNumber:      issueNumber,
-		Trigger:          trigger,
-		GitHubToken:      ghToken,
-		MetaDir:          metaDir,
-		WorkRoot:         workRoot,
-		RepoDir:          repoDir,
-		GooseLogPath:     filepath.Join(metaDir, defaultGooseLogFile),
-		MetaPath:         filepath.Join(metaDir, defaultMetaFile),
-		InstructionsPath: filepath.Join(metaDir, defaultInstructionsFile),
-		CommitMsgPath:    filepath.Join(metaDir, defaultCommitMsgFile),
-		PRBodyPath:       filepath.Join(metaDir, defaultPRBodyFile),
-		GooseDebug:       debug,
+		RunID:              runID,
+		TaskID:             taskID,
+		Task:               strings.TrimSpace(os.Getenv("RASCAL_TASK")),
+		Repo:               repo,
+		BaseBranch:         baseBranch,
+		HeadBranch:         headBranch,
+		IssueNumber:        issueNumber,
+		Trigger:            trigger,
+		GitHubToken:        ghToken,
+		MetaDir:            metaDir,
+		WorkRoot:           workRoot,
+		RepoDir:            repoDir,
+		GooseLogPath:       filepath.Join(metaDir, defaultGooseLogFile),
+		MetaPath:           filepath.Join(metaDir, defaultMetaFile),
+		InstructionsPath:   filepath.Join(metaDir, defaultInstructionsFile),
+		CommitMsgPath:      filepath.Join(metaDir, defaultCommitMsgFile),
+		PRBodyPath:         filepath.Join(metaDir, defaultPRBodyFile),
+		GooseDebug:         debug,
+		GoosePathRoot:      goosePathRoot,
+		GooseSessionMode:   gooseSessionMode,
+		GooseSessionResume: gooseSessionResume,
+		GooseSessionKey:    gooseSessionKey,
+		GooseSessionName:   gooseSessionName,
 	}, nil
 }
 
@@ -421,6 +452,20 @@ func firstNonEmptyValue(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseBoolEnv(raw string, fallback bool) bool {
+	if strings.TrimSpace(raw) == "" {
+		return fallback
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func ensureInstructions(cfg config) error {
@@ -513,29 +558,33 @@ func checkoutRepo(ex commandExecutor, cfg config) error {
 }
 
 func runGoose(ex commandExecutor, cfg config) (string, error) {
-	log.Printf("[%s] running goose (debug=%t)", nowUTC(), cfg.GooseDebug)
+	log.Printf("[%s] running goose (debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
+		nowUTC(),
+		cfg.GooseDebug,
+		cfg.GooseSessionMode,
+		cfg.GooseSessionKey,
+		cfg.GooseSessionName,
+		cfg.GooseSessionResume,
+		cfg.GoosePathRoot,
+	)
 
-	logFile, err := os.OpenFile(cfg.GooseLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("open goose log: %w", err)
-	}
-	defer logFile.Close()
-
-	args := []string{"run", "--no-session", "-i", cfg.InstructionsPath, "--output-format", "stream-json"}
-	env := []string{}
-	if cfg.GooseDebug {
-		args = append(args, "--debug")
-		env = append(env, "GOOSE_CODEX_DEBUG=1")
-	}
-
-	// Keep goose.ndjson reserved for structured stdout. Goose debug output goes to
-	// stderr, and mixing the two makes token extraction flaky because the final
-	// complete event can be corrupted by interleaved debug lines.
-	if err := ex.Run(cfg.RepoDir, env, logFile, os.Stderr, "goose", args...); err != nil {
-		if stat, statErr := os.Stat(cfg.GooseLogPath); statErr == nil && stat.Size() == 0 {
-			_ = os.WriteFile(cfg.GooseLogPath, []byte(`{"event":"error","message":"goose run failed"}`+"\n"), 0o644)
+	firstAttemptArgs := gooseRunArgs(cfg, cfg.GooseSessionResume)
+	if err := runGooseOnce(ex, cfg, firstAttemptArgs); err != nil {
+		if cfg.GooseSessionResume && isSessionResumeFailure(err, cfg.GooseLogPath) {
+			log.Printf("[%s] goose session resume failed; falling back to fresh session name=%s reason=%s", nowUTC(), cfg.GooseSessionName, strings.TrimSpace(err.Error()))
+			if resetErr := resetGooseSessionRoot(cfg.GoosePathRoot); resetErr != nil {
+				log.Printf("[%s] goose session reset warning: %v", nowUTC(), resetErr)
+			}
+			fallbackArgs := gooseRunArgs(cfg, false)
+			if retryErr := runGooseOnce(ex, cfg, fallbackArgs); retryErr != nil {
+				ensureGooseLogHasError(cfg.GooseLogPath)
+				return "", fmt.Errorf("goose run failed after session fallback: %w", retryErr)
+			}
+			log.Printf("[%s] goose session fallback succeeded; started fresh session name=%s", nowUTC(), cfg.GooseSessionName)
+		} else {
+			ensureGooseLogHasError(cfg.GooseLogPath)
+			return "", fmt.Errorf("goose run failed: %w", err)
 		}
-		return "", fmt.Errorf("goose run failed: %w", err)
 	}
 	data, err := os.ReadFile(cfg.GooseLogPath)
 	if err != nil {
@@ -545,6 +594,104 @@ func runGoose(ex commandExecutor, cfg config) (string, error) {
 		return "(no goose output captured)", nil
 	}
 	return string(data), nil
+}
+
+func gooseRunArgs(cfg config, resume bool) []string {
+	args := []string{"run"}
+	if cfg.GooseSessionMode != runner.GooseSessionModeOff && cfg.GooseSessionName != "" {
+		args = append(args, "--session", cfg.GooseSessionName)
+		if resume {
+			args = append(args, "--resume")
+		}
+	} else {
+		args = append(args, "--no-session")
+	}
+	args = append(args, "-i", cfg.InstructionsPath, "--output-format", "stream-json")
+	if cfg.GooseDebug {
+		args = append(args, "--debug")
+	}
+	return args
+}
+
+func runGooseOnce(ex commandExecutor, cfg config, args []string) error {
+	logFile, err := os.OpenFile(cfg.GooseLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open goose log: %w", err)
+	}
+	defer logFile.Close()
+
+	env := []string{}
+	if cfg.GooseDebug {
+		env = append(env, "GOOSE_CODEX_DEBUG=1")
+	}
+	if err := ex.Run(cfg.RepoDir, env, logFile, logFile, "goose", args...); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureGooseLogHasError(path string) {
+	if stat, err := os.Stat(path); err == nil && stat.Size() == 0 {
+		_ = os.WriteFile(path, []byte(`{"event":"error","message":"goose run failed"}`+"\n"), 0o644)
+	}
+}
+
+func resetGooseSessionRoot(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	if err := os.RemoveAll(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove goose session root: %w", err)
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return fmt.Errorf("recreate goose session root: %w", err)
+	}
+	return nil
+}
+
+func isSessionResumeFailure(err error, logPath string) bool {
+	var b strings.Builder
+	if err != nil {
+		b.WriteString(err.Error())
+	}
+	if data, readErr := os.ReadFile(logPath); readErr == nil {
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.Write(data)
+	}
+	text := strings.ToLower(b.String())
+	if text == "" {
+		return false
+	}
+	hasSessionContext := strings.Contains(text, "session") || strings.Contains(text, "resume")
+	if !hasSessionContext {
+		return false
+	}
+	for _, marker := range []string{
+		"not found",
+		"no such file",
+		"no existing",
+		"cannot find",
+		"can't find",
+		"does not exist",
+		"missing",
+		"corrupt",
+		"invalid",
+		"malformed",
+		"failed to load",
+		"failed loading",
+		"decode",
+		"deserialize",
+		"unmarshal",
+		"state",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func loadAgentCommitMessage(path string) (title, body string, err error) {
