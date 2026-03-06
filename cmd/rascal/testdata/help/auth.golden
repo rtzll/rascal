@@ -10,7 +10,7 @@ rascal auth sync --host 203.0.113.10
 
 Available Commands:
   rotate      Generate fresh API/webhook tokens and optionally sync remote server
-  sync        Push auth tokens to remote /etc/rascal/rascal.env over SSH
+  sync        Sync auth material to remote host over SSH
 
 Flags:
       --github-runtime-token string   GitHub runtime token for remote auth sync

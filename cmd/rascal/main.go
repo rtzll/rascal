@@ -2059,11 +2059,12 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 		apiToken           string
 		githubRuntimeToken string
 		webhookSecret      string
+		codexAuthPath      string
 		restartSvc         bool
 	)
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Push auth tokens to remote /etc/rascal/rascal.env over SSH",
+		Short: "Sync auth material to remote host over SSH",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			host = strings.TrimSpace(host)
 			if host == "" {
@@ -2072,17 +2073,25 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 			if sshPort <= 0 {
 				return &cliError{Code: exitInput, Message: "--ssh-port must be positive"}
 			}
-			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), strings.TrimSpace(a.cfg.APIToken))
-			if apiToken == "" {
-				return &cliError{Code: exitInput, Message: "missing API token", Hint: "pass --api-token or set local config"}
-			}
-			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
-			if githubRuntimeToken == "" {
-				return &cliError{Code: exitInput, Message: "missing GitHub runtime token", Hint: "pass --github-runtime-token or set GITHUB_RUNTIME_TOKEN"}
-			}
+			apiToken = strings.TrimSpace(apiToken)
+			githubRuntimeToken = strings.TrimSpace(githubRuntimeToken)
 			webhookSecret = strings.TrimSpace(webhookSecret)
-			if webhookSecret == "" {
-				return &cliError{Code: exitInput, Message: "missing webhook secret", Hint: "pass --webhook-secret"}
+			codexAuthPath = strings.TrimSpace(codexAuthPath)
+
+			syncCodexAuth := codexAuthPath != ""
+			syncServerAuth := !syncCodexAuth || apiToken != "" || githubRuntimeToken != "" || webhookSecret != ""
+			if syncServerAuth {
+				apiToken = firstNonEmpty(apiToken, strings.TrimSpace(a.cfg.APIToken))
+				if apiToken == "" {
+					return &cliError{Code: exitInput, Message: "missing API token", Hint: "pass --api-token or set local config"}
+				}
+				githubRuntimeToken = firstNonEmpty(githubRuntimeToken, strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
+				if githubRuntimeToken == "" {
+					return &cliError{Code: exitInput, Message: "missing GitHub runtime token", Hint: "pass --github-runtime-token or set GITHUB_RUNTIME_TOKEN"}
+				}
+				if webhookSecret == "" {
+					return &cliError{Code: exitInput, Message: "missing webhook secret", Hint: "pass --webhook-secret"}
+				}
 			}
 			if err := syncRemoteAuth(syncRemoteAuthConfig{
 				Host:          host,
@@ -2092,17 +2101,27 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 				APIToken:      apiToken,
 				GitHubRuntime: githubRuntimeToken,
 				WebhookSecret: webhookSecret,
+				CodexAuthPath: codexAuthPath,
 				Restart:       restartSvc,
 			}); err != nil {
 				return &cliError{Code: exitRuntime, Message: "failed to sync auth", Cause: err}
 			}
 			return a.emit(map[string]any{
-				"host":           host,
-				"api_token":      maskSecret(apiToken),
-				"webhook_secret": maskSecret(webhookSecret),
-				"restarted":      restartSvc,
+				"host":             host,
+				"synced_env_auth":  syncServerAuth,
+				"synced_codex":     syncCodexAuth,
+				"api_token":        maskSecret(apiToken),
+				"webhook_secret":   maskSecret(webhookSecret),
+				"codex_auth_path":  codexAuthPath,
+				"restarted_service": restartSvc,
 			}, func() error {
-				a.println("synced auth on %s", host)
+				if syncServerAuth && syncCodexAuth {
+					a.println("synced server env auth and codex auth on %s", host)
+				} else if syncCodexAuth {
+					a.println("synced codex auth on %s", host)
+				} else {
+					a.println("synced server env auth on %s", host)
+				}
 				if restartSvc {
 					a.println("active rascal slot restarted")
 				}
@@ -2117,6 +2136,7 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token (defaults to current config)")
 	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token (or GITHUB_RUNTIME_TOKEN)")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
+	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to upload to /etc/rascal/codex_auth.json")
 	cmd.Flags().BoolVar(&restartSvc, "restart-service", true, "restart active rascal slot after updating env")
 	return cmd
 }
