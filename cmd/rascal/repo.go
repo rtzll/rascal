@@ -21,13 +21,15 @@ var requiredWebhookEvents = []string{
 }
 
 type repoEnableInput struct {
-	Repo          string
-	GitHubToken   string
-	WebhookSecret string
-	WebhookURL    string
-	Timeout       time.Duration
-	Client        repoGitHubClient
-	RawErrors     bool
+	Repo                       string
+	GitHubToken                string
+	WebhookSecret              string
+	UseServerWebhookSecret     bool
+	ResolveServerWebhookSecret func() (string, error)
+	WebhookURL                 string
+	Timeout                    time.Duration
+	Client                     repoGitHubClient
+	RawErrors                  bool
 }
 
 type repoEnableResult struct {
@@ -51,7 +53,33 @@ func (a *app) runRepoEnable(input repoEnableInput) (repoEnableResult, error) {
 	}
 	webhookSecret := strings.TrimSpace(input.WebhookSecret)
 	if webhookSecret == "" {
-		return repoEnableResult{}, &cliError{Code: exitInput, Message: "missing webhook secret", Hint: "pass --webhook-secret (must match server secret)"}
+		webhookSecret = strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET"))
+	}
+	if webhookSecret == "" && input.UseServerWebhookSecret {
+		resolveSecret := input.ResolveServerWebhookSecret
+		if resolveSecret == nil {
+			resolveSecret = a.fetchServerWebhookSecret
+		}
+		secret, err := resolveSecret()
+		if err != nil {
+			if input.RawErrors {
+				return repoEnableResult{}, fmt.Errorf("resolve webhook secret from server: %w", err)
+			}
+			return repoEnableResult{}, &cliError{
+				Code:    exitRuntime,
+				Message: "failed to resolve webhook secret from server",
+				Hint:    "check SSH access and remote /etc/rascal/rascal.env, or pass --webhook-secret explicitly",
+				Cause:   err,
+			}
+		}
+		webhookSecret = strings.TrimSpace(secret)
+	}
+	if webhookSecret == "" {
+		return repoEnableResult{}, &cliError{
+			Code:    exitInput,
+			Message: "missing webhook secret",
+			Hint:    "pass --webhook-secret, set RASCAL_GITHUB_WEBHOOK_SECRET, or use --use-server-webhook-secret",
+		}
 	}
 	webhookURL := firstNonEmpty(strings.TrimSpace(input.WebhookURL), strings.TrimSpace(a.cfg.ServerURL)+"/v1/webhooks/github")
 	webhookURL = strings.TrimRight(webhookURL, "/")
@@ -103,10 +131,11 @@ rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "
 
 func (a *app) newRepoEnableCmd() *cobra.Command {
 	var (
-		githubToken   string
-		webhookSecret string
-		webhookURL    string
-		timeout       time.Duration
+		githubToken            string
+		webhookSecret          string
+		useServerWebhookSecret bool
+		webhookURL             string
+		timeout                time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "enable [OWNER/REPO]",
@@ -115,11 +144,12 @@ func (a *app) newRepoEnableCmd() *cobra.Command {
 		RunE: func(_ *cobra.Command, args []string) error {
 			repo := resolveRepoArg(args, a.cfg.DefaultRepo)
 			result, err := a.runRepoEnable(repoEnableInput{
-				Repo:          repo,
-				GitHubToken:   githubToken,
-				WebhookSecret: webhookSecret,
-				WebhookURL:    webhookURL,
-				Timeout:       timeout,
+				Repo:                   repo,
+				GitHubToken:            githubToken,
+				WebhookSecret:          webhookSecret,
+				UseServerWebhookSecret: useServerWebhookSecret,
+				WebhookURL:             webhookURL,
+				Timeout:                timeout,
 			})
 			if err != nil {
 				return err
@@ -138,9 +168,43 @@ func (a *app) newRepoEnableCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token (or GITHUB_TOKEN)")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret (must match server secret)")
+	cmd.Flags().BoolVar(&useServerWebhookSecret, "use-server-webhook-secret", false, "resolve webhook secret from remote /etc/rascal/rascal.env over SSH")
 	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "override webhook URL (default: <orchestrator-url>/v1/webhooks/github)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 45*time.Second, "GitHub API timeout")
 	return cmd
+}
+
+func (a *app) fetchServerWebhookSecret() (string, error) {
+	cfg, err := a.resolveSSHLogConfig("", "", "", 0)
+	if err != nil {
+		return "", err
+	}
+	remoteCmd := strings.Join([]string{
+		"set -euo pipefail",
+		`for f in /etc/rascal/rascal.env /etc/rascal/rascal-blue.env /etc/rascal/rascal-green.env; do`,
+		`  [ -f "$f" ] || continue`,
+		`  line=$(grep -m1 -E '^(RASCAL_GITHUB_WEBHOOK_SECRET|GITHUB_WEBHOOK_SECRET)=' "$f" || true)`,
+		`  if [ -n "$line" ]; then`,
+		`    val="${line#*=}"`,
+		`    val="${val%\"}"`,
+		`    val="${val#\"}"`,
+		`    printf '%s' "$val"`,
+		`    exit 0`,
+		`  fi`,
+		`done`,
+		`echo "webhook secret not found in /etc/rascal/*.env" >&2`,
+		`exit 1`,
+	}, "\n")
+
+	out, err := runLocalCapture("ssh", sshArgs(cfg, remoteCmd)...)
+	if err != nil {
+		return "", err
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return "", fmt.Errorf("remote webhook secret is empty")
+	}
+	return out, nil
 }
 
 func (a *app) newRepoDisableCmd() *cobra.Command {

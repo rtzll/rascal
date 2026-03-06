@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,5 +114,95 @@ func TestRunRepoEnableUsesProvidedClient(t *testing.T) {
 	}
 	if result.WebhookURL != "http://example.com/v1/webhooks/github" {
 		t.Fatalf("unexpected result webhook url: %s", result.WebhookURL)
+	}
+}
+
+func TestRunRepoEnableResolvesServerWebhookSecret(t *testing.T) {
+	client := &fakeRepoClient{}
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://example.com",
+		},
+	}
+	result, err := a.runRepoEnable(repoEnableInput{
+		Repo:                   "owner/repo",
+		GitHubToken:            "token",
+		UseServerWebhookSecret: true,
+		ResolveServerWebhookSecret: func() (string, error) {
+			return "server-secret", nil
+		},
+		Client:  client,
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("runRepoEnable failed: %v", err)
+	}
+	if client.webhookSecret != "server-secret" {
+		t.Fatalf("unexpected webhook secret: %s", client.webhookSecret)
+	}
+	if result.WebhookURL != "http://example.com/v1/webhooks/github" {
+		t.Fatalf("unexpected result webhook url: %s", result.WebhookURL)
+	}
+}
+
+func TestRunRepoEnablePrefersExplicitWebhookSecretOverServerResolve(t *testing.T) {
+	client := &fakeRepoClient{}
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://example.com",
+		},
+	}
+	result, err := a.runRepoEnable(repoEnableInput{
+		Repo:                   "owner/repo",
+		GitHubToken:            "token",
+		WebhookSecret:          "explicit-secret",
+		UseServerWebhookSecret: true,
+		ResolveServerWebhookSecret: func() (string, error) {
+			t.Fatal("expected server webhook secret resolver not to be called")
+			return "", nil
+		},
+		Client:  client,
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("runRepoEnable failed: %v", err)
+	}
+	if client.webhookSecret != "explicit-secret" {
+		t.Fatalf("unexpected webhook secret: %s", client.webhookSecret)
+	}
+	if result.Repo != "owner/repo" {
+		t.Fatalf("unexpected result repo: %s", result.Repo)
+	}
+}
+
+func TestRunRepoEnableServerSecretResolveFailure(t *testing.T) {
+	client := &fakeRepoClient{}
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://example.com",
+		},
+	}
+	_, err := a.runRepoEnable(repoEnableInput{
+		Repo:                   "owner/repo",
+		GitHubToken:            "token",
+		UseServerWebhookSecret: true,
+		ResolveServerWebhookSecret: func() (string, error) {
+			return "", errors.New("ssh unavailable")
+		},
+		Client:  client,
+		Timeout: 5 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	ce := &cliError{}
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected cliError, got %T (%v)", err, err)
+	}
+	if ce.Code != exitRuntime {
+		t.Fatalf("unexpected cli error code: %d", ce.Code)
+	}
+	if !strings.Contains(ce.Message, "failed to resolve webhook secret from server") {
+		t.Fatalf("unexpected cli error message: %s", ce.Message)
 	}
 }
