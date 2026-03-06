@@ -671,6 +671,7 @@ ExecStart=/opt/rascal/rascald
 Restart=always
 RestartSec=3
 KillSignal=SIGTERM
+KillMode=mixed
 TimeoutStopSec=330
 User=root
 WorkingDirectory=/opt/rascal

@@ -213,6 +213,19 @@ func TestResolveRunnerBuildInfoDefaults(t *testing.T) {
 	}
 }
 
+func TestSystemdServiceContentUsesMixedKillModeForDrain(t *testing.T) {
+	content := systemdServiceContent()
+	for _, want := range []string{
+		"KillSignal=SIGTERM",
+		"KillMode=mixed",
+		"TimeoutStopSec=330",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("service content missing %q:\n%s", want, content)
+		}
+	}
+}
+
 func testDeployConfig() Config {
 	return Config{
 		Host:               "example-host",
