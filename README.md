@@ -32,16 +32,18 @@ GITHUB_ADMIN_TOKEN=...
 GITHUB_RUNTIME_TOKEN=...
 ```
 
-3. (Optional) Set a domain:
+3. Init (provision + deploy + GitHub). If you want a custom domain, set it first:
 
 ```bash
 ./bin/rascal config set domain rascal.example.com
+./bin/rascal init --provision --repo OWNER/REPO
 ```
 
-4. Init (provision + deploy + GitHub):
+4. Verify:
 
 ```bash
-./bin/rascal init --provision --repo OWNER/REPO
+./bin/rascal doctor --host <server_ip>
+./bin/rascal config view
 ```
 
 5. Run first task:
