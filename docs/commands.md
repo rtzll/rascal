@@ -4,7 +4,7 @@
 
 ```bash
 ./bin/rascal bootstrap --repo OWNER/REPO --domain rascal.example.com
-./bin/rascal deploy --host YOUR_SERVER_IP --skip-env-upload --skip-auth-upload
+./bin/rascal deploy --host YOUR_SERVER_IP
 ./bin/rascal doctor --host YOUR_SERVER_IP
 ./bin/rascal config view
 ```

@@ -81,6 +81,4 @@ jobs:
             --ssh-port "${DEPLOY_PORT}" \
             --ssh-key "$HOME/.ssh/id_ed25519" \
             --domain "${DEPLOY_DOMAIN}" \
-            --runner-image "${DEPLOY_RUNNER_IMAGE}" \
-            --skip-env-upload \
-            --skip-auth-upload
+            --runner-image "${DEPLOY_RUNNER_IMAGE}"
