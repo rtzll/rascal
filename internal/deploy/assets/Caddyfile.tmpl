@@ -1,10 +1,40 @@
 (rascal_common) {
   encode gzip zstd
-  import /etc/caddy/rascal-upstream.caddy
 
   log {
     output file /var/log/caddy/rascal-access.log
     format json
+  }
+
+  @allowed_health {
+    method GET
+    path /healthz /readyz
+  }
+  handle @allowed_health {
+    import /etc/caddy/rascal-upstream.caddy
+  }
+
+  @allowed_api {
+    method GET POST
+    path /v1/runs /v1/runs/* /v1/tasks /v1/tasks/* /v1/tasks/issue
+  }
+  handle @allowed_api {
+    import /etc/caddy/rascal-upstream.caddy
+  }
+
+  @allowed_webhook {
+    method POST
+    path /v1/webhooks/github
+    header X-GitHub-Event *
+    header X-GitHub-Delivery *
+    header X-Hub-Signature-256 *
+  }
+  handle @allowed_webhook {
+    import /etc/caddy/rascal-upstream.caddy
+  }
+
+  handle {
+    respond 404
   }
 }
 
