@@ -14,7 +14,7 @@ Flags:
       --github-runtime-token string   GitHub runtime token
       --goarch string                 GOARCH for rascald binary (auto-detected when empty)
   -h, --help                          help for deploy
-      --host string                   existing server host
+      --host string                   existing server host (defaults to config host/ssh_host)
       --runner-image string           runner docker image tag (default "rascal-runner:latest")
       --skip-auth-upload              keep existing codex auth file on server
       --skip-env-upload               keep existing /etc/rascal/rascal.env on server

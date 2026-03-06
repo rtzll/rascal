@@ -2,6 +2,8 @@ package main
 
 import (
 	"testing"
+
+	"github.com/rtzll/rascal/internal/config"
 )
 
 func TestDefaultHetznerFirewallRules(t *testing.T) {
@@ -103,5 +105,40 @@ func TestRunDeployExistingSkipsHealthyHost(t *testing.T) {
 	}
 	if result.DeployPerformed {
 		t.Fatal("expected DeployPerformed=false for healthy host")
+	}
+}
+
+func TestRunDeployExistingUsesConfiguredHost(t *testing.T) {
+	origDeploy := deployToExistingHostFn
+	t.Cleanup(func() {
+		deployToExistingHostFn = origDeploy
+	})
+
+	deployHost := ""
+	deployToExistingHostFn = func(cfg deployConfig) error {
+		deployHost = cfg.Host
+		return nil
+	}
+
+	a := &app{
+		cfg: config.ClientConfig{
+			Host: "203.0.113.10",
+		},
+	}
+	result, err := a.runDeployExisting(deployExistingInput{
+		SSHPort:        22,
+		GOARCH:         "amd64",
+		SkipEnvUpload:  true,
+		SkipAuthUpload: true,
+		RawErrors:      true,
+	})
+	if err != nil {
+		t.Fatalf("runDeployExisting failed: %v", err)
+	}
+	if deployHost != "203.0.113.10" {
+		t.Fatalf("deploy host = %q, want config host", deployHost)
+	}
+	if result.Host != "203.0.113.10" {
+		t.Fatalf("result host = %q, want config host", result.Host)
 	}
 }

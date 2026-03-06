@@ -353,7 +353,7 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().StringVar(&host, "host", "", "existing server host")
+	cmd.Flags().StringVar(&host, "host", "", "existing server host (defaults to config host/ssh_host)")
 	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH target user")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path")
 	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH target port")
@@ -402,7 +402,7 @@ var (
 )
 
 func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult, error) {
-	host := strings.TrimSpace(input.Host)
+	host := firstNonEmpty(strings.TrimSpace(input.Host), strings.TrimSpace(a.cfg.Host), strings.TrimSpace(a.cfg.SSHHost))
 	sshUser := strings.TrimSpace(input.SSHUser)
 	sshKey := strings.TrimSpace(input.SSHKey)
 	goarch := strings.TrimSpace(input.GOARCH)
@@ -416,7 +416,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	webhookSecret := strings.TrimSpace(input.WebhookSecret)
 
 	if host == "" {
-		return deployExistingResult{}, &cliError{Code: exitInput, Message: "--host is required"}
+		return deployExistingResult{}, &cliError{Code: exitInput, Message: "--host is required (or set config host)"}
 	}
 	if sshPort <= 0 {
 		return deployExistingResult{}, &cliError{Code: exitInput, Message: "--ssh-port must be positive"}
