@@ -239,9 +239,9 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 
 func waitForServerIdle(t *testing.T, s *server) {
 	t.Helper()
-	waitFor(t, 2*time.Second, func() bool {
-		return s.activeRunCount() == 0
-	}, "server idle")
+	if err := s.waitForNoActiveRuns(5 * time.Second); err != nil {
+		t.Fatalf("timeout waiting for condition: server idle: %v", err)
+	}
 }
 
 func markRunSucceeded(t *testing.T, s *server, runID string) {
@@ -1329,6 +1329,118 @@ func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
 
 	if calls := launcher.Calls(); calls != 2 {
 		t.Fatalf("expected 2 launcher calls, got %d", calls)
+	}
+}
+
+func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
+	launcher := &fakeLauncher{}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	sessionRoot := filepath.Join(t.TempDir(), "goose-sessions")
+	s.cfg.GooseSessionMode = "pr-only"
+	s.cfg.GooseSessionRoot = sessionRoot
+	s.cfg.GooseSessionTTLDays = 0
+
+	run, err := s.createAndQueueRun(runRequest{
+		TaskID:  "owner/repo#123",
+		Repo:    "owner/repo",
+		Task:    "Address PR #123 feedback",
+		Trigger: "pr_comment",
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		r, ok := s.store.GetRun(run.ID)
+		return ok && r.Status == state.StatusSucceeded
+	}, "run completion")
+
+	if launcher.Calls() != 1 {
+		t.Fatalf("expected 1 launcher call, got %d", launcher.Calls())
+	}
+	spec := launcher.specs[0]
+	if !spec.GooseSessionResume {
+		t.Fatal("expected GooseSessionResume=true for pr-only comment trigger")
+	}
+	if spec.GooseSessionTaskKey == "" {
+		t.Fatal("expected GooseSessionTaskKey to be populated")
+	}
+	if spec.GooseSessionName == "" {
+		t.Fatal("expected GooseSessionName to be populated")
+	}
+	if !strings.HasPrefix(spec.GooseSessionTaskDir, sessionRoot+string(os.PathSeparator)) {
+		t.Fatalf("unexpected GooseSessionTaskDir %q (root %q)", spec.GooseSessionTaskDir, sessionRoot)
+	}
+}
+
+func TestExecuteRunDisablesGooseSessionSpecForNonPROnlyTrigger(t *testing.T) {
+	launcher := &fakeLauncher{}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	s.cfg.GooseSessionMode = "pr-only"
+	s.cfg.GooseSessionRoot = filepath.Join(t.TempDir(), "goose-sessions")
+	s.cfg.GooseSessionTTLDays = 0
+
+	run, err := s.createAndQueueRun(runRequest{
+		TaskID:  "owner/repo#124",
+		Repo:    "owner/repo",
+		Task:    "Initial issue run",
+		Trigger: "issue_label",
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		r, ok := s.store.GetRun(run.ID)
+		return ok && r.Status == state.StatusSucceeded
+	}, "run completion")
+
+	if launcher.Calls() != 1 {
+		t.Fatalf("expected 1 launcher call, got %d", launcher.Calls())
+	}
+	spec := launcher.specs[0]
+	if spec.GooseSessionResume {
+		t.Fatal("expected GooseSessionResume=false for non PR-only trigger")
+	}
+	if spec.GooseSessionTaskDir != "" || spec.GooseSessionTaskKey != "" || spec.GooseSessionName != "" {
+		t.Fatalf("expected empty goose session fields when resume disabled, got dir=%q key=%q name=%q", spec.GooseSessionTaskDir, spec.GooseSessionTaskKey, spec.GooseSessionName)
+	}
+}
+
+func TestCleanupStaleGooseSessionDirs(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "goose-sessions")
+	oldDir := filepath.Join(root, "old")
+	freshDir := filepath.Join(root, "fresh")
+	for _, dir := range []string{oldDir, freshDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	now := time.Now().UTC()
+	if err := os.Chtimes(oldDir, now.AddDate(0, 0, -30), now.AddDate(0, 0, -30)); err != nil {
+		t.Fatalf("chtimes old dir: %v", err)
+	}
+	if err := os.Chtimes(freshDir, now.AddDate(0, 0, -2), now.AddDate(0, 0, -2)); err != nil {
+		t.Fatalf("chtimes fresh dir: %v", err)
+	}
+
+	removed, err := cleanupStaleGooseSessionDirs(root, 14, now)
+	if err != nil {
+		t.Fatalf("cleanupStaleGooseSessionDirs: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
+		t.Fatalf("expected old dir removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(freshDir); err != nil {
+		t.Fatalf("expected fresh dir to remain: %v", err)
 	}
 }
 

@@ -642,6 +642,9 @@ RASCAL_GITHUB_WEBHOOK_SECRET=%s
 RASCAL_RUNNER_MODE=%s
 RASCAL_RUNNER_IMAGE=%s
 RASCAL_RUNNER_MAX_ATTEMPTS=1
+RASCAL_GOOSE_SESSION_MODE=all
+RASCAL_GOOSE_SESSION_ROOT=%s
+RASCAL_GOOSE_SESSION_TTL_DAYS=14
 RASCAL_CODEX_AUTH_PATH=%s
 	`)+"\n",
 		cfg.ServerListenAddr,
@@ -652,6 +655,7 @@ RASCAL_CODEX_AUTH_PATH=%s
 		cfg.WebhookSecret,
 		cfg.RunnerMode,
 		cfg.RunnerImage,
+		filepath.Join(cfg.ServerDataDir, "goose-sessions"),
 		cfg.ServerCodexAuthDst,
 	)
 }

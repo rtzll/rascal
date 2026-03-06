@@ -892,25 +892,25 @@ rascal run --issue OWNER/REPO#123
 				return err
 			}
 			issueRef = strings.TrimSpace(issueRef)
-				if issueRef != "" {
-					if cmd.Flags().Changed("repo") || cmd.Flags().Changed("task") || cmd.Flags().Changed("base-branch") {
-						return &cliError{Code: exitInput, Message: "--issue cannot be combined with --repo, --task, or --base-branch"}
-					}
+			if issueRef != "" {
+				if cmd.Flags().Changed("repo") || cmd.Flags().Changed("task") || cmd.Flags().Changed("base-branch") {
+					return &cliError{Code: exitInput, Message: "--issue cannot be combined with --repo, --task, or --base-branch"}
+				}
 				repo, issueNumber, err := parseIssueRef(issueRef)
 				if err != nil {
 					return &cliError{Code: exitInput, Message: err.Error()}
 				}
-					payload := map[string]any{
-						"repo":         repo,
-						"issue_number": issueNumber,
-					}
-					if cmd.Flags().Changed("debug") {
-						payload["debug"] = debug
-					}
-					resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks/issue", payload)
-					if err != nil {
-						return &cliError{Code: exitServer, Message: "request failed", Cause: err}
-					}
+				payload := map[string]any{
+					"repo":         repo,
+					"issue_number": issueNumber,
+				}
+				if cmd.Flags().Changed("debug") {
+					payload["debug"] = debug
+				}
+				resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks/issue", payload)
+				if err != nil {
+					return &cliError{Code: exitServer, Message: "request failed", Cause: err}
+				}
 				defer resp.Body.Close()
 				if resp.StatusCode >= 300 {
 					return decodeServerError(resp)
@@ -934,18 +934,18 @@ rascal run --issue OWNER/REPO#123
 				return &cliError{Code: exitInput, Message: "both --repo/-R and --task/-t are required"}
 			}
 
-				payload := map[string]any{
-					"repo":        repo,
-					"task":        task,
-					"base_branch": baseBranch,
-				}
-				if cmd.Flags().Changed("debug") {
-					payload["debug"] = debug
-				}
-				resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
-				if err != nil {
-					return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
-				}
+			payload := map[string]any{
+				"repo":        repo,
+				"task":        task,
+				"base_branch": baseBranch,
+			}
+			if cmd.Flags().Changed("debug") {
+				payload["debug"] = debug
+			}
+			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
+			if err != nil {
+				return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
+			}
 			defer resp.Body.Close()
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
@@ -1640,6 +1640,7 @@ rascal retry run_abc123 --debug=false
 				"repo":        run.Repo,
 				"task":        run.Task,
 				"base_branch": run.BaseBranch,
+				"trigger":     "retry",
 			}
 			if cmd.Flags().Changed("debug") {
 				payload["debug"] = debug
@@ -2113,12 +2114,12 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 				return &cliError{Code: exitRuntime, Message: "failed to sync auth", Cause: err}
 			}
 			return a.emit(map[string]any{
-				"host":             host,
-				"synced_env_auth":  syncServerAuth,
-				"synced_codex":     syncCodexAuth,
-				"api_token":        maskSecret(apiToken),
-				"webhook_secret":   maskSecret(webhookSecret),
-				"codex_auth_path":  codexAuthPath,
+				"host":              host,
+				"synced_env_auth":   syncServerAuth,
+				"synced_codex":      syncCodexAuth,
+				"api_token":         maskSecret(apiToken),
+				"webhook_secret":    maskSecret(webhookSecret),
+				"codex_auth_path":   codexAuthPath,
 				"restarted_service": restartSvc,
 			}, func() error {
 				if syncServerAuth && syncCodexAuth {

@@ -18,6 +18,12 @@ type Spec struct {
 	IssueNumber int
 	PRNumber    int
 	Context     string
+
+	GooseSessionMode    string
+	GooseSessionResume  bool
+	GooseSessionTaskDir string
+	GooseSessionTaskKey string
+	GooseSessionName    string
 }
 
 // Result captures outputs emitted by the run environment.

@@ -116,6 +116,115 @@ exit 0
 	}
 }
 
+func TestDockerLauncherUsesTaskSessionMountWhenResumeEnabled(t *testing.T) {
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "docker_calls.log")
+	fakeDocker := filepath.Join(tmp, "docker")
+	script := `#!/bin/sh
+set -eu
+echo "$@" >> "` + logPath + `"
+exit 0
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	runDir := filepath.Join(tmp, "run")
+	sessionDir := filepath.Join(tmp, "sessions", "task")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("create run dir: %v", err)
+	}
+
+	launcher := DockerLauncher{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
+	_, err := launcher.Start(context.Background(), Spec{
+		RunID:               "run_1",
+		TaskID:              "owner/repo#1",
+		Repo:                "owner/repo",
+		Task:                "task",
+		BaseBranch:          "main",
+		HeadBranch:          "rascal/task-1",
+		Trigger:             "pr_comment",
+		Debug:               true,
+		RunDir:              runDir,
+		GooseSessionMode:    GooseSessionModePROnly,
+		GooseSessionResume:  true,
+		GooseSessionTaskDir: sessionDir,
+		GooseSessionTaskKey: "owner-repo-1-abc123",
+		GooseSessionName:    "rascal-owner-repo-1-abc123",
+	})
+	if err != nil {
+		t.Fatalf("launcher start: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker calls log: %v", err)
+	}
+	call := string(data)
+	if !strings.Contains(call, "-e GOOSE_PATH_ROOT=/rascal-goose-session") {
+		t.Fatalf("expected persistent goose path root env, got:\n%s", call)
+	}
+	if !strings.Contains(call, "-e RASCAL_GOOSE_SESSION_MODE=pr-only") {
+		t.Fatalf("expected session mode env, got:\n%s", call)
+	}
+	if !strings.Contains(call, "-e RASCAL_GOOSE_SESSION_RESUME=true") {
+		t.Fatalf("expected resume env, got:\n%s", call)
+	}
+	if !strings.Contains(call, sessionDir+":/rascal-goose-session") {
+		t.Fatalf("expected task session mount, got:\n%s", call)
+	}
+}
+
+func TestDockerLauncherKeepsRunScopedGoosePathWhenSessionResumeDisabled(t *testing.T) {
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "docker_calls.log")
+	fakeDocker := filepath.Join(tmp, "docker")
+	script := `#!/bin/sh
+set -eu
+echo "$@" >> "` + logPath + `"
+exit 0
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	runDir := filepath.Join(tmp, "run")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("create run dir: %v", err)
+	}
+
+	launcher := DockerLauncher{Image: "rascal-runner:latest"}
+	_, err := launcher.Start(context.Background(), Spec{
+		RunID:            "run_2",
+		TaskID:           "owner/repo#2",
+		Repo:             "owner/repo",
+		Task:             "task",
+		BaseBranch:       "main",
+		HeadBranch:       "rascal/task-2",
+		Trigger:          "issue_label",
+		Debug:            false,
+		RunDir:           runDir,
+		GooseSessionMode: GooseSessionModePROnly,
+	})
+	if err != nil {
+		t.Fatalf("launcher start: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker calls log: %v", err)
+	}
+	call := string(data)
+	if !strings.Contains(call, "-e GOOSE_PATH_ROOT=/rascal-meta/goose") {
+		t.Fatalf("expected run-scoped goose path root env, got:\n%s", call)
+	}
+	if strings.Contains(call, ":/rascal-goose-session") {
+		t.Fatalf("did not expect persistent session mount when resume disabled, got:\n%s", call)
+	}
+}
+
 func TestDockerLauncherIncludesNoNewPrivilegesSecurityOpt(t *testing.T) {
 	tmp := t.TempDir()
 	logPath := filepath.Join(tmp, "docker_calls.log")

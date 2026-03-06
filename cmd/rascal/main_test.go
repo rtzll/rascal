@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/state"
-	"github.com/pelletier/go-toml/v2"
 )
 
 func TestMaskSecret(t *testing.T) {
@@ -874,6 +874,71 @@ func TestRetrySendsExplicitDebugOverride(t *testing.T) {
 
 	if retryPayload["debug"] != false {
 		t.Fatalf("expected explicit debug override false, got: %v", retryPayload["debug"])
+	}
+}
+
+func TestRetryCreatesRunWithRetryTrigger(t *testing.T) {
+	var createPayload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"run": map[string]any{
+					"id":          "run_old",
+					"task_id":     "owner/repo#123",
+					"repo":        "owner/repo",
+					"task":        "Fix failing tests",
+					"base_branch": "main",
+					"status":      "failed",
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/tasks":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read retry create body: %v", err)
+			}
+			if err := json.Unmarshal(body, &createPayload); err != nil {
+				t.Fatalf("decode retry payload: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"run": map[string]any{
+					"id":     "run_new",
+					"status": "queued",
+				},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "json",
+	}
+
+	cmd := a.newRetryCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"run_old"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("retry command failed: %v", err)
+	}
+
+	if createPayload["trigger"] != "retry" {
+		t.Fatalf("retry payload trigger = %v, want retry", createPayload["trigger"])
 	}
 }
 

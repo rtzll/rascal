@@ -43,6 +43,32 @@ Cancel active run:
 ./bin/rascal cancel <run_id>
 ```
 
+## Goose Session Resume
+
+Rascal can persist Goose session state on disk and resume it across later runs
+for the same task/PR, without any background process.
+
+Server env controls:
+
+- `RASCAL_GOOSE_SESSION_MODE=off|pr-only|all` (default: `all`)
+- `RASCAL_GOOSE_SESSION_ROOT` (default: `${RASCAL_DATA_DIR}/goose-sessions`)
+- `RASCAL_GOOSE_SESSION_TTL_DAYS` (default: `14`, set `0` to disable cleanup)
+
+`pr-only` resumes for iterative PR triggers:
+
+- `pr_comment`
+- `pr_review`
+- `pr_review_comment`
+- `retry`
+- `issue_edited` (same task)
+
+To reset a task session manually, delete its directory under
+`${RASCAL_GOOSE_SESSION_ROOT}`.
+
+Tradeoff: resume can reduce repeated context rebuilding and token usage, but can
+carry stale context. Reset the task session directory when context drift is
+suspected.
+
 ## Troubleshooting Checklist
 
 1. Run `doctor` first.

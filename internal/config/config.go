@@ -25,6 +25,9 @@ type ServerConfig struct {
 	RunnerImage         string
 	RunnerMaxAttempts   int
 	CodexAuthPath       string
+	GooseSessionMode    string
+	GooseSessionRoot    string
+	GooseSessionTTLDays int
 	MaxRuns             int
 }
 
@@ -60,6 +63,9 @@ func LoadServerConfig() ServerConfig {
 		RunnerImage:         envOrDefault("RASCAL_RUNNER_IMAGE", "rascal-runner:latest"),
 		RunnerMaxAttempts:   envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
 		CodexAuthPath:       envOrDefault("RASCAL_CODEX_AUTH_PATH", "/etc/rascal/codex_auth.json"),
+		GooseSessionMode:    normalizeGooseSessionMode(envOrDefault("RASCAL_GOOSE_SESSION_MODE", "all")),
+		GooseSessionRoot:    envOrDefault("RASCAL_GOOSE_SESSION_ROOT", filepath.Join(dataDir, "goose-sessions")),
+		GooseSessionTTLDays: envNonNegativeIntOrDefault("RASCAL_GOOSE_SESSION_TTL_DAYS", 14),
 		MaxRuns:             200,
 	}
 }
@@ -73,6 +79,15 @@ func (c ServerConfig) Ensure() error {
 	}
 	if err := os.MkdirAll(filepath.Join(c.DataDir, "runs"), 0o755); err != nil {
 		return fmt.Errorf("create runs directory: %w", err)
+	}
+	if normalizeGooseSessionMode(c.GooseSessionMode) != "off" {
+		root := strings.TrimSpace(c.GooseSessionRoot)
+		if root == "" {
+			root = filepath.Join(c.DataDir, "goose-sessions")
+		}
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return fmt.Errorf("create goose sessions directory: %w", err)
+		}
 	}
 	return nil
 }
@@ -195,4 +210,27 @@ func envIntOrDefault(key string, fallback int) int {
 		return fallback
 	}
 	return out
+}
+
+func envNonNegativeIntOrDefault(key string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	var out int
+	if _, err := fmt.Sscanf(v, "%d", &out); err != nil || out < 0 {
+		return fallback
+	}
+	return out
+}
+
+func normalizeGooseSessionMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "pr-only":
+		return "pr-only"
+	case "all":
+		return "all"
+	default:
+		return "off"
+	}
 }
