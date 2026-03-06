@@ -38,6 +38,9 @@ const runSupervisorTick = 1 * time.Second
 const runResponseTargetFile = "response_target.json"
 const runCompletionCommentMarkerFile = "completion_comment_posted.json"
 const runCompletionCommentBodyMarker = "<!-- rascal:completion-comment -->"
+const shutdownDrainTimeoutCancelReason = "orchestrator shutdown drain timeout"
+const deployReclaimCancelReason = "superseded by newer deploy while draining"
+const deployReclaimCleanupWindow = 20 * time.Second
 
 type githubClient interface {
 	GetIssue(ctx context.Context, repo string, issueNumber int) (ghapi.IssueData, error)
@@ -137,6 +140,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/readyz", s.handleReady)
+	mux.HandleFunc("/v1/admin/drain", s.withAuth(s.handleAdminDrain))
+	mux.HandleFunc("/v1/admin/reclaim", s.withAuth(s.handleAdminReclaim))
 	mux.HandleFunc("/v1/runs", s.withAuth(s.handleListRuns))
 	mux.HandleFunc("/v1/runs/", s.withAuth(s.handleRunSubresources))
 	mux.HandleFunc("/v1/tasks", s.withAuth(s.handleCreateTask))
@@ -179,7 +184,7 @@ func main() {
 
 	if err := s.waitForNoActiveRuns(5 * time.Minute); err != nil {
 		log.Printf("active runs did not finish within drain timeout; canceling remaining runs")
-		s.cancelActiveRuns("orchestrator shutdown drain timeout")
+		s.cancelActiveRuns(shutdownDrainTimeoutCancelReason)
 		_ = s.waitForNoActiveRuns(30 * time.Second)
 	}
 }
@@ -270,6 +275,35 @@ func (s *server) handleReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "rascald", "ready": true})
+}
+
+func (s *server) handleAdminDrain(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.beginDrain()
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"draining":    true,
+		"active_runs": s.activeRunCount(),
+	})
+}
+
+func (s *server) handleAdminReclaim(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.beginDrain()
+	s.cancelActiveRunsWithSource(deployReclaimCancelReason, "deploy_reclaim")
+	waitErr := s.waitForNoActiveRuns(deployReclaimCleanupWindow)
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"reclaimed":      true,
+		"cancel_reason":  deployReclaimCancelReason,
+		"active_runs":    s.activeRunCount(),
+		"cleanup_timed":  waitErr != nil,
+		"cleanup_window": deployReclaimCleanupWindow.String(),
+	})
 }
 
 func (s *server) handleListRuns(w http.ResponseWriter, r *http.Request) {
@@ -1794,15 +1828,23 @@ func (s *server) cancelRunningTaskRuns(taskID, reason string) {
 }
 
 func (s *server) cancelActiveRuns(reason string) {
+	s.cancelActiveRunsWithSource(reason, "shutdown")
+}
+
+func (s *server) cancelActiveRunsWithSource(reason, source string) {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		reason = "canceled"
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		source = "system"
 	}
 	s.mu.Lock()
 	cancels := make([]context.CancelFunc, 0, len(s.runCancels))
 	for runID, cancel := range s.runCancels {
 		s.runCancelNote[runID] = reason
-		_ = s.store.RequestRunCancel(runID, reason, "shutdown")
+		_ = s.store.RequestRunCancel(runID, reason, source)
 		cancels = append(cancels, cancel)
 	}
 	s.mu.Unlock()

@@ -176,6 +176,60 @@ func TestExecuteRollsOutRunnerBinaryBeforeImageBuild(t *testing.T) {
 	}
 }
 
+func TestExecuteDoesNotReclaimWhenInactiveSlotNotDraining(t *testing.T) {
+	logDir := setupFakeDeployCommands(t, "")
+
+	if err := Execute(testDeployConfig()); err != nil {
+		t.Fatalf("execute deploy: %v", err)
+	}
+
+	scripts := readCapturedSSHScripts(t, logDir)
+	if !containsScript(scripts, "rascal:check-draining slot=green") {
+		t.Fatalf("expected inactive-slot drain detection script, got %d scripts", len(scripts))
+	}
+	if containsScript(scripts, "rascal:reclaim-slot slot=green") {
+		t.Fatalf("did not expect reclaim script when inactive slot is not draining")
+	}
+	if containsScript(scripts, "systemctl stop --no-block \"rascal@blue\"") {
+		t.Fatalf("did not expect old slot stop --no-block during cutover")
+	}
+	if !containsScript(scripts, "rascal:mark-draining slot=blue") {
+		t.Fatalf("expected old active slot to be marked draining")
+	}
+}
+
+func TestExecuteReclaimsDrainingInactiveSlotBeforeRestart(t *testing.T) {
+	logDir := setupFakeDeployCommands(t, "inactive_draining")
+
+	if err := Execute(testDeployConfig()); err != nil {
+		t.Fatalf("execute deploy: %v", err)
+	}
+
+	scripts := readCapturedSSHScripts(t, logDir)
+	reclaimIdx := scriptIndexContaining(scripts, "rascal:reclaim-slot slot=green")
+	if reclaimIdx < 0 {
+		t.Fatalf("expected reclaim script for draining inactive slot")
+	}
+	restartIdx := scriptIndexContaining(scripts, "systemctl restart 'rascal@green'")
+	if restartIdx < 0 {
+		t.Fatalf("expected inactive slot restart script")
+	}
+	if reclaimIdx > restartIdx {
+		t.Fatalf("expected reclaim before inactive slot restart (reclaim=%d restart=%d)", reclaimIdx, restartIdx)
+	}
+	switchIdx := scriptIndexContaining(scripts, "echo 'green' >/etc/rascal/active_slot")
+	if switchIdx < 0 {
+		t.Fatalf("expected active slot switch script")
+	}
+	markDrainIdx := scriptIndexContaining(scripts, "rascal:mark-draining slot=blue")
+	if markDrainIdx < 0 {
+		t.Fatalf("expected old active slot drain marker script")
+	}
+	if markDrainIdx < switchIdx {
+		t.Fatalf("expected old slot drain marker after active_slot switch (mark=%d switch=%d)", markDrainIdx, switchIdx)
+	}
+}
+
 func TestResolveRunnerBuildInfoUsesEnv(t *testing.T) {
 	t.Setenv("RASCAL_BUILD_VERSION", "v1.2.3")
 	t.Setenv("RASCAL_BUILD_COMMIT", "abc1234")
@@ -314,6 +368,14 @@ if grep -Fq "slot=''" "$script_file" && grep -Fq "printf 'blue'" "$script_file";
   printf 'blue'
   exit 0
 fi
+if grep -Fq "rascal:check-draining slot=green" "$script_file"; then
+  if [ "${RASCAL_TEST_FAIL_MODE:-}" = "inactive_draining" ]; then
+    printf 'draining'
+  else
+    printf 'ready'
+  fi
+  exit 0
+fi
 
 case "${RASCAL_TEST_FAIL_MODE:-}" in
   caddy_reload)
@@ -399,4 +461,13 @@ func firstLineContaining(lines []string, needle string) string {
 		}
 	}
 	return ""
+}
+
+func scriptIndexContaining(scripts []string, needle string) int {
+	for i, script := range scripts {
+		if strings.Contains(script, needle) {
+			return i
+		}
+	}
+	return -1
 }

@@ -1720,6 +1720,149 @@ func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
 	}, "run canceled with drain reason")
 }
 
+func TestBeginDrainTimeoutDoesNotCancelActiveRuns(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer func() {
+		close(waitCh)
+		waitForServerIdle(t, s)
+	}()
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "drain-timeout-no-cancel", Repo: "owner/repo", Task: "long running"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "run start")
+
+	s.beginDrain()
+	if err := s.waitForNoActiveRuns(50 * time.Millisecond); err == nil {
+		t.Fatalf("expected waitForNoActiveRuns timeout while run is active")
+	}
+
+	current, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if current.Status != state.StatusRunning {
+		t.Fatalf("expected run to remain running, got %s", current.Status)
+	}
+	if _, ok := s.store.GetRunCancel(run.ID); ok {
+		t.Fatalf("did not expect persisted cancel request when only waiting for drain")
+	}
+}
+
+func TestHandleAdminDrainKeepsActiveRuns(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer func() {
+		close(waitCh)
+		waitForServerIdle(t, s)
+	}()
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "admin-drain", Repo: "owner/repo", Task: "keep running"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "run start")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/drain", nil)
+	rec := httptest.NewRecorder()
+	s.handleAdminDrain(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	current, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if current.Status != state.StatusRunning {
+		t.Fatalf("expected run to remain running after admin drain, got %s", current.Status)
+	}
+}
+
+func TestHandleAdminReclaimCancelsActiveRunsWithDeployReason(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer func() {
+		close(waitCh)
+		waitForServerIdle(t, s)
+	}()
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "admin-reclaim", Repo: "owner/repo", Task: "cancel on reclaim"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "run start")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/reclaim", nil)
+	rec := httptest.NewRecorder()
+	s.handleAdminReclaim(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		current, ok := s.store.GetRun(run.ID)
+		return ok && current.Status == state.StatusCanceled && strings.Contains(current.Error, deployReclaimCancelReason)
+	}, "run canceled by reclaim reason")
+}
+
+func TestCancelActiveRunsOnlyCancelsKnownLocalRuns(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer func() {
+		close(waitCh)
+		waitForServerIdle(t, s)
+	}()
+
+	localRun, err := s.createAndQueueRun(runRequest{TaskID: "local-slot", Repo: "owner/repo", Task: "local active"})
+	if err != nil {
+		t.Fatalf("create local run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "local run start")
+
+	otherRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_other_slot_active",
+		TaskID:     "other-slot",
+		Repo:       "owner/repo",
+		Task:       "other slot active",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add other-slot run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(otherRun.ID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set other-slot run running: %v", err)
+	}
+	if err := s.store.UpsertRunLease(otherRun.ID, "other-slot-instance", 2*time.Minute); err != nil {
+		t.Fatalf("set other-slot run lease: %v", err)
+	}
+
+	s.cancelActiveRunsWithSource(deployReclaimCancelReason, "deploy_reclaim")
+
+	waitFor(t, 2*time.Second, func() bool {
+		current, ok := s.store.GetRun(localRun.ID)
+		return ok && current.Status == state.StatusCanceled
+	}, "local run canceled")
+
+	otherCurrent, ok := s.store.GetRun(otherRun.ID)
+	if !ok {
+		t.Fatalf("missing other-slot run %s", otherRun.ID)
+	}
+	if otherCurrent.Status != state.StatusRunning {
+		t.Fatalf("expected other-slot run to remain running, got %s", otherCurrent.Status)
+	}
+	if _, ok := s.store.GetRunCancel(otherRun.ID); ok {
+		t.Fatalf("did not expect cancel request for other-slot run")
+	}
+}
+
 func TestExecuteRunHonorsPersistedCancelBeforeStart(t *testing.T) {
 	launcher := &fakeLauncher{}
 	s := newTestServer(t, launcher)

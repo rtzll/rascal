@@ -39,28 +39,45 @@ Given active slot `A` and inactive slot `B`, deploy does:
 4. Install uploaded `rascal-runner` into `/opt/rascal/runner/rascal-runner`.
 5. Build/update runner image on host.
 6. Install/update systemd unit and env files.
-7. Start/restart slot `B`.
-8. Wait for slot `B` readiness (`/readyz` on `B` port).
-9. Update Caddy upstream to slot `B` and reload Caddy.
-10. Verify proxy readiness via Caddy.
-11. Write `/etc/rascal/active_slot = B`.
-12. Stop old slot `A` with `systemctl stop --no-block` (non-blocking).
-13. Disable old slot unit; keep new slot unit enabled/active.
+7. If slot `B` is still running in draining mode from a previous deploy, reclaim it first:
+   - call slot-local reclaim API on `B`
+   - cancel active runs on `B` with reason `superseded by newer deploy while draining`
+   - wait a short bounded cleanup window
+   - stop `B`
+8. Start/restart slot `B`.
+9. Wait for slot `B` readiness (`/readyz` on `B` port).
+10. Update Caddy upstream to slot `B` and reload Caddy.
+11. Verify proxy readiness via Caddy.
+12. Write `/etc/rascal/active_slot = B`.
+13. Mark old slot `A` as draining via slot-local admin API (do not stop immediately).
+14. Disable old slot unit; keep new slot unit enabled/active.
 
 Important: deploy success is no longer coupled to waiting for old-slot drain.
 
-## Drain Behavior
+## Slot States And Policy
 
-When old slot gets `SIGTERM`:
+Slots are treated as:
 
-1. Enters draining mode.
-2. Stops accepting new work.
-3. Cancels queued runs immediately.
-4. Waits up to 5 minutes for active runs to finish.
-5. If timeout hits, cancels remaining active runs with drain-timeout reason.
-6. Waits a short final window, then exits.
+- `active`: receives traffic and schedules work.
+- `draining`: no new work accepted, active work may continue.
+- `inactive`: free to deploy.
 
-This allows fast cutover while old work winds down in the background.
+Policy:
+
+1. The immediately previous slot is allowed to drain active work with no fixed deploy timeout.
+2. If the next deploy needs that slot and it is still draining, deploy explicitly reclaims it and cancels its active work.
+3. The currently active slot is not canceled just because a new deploy starts.
+
+## Drain And Shutdown Behavior
+
+Deploy-driven drain is now explicit (`/v1/admin/drain`) and does not apply a fixed active-run timeout.
+
+Generic process shutdown (`SIGTERM`, host shutdown, operator stop) keeps bounded shutdown behavior:
+
+1. Enter draining mode.
+2. Stop accepting new work.
+3. Wait up to 5 minutes for active runs.
+4. Cancel remaining runs with `orchestrator shutdown drain timeout`.
 
 ## Runner Entrypoint
 
@@ -89,7 +106,7 @@ Additional safeguards:
 - Docker launcher explicitly stops and removes the run container on cancel.
 - Final success write is guarded so canceled runs cannot later become
   `succeeded` or `review`.
-- Cancel reason distinguishes user cancel vs shutdown/drain timeout.
+- Cancel reason distinguishes user cancel vs deploy reclaim vs shutdown timeout.
 
 ## Rollback Behavior
 
@@ -113,13 +130,14 @@ ssh root@HOST 'curl -fsS http://127.0.0.1:18081/readyz || true'
 
 ## End-to-End Example Flow
 
-Example: `blue` is active and running a job, deploy is triggered.
+Example timeline:
 
-1. Deploy prepares `green` and passes `green` readiness.
-2. Caddy upstream switches to `green`.
-3. `active_slot` flips to `green`.
-4. `blue` gets stop request with `--no-block`; deploy returns success quickly.
-5. `blue` drains in background; existing job can finish or be canceled on
-   timeout.
-6. If canceled, runner container is explicitly stopped/removed and run stays
-   terminally `canceled`.
+1. `blue` is active and running a job.
+2. Deploy N starts `green`, flips traffic to `green`, and marks `blue` draining.
+3. `blue` keeps running its active job with no deploy-time fixed timeout.
+4. Deploy N+1 starts while `blue` is still draining.
+5. Deploy N+1 explicitly reclaims `blue` before reusing it:
+   - cancel `blue` active runs with reason `superseded by newer deploy while draining`
+   - bounded cleanup wait
+   - stop `blue`
+6. New version deploys onto `blue`, traffic flips, and `green` becomes the next draining slot.

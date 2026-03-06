@@ -84,6 +84,13 @@ curl -fsS "https://${DOMAIN}/readyz"
 
 See also: [deployment.md](deployment.md)
 
+Repeated deploy policy (interim two-slot behavior):
+
+- After one deploy, the previous slot may keep draining active runs indefinitely.
+- If you deploy again before it finishes, deploy reclaims that oldest draining slot and cancels its active runs with reason:
+  - `superseded by newer deploy while draining`
+- This keeps two-slot rotation moving without adding a third slot.
+
 ## 3) Run Appears Stuck
 
 Identify run and follow logs:
@@ -153,7 +160,12 @@ EOF
 systemctl reload caddy || systemctl restart caddy
 echo blue >/etc/rascal/active_slot
 systemctl restart rascal@blue
-systemctl stop --no-block rascal@green || true"
+if [ -f /etc/rascal/rascal.env ]; then set -a; . /etc/rascal/rascal.env; set +a; fi
+if [ -n \"\${RASCAL_API_TOKEN:-}\" ]; then
+  curl -fsS -X POST -H \"Authorization: Bearer \${RASCAL_API_TOKEN}\" http://127.0.0.1:18081/v1/admin/drain >/dev/null || true
+else
+  curl -fsS -X POST http://127.0.0.1:18081/v1/admin/drain >/dev/null || true
+fi"
 ```
 
 3. Verify recovery:

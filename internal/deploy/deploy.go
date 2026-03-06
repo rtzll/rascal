@@ -13,11 +13,12 @@ import (
 )
 
 const (
-	SlotBlue      = "blue"
-	SlotGreen     = "green"
-	SlotBluePort  = 18080
-	SlotGreenPort = 18081
-	ProxyPort     = 8080
+	SlotBlue                  = "blue"
+	SlotGreen                 = "green"
+	SlotBluePort              = 18080
+	SlotGreenPort             = 18081
+	ProxyPort                 = 8080
+	deployReclaimCancelReason = "superseded by newer deploy while draining"
 )
 
 type Config struct {
@@ -257,6 +258,15 @@ systemctl daemon-reload
 	if err := runRemoteScript(cfg, fmt.Sprintf("set -eu\nif ! systemctl is-active --quiet 'rascal@%s'; then systemctl enable 'rascal@%s' >/dev/null 2>&1 || true; systemctl restart 'rascal@%s'; fi\n", activeSlot, activeSlot, activeSlot)); err != nil {
 		return err
 	}
+	inactiveDraining, err := isRemoteSlotDraining(cfg, inactiveSlot, inactivePort)
+	if err != nil {
+		return err
+	}
+	if inactiveDraining {
+		if err := reclaimRemoteSlot(cfg, inactiveSlot, inactivePort); err != nil {
+			return err
+		}
+	}
 	if err := runRemoteScript(cfg, fmt.Sprintf("set -eu\nsystemctl enable 'rascal@%s' >/dev/null 2>&1 || true\nsystemctl restart 'rascal@%s'\n", inactiveSlot, inactiveSlot)); err != nil {
 		return err
 	}
@@ -328,13 +338,17 @@ if systemctl is-active --quiet rascal; then
   systemctl disable rascal >/dev/null 2>&1 || true
 fi
 if [ %s != %s ]; then
-  systemctl stop --no-block "rascal@%s" || true
   systemctl disable "rascal@%s" >/dev/null 2>&1 || true
 fi
 systemctl enable "rascal@%s" >/dev/null 2>&1 || true
 systemctl is-active --quiet "rascal@%s"
-`)+"\n", shellSingleQuote(inactiveSlot), shellSingleQuote(activeSlot), shellSingleQuote(inactiveSlot), activeSlot, activeSlot, inactiveSlot, inactiveSlot)); err != nil {
+`)+"\n", shellSingleQuote(inactiveSlot), shellSingleQuote(activeSlot), shellSingleQuote(inactiveSlot), activeSlot, inactiveSlot, inactiveSlot)); err != nil {
 		return err
+	}
+	if activeSlot != inactiveSlot {
+		if err := markRemoteSlotDraining(cfg, activeSlot, activePort); err != nil {
+			return err
+		}
 	}
 	if err := runRemoteScript(cfg, "set -eu\nrm -rf /tmp/rascal-bootstrap\n"); err != nil {
 		return err
@@ -593,6 +607,94 @@ fi
 `)+"\n", ProxyPort, ProxyPort, ProxyPort)
 	if err := runRemoteScript(cfg, checkScript); err != nil {
 		return fmt.Errorf("proxy readiness check failed on caddy: %w", err)
+	}
+	return nil
+}
+
+func isRemoteSlotDraining(cfg Config, slot string, port int) (bool, error) {
+	out, err := runRemoteScriptCapture(cfg, fmt.Sprintf(strings.TrimSpace(`
+set -eu
+# rascal:check-draining slot=%s
+if ! systemctl is-active --quiet "rascal@%s"; then
+  printf 'inactive'
+  exit 0
+fi
+status_code=''
+if command -v curl >/dev/null 2>&1; then
+  status_code="$(curl -sS -o /dev/null -w '%%{http_code}' --max-time 5 http://127.0.0.1:%d/readyz || true)"
+fi
+if [ "$status_code" = "503" ]; then
+  printf 'draining'
+  exit 0
+fi
+printf 'ready'
+`)+"\n", slot, slot, port))
+	if err != nil {
+		return false, fmt.Errorf("detect slot %s drain state: %w", slot, err)
+	}
+	state := strings.TrimSpace(out)
+	switch state {
+	case "", "inactive", "ready":
+		return false, nil
+	case "draining":
+		return true, nil
+	default:
+		return false, fmt.Errorf("detect slot %s drain state: unexpected response %q", slot, state)
+	}
+}
+
+func reclaimRemoteSlot(cfg Config, slot string, port int) error {
+	if err := runRemoteScript(cfg, fmt.Sprintf(strings.TrimSpace(`
+set -eu
+# rascal:reclaim-slot slot=%s
+if ! systemctl is-active --quiet "rascal@%s"; then
+  exit 0
+fi
+if [ -f /etc/rascal/rascal.env ]; then
+  set -a
+  . /etc/rascal/rascal.env
+  set +a
+fi
+post_reclaim() {
+  url="$1"
+  if [ -n "${RASCAL_API_TOKEN:-}" ]; then
+    curl -fsS --max-time 15 -X POST -H "Authorization: Bearer ${RASCAL_API_TOKEN}" "$url" >/dev/null
+    return
+  fi
+  curl -fsS --max-time 15 -X POST "$url" >/dev/null
+}
+post_reclaim "http://127.0.0.1:%d/v1/admin/reclaim"
+systemctl stop "rascal@%s"
+systemctl disable "rascal@%s" >/dev/null 2>&1 || true
+`)+"\n", slot, slot, port, slot, slot)); err != nil {
+		return fmt.Errorf("reclaim draining slot %s (%s): %w", slot, deployReclaimCancelReason, err)
+	}
+	return nil
+}
+
+func markRemoteSlotDraining(cfg Config, slot string, port int) error {
+	if err := runRemoteScript(cfg, fmt.Sprintf(strings.TrimSpace(`
+set -eu
+# rascal:mark-draining slot=%s
+if ! systemctl is-active --quiet "rascal@%s"; then
+  exit 0
+fi
+if [ -f /etc/rascal/rascal.env ]; then
+  set -a
+  . /etc/rascal/rascal.env
+  set +a
+fi
+post_drain() {
+  url="$1"
+  if [ -n "${RASCAL_API_TOKEN:-}" ]; then
+    curl -fsS --max-time 10 -X POST -H "Authorization: Bearer ${RASCAL_API_TOKEN}" "$url" >/dev/null
+    return
+  fi
+  curl -fsS --max-time 10 -X POST "$url" >/dev/null
+}
+post_drain "http://127.0.0.1:%d/v1/admin/drain"
+`)+"\n", slot, slot, port)); err != nil {
+		return fmt.Errorf("mark previous slot %s draining: %w", slot, err)
 	}
 	return nil
 }
