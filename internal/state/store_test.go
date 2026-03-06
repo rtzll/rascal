@@ -235,6 +235,28 @@ func TestStoreReleaseDeliveryClaimAllowsRetry(t *testing.T) {
 	}
 }
 
+func TestStoreOutgoingIssueCommentTracking(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	if store.IsOutgoingIssueComment(12345) {
+		t.Fatal("expected comment to be absent before record")
+	}
+	if err := store.RecordOutgoingIssueComment("owner/repo", 77, 12345, "run_123"); err != nil {
+		t.Fatalf("record outgoing issue comment: %v", err)
+	}
+	if !store.IsOutgoingIssueComment(12345) {
+		t.Fatal("expected comment to be tracked after record")
+	}
+	if err := store.RecordOutgoingIssueComment("owner/repo", 77, 12345, "run_123"); err != nil {
+		t.Fatalf("record outgoing issue comment should be idempotent: %v", err)
+	}
+}
+
 func TestStoreClaimRunStartAtomic(t *testing.T) {
 	t.Parallel()
 

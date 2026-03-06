@@ -19,6 +19,14 @@ type Delivery struct {
 	LastError   string        `json:"last_error"`
 }
 
+type OutgoingIssueComment struct {
+	CommentID   int64  `json:"comment_id"`
+	Repo        string `json:"repo"`
+	IssueNumber int64  `json:"issue_number"`
+	RunID       string `json:"run_id"`
+	CreatedAt   int64  `json:"created_at"`
+}
+
 type Run struct {
 	Seq         int64         `json:"seq"`
 	ID          string        `json:"id"`

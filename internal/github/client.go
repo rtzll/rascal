@@ -260,30 +260,39 @@ func (c *APIClient) AddIssueCommentReaction(ctx context.Context, repo string, co
 	return nil
 }
 
-func (c *APIClient) CreateIssueComment(ctx context.Context, repo string, issueNumber int, body string) error {
+func (c *APIClient) CreateIssueComment(ctx context.Context, repo string, issueNumber int, body string) (int64, error) {
 	if issueNumber <= 0 {
-		return fmt.Errorf("issue number must be positive")
+		return 0, fmt.Errorf("issue number must be positive")
 	}
 	body = strings.TrimSpace(body)
 	if body == "" {
-		return fmt.Errorf("comment body is required")
+		return 0, fmt.Errorf("comment body is required")
 	}
 
 	owner, repoName, err := splitRepo(repo)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repoName, issueNumber)
 	resp, err := c.do(ctx, http.MethodPost, path, map[string]string{"body": body})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("github create issue comment failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+		return 0, fmt.Errorf("github create issue comment failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
 	}
-	return nil
+	var out struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, fmt.Errorf("decode created issue comment: %w", err)
+	}
+	if out.ID <= 0 {
+		return 0, fmt.Errorf("github create issue comment missing id")
+	}
+	return out.ID, nil
 }
 
 func (c *APIClient) AddPullRequestReviewReaction(ctx context.Context, repo string, pullNumber int, reviewID int64, content string) error {

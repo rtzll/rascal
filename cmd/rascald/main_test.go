@@ -43,6 +43,7 @@ type stubbornLauncher struct {
 }
 
 type postedIssueComment struct {
+	commentID   int64
 	repo        string
 	issueNumber int
 	body        string
@@ -153,7 +154,7 @@ func (f *fakeGitHubClient) AddPullRequestReviewCommentReaction(_ context.Context
 	return nil
 }
 
-func (f *fakeGitHubClient) CreateIssueComment(_ context.Context, repo string, issueNumber int, body string) error {
+func (f *fakeGitHubClient) CreateIssueComment(_ context.Context, repo string, issueNumber int, body string) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	callIdx := f.createIssueCommentCalls
@@ -163,14 +164,16 @@ func (f *fakeGitHubClient) CreateIssueComment(_ context.Context, repo string, is
 		err = f.createIssueCommentErrSeq[callIdx]
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
+	commentID := int64(1000 + f.createIssueCommentCalls)
 	f.issueComments = append(f.issueComments, postedIssueComment{
+		commentID:   commentID,
 		repo:        repo,
 		issueNumber: issueNumber,
 		body:        body,
 	})
-	return nil
+	return commentID, nil
 }
 
 func (f *fakeGitHubClient) postedComments() []postedIssueComment {
@@ -1053,6 +1056,26 @@ func TestHandleWebhookIssueCommentIgnoresRascalAutomationComment(t *testing.T) {
 	}
 }
 
+func TestHandleWebhookIssueCommentIgnoresTrackedOutgoingCommentID(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	if err := s.store.RecordOutgoingIssueComment("owner/repo", 9, 777, "run_777"); err != nil {
+		t.Fatalf("record outgoing issue comment: %v", err)
+	}
+
+	payload := []byte(`{"action":"created","issue":{"number":9,"pull_request":{}},"comment":{"id":777,"body":"follow-up from rascal","user":{"login":"rascal"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"rascal"}}`)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-tracked", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+	if got := len(s.store.ListRuns(10)); got != 0 {
+		t.Fatalf("expected zero runs for tracked outgoing comment id, got %d", got)
+	}
+}
+
 func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
@@ -1548,6 +1571,9 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	comment := comments[0]
 	if comment.repo != "owner/repo" || comment.issueNumber != 77 {
 		t.Fatalf("unexpected comment target: %+v", comment)
+	}
+	if !s.store.IsOutgoingIssueComment(comment.commentID) {
+		t.Fatalf("expected posted comment id %d to be tracked in sqlite", comment.commentID)
 	}
 	if !strings.Contains(comment.body, "@alice implemented in commit [`0123456789ab`]") {
 		t.Fatalf("expected requester mention with short sha, got body:\n%s", comment.body)

@@ -920,6 +920,21 @@ func (q *Queries) MarkTaskCompleted(ctx context.Context, arg MarkTaskCompletedPa
 	return result.RowsAffected()
 }
 
+const outgoingIssueCommentExists = `-- name: OutgoingIssueCommentExists :one
+SELECT EXISTS(
+  SELECT 1
+  FROM outgoing_issue_comments
+  WHERE comment_id = ?
+)
+`
+
+func (q *Queries) OutgoingIssueCommentExists(ctx context.Context, commentID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, outgoingIssueCommentExists, commentID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const recordDelivery = `-- name: RecordDelivery :exec
 INSERT OR REPLACE INTO deliveries (
   id,
@@ -942,6 +957,37 @@ type RecordDeliveryParams struct {
 
 func (q *Queries) RecordDelivery(ctx context.Context, arg RecordDeliveryParams) error {
 	_, err := q.db.ExecContext(ctx, recordDelivery, arg.ID, arg.ProcessedAt, arg.SeenAt)
+	return err
+}
+
+const recordOutgoingIssueComment = `-- name: RecordOutgoingIssueComment :exec
+INSERT INTO outgoing_issue_comments (
+  comment_id,
+  repo,
+  issue_number,
+  run_id,
+  created_at
+)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(comment_id) DO NOTHING
+`
+
+type RecordOutgoingIssueCommentParams struct {
+	CommentID   int64  `json:"comment_id"`
+	Repo        string `json:"repo"`
+	IssueNumber int64  `json:"issue_number"`
+	RunID       string `json:"run_id"`
+	CreatedAt   int64  `json:"created_at"`
+}
+
+func (q *Queries) RecordOutgoingIssueComment(ctx context.Context, arg RecordOutgoingIssueCommentParams) error {
+	_, err := q.db.ExecContext(ctx, recordOutgoingIssueComment,
+		arg.CommentID,
+		arg.Repo,
+		arg.IssueNumber,
+		arg.RunID,
+		arg.CreatedAt,
+	)
 	return err
 }
 

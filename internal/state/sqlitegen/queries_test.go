@@ -79,6 +79,16 @@ CREATE TABLE deliveries (
 );
 
 CREATE INDEX idx_deliveries_seen_at ON deliveries (seen_at ASC);
+
+CREATE TABLE outgoing_issue_comments (
+  comment_id INTEGER PRIMARY KEY,
+  repo TEXT NOT NULL,
+  issue_number INTEGER NOT NULL DEFAULT 0,
+  run_id TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_outgoing_issue_comments_created_at ON outgoing_issue_comments (created_at ASC);
 `
 
 func newQueriesForTest(t *testing.T) (*sql.DB, *Queries) {
@@ -558,5 +568,29 @@ func TestQueriesCoverage(t *testing.T) {
 	}
 	if seen != 0 {
 		t.Fatalf("expected delivery_1 to be deleted, got %d", seen)
+	}
+
+	exists, err := q.OutgoingIssueCommentExists(ctx, 1234)
+	if err != nil {
+		t.Fatalf("OutgoingIssueCommentExists before record: %v", err)
+	}
+	if exists != 0 {
+		t.Fatalf("expected outgoing issue comment to be absent, got %d", exists)
+	}
+	if err := q.RecordOutgoingIssueComment(ctx, RecordOutgoingIssueCommentParams{
+		CommentID:   1234,
+		Repo:        "owner/repo",
+		IssueNumber: 77,
+		RunID:       "run_2",
+		CreatedAt:   later + 500,
+	}); err != nil {
+		t.Fatalf("RecordOutgoingIssueComment: %v", err)
+	}
+	exists, err = q.OutgoingIssueCommentExists(ctx, 1234)
+	if err != nil {
+		t.Fatalf("OutgoingIssueCommentExists after record: %v", err)
+	}
+	if exists == 0 {
+		t.Fatal("expected outgoing issue comment to exist")
 	}
 }

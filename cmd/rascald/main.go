@@ -46,7 +46,7 @@ type githubClient interface {
 	AddIssueCommentReaction(ctx context.Context, repo string, commentID int64, content string) error
 	AddPullRequestReviewReaction(ctx context.Context, repo string, pullNumber int, reviewID int64, content string) error
 	AddPullRequestReviewCommentReaction(ctx context.Context, repo string, commentID int64, content string) error
-	CreateIssueComment(ctx context.Context, repo string, issueNumber int, body string) error
+	CreateIssueComment(ctx context.Context, repo string, issueNumber int, body string) (int64, error)
 }
 
 type server struct {
@@ -622,7 +622,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		default:
 			return nil
 		}
-		if isRascalAutomationComment(ev.Comment.Body) {
+		if s.store.IsOutgoingIssueComment(ev.Comment.ID) || isRascalAutomationComment(ev.Comment.Body) {
 			return nil
 		}
 		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
@@ -2090,9 +2090,13 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := s.gh.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
+	commentID, err := s.gh.CreateIssueComment(ctx, repo, issueNumber, body)
+	if err != nil {
 		log.Printf("failed to post completion comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
 		return
+	}
+	if err := s.store.RecordOutgoingIssueComment(repo, issueNumber, commentID, run.ID); err != nil {
+		log.Printf("failed to record outgoing issue comment id %d for run %s: %v", commentID, run.ID, err)
 	}
 	if err := writeRunCompletionCommentMarker(run, repo, issueNumber); err != nil {
 		log.Printf("failed to persist completion comment marker for run %s: %v", run.ID, err)

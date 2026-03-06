@@ -434,3 +434,21 @@ WHERE id IN (
   ORDER BY seen_at ASC
   LIMIT ?
 );
+
+-- name: RecordOutgoingIssueComment :exec
+INSERT INTO outgoing_issue_comments (
+  comment_id,
+  repo,
+  issue_number,
+  run_id,
+  created_at
+)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(comment_id) DO NOTHING;
+
+-- name: OutgoingIssueCommentExists :one
+SELECT EXISTS(
+  SELECT 1
+  FROM outgoing_issue_comments
+  WHERE comment_id = ?
+);

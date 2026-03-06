@@ -741,6 +741,38 @@ func (s *Store) RecordDelivery(deliveryID string) error {
 	return s.trimDeliveriesIfNeeded()
 }
 
+func (s *Store) RecordOutgoingIssueComment(repo string, issueNumber int, commentID int64, runID string) error {
+	repo = strings.TrimSpace(repo)
+	runID = strings.TrimSpace(runID)
+	if repo == "" {
+		return fmt.Errorf("repo is required")
+	}
+	if issueNumber <= 0 {
+		return fmt.Errorf("issue number must be positive")
+	}
+	if commentID <= 0 {
+		return fmt.Errorf("comment id must be positive")
+	}
+	return s.q.RecordOutgoingIssueComment(context.Background(), sqlitegen.RecordOutgoingIssueCommentParams{
+		CommentID:   commentID,
+		Repo:        repo,
+		IssueNumber: int64(issueNumber),
+		RunID:       runID,
+		CreatedAt:   time.Now().UTC().UnixNano(),
+	})
+}
+
+func (s *Store) IsOutgoingIssueComment(commentID int64) bool {
+	if commentID <= 0 {
+		return false
+	}
+	exists, err := s.q.OutgoingIssueCommentExists(context.Background(), commentID)
+	if err != nil {
+		return false
+	}
+	return exists > 0
+}
+
 func (s *Store) trimDeliveriesIfNeeded() error {
 	count, err := s.q.CountDeliveries(context.Background())
 	if err != nil {
