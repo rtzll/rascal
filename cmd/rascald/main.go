@@ -123,9 +123,14 @@ func main() {
 	}
 
 	s := &server{
-		cfg:           cfg,
-		store:         store,
-		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken),
+		cfg:   cfg,
+		store: store,
+		launcher: runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken, runner.SecurityOptions{
+			Mode:        cfg.RunnerSecurityMode,
+			PidsLimit:   cfg.RunnerPidsLimit,
+			MemoryLimit: cfg.RunnerMemoryLimit,
+			CPULimit:    cfg.RunnerCPULimit,
+		}),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
 		runCancels:    make(map[string]context.CancelFunc),
 		runCancelNote: make(map[string]string),

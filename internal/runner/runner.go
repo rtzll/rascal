@@ -39,10 +39,14 @@ type Launcher interface {
 	Start(ctx context.Context, spec Spec) (Result, error)
 }
 
-func NewLauncher(mode, image, githubToken string) Launcher {
+func NewLauncher(mode, image, githubToken string, security SecurityOptions) Launcher {
 	switch mode {
 	case "docker":
-		return DockerLauncher{Image: image, GitHubToken: githubToken}
+		return DockerLauncher{
+			Image:       image,
+			GitHubToken: githubToken,
+			Security:    security,
+		}
 	default:
 		return NoopLauncher{}
 	}

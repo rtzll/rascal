@@ -75,6 +75,32 @@ This allows fast cutover while old work winds down in the background.
 - It only executes `/usr/local/bin/rascal-runner`.
 - Task workflow behavior (git/goose/PR/meta handling) is implemented in Go in `cmd/rascal-runner`.
 
+## Runner Security Modes
+
+Runner container hardening is controlled by `RASCAL_RUNNER_SECURITY_MODE`:
+
+- `open`: compatibility mode (default when unset)
+- `baseline`: recommended for new installs
+- `strict`: adds stronger isolation that may require repo-specific tuning
+
+Baseline applies these runtime flags:
+
+- `--cap-drop=ALL`
+- `--security-opt=no-new-privileges:true`
+- `--init`
+- `--pids-limit` (from `RASCAL_RUNNER_PIDS_LIMIT`, default `512`)
+- `--memory` (from `RASCAL_RUNNER_MEMORY_LIMIT`, default `4g`)
+- `--cpus` (from `RASCAL_RUNNER_CPU_LIMIT`, default `2`)
+
+Strict currently adds:
+
+- `--read-only`
+- `--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m`
+- `--tmpfs=/var/tmp:rw,nosuid,nodev,noexec,size=64m`
+- `--security-opt=seccomp=default`
+
+Each run writes an audit line to `runner.log` with selected mode and applied constraints.
+
 ## Overlap Safety (Both Slots Alive Briefly)
 
 During overlap, only active slot may process webhooks:

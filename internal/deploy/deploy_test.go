@@ -233,6 +233,20 @@ func TestServerEnvFileEnablesGooseSessionsByDefault(t *testing.T) {
 	}
 }
 
+func TestServerEnvFileIncludesRunnerSecurityDefaults(t *testing.T) {
+	content := serverEnvFile(testDeployConfig())
+	for _, want := range []string{
+		"RASCAL_RUNNER_SECURITY_MODE=open",
+		"RASCAL_RUNNER_PIDS_LIMIT=512",
+		"RASCAL_RUNNER_MEMORY_LIMIT=4g",
+		"RASCAL_RUNNER_CPU_LIMIT=2",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("server env file missing %q:\n%s", want, content)
+		}
+	}
+}
+
 func testDeployConfig() Config {
 	return Config{
 		Host:               "example-host",

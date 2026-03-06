@@ -5,10 +5,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
 )
+
+const (
+	RunnerSecurityModeOpen     = "open"
+	RunnerSecurityModeBaseline = "baseline"
+	RunnerSecurityModeStrict   = "strict"
+
+	DefaultRunnerSecurityMode = RunnerSecurityModeOpen
+	DefaultRunnerPidsLimit    = 512
+	DefaultRunnerMemoryLimit  = "4g"
+	DefaultRunnerCPULimit     = "2"
+)
+
+var dockerMemoryLimitPattern = regexp.MustCompile(`^[1-9][0-9]*(?:\.[0-9]+)?[bkmgBKMG]?$`)
 
 // ServerConfig controls rascald runtime behavior.
 type ServerConfig struct {
@@ -24,11 +39,16 @@ type ServerConfig struct {
 	RunnerMode          string
 	RunnerImage         string
 	RunnerMaxAttempts   int
+	RunnerSecurityMode  string
+	RunnerPidsLimit     int
+	RunnerMemoryLimit   string
+	RunnerCPULimit      string
 	CodexAuthPath       string
 	GooseSessionMode    string
 	GooseSessionRoot    string
 	GooseSessionTTLDays int
 	MaxRuns             int
+	loadErr             error
 }
 
 // ClientConfig controls rascal CLI behavior.
@@ -48,8 +68,9 @@ type ClientConfig struct {
 func LoadServerConfig() ServerConfig {
 	dataDir := envOrDefault("RASCAL_DATA_DIR", "./var/lib/rascal")
 	statePath := envOrDefault("RASCAL_STATE_PATH", filepath.Join(dataDir, "state.db"))
+	runnerPidsLimit, runnerPidsErr := envPositiveIntOrDefault("RASCAL_RUNNER_PIDS_LIMIT", DefaultRunnerPidsLimit)
 
-	return ServerConfig{
+	cfg := ServerConfig{
 		ListenAddr:          envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
 		DataDir:             dataDir,
 		StatePath:           statePath,
@@ -62,15 +83,30 @@ func LoadServerConfig() ServerConfig {
 		RunnerMode:          envOrDefault("RASCAL_RUNNER_MODE", "noop"),
 		RunnerImage:         envOrDefault("RASCAL_RUNNER_IMAGE", "rascal-runner:latest"),
 		RunnerMaxAttempts:   envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
+		RunnerSecurityMode:  envOrDefault("RASCAL_RUNNER_SECURITY_MODE", DefaultRunnerSecurityMode),
+		RunnerPidsLimit:     runnerPidsLimit,
+		RunnerMemoryLimit:   envOrDefault("RASCAL_RUNNER_MEMORY_LIMIT", DefaultRunnerMemoryLimit),
+		RunnerCPULimit:      envOrDefault("RASCAL_RUNNER_CPU_LIMIT", DefaultRunnerCPULimit),
 		CodexAuthPath:       envOrDefault("RASCAL_CODEX_AUTH_PATH", "/etc/rascal/codex_auth.json"),
 		GooseSessionMode:    normalizeGooseSessionMode(envOrDefault("RASCAL_GOOSE_SESSION_MODE", "all")),
 		GooseSessionRoot:    envOrDefault("RASCAL_GOOSE_SESSION_ROOT", filepath.Join(dataDir, "goose-sessions")),
 		GooseSessionTTLDays: envNonNegativeIntOrDefault("RASCAL_GOOSE_SESSION_TTL_DAYS", 14),
 		MaxRuns:             200,
 	}
+	cfg.loadErr = errors.Join(
+		runnerPidsErr,
+		validateRunnerSecurityMode(cfg.RunnerSecurityMode),
+		validatePositiveInt("RASCAL_RUNNER_PIDS_LIMIT", cfg.RunnerPidsLimit),
+		validateDockerMemoryLimit("RASCAL_RUNNER_MEMORY_LIMIT", cfg.RunnerMemoryLimit),
+		validateCPULimit("RASCAL_RUNNER_CPU_LIMIT", cfg.RunnerCPULimit),
+	)
+	return cfg
 }
 
 func (c ServerConfig) Ensure() error {
+	if c.loadErr != nil {
+		return c.loadErr
+	}
 	if c.DataDir == "" {
 		return fmt.Errorf("data directory cannot be empty")
 	}
@@ -79,6 +115,14 @@ func (c ServerConfig) Ensure() error {
 	}
 	if err := os.MkdirAll(filepath.Join(c.DataDir, "runs"), 0o755); err != nil {
 		return fmt.Errorf("create runs directory: %w", err)
+	}
+	if err := errors.Join(
+		validateRunnerSecurityMode(c.RunnerSecurityMode),
+		validatePositiveInt("RASCAL_RUNNER_PIDS_LIMIT", c.RunnerPidsLimit),
+		validateDockerMemoryLimit("RASCAL_RUNNER_MEMORY_LIMIT", c.RunnerMemoryLimit),
+		validateCPULimit("RASCAL_RUNNER_CPU_LIMIT", c.RunnerCPULimit),
+	); err != nil {
+		return err
 	}
 	if normalizeGooseSessionMode(c.GooseSessionMode) != "off" {
 		root := strings.TrimSpace(c.GooseSessionRoot)
@@ -224,6 +268,18 @@ func envNonNegativeIntOrDefault(key string, fallback int) int {
 	return out
 }
 
+func envPositiveIntOrDefault(key string, fallback int) (int, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback, nil
+	}
+	out, err := strconv.Atoi(v)
+	if err != nil || out <= 0 {
+		return fallback, fmt.Errorf("%s must be a positive integer: %q", key, v)
+	}
+	return out, nil
+}
+
 func normalizeGooseSessionMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "pr-only":
@@ -233,4 +289,43 @@ func normalizeGooseSessionMode(mode string) string {
 	default:
 		return "off"
 	}
+}
+
+func validateRunnerSecurityMode(v string) error {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case RunnerSecurityModeOpen, RunnerSecurityModeBaseline, RunnerSecurityModeStrict:
+		return nil
+	default:
+		return fmt.Errorf("RASCAL_RUNNER_SECURITY_MODE must be one of: open, baseline, strict")
+	}
+}
+
+func validatePositiveInt(key string, v int) error {
+	if v <= 0 {
+		return fmt.Errorf("%s must be positive", key)
+	}
+	return nil
+}
+
+func validateDockerMemoryLimit(key, v string) error {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return fmt.Errorf("%s cannot be empty", key)
+	}
+	if !dockerMemoryLimitPattern.MatchString(v) {
+		return fmt.Errorf("%s must use Docker size format like 512m or 4g", key)
+	}
+	return nil
+}
+
+func validateCPULimit(key, v string) error {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return fmt.Errorf("%s cannot be empty", key)
+	}
+	value, err := strconv.ParseFloat(v, 64)
+	if err != nil || value <= 0 {
+		return fmt.Errorf("%s must be a positive number: %q", key, v)
+	}
+	return nil
 }

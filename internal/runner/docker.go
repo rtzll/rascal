@@ -20,6 +20,28 @@ import (
 type DockerLauncher struct {
 	Image       string
 	GitHubToken string
+	Security    SecurityOptions
+}
+
+const (
+	securityModeOpen     = "open"
+	securityModeBaseline = "baseline"
+	securityModeStrict   = "strict"
+	defaultPidsLimit     = 512
+)
+
+// SecurityOptions controls runtime hardening flags for docker-runner containers.
+type SecurityOptions struct {
+	Mode        string
+	PidsLimit   int
+	MemoryLimit string
+	CPULimit    string
+}
+
+type securityProfile struct {
+	mode        string
+	args        []string
+	constraints []string
 }
 
 const (
@@ -56,66 +78,16 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	}
 	defer logFile.Close()
 
-	_, _ = fmt.Fprintf(logFile, "[%s] starting docker runner image=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), l.Image, spec.RunID)
-
-	envPairs := map[string]string{
-		"RASCAL_RUN_ID":                spec.RunID,
-		"RASCAL_TASK_ID":               spec.TaskID,
-		"RASCAL_TASK":                  spec.Task,
-		"RASCAL_REPO":                  spec.Repo,
-		"RASCAL_BASE_BRANCH":           spec.BaseBranch,
-		"RASCAL_HEAD_BRANCH":           spec.HeadBranch,
-		"RASCAL_TRIGGER":               spec.Trigger,
-		"RASCAL_GOOSE_DEBUG":           strconv.FormatBool(spec.Debug),
-		"RASCAL_CONTEXT":               spec.Context,
-		"RASCAL_CONTEXT_JSON":          "/rascal-meta/context.json",
-		"RASCAL_ISSUE_NUMBER":          strconv.Itoa(spec.IssueNumber),
-		"RASCAL_PR_NUMBER":             strconv.Itoa(spec.PRNumber),
-		"RASCAL_GOOSE_SESSION_MODE":    NormalizeGooseSessionMode(spec.GooseSessionMode),
-		"RASCAL_GOOSE_SESSION_RESUME":  strconv.FormatBool(spec.GooseSessionResume),
-		"RASCAL_GOOSE_SESSION_KEY":     strings.TrimSpace(spec.GooseSessionTaskKey),
-		"RASCAL_GOOSE_SESSION_NAME":    strings.TrimSpace(spec.GooseSessionName),
-		"CODEX_HOME":                   "/rascal-meta/codex",
-		"GOOSE_PROVIDER":               "codex",
-		"GOOSE_MODEL":                  "gpt-5.4",
-		"GOOSE_MODE":                   "auto",
-		"GOOSE_DISABLE_KEYRING":        "1",
-		"GOOSE_DISABLE_SESSION_NAMING": "true",
-		"GOOSE_CONTEXT_STRATEGY":       "summarize",
-		"GH_PROMPT_DISABLED":           "1",
-		"GIT_TERMINAL_PROMPT":          "0",
-	}
-	if strings.TrimSpace(l.GitHubToken) != "" {
-		envPairs["GH_TOKEN"] = l.GitHubToken
-	}
-
 	goosePathRoot := "/rascal-meta/goose"
 	if spec.GooseSessionResume && sessionDir != "" {
 		goosePathRoot = "/rascal-goose-session"
 	}
-	envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
-
-	containerName := sanitizeContainerName("rascal-" + spec.RunID)
-	args := []string{"run", "--rm", "--name", containerName}
-	envKeys := make([]string, 0, len(envPairs))
-	for k := range envPairs {
-		envKeys = append(envKeys, k)
+	args, containerName, profile, err := l.buildRunArgs(spec, workspaceDir, sessionDir, goosePathRoot)
+	if err != nil {
+		return Result{}, err
 	}
-	sort.Strings(envKeys)
-	for _, k := range envKeys {
-		v := envPairs[k]
-		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
-	}
-	args = append(args,
-		// Harden container execution against privilege escalation.
-		"--security-opt", "no-new-privileges:true",
-		"-v", fmt.Sprintf("%s:/rascal-meta", spec.RunDir),
-		"-v", fmt.Sprintf("%s:/work", workspaceDir),
-	)
-	if spec.GooseSessionResume && sessionDir != "" {
-		args = append(args, "-v", fmt.Sprintf("%s:%s", sessionDir, goosePathRoot))
-	}
-	args = append(args, l.Image)
+	_, _ = fmt.Fprintf(logFile, "[%s] starting docker runner image=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), l.Image, spec.RunID)
+	_, _ = fmt.Fprintf(logFile, "[%s] docker security mode=%s constraints=%s\n", time.Now().UTC().Format(time.RFC3339), profile.mode, strings.Join(profile.constraints, ","))
 
 	_, _ = fmt.Fprintf(logFile, "[%s] goose session mode=%s resume=%t key=%s name=%s path_root=%s\n",
 		time.Now().UTC().Format(time.RFC3339),
@@ -183,6 +155,129 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 		return res, fmt.Errorf("docker runner failed with exit code %d", exitCode)
 	}
 	return res, nil
+}
+
+func (l DockerLauncher) buildRunArgs(spec Spec, workspaceDir, sessionDir, goosePathRoot string) ([]string, string, securityProfile, error) {
+	profile, err := l.buildSecurityProfile()
+	if err != nil {
+		return nil, "", securityProfile{}, err
+	}
+	envPairs := map[string]string{
+		"RASCAL_RUN_ID":                spec.RunID,
+		"RASCAL_TASK_ID":               spec.TaskID,
+		"RASCAL_TASK":                  spec.Task,
+		"RASCAL_REPO":                  spec.Repo,
+		"RASCAL_BASE_BRANCH":           spec.BaseBranch,
+		"RASCAL_HEAD_BRANCH":           spec.HeadBranch,
+		"RASCAL_TRIGGER":               spec.Trigger,
+		"RASCAL_GOOSE_DEBUG":           strconv.FormatBool(spec.Debug),
+		"RASCAL_CONTEXT":               spec.Context,
+		"RASCAL_CONTEXT_JSON":          "/rascal-meta/context.json",
+		"RASCAL_ISSUE_NUMBER":          strconv.Itoa(spec.IssueNumber),
+		"RASCAL_PR_NUMBER":             strconv.Itoa(spec.PRNumber),
+		"RASCAL_GOOSE_SESSION_MODE":    NormalizeGooseSessionMode(spec.GooseSessionMode),
+		"RASCAL_GOOSE_SESSION_RESUME":  strconv.FormatBool(spec.GooseSessionResume),
+		"RASCAL_GOOSE_SESSION_KEY":     strings.TrimSpace(spec.GooseSessionTaskKey),
+		"RASCAL_GOOSE_SESSION_NAME":    strings.TrimSpace(spec.GooseSessionName),
+		"CODEX_HOME":                   "/rascal-meta/codex",
+		"GOOSE_PROVIDER":               "codex",
+		"GOOSE_MODEL":                  "gpt-5.4",
+		"GOOSE_MODE":                   "auto",
+		"GOOSE_DISABLE_KEYRING":        "1",
+		"GOOSE_DISABLE_SESSION_NAMING": "true",
+		"GOOSE_CONTEXT_STRATEGY":       "summarize",
+		"GH_PROMPT_DISABLED":           "1",
+		"GIT_TERMINAL_PROMPT":          "0",
+		"GOOSE_PATH_ROOT":              goosePathRoot,
+	}
+	if strings.TrimSpace(l.GitHubToken) != "" {
+		envPairs["GH_TOKEN"] = l.GitHubToken
+	}
+
+	containerName := sanitizeContainerName("rascal-" + spec.RunID)
+	args := []string{"run", "--rm", "--name", containerName}
+	args = append(args, profile.args...)
+	envKeys := make([]string, 0, len(envPairs))
+	for k := range envPairs {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	for _, k := range envKeys {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, envPairs[k]))
+	}
+	args = append(args,
+		"-v", fmt.Sprintf("%s:/rascal-meta", spec.RunDir),
+		"-v", fmt.Sprintf("%s:/work", workspaceDir),
+	)
+	if spec.GooseSessionResume && strings.TrimSpace(sessionDir) != "" {
+		args = append(args, "-v", fmt.Sprintf("%s:%s", sessionDir, goosePathRoot))
+	}
+	args = append(args, l.Image)
+	return args, containerName, profile, nil
+}
+
+func (l DockerLauncher) buildSecurityProfile() (securityProfile, error) {
+	mode := strings.ToLower(strings.TrimSpace(l.Security.Mode))
+	if mode == "" {
+		mode = securityModeOpen
+	}
+	profile := securityProfile{mode: mode}
+
+	// Preserve current main hardening as the floor, then add stronger modes.
+	profile.args = append(profile.args, "--security-opt", "no-new-privileges:true")
+	profile.constraints = append(profile.constraints, "no_new_privileges=true")
+
+	switch mode {
+	case securityModeOpen:
+		return profile, nil
+	case securityModeBaseline, securityModeStrict:
+	default:
+		return securityProfile{}, fmt.Errorf("invalid docker security mode %q", mode)
+	}
+
+	pidsLimit := l.Security.PidsLimit
+	if pidsLimit <= 0 {
+		pidsLimit = defaultPidsLimit
+	}
+	memoryLimit := strings.TrimSpace(l.Security.MemoryLimit)
+	if memoryLimit == "" {
+		memoryLimit = "4g"
+	}
+	cpuLimit := strings.TrimSpace(l.Security.CPULimit)
+	if cpuLimit == "" {
+		cpuLimit = "2"
+	}
+
+	profile.args = append(profile.args,
+		"--cap-drop=ALL",
+		"--init",
+		fmt.Sprintf("--pids-limit=%d", pidsLimit),
+		fmt.Sprintf("--memory=%s", memoryLimit),
+		fmt.Sprintf("--cpus=%s", cpuLimit),
+	)
+	profile.constraints = append(profile.constraints,
+		"cap_drop=ALL",
+		"init=true",
+		fmt.Sprintf("pids_limit=%d", pidsLimit),
+		fmt.Sprintf("memory=%s", memoryLimit),
+		fmt.Sprintf("cpus=%s", cpuLimit),
+	)
+
+	if mode == securityModeStrict {
+		profile.args = append(profile.args,
+			"--read-only",
+			"--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m",
+			"--tmpfs=/var/tmp:rw,nosuid,nodev,noexec,size=64m",
+			"--security-opt", "seccomp=default",
+		)
+		profile.constraints = append(profile.constraints,
+			"read_only=true",
+			"tmpfs=/tmp",
+			"tmpfs=/var/tmp",
+			"seccomp=default",
+		)
+	}
+	return profile, nil
 }
 
 func forceStopContainer(containerName string, logOut io.Writer) {

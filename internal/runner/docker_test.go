@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -291,4 +292,186 @@ exit 0
 	if securityOptIdx+1 >= len(fields) || fields[securityOptIdx+1] != "no-new-privileges:true" {
 		t.Fatalf("expected no-new-privileges:true in docker args, got: %s", string(logData))
 	}
+}
+
+func TestDockerLauncherBuildRunArgsOpenMode(t *testing.T) {
+	t.Parallel()
+
+	launcher := DockerLauncher{
+		Image: "rascal-runner:latest",
+		Security: SecurityOptions{
+			Mode: securityModeOpen,
+		},
+	}
+	args, _, profile, err := launcher.buildRunArgs(testSpec(), "/tmp/workspace", "", "/rascal-meta/goose")
+	if err != nil {
+		t.Fatalf("build run args: %v", err)
+	}
+	if profile.mode != securityModeOpen {
+		t.Fatalf("mode = %q, want %q", profile.mode, securityModeOpen)
+	}
+	if !containsArg(args, "run") || !containsArg(args, "--rm") {
+		t.Fatalf("expected base docker run args, got: %v", args)
+	}
+	if !hasArgPair(args, "--security-opt", "no-new-privileges:true") {
+		t.Fatalf("expected open mode to preserve no-new-privileges, got: %v", args)
+	}
+	for _, forbidden := range []string{
+		"--cap-drop=ALL",
+		"--init",
+		"--read-only",
+	} {
+		if containsArg(args, forbidden) {
+			t.Fatalf("open mode should not include %q in args: %v", forbidden, args)
+		}
+	}
+}
+
+func TestDockerLauncherBuildRunArgsBaselineMode(t *testing.T) {
+	t.Parallel()
+
+	launcher := DockerLauncher{
+		Image: "rascal-runner:latest",
+		Security: SecurityOptions{
+			Mode:        securityModeBaseline,
+			PidsLimit:   1024,
+			MemoryLimit: "6g",
+			CPULimit:    "3.5",
+		},
+	}
+	args, _, profile, err := launcher.buildRunArgs(testSpec(), "/tmp/workspace", "", "/rascal-meta/goose")
+	if err != nil {
+		t.Fatalf("build run args: %v", err)
+	}
+	if profile.mode != securityModeBaseline {
+		t.Fatalf("mode = %q, want %q", profile.mode, securityModeBaseline)
+	}
+	for _, required := range []string{
+		"--cap-drop=ALL",
+		"--init",
+		"--pids-limit=1024",
+		"--memory=6g",
+		"--cpus=3.5",
+	} {
+		if !containsArg(args, required) {
+			t.Fatalf("baseline mode missing %q in args: %v", required, args)
+		}
+	}
+	if !hasArgPair(args, "--security-opt", "no-new-privileges:true") {
+		t.Fatalf("baseline mode missing no-new-privileges security-opt: %v", args)
+	}
+	if containsArg(args, "--read-only") {
+		t.Fatalf("baseline mode should not include strict flags: %v", args)
+	}
+}
+
+func TestDockerLauncherBuildRunArgsStrictMode(t *testing.T) {
+	t.Parallel()
+
+	launcher := DockerLauncher{
+		Image: "rascal-runner:latest",
+		Security: SecurityOptions{
+			Mode:        securityModeStrict,
+			PidsLimit:   700,
+			MemoryLimit: "5g",
+			CPULimit:    "2",
+		},
+	}
+	args, _, profile, err := launcher.buildRunArgs(testSpec(), "/tmp/workspace", "", "/rascal-meta/goose")
+	if err != nil {
+		t.Fatalf("build run args: %v", err)
+	}
+	if profile.mode != securityModeStrict {
+		t.Fatalf("mode = %q, want %q", profile.mode, securityModeStrict)
+	}
+	for _, required := range []string{
+		"--cap-drop=ALL",
+		"--init",
+		"--pids-limit=700",
+		"--memory=5g",
+		"--cpus=2",
+		"--read-only",
+		"--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m",
+		"--tmpfs=/var/tmp:rw,nosuid,nodev,noexec,size=64m",
+	} {
+		if !containsArg(args, required) {
+			t.Fatalf("strict mode missing %q in args: %v", required, args)
+		}
+	}
+	if !hasArgPair(args, "--security-opt", "no-new-privileges:true") {
+		t.Fatalf("strict mode missing no-new-privileges security-opt: %v", args)
+	}
+	if !hasArgPair(args, "--security-opt", "seccomp=default") {
+		t.Fatalf("strict mode missing seccomp security-opt: %v", args)
+	}
+}
+
+func TestDockerLauncherBuildRunArgsInvalidMode(t *testing.T) {
+	t.Parallel()
+
+	launcher := DockerLauncher{
+		Image: "rascal-runner:latest",
+		Security: SecurityOptions{
+			Mode: "invalid",
+		},
+	}
+	_, _, _, err := launcher.buildRunArgs(testSpec(), "/tmp/workspace", "", "/rascal-meta/goose")
+	if err == nil || !strings.Contains(err.Error(), "invalid docker security mode") {
+		t.Fatalf("expected invalid security mode error, got %v", err)
+	}
+}
+
+func TestDockerLauncherBuildRunArgsBaselineDefaults(t *testing.T) {
+	t.Parallel()
+
+	launcher := DockerLauncher{
+		Image: "rascal-runner:latest",
+		Security: SecurityOptions{
+			Mode: securityModeBaseline,
+		},
+	}
+	args, _, _, err := launcher.buildRunArgs(testSpec(), "/tmp/workspace", "", "/rascal-meta/goose")
+	if err != nil {
+		t.Fatalf("build run args: %v", err)
+	}
+	if !containsArg(args, "--pids-limit="+strconv.Itoa(defaultPidsLimit)) {
+		t.Fatalf("expected default pids limit in args: %v", args)
+	}
+	if !containsArg(args, "--memory=4g") {
+		t.Fatalf("expected default memory limit in args: %v", args)
+	}
+	if !containsArg(args, "--cpus=2") {
+		t.Fatalf("expected default cpu limit in args: %v", args)
+	}
+}
+
+func testSpec() Spec {
+	return Spec{
+		RunID:      "run_123",
+		TaskID:     "task_123",
+		Task:       "test task",
+		Repo:       "owner/repo",
+		BaseBranch: "main",
+		HeadBranch: "rascal/test",
+		Trigger:    "cli",
+		Context:    "{}",
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasArgPair(args []string, key, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == key && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }

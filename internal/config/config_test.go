@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -150,4 +151,68 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	if cfg.GooseSessionTTLDays != 0 {
 		t.Fatalf("GooseSessionTTLDays = %d, want 0", cfg.GooseSessionTTLDays)
 	}
+}
+
+func TestLoadServerConfigRunnerSecurityDefaults(t *testing.T) {
+	t.Setenv("RASCAL_RUNNER_SECURITY_MODE", "")
+	t.Setenv("RASCAL_RUNNER_PIDS_LIMIT", "")
+	t.Setenv("RASCAL_RUNNER_MEMORY_LIMIT", "")
+	t.Setenv("RASCAL_RUNNER_CPU_LIMIT", "")
+
+	cfg := LoadServerConfig()
+	if cfg.RunnerSecurityMode != DefaultRunnerSecurityMode {
+		t.Fatalf("RunnerSecurityMode = %q, want %q", cfg.RunnerSecurityMode, DefaultRunnerSecurityMode)
+	}
+	if cfg.RunnerPidsLimit != DefaultRunnerPidsLimit {
+		t.Fatalf("RunnerPidsLimit = %d, want %d", cfg.RunnerPidsLimit, DefaultRunnerPidsLimit)
+	}
+	if cfg.RunnerMemoryLimit != DefaultRunnerMemoryLimit {
+		t.Fatalf("RunnerMemoryLimit = %q, want %q", cfg.RunnerMemoryLimit, DefaultRunnerMemoryLimit)
+	}
+	if cfg.RunnerCPULimit != DefaultRunnerCPULimit {
+		t.Fatalf("RunnerCPULimit = %q, want %q", cfg.RunnerCPULimit, DefaultRunnerCPULimit)
+	}
+	if err := cfg.Ensure(); err != nil {
+		t.Fatalf("Ensure() unexpected error: %v", err)
+	}
+}
+
+func TestLoadServerConfigInvalidRunnerSecurityMode(t *testing.T) {
+	t.Setenv("RASCAL_RUNNER_SECURITY_MODE", "bad")
+
+	cfg := LoadServerConfig()
+	if err := cfg.Ensure(); err == nil || !containsError(err, "RASCAL_RUNNER_SECURITY_MODE") {
+		t.Fatalf("expected runner security mode validation error, got %v", err)
+	}
+}
+
+func TestLoadServerConfigInvalidRunnerPidsLimit(t *testing.T) {
+	t.Setenv("RASCAL_RUNNER_PIDS_LIMIT", "0")
+
+	cfg := LoadServerConfig()
+	if err := cfg.Ensure(); err == nil || !containsError(err, "RASCAL_RUNNER_PIDS_LIMIT") {
+		t.Fatalf("expected pids limit validation error, got %v", err)
+	}
+}
+
+func TestLoadServerConfigInvalidRunnerMemoryLimit(t *testing.T) {
+	t.Setenv("RASCAL_RUNNER_MEMORY_LIMIT", "not-a-size")
+
+	cfg := LoadServerConfig()
+	if err := cfg.Ensure(); err == nil || !containsError(err, "RASCAL_RUNNER_MEMORY_LIMIT") {
+		t.Fatalf("expected memory limit validation error, got %v", err)
+	}
+}
+
+func TestLoadServerConfigInvalidRunnerCPULimit(t *testing.T) {
+	t.Setenv("RASCAL_RUNNER_CPU_LIMIT", "-2")
+
+	cfg := LoadServerConfig()
+	if err := cfg.Ensure(); err == nil || !containsError(err, "RASCAL_RUNNER_CPU_LIMIT") {
+		t.Fatalf("expected cpu limit validation error, got %v", err)
+	}
+}
+
+func containsError(err error, text string) bool {
+	return err != nil && strings.Contains(err.Error(), text)
 }
