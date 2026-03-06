@@ -12,23 +12,24 @@ import (
 
 // ServerConfig controls rascald runtime behavior.
 type ServerConfig struct {
-	ListenAddr          string
-	DataDir             string
-	StatePath           string
-	Slot                string
-	ActiveSlotPath      string
-	APIToken            string
-	GitHubToken         string
-	GitHubWebhookSecret string
-	BotLogin            string
-	RunnerMode          string
-	RunnerImage         string
-	RunnerMaxAttempts   int
-	CodexAuthPath       string
-	GooseSessionMode    string
-	GooseSessionRoot    string
-	GooseSessionTTLDays int
-	MaxRuns             int
+	ListenAddr            string
+	DataDir               string
+	StatePath             string
+	Slot                  string
+	ActiveSlotPath        string
+	APIToken              string
+	GitHubToken           string
+	GitHubWebhookSecret   string
+	BotLogin              string
+	RunnerMode            string
+	RunnerImage           string
+	RunnerMaxAttempts     int
+	RunnerAllowEnvSecrets bool
+	CodexAuthPath         string
+	GooseSessionMode      string
+	GooseSessionRoot      string
+	GooseSessionTTLDays   int
+	MaxRuns               int
 }
 
 // ClientConfig controls rascal CLI behavior.
@@ -50,23 +51,24 @@ func LoadServerConfig() ServerConfig {
 	statePath := envOrDefault("RASCAL_STATE_PATH", filepath.Join(dataDir, "state.db"))
 
 	return ServerConfig{
-		ListenAddr:          envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
-		DataDir:             dataDir,
-		StatePath:           statePath,
-		Slot:                strings.TrimSpace(os.Getenv("RASCAL_SLOT")),
-		ActiveSlotPath:      envOrDefault("RASCAL_ACTIVE_SLOT_PATH", "/etc/rascal/active_slot"),
-		APIToken:            strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")),
-		GitHubToken:         strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")),
-		GitHubWebhookSecret: strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
-		BotLogin:            strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
-		RunnerMode:          envOrDefault("RASCAL_RUNNER_MODE", "noop"),
-		RunnerImage:         envOrDefault("RASCAL_RUNNER_IMAGE", "rascal-runner:latest"),
-		RunnerMaxAttempts:   envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
-		CodexAuthPath:       envOrDefault("RASCAL_CODEX_AUTH_PATH", "/etc/rascal/codex_auth.json"),
-		GooseSessionMode:    normalizeGooseSessionMode(envOrDefault("RASCAL_GOOSE_SESSION_MODE", "all")),
-		GooseSessionRoot:    envOrDefault("RASCAL_GOOSE_SESSION_ROOT", filepath.Join(dataDir, "goose-sessions")),
-		GooseSessionTTLDays: envNonNegativeIntOrDefault("RASCAL_GOOSE_SESSION_TTL_DAYS", 14),
-		MaxRuns:             200,
+		ListenAddr:            envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
+		DataDir:               dataDir,
+		StatePath:             statePath,
+		Slot:                  strings.TrimSpace(os.Getenv("RASCAL_SLOT")),
+		ActiveSlotPath:        envOrDefault("RASCAL_ACTIVE_SLOT_PATH", "/etc/rascal/active_slot"),
+		APIToken:              strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")),
+		GitHubToken:           strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")),
+		GitHubWebhookSecret:   strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
+		BotLogin:              strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
+		RunnerMode:            envOrDefault("RASCAL_RUNNER_MODE", "noop"),
+		RunnerImage:           envOrDefault("RASCAL_RUNNER_IMAGE", "rascal-runner:latest"),
+		RunnerMaxAttempts:     envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
+		RunnerAllowEnvSecrets: envBoolOrDefault("RASCAL_RUNNER_ALLOW_ENV_SECRETS", false),
+		CodexAuthPath:         envOrDefault("RASCAL_CODEX_AUTH_PATH", "/etc/rascal/codex_auth.json"),
+		GooseSessionMode:      normalizeGooseSessionMode(envOrDefault("RASCAL_GOOSE_SESSION_MODE", "all")),
+		GooseSessionRoot:      envOrDefault("RASCAL_GOOSE_SESSION_ROOT", filepath.Join(dataDir, "goose-sessions")),
+		GooseSessionTTLDays:   envNonNegativeIntOrDefault("RASCAL_GOOSE_SESSION_TTL_DAYS", 14),
+		MaxRuns:               200,
 	}
 }
 
@@ -232,5 +234,20 @@ func normalizeGooseSessionMode(mode string) string {
 		return "all"
 	default:
 		return "off"
+	}
+}
+
+func envBoolOrDefault(key string, fallback bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
 	}
 }

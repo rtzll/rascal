@@ -18,8 +18,9 @@ import (
 
 // DockerLauncher runs a task inside a Docker container.
 type DockerLauncher struct {
-	Image       string
-	GitHubToken string
+	Image           string
+	GitHubToken     string
+	AllowEnvSecrets bool
 }
 
 const (
@@ -45,7 +46,11 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 			return Result{}, fmt.Errorf("create goose session dir: %w", err)
 		}
 	}
-	if err := prepareMountAccess(spec.RunDir, workspaceDir, sessionDir); err != nil {
+	secretDir := strings.TrimSpace(spec.SecretDir)
+	if secretDir == "" {
+		secretDir = spec.RunDir + ".secrets"
+	}
+	if err := prepareMountAccess(spec.RunDir, workspaceDir, sessionDir, secretDir); err != nil {
 		return Result{}, err
 	}
 
@@ -85,15 +90,28 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 		"GH_PROMPT_DISABLED":           "1",
 		"GIT_TERMINAL_PROMPT":          "0",
 	}
-	if strings.TrimSpace(l.GitHubToken) != "" {
+	if l.AllowEnvSecrets {
+		envPairs["RASCAL_RUNNER_ALLOW_ENV_SECRETS"] = "true"
+	}
+	if strings.TrimSpace(l.GitHubToken) != "" && l.AllowEnvSecrets {
 		envPairs["GH_TOKEN"] = l.GitHubToken
 	}
-
 	goosePathRoot := "/rascal-meta/goose"
 	if spec.GooseSessionResume && sessionDir != "" {
 		goosePathRoot = "/rascal-goose-session"
 	}
 	envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
+
+	hostSecretDir := secretDir
+	hasSecretMount := false
+	if _, err := os.Stat(filepath.Join(hostSecretDir, "gh_token")); err == nil {
+		envPairs["GH_TOKEN_FILE"] = "/run/rascal-secrets/gh_token"
+		hasSecretMount = true
+	}
+	if _, err := os.Stat(filepath.Join(hostSecretDir, "codex_auth.json")); err == nil {
+		envPairs["CODEX_AUTH_FILE"] = "/run/rascal-secrets/codex_auth.json"
+		hasSecretMount = true
+	}
 
 	containerName := sanitizeContainerName("rascal-" + spec.RunID)
 	args := []string{"run", "--rm", "--name", containerName}
@@ -114,6 +132,9 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	)
 	if spec.GooseSessionResume && sessionDir != "" {
 		args = append(args, "-v", fmt.Sprintf("%s:%s", sessionDir, goosePathRoot))
+	}
+	if hasSecretMount {
+		args = append(args, "-v", fmt.Sprintf("%s:/run/rascal-secrets:ro", hostSecretDir))
 	}
 	args = append(args, l.Image)
 
@@ -199,7 +220,7 @@ func forceStopContainer(containerName string, logOut io.Writer) {
 	_ = rmCmd.Run()
 }
 
-func prepareMountAccess(runDir, workspaceDir, sessionDir string) error {
+func prepareMountAccess(runDir, workspaceDir, sessionDir, secretDir string) error {
 	if os.Geteuid() == 0 {
 		if err := chownTree(runDir, runtimeUID, runtimeGID); err != nil {
 			return fmt.Errorf("prepare run dir ownership: %w", err)
@@ -207,6 +228,11 @@ func prepareMountAccess(runDir, workspaceDir, sessionDir string) error {
 		if strings.TrimSpace(sessionDir) != "" {
 			if err := chownTree(sessionDir, runtimeUID, runtimeGID); err != nil {
 				return fmt.Errorf("prepare goose session dir ownership: %w", err)
+			}
+		}
+		if strings.TrimSpace(secretDir) != "" {
+			if err := chownTree(secretDir, runtimeUID, runtimeGID); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("prepare run secret dir ownership: %w", err)
 			}
 		}
 		return nil
@@ -217,6 +243,9 @@ func prepareMountAccess(runDir, workspaceDir, sessionDir string) error {
 	if strings.TrimSpace(sessionDir) != "" {
 		targets = append(targets, sessionDir)
 	}
+	if strings.TrimSpace(secretDir) != "" {
+		targets = append(targets, secretDir)
+	}
 	for _, target := range targets {
 		if err := chmodIfExists(target, 0o777); err != nil {
 			return fmt.Errorf("prepare writable mount %s: %w", target, err)
@@ -224,6 +253,12 @@ func prepareMountAccess(runDir, workspaceDir, sessionDir string) error {
 	}
 	if err := chmodIfExists(filepath.Join(runDir, "codex", "auth.json"), 0o644); err != nil {
 		return fmt.Errorf("prepare codex auth readability: %w", err)
+	}
+	if err := chmodIfExists(filepath.Join(secretDir, "gh_token"), 0o444); err != nil {
+		return fmt.Errorf("prepare GH token secret readability: %w", err)
+	}
+	if err := chmodIfExists(filepath.Join(secretDir, "codex_auth.json"), 0o444); err != nil {
+		return fmt.Errorf("prepare codex auth secret readability: %w", err)
 	}
 	return nil
 }

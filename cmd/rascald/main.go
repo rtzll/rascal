@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -32,6 +33,14 @@ import (
 
 var errTaskCompleted = errors.New("task is already completed")
 var errServerDraining = errors.New("orchestrator is draining")
+
+var secretRedactionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9_]{20,}`),
+	regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`),
+	regexp.MustCompile(`sk-[A-Za-z0-9]{20,}`),
+	regexp.MustCompile(`(?i)bearer[[:space:]]+[A-Za-z0-9._-]{16,}`),
+	regexp.MustCompile(`x-access-token:[^@\s]+@`),
+}
 
 const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
@@ -125,7 +134,7 @@ func main() {
 	s := &server{
 		cfg:           cfg,
 		store:         store,
-		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken),
+		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken, cfg.RunnerAllowEnvSecrets),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
 		runCancels:    make(map[string]context.CancelFunc),
 		runCancelNote: make(map[string]string),
@@ -194,7 +203,7 @@ func (s *server) recoverQueuedCancels() {
 			continue
 		}
 		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
+			_, _ = s.setRunStatus(run.ID, state.StatusCanceled, reason)
 			_ = s.store.ClearRunCancel(run.ID)
 		}
 	}
@@ -205,7 +214,7 @@ func (s *server) recoverRunningRuns() {
 	runs := s.store.ListRunningRuns()
 	for _, run := range runs {
 		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
+			_, _ = s.setRunStatus(run.ID, state.StatusCanceled, reason)
 			_ = s.store.ClearRunCancel(run.ID)
 			continue
 		}
@@ -849,7 +858,7 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 	s.mu.Unlock()
 
 	if run.Status == state.StatusQueued {
-		updated, err := s.store.SetRunStatus(runID, state.StatusCanceled, "canceled by user")
+		updated, err := s.setRunStatus(runID, state.StatusCanceled, "canceled by user")
 		if err != nil {
 			http.Error(w, "failed to cancel run", http.StatusInternalServerError)
 			return
@@ -862,7 +871,7 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 		return
 	}
 
-	updated, err := s.store.SetRunStatus(runID, state.StatusCanceled, "canceled by user")
+	updated, err := s.setRunStatus(runID, state.StatusCanceled, "canceled by user")
 	if err != nil {
 		writeJSON(w, http.StatusAccepted, map[string]any{"run_id": runID, "cancel_requested": true})
 		return
@@ -929,7 +938,7 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 		_, _ = fmt.Fprintln(&body, gooseNote)
 	}
 
-	logsText := body.String()
+	logsText := s.redactRunText(run, body.String())
 	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format"))) {
 	case "", "text":
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -1039,11 +1048,11 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	}
 
 	if err := s.writeRunFiles(run); err != nil {
-		_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, err.Error())
+		_, _ = s.setRunStatus(run.ID, state.StatusFailed, err.Error())
 		return state.Run{}, fmt.Errorf("prepare run files: %w", err)
 	}
 	if err := s.writeRunResponseTarget(run, req.ResponseTarget); err != nil {
-		_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, err.Error())
+		_, _ = s.setRunStatus(run.ID, state.StatusFailed, err.Error())
 		return state.Run{}, fmt.Errorf("prepare run response target: %w", err)
 	}
 	s.scheduleRuns(run.TaskID)
@@ -1051,14 +1060,31 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 }
 
 func (s *server) writeRunFiles(run state.Run) error {
-	if err := os.MkdirAll(filepath.Join(run.RunDir, "codex"), 0o755); err != nil {
-		return err
+	secretDir := runSecretDir(run.RunDir)
+	if err := os.RemoveAll(secretDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("reset run secret dir: %w", err)
 	}
-	if strings.TrimSpace(s.cfg.CodexAuthPath) != "" {
-		if _, err := os.Stat(s.cfg.CodexAuthPath); err == nil {
-			if err := copyFile(s.cfg.CodexAuthPath, filepath.Join(run.RunDir, "codex", "auth.json"), 0o600); err != nil {
-				return fmt.Errorf("copy codex auth: %w", err)
+	if err := os.MkdirAll(secretDir, 0o700); err != nil {
+		return fmt.Errorf("create run secret dir: %w", err)
+	}
+	wroteSecret := false
+	if token := strings.TrimSpace(s.cfg.GitHubToken); token != "" {
+		if err := os.WriteFile(filepath.Join(secretDir, "gh_token"), []byte(token), 0o400); err != nil {
+			return fmt.Errorf("write GitHub token secret: %w", err)
+		}
+		wroteSecret = true
+	}
+	if authPath := strings.TrimSpace(s.cfg.CodexAuthPath); authPath != "" {
+		if _, err := os.Stat(authPath); err == nil {
+			if err := copyFile(authPath, filepath.Join(secretDir, "codex_auth.json"), 0o600); err != nil {
+				return fmt.Errorf("copy codex auth secret: %w", err)
 			}
+			wroteSecret = true
+		}
+	}
+	if !wroteSecret {
+		if err := os.RemoveAll(secretDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove empty run secret dir: %w", err)
 		}
 	}
 
@@ -1221,6 +1247,7 @@ func (s *server) executeRun(runID string) {
 		HeadBranch:          run.HeadBranch,
 		Trigger:             run.Trigger,
 		RunDir:              run.RunDir,
+		SecretDir:           runSecretDir(run.RunDir),
 		IssueNumber:         run.IssueNumber,
 		PRNumber:            run.PRNumber,
 		Context:             run.Context,
@@ -1383,7 +1410,7 @@ func (s *server) superviseRun(ctx context.Context, runID string, cancel context.
 }
 
 func (s *server) setRunStatusWithFallback(run state.Run, status state.RunStatus, errText string) state.Run {
-	updated, err := s.store.SetRunStatus(run.ID, status, errText)
+	updated, err := s.setRunStatus(run.ID, status, errText)
 	if err == nil {
 		return updated
 	}
@@ -1405,6 +1432,9 @@ func (s *server) setRunStatusWithFallback(run state.Run, status state.RunStatus,
 func (s *server) finishRun(run state.Run) {
 	if runStatusIsDone(run.Status) {
 		_ = s.store.ClearRunCancel(run.ID)
+		if err := cleanupRunSecrets(run.RunDir); err != nil {
+			log.Printf("failed to clean run secrets for %s: %v", run.ID, err)
+		}
 	}
 	taskCompleted := s.store.IsTaskCompleted(run.TaskID)
 
@@ -1415,6 +1445,19 @@ func (s *server) finishRun(run state.Run) {
 	if !s.isDraining() {
 		s.scheduleRuns(run.TaskID)
 	}
+}
+
+func (s *server) setRunStatus(runID string, status state.RunStatus, errText string) (state.Run, error) {
+	updated, err := s.store.SetRunStatus(runID, status, errText)
+	if err != nil {
+		return state.Run{}, err
+	}
+	if runStatusIsDone(updated.Status) {
+		if cleanErr := cleanupRunSecrets(updated.RunDir); cleanErr != nil {
+			log.Printf("failed to clean run secrets for %s: %v", updated.ID, cleanErr)
+		}
+	}
+	return updated, nil
 }
 
 func (s *server) scheduleRuns(preferredTaskID string) {
@@ -1444,17 +1487,17 @@ func (s *server) scheduleRuns(preferredTaskID string) {
 		}
 
 		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
+			_, _ = s.setRunStatus(run.ID, state.StatusCanceled, reason)
 			_ = s.store.ClearRunCancel(run.ID)
 			continue
 		}
 
 		if s.isDraining() {
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, "orchestrator shutting down")
+			_, _ = s.setRunStatus(run.ID, state.StatusCanceled, "orchestrator shutting down")
 			return
 		}
 		if err := s.store.UpsertRunLease(run.ID, s.instanceID, runLeaseTTL); err != nil {
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, fmt.Sprintf("claim run lease: %v", err))
+			_, _ = s.setRunStatus(run.ID, state.StatusFailed, fmt.Sprintf("claim run lease: %v", err))
 			continue
 		}
 
@@ -1743,6 +1786,50 @@ func buildHeadBranch(taskID, task, runID string) string {
 		runSuffix = runSuffix[:10]
 	}
 	return fmt.Sprintf("rascal/%s-%s", taskPart, runSuffix)
+}
+
+func runSecretDir(runDir string) string {
+	runDir = strings.TrimSpace(runDir)
+	if runDir == "" {
+		return ""
+	}
+	return runDir + ".secrets"
+}
+
+func cleanupRunSecrets(runDir string) error {
+	secretDir := runSecretDir(runDir)
+	if secretDir == "" {
+		return nil
+	}
+	if err := os.RemoveAll(secretDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func (s *server) redactRunText(run state.Run, text string) string {
+	if token := strings.TrimSpace(s.cfg.GitHubToken); len(token) >= 6 {
+		text = strings.ReplaceAll(text, token, "[REDACTED]")
+	}
+	return redactTextForRun(run, text)
+}
+
+func redactTextForRun(run state.Run, text string) string {
+	secrets := []string{}
+	if tokenData, err := os.ReadFile(filepath.Join(runSecretDir(run.RunDir), "gh_token")); err == nil {
+		if token := strings.TrimSpace(string(tokenData)); token != "" {
+			secrets = append(secrets, token)
+		}
+	}
+	for _, secret := range secrets {
+		if len(secret) >= 6 {
+			text = strings.ReplaceAll(text, secret, "[REDACTED]")
+		}
+	}
+	for _, pattern := range secretRedactionPatterns {
+		text = pattern.ReplaceAllString(text, "[REDACTED]")
+	}
+	return text
 }
 
 func maxInt(a, b int) int {
@@ -2104,7 +2191,7 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 	gooseOutput := "(no goose output captured)"
 	if data, err := os.ReadFile(goosePath); err == nil {
 		if strings.TrimSpace(string(data)) != "" {
-			gooseOutput = string(data)
+			gooseOutput = redactTextForRun(run, string(data))
 		}
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("read goose log: %w", err)

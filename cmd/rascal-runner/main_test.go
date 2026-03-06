@@ -141,7 +141,9 @@ func TestLoadConfig(t *testing.T) {
 	t.Setenv("RASCAL_RUN_ID", "run_1")
 	t.Setenv("RASCAL_TASK_ID", "task_1")
 	t.Setenv("RASCAL_REPO", "owner/repo")
-	t.Setenv("GH_TOKEN", "token")
+	setGitHubTokenFile(t, "token")
+	t.Setenv("RASCAL_BASE_BRANCH", "")
+	t.Setenv("RASCAL_HEAD_BRANCH", "")
 	t.Setenv("RASCAL_TASK", "Do thing")
 	t.Setenv("RASCAL_ISSUE_NUMBER", "7")
 	t.Setenv("RASCAL_BASE_BRANCH", "")
@@ -186,7 +188,7 @@ func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
 	t.Setenv("RASCAL_RUN_ID", "run_2")
 	t.Setenv("RASCAL_TASK_ID", "task_2")
 	t.Setenv("RASCAL_REPO", "owner/repo")
-	t.Setenv("GH_TOKEN", "token")
+	setGitHubTokenFile(t, "token")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
@@ -584,6 +586,37 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRequiresTokenFileByDefault(t *testing.T) {
+	t.Setenv("RASCAL_RUN_ID", "run_missing_token_file")
+	t.Setenv("RASCAL_TASK_ID", "task_missing_token_file")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_FILE", "")
+	t.Setenv("RASCAL_RUNNER_ALLOW_ENV_SECRETS", "")
+
+	_, err := loadConfig()
+	if err == nil || !strings.Contains(err.Error(), "GH_TOKEN_FILE is required") {
+		t.Fatalf("expected GH_TOKEN_FILE requirement error, got %v", err)
+	}
+}
+
+func TestLoadConfigAllowsEnvTokenWhenCompatibilityEnabled(t *testing.T) {
+	t.Setenv("RASCAL_RUN_ID", "run_env_compat")
+	t.Setenv("RASCAL_TASK_ID", "task_env_compat")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token-from-env")
+	t.Setenv("GH_TOKEN_FILE", "")
+	t.Setenv("RASCAL_RUNNER_ALLOW_ENV_SECRETS", "true")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if cfg.GitHubToken != "token-from-env" {
+		t.Fatalf("expected env token in compatibility mode, got %q", cfg.GitHubToken)
+	}
+}
+
 func TestRunEndToEndWithFakeCommands(t *testing.T) {
 	root := t.TempDir()
 	binDir := filepath.Join(root, "bin")
@@ -691,7 +724,7 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 	t.Setenv("RASCAL_RUN_ID", "run_fake")
 	t.Setenv("RASCAL_TASK_ID", "task_fake")
 	t.Setenv("RASCAL_REPO", "owner/repo")
-	t.Setenv("GH_TOKEN", "token")
+	setGitHubTokenFile(t, "token")
 	t.Setenv("RASCAL_TASK", "Address feedback")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
@@ -754,7 +787,7 @@ func TestRunWithExecutorFailsWhenRequiredCommandMissing(t *testing.T) {
 	t.Setenv("RASCAL_RUN_ID", "run_missing_cmd")
 	t.Setenv("RASCAL_TASK_ID", "task_missing_cmd")
 	t.Setenv("RASCAL_REPO", "owner/repo")
-	t.Setenv("GH_TOKEN", "token")
+	setGitHubTokenFile(t, "token")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 
@@ -804,7 +837,7 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 	t.Setenv("RASCAL_RUN_ID", "run_pr_create_fail")
 	t.Setenv("RASCAL_TASK_ID", "task_pr_create_fail")
 	t.Setenv("RASCAL_REPO", "owner/repo")
-	t.Setenv("GH_TOKEN", "token")
+	setGitHubTokenFile(t, "token")
 	t.Setenv("RASCAL_TASK", "Address PR feedback")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
@@ -872,6 +905,16 @@ func TestRunStageWrapsError(t *testing.T) {
 	if err := runStage("ok_stage", func() error { return nil }); err != nil {
 		t.Fatalf("expected nil error on success stage, got %v", err)
 	}
+}
+
+func setGitHubTokenFile(t *testing.T, token string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "gh_token")
+	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
+		t.Fatalf("write gh token file: %v", err)
+	}
+	t.Setenv("GH_TOKEN_FILE", path)
+	t.Setenv("GH_TOKEN", "")
 }
 
 func writeExe(t *testing.T, path, content string) {

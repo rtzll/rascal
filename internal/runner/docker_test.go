@@ -242,6 +242,126 @@ exit 0
 	}
 }
 
+func TestDockerLauncherUsesSecretFilesByDefault(t *testing.T) {
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "docker_calls.log")
+	fakeDocker := filepath.Join(tmp, "docker")
+	script := `#!/bin/sh
+set -eu
+echo "$@" >> "` + logPath + `"
+exit 0
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+oldPath)
+
+	runDir := filepath.Join(tmp, "run")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("create run dir: %v", err)
+	}
+	secretDir := runDir + ".secrets"
+	if err := os.MkdirAll(secretDir, 0o700); err != nil {
+		t.Fatalf("create secret dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(secretDir, "gh_token"), []byte("token_123"), 0o400); err != nil {
+		t.Fatalf("write gh token secret: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(secretDir, "codex_auth.json"), []byte(`{"token":"abc"}`), 0o600); err != nil {
+		t.Fatalf("write codex auth secret: %v", err)
+	}
+
+	launcher := DockerLauncher{Image: "rascal-runner:latest", GitHubToken: "env-token"}
+	_, err := launcher.Start(context.Background(), Spec{
+		RunID:      "run_secure",
+		TaskID:     "task_secure",
+		Repo:       "owner/repo",
+		Task:       "secure run",
+		BaseBranch: "main",
+		HeadBranch: "rascal/task-secure",
+		Trigger:    "cli",
+		Debug:      true,
+		RunDir:     runDir,
+	})
+	if err != nil {
+		t.Fatalf("launcher start failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker args: %v", err)
+	}
+	args := string(data)
+	if !strings.Contains(args, "GH_TOKEN_FILE=/run/rascal-secrets/gh_token") {
+		t.Fatalf("expected GH_TOKEN_FILE env arg, got: %s", args)
+	}
+	if !strings.Contains(args, "CODEX_AUTH_FILE=/run/rascal-secrets/codex_auth.json") {
+		t.Fatalf("expected CODEX_AUTH_FILE env arg, got: %s", args)
+	}
+	if !strings.Contains(args, secretDir+":/run/rascal-secrets:ro") {
+		t.Fatalf("expected read-only secret mount, got: %s", args)
+	}
+	if strings.Contains(args, "GH_TOKEN=env-token") {
+		t.Fatalf("did not expect GH_TOKEN env in secure mode, got: %s", args)
+	}
+}
+
+func TestDockerLauncherAllowsEnvSecretsCompatibilityMode(t *testing.T) {
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "docker_calls.log")
+	fakeDocker := filepath.Join(tmp, "docker")
+	script := `#!/bin/sh
+set -eu
+echo "$@" >> "` + logPath + `"
+exit 0
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+oldPath)
+
+	runDir := filepath.Join(tmp, "run")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("create run dir: %v", err)
+	}
+
+	launcher := DockerLauncher{
+		Image:           "rascal-runner:latest",
+		GitHubToken:     "token-compat",
+		AllowEnvSecrets: true,
+	}
+	_, err := launcher.Start(context.Background(), Spec{
+		RunID:      "run_compat",
+		TaskID:     "task_compat",
+		Repo:       "owner/repo",
+		Task:       "compat run",
+		BaseBranch: "main",
+		HeadBranch: "rascal/task-compat",
+		Trigger:    "cli",
+		Debug:      true,
+		RunDir:     runDir,
+	})
+	if err != nil {
+		t.Fatalf("launcher start failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker args: %v", err)
+	}
+	args := string(data)
+	if !strings.Contains(args, "GH_TOKEN=token-compat") {
+		t.Fatalf("expected GH_TOKEN env arg in compatibility mode, got: %s", args)
+	}
+	if !strings.Contains(args, "RASCAL_RUNNER_ALLOW_ENV_SECRETS=true") {
+		t.Fatalf("expected compatibility mode flag env arg, got: %s", args)
+	}
+}
+
 func TestDockerLauncherIncludesNoNewPrivilegesSecurityOpt(t *testing.T) {
 	tmp := t.TempDir()
 	logPath := filepath.Join(tmp, "docker_calls.log")

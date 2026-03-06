@@ -151,3 +151,19 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 		t.Fatalf("GooseSessionTTLDays = %d, want 0", cfg.GooseSessionTTLDays)
 	}
 }
+
+func TestLoadServerConfigRunnerAllowEnvSecretsDefaultFalse(t *testing.T) {
+	t.Setenv("RASCAL_RUNNER_ALLOW_ENV_SECRETS", "")
+	cfg := LoadServerConfig()
+	if cfg.RunnerAllowEnvSecrets {
+		t.Fatal("expected RunnerAllowEnvSecrets default false")
+	}
+}
+
+func TestLoadServerConfigRunnerAllowEnvSecretsTrue(t *testing.T) {
+	t.Setenv("RASCAL_RUNNER_ALLOW_ENV_SECRETS", "true")
+	cfg := LoadServerConfig()
+	if !cfg.RunnerAllowEnvSecrets {
+		t.Fatal("expected RunnerAllowEnvSecrets true")
+	}
+}

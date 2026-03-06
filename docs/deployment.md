@@ -74,6 +74,9 @@ This allows fast cutover while old work winds down in the background.
 - Container entrypoint script is intentionally minimal (`runner/entrypoint.sh`).
 - It only executes `/usr/local/bin/rascal-runner`.
 - Task workflow behavior (git/goose/PR/meta handling) is implemented in Go in `cmd/rascal-runner`.
+- Per-run secrets are written on host as scoped files (`<run_dir>.secrets`) and mounted read-only to `/run/rascal-secrets`.
+- Runner receives pointer env vars (`GH_TOKEN_FILE`, `CODEX_AUTH_FILE`) by default; direct token env exposure is disabled unless `RASCAL_RUNNER_ALLOW_ENV_SECRETS=true`.
+- Secret files are removed when a run reaches a terminal state (`succeeded`, `failed`, `canceled`).
 
 ## Overlap Safety (Both Slots Alive Briefly)
 

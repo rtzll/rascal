@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -32,22 +33,32 @@ const (
 var (
 	convCommitPattern = regexp.MustCompile(`^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?(!)?:[[:space:]].+`)
 	prURLPattern      = regexp.MustCompile(`https://github\.com/[^[:space:]]+/pull/[0-9]+`)
+	secretPatterns    = []*regexp.Regexp{
+		regexp.MustCompile(`gh[pousr]_[A-Za-z0-9_]{20,}`),
+		regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`),
+		regexp.MustCompile(`sk-[A-Za-z0-9]{20,}`),
+		regexp.MustCompile(`(?i)bearer[[:space:]]+[A-Za-z0-9._-]{16,}`),
+		regexp.MustCompile(`x-access-token:[^@\s]+@`),
+	}
 
 	buildVersion = "dev"
 	buildCommit  = "unknown"
 	buildTime    = "unknown"
+
+	runtimeSecretValues []string
 )
 
 type config struct {
-	RunID       string
-	TaskID      string
-	Task        string
-	Repo        string
-	BaseBranch  string
-	HeadBranch  string
-	IssueNumber int
-	Trigger     string
-	GitHubToken string
+	RunID         string
+	TaskID        string
+	Task          string
+	Repo          string
+	BaseBranch    string
+	HeadBranch    string
+	IssueNumber   int
+	Trigger       string
+	GitHubToken   string
+	CodexAuthFile string
 
 	MetaDir          string
 	WorkRoot         string
@@ -96,12 +107,13 @@ func (osExecutor) CombinedOutput(dir string, extraEnv []string, name string, arg
 	}
 	cmd.Env = append(os.Environ(), extraEnv...)
 	out, err := cmd.CombinedOutput()
-	text := strings.TrimSpace(string(out))
+	text := redactSecrets(strings.TrimSpace(string(out)))
+	safeArgs := strings.Join(sanitizedArgs(args), " ")
 	if err != nil {
 		if text == "" {
-			return "", fmt.Errorf("%s %s failed: %w", name, strings.Join(args, " "), err)
+			return "", fmt.Errorf("%s %s failed: %w", name, safeArgs, err)
 		}
-		return text, fmt.Errorf("%s %s failed: %w (%s)", name, strings.Join(args, " "), err, text)
+		return text, fmt.Errorf("%s %s failed: %w (%s)", name, safeArgs, err, text)
 	}
 	return text, nil
 }
@@ -131,6 +143,7 @@ func run() error {
 }
 
 func runWithExecutor(ex commandExecutor) error {
+	runtimeSecretValues = nil
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -170,6 +183,12 @@ func runWithExecutor(ex commandExecutor) error {
 			return fmt.Errorf("create work dir: %w", err)
 		}
 		return nil
+	}); err != nil {
+		return fail(err)
+	}
+
+	if err := runStage("prepare_auth", func() error {
+		return stageCodexAuth(cfg)
 	}); err != nil {
 		return fail(err)
 	}
@@ -361,10 +380,13 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
-	ghToken, err := requiredEnv("GH_TOKEN")
+	ghToken, err := resolveGitHubToken()
 	if err != nil {
 		return config{}, err
 	}
+	registerRuntimeSecretValue(ghToken)
+	_ = os.Setenv("GH_TOKEN", ghToken)
+	_ = os.Setenv("GITHUB_TOKEN", ghToken)
 
 	baseBranch := strings.TrimSpace(os.Getenv("RASCAL_BASE_BRANCH"))
 	if baseBranch == "" {
@@ -432,6 +454,7 @@ func loadConfig() (config, error) {
 		IssueNumber:        issueNumber,
 		Trigger:            trigger,
 		GitHubToken:        ghToken,
+		CodexAuthFile:      strings.TrimSpace(os.Getenv("CODEX_AUTH_FILE")),
 		MetaDir:            metaDir,
 		WorkRoot:           workRoot,
 		RepoDir:            repoDir,
@@ -470,6 +493,70 @@ func parseBoolEnv(raw string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func resolveGitHubToken() (string, error) {
+	allowEnvSecrets := envBool("RASCAL_RUNNER_ALLOW_ENV_SECRETS", false)
+	tokenFile := strings.TrimSpace(os.Getenv("GH_TOKEN_FILE"))
+	if tokenFile != "" {
+		token, err := readSecretFile(tokenFile)
+		if err != nil {
+			return "", fmt.Errorf("read GH_TOKEN_FILE: %w", err)
+		}
+		if token != "" {
+			return token, nil
+		}
+	}
+	if allowEnvSecrets {
+		if token := strings.TrimSpace(os.Getenv("GH_TOKEN")); token != "" {
+			return token, nil
+		}
+	}
+	if tokenFile != "" {
+		return "", fmt.Errorf("GH_TOKEN_FILE is empty: %s", tokenFile)
+	}
+	if allowEnvSecrets {
+		return "", fmt.Errorf("GH_TOKEN is required")
+	}
+	return "", fmt.Errorf("GH_TOKEN_FILE is required (set RASCAL_RUNNER_ALLOW_ENV_SECRETS=true to permit GH_TOKEN)")
+}
+
+func readSecretFile(path string) (string, error) {
+	data, err := os.ReadFile(strings.TrimSpace(path))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func envBool(key string, fallback bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if raw == "" {
+		return fallback
+	}
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func stageCodexAuth(cfg config) error {
+	if strings.TrimSpace(cfg.CodexAuthFile) == "" {
+		return nil
+	}
+	data, err := os.ReadFile(cfg.CodexAuthFile)
+	if err != nil {
+		return fmt.Errorf("read CODEX_AUTH_FILE: %w", err)
+	}
+	dst := filepath.Join(cfg.MetaDir, "codex", "auth.json")
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
+		return fmt.Errorf("write codex auth: %w", err)
+	}
+	return nil
 }
 
 func ensureInstructions(cfg config) error {
@@ -608,7 +695,7 @@ func runGoose(ex commandExecutor, cfg config) (string, error) {
 	if strings.TrimSpace(string(data)) == "" {
 		return "(no goose output captured)", nil
 	}
-	return string(data), nil
+	return redactSecrets(string(data)), nil
 }
 
 func gooseRunArgs(cfg config, resume bool) []string {
@@ -788,6 +875,41 @@ func runStage(name string, fn func() error) error {
 
 func runCommand(ex commandExecutor, dir string, extraEnv []string, name string, args ...string) (string, error) {
 	return ex.CombinedOutput(dir, extraEnv, name, args...)
+}
+
+func registerRuntimeSecretValue(secret string) {
+	secret = strings.TrimSpace(secret)
+	if len(secret) < 6 {
+		return
+	}
+	runtimeSecretValues = append(runtimeSecretValues, secret)
+}
+
+func sanitizedArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for _, arg := range args {
+		out = append(out, redactSecrets(arg))
+	}
+	return out
+}
+
+func redactSecrets(text string) string {
+	if text == "" {
+		return text
+	}
+	knownSecrets := append([]string{}, runtimeSecretValues...)
+	sort.Slice(knownSecrets, func(i, j int) bool {
+		return len(knownSecrets[i]) > len(knownSecrets[j])
+	})
+	for _, secret := range knownSecrets {
+		if len(secret) >= 6 {
+			text = strings.ReplaceAll(text, secret, "[REDACTED]")
+		}
+	}
+	for _, pattern := range secretPatterns {
+		text = pattern.ReplaceAllString(text, "[REDACTED]")
+	}
+	return text
 }
 
 func taskSubject(task, fallback string) string {

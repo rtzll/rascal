@@ -53,7 +53,7 @@ Required:
 - `RASCAL_RUN_ID`
 - `RASCAL_TASK_ID`
 - `RASCAL_REPO`
-- `GH_TOKEN`
+- `GH_TOKEN_FILE` (secure default; mounted read-only from `/run/rascal-secrets/gh_token`)
 
 Common optional:
 
@@ -71,3 +71,5 @@ Common optional:
 - `RASCAL_GOOSE_SESSION_KEY` (stable task-scoped key when resume is enabled)
 - `RASCAL_GOOSE_SESSION_NAME` (stable Goose session name when resume is enabled)
 - `GOOSE_PATH_ROOT` (run-scoped `/rascal-meta/goose` in stateless mode, or task-scoped mount in resume mode)
+- `CODEX_AUTH_FILE` (secure default path: `/run/rascal-secrets/codex_auth.json`)
+- `RASCAL_RUNNER_ALLOW_ENV_SECRETS` (default: `false`; compatibility toggle to allow `GH_TOKEN` env fallback)

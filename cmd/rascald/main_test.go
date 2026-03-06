@@ -2094,6 +2094,46 @@ func TestRecoverRunningRunWithoutLeaseOldStartRequeues(t *testing.T) {
 	}
 }
 
+func TestWriteRunFilesStoresSecretsOutsideRunDir(t *testing.T) {
+	launcher := &fakeLauncher{}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	codexSource := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(codexSource, []byte(`{"token":"codex-secret"}`), 0o600); err != nil {
+		t.Fatalf("write codex source: %v", err)
+	}
+	s.cfg.GitHubToken = "ghp_abcdefghijklmnopqrstuvwxyz123456"
+	s.cfg.CodexAuthPath = codexSource
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_write_files_secrets",
+		TaskID:     "task_write_files_secrets",
+		Repo:       "owner/repo",
+		Task:       "prepare files",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := s.writeRunFiles(run); err != nil {
+		t.Fatalf("write run files: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(run.RunDir, "codex", "auth.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected no codex auth inside run dir, stat err=%v", err)
+	}
+
+	secretDir := runSecretDir(run.RunDir)
+	if _, err := os.Stat(filepath.Join(secretDir, "gh_token")); err != nil {
+		t.Fatalf("expected GH token secret file, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(secretDir, "codex_auth.json")); err != nil {
+		t.Fatalf("expected codex auth secret file, got err=%v", err)
+	}
+}
+
 func TestHandleRunLogsRespectsLines(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
@@ -2191,6 +2231,82 @@ func TestHandleRunLogsJSONIncludesStatusAndDone(t *testing.T) {
 	}
 	if !strings.Contains(out.Logs, "runner-2") || !strings.Contains(out.Logs, "goose-2") {
 		t.Fatalf("expected newest lines to be present, got:\n%s", out.Logs)
+	}
+}
+
+func TestHandleRunLogsRedactsSecrets(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	runDir := t.TempDir()
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_logs_redact",
+		TaskID:     "task_logs_redact",
+		Repo:       "owner/repo",
+		Task:       "show redacted logs",
+		BaseBranch: "main",
+		RunDir:     runDir,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	secretDir := runSecretDir(run.RunDir)
+	if err := os.MkdirAll(secretDir, 0o700); err != nil {
+		t.Fatalf("mkdir secret dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(secretDir, "gh_token"), []byte("ghp_abcdefghijklmnopqrstuvwxyz123456"), 0o400); err != nil {
+		t.Fatalf("write gh token secret: %v", err)
+	}
+
+	logBody := "token=ghp_abcdefghijklmnopqrstuvwxyz123456\nclone https://x-access-token:ghp_abcdefghijklmnopqrstuvwxyz123456@github.com/owner/repo.git\n"
+	if err := os.WriteFile(filepath.Join(run.RunDir, "runner.log"), []byte(logBody), 0o644); err != nil {
+		t.Fatalf("write runner log: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/logs?lines=10", nil)
+	rec := httptest.NewRecorder()
+	s.handleRunSubresources(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "ghp_abcdefghijklmnopqrstuvwxyz123456") {
+		t.Fatalf("expected token to be redacted, got:\n%s", body)
+	}
+	if !strings.Contains(body, "[REDACTED]") {
+		t.Fatalf("expected redaction marker in logs, got:\n%s", body)
+	}
+}
+
+func TestSetRunStatusCleansRunSecretsOnTerminalState(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	runDir := t.TempDir()
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_cleanup_secrets",
+		TaskID:     "task_cleanup_secrets",
+		Repo:       "owner/repo",
+		Task:       "cleanup secrets",
+		BaseBranch: "main",
+		RunDir:     runDir,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	secretDir := runSecretDir(run.RunDir)
+	if err := os.MkdirAll(secretDir, 0o700); err != nil {
+		t.Fatalf("mkdir secret dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(secretDir, "gh_token"), []byte("token"), 0o400); err != nil {
+		t.Fatalf("write gh token secret: %v", err)
+	}
+
+	if _, err := s.setRunStatus(run.ID, state.StatusCanceled, "canceled by test"); err != nil {
+		t.Fatalf("set canceled status: %v", err)
+	}
+	if _, err := os.Stat(secretDir); !os.IsNotExist(err) {
+		t.Fatalf("expected secret dir removed, stat err=%v", err)
 	}
 }
 
