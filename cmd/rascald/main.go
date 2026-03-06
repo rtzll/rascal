@@ -37,6 +37,7 @@ const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
 const runResponseTargetFile = "response_target.json"
 const runCompletionCommentMarkerFile = "completion_comment_posted.json"
+const runCompletionCommentBodyMarker = "<!-- rascal:completion-comment -->"
 
 type githubClient interface {
 	GetIssue(ctx context.Context, repo string, issueNumber int) (ghapi.IssueData, error)
@@ -610,6 +611,9 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				return nil
 			}
 		default:
+			return nil
+		}
+		if isRascalAutomationComment(ev.Comment.Body) {
 			return nil
 		}
 		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
@@ -2008,7 +2012,7 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 	if err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("read commit message: %w", err)
 	}
-	return runsummary.BuildCompletionComment(runsummary.CompletionCommentInput{
+	body, err := runsummary.BuildCompletionComment(runsummary.CompletionCommentInput{
 		RunID:           run.ID,
 		Repo:            repo,
 		RequestedBy:     target.RequestedBy,
@@ -2018,6 +2022,22 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 		CommitMessage:   commitMessageData,
 		DurationSeconds: runsummary.RunDurationSeconds(run.CreatedAt, run.StartedAt, run.CompletedAt),
 	})
+	if err != nil {
+		return "", err
+	}
+	return runCompletionCommentBodyMarker + "\n\n" + body, nil
+}
+
+func isRascalAutomationComment(body string) bool {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return false
+	}
+	if strings.Contains(trimmed, runCompletionCommentBodyMarker) {
+		return true
+	}
+	legacy := strings.ToLower(trimmed)
+	return strings.Contains(legacy, "rascal run `") && strings.Contains(legacy, "completed in ")
 }
 
 func (s *server) requeueRun(runID string) error {

@@ -986,6 +986,22 @@ func TestHandleWebhookIssueCommentIgnoresBotActor(t *testing.T) {
 	}
 }
 
+func TestHandleWebhookIssueCommentIgnoresRascalAutomationComment(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	payload := []byte(`{"action":"created","issue":{"number":9,"pull_request":{}},"comment":{"id":502,"body":"<!-- rascal:completion-comment -->\n\nRascal run ` + "`run_123`" + ` completed in 12s.","user":{"login":"rascal"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"rascal"}}`)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-automation", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+	if got := len(s.store.ListRuns(10)); got != 0 {
+		t.Fatalf("expected zero runs for rascal automation comment, got %d", got)
+	}
+}
+
 func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
@@ -1372,6 +1388,9 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	}
 	if !strings.Contains(comment.body, "@alice implemented in commit [`0123456789ab`]") {
 		t.Fatalf("expected requester mention with short sha, got body:\n%s", comment.body)
+	}
+	if !strings.Contains(comment.body, runCompletionCommentBodyMarker) {
+		t.Fatalf("expected completion marker in comment body, got body:\n%s", comment.body)
 	}
 	if !strings.Contains(comment.body, "- updated handlers") {
 		t.Fatalf("expected commit body bullets in comment, got:\n%s", comment.body)
