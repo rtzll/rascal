@@ -1294,7 +1294,7 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 	}
 }
 
-func (a *app) resolveSSHLogConfig(host, sshUser, sshKey string, sshPort int) (deployConfig, error) {
+func (a *app) resolveSSHConfig(host, sshUser, sshKey string, sshPort int) (deployConfig, error) {
 	resolvedHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
 	if resolvedHost == "" {
 		return deployConfig{}, &cliError{Code: exitInput, Message: "missing SSH host", Hint: "set --host or configure ssh_host/host"}
@@ -1308,7 +1308,7 @@ func (a *app) resolveSSHLogConfig(host, sshUser, sshKey string, sshPort int) (de
 }
 
 func (a *app) streamSystemdUnitLogs(unit, host, sshUser, sshKey string, sshPort int, follow bool, lines int) error {
-	cfg, err := a.resolveSSHLogConfig(host, sshUser, sshKey, sshPort)
+	cfg, err := a.resolveSSHConfig(host, sshUser, sshKey, sshPort)
 	if err != nil {
 		return err
 	}
@@ -1323,7 +1323,7 @@ func (a *app) streamSystemdUnitLogs(unit, host, sshUser, sshKey string, sshPort 
 }
 
 func (a *app) streamRascaldServiceLogs(host, sshUser, sshKey string, sshPort int, follow bool, lines int) error {
-	cfg, err := a.resolveSSHLogConfig(host, sshUser, sshKey, sshPort)
+	cfg, err := a.resolveSSHConfig(host, sshUser, sshKey, sshPort)
 	if err != nil {
 		return err
 	}
@@ -1361,7 +1361,7 @@ func rascaldJournalctlRemoteCmd(lines int, follow bool) string {
 }
 
 func (a *app) streamRemoteFileLogs(path, host, sshUser, sshKey string, sshPort int, follow bool, lines int) error {
-	cfg, err := a.resolveSSHLogConfig(host, sshUser, sshKey, sshPort)
+	cfg, err := a.resolveSSHConfig(host, sshUser, sshKey, sshPort)
 	if err != nil {
 		return err
 	}
@@ -2073,13 +2073,11 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 		Use:   "sync",
 		Short: "Sync auth material to remote host over SSH",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			host = strings.TrimSpace(host)
-			if host == "" {
-				return &cliError{Code: exitInput, Message: "--host is required"}
+			sshCfg, err := a.resolveSSHConfig(host, sshUser, sshKey, sshPort)
+			if err != nil {
+				return err
 			}
-			if sshPort <= 0 {
-				return &cliError{Code: exitInput, Message: "--ssh-port must be positive"}
-			}
+			host = sshCfg.Host
 			apiToken = strings.TrimSpace(apiToken)
 			githubRuntimeToken = strings.TrimSpace(githubRuntimeToken)
 			webhookSecret = strings.TrimSpace(webhookSecret)
@@ -2102,9 +2100,9 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 			}
 			if err := syncRemoteAuth(syncRemoteAuthConfig{
 				Host:          host,
-				SSHUser:       firstNonEmpty(strings.TrimSpace(sshUser), "root"),
-				SSHKeyPath:    strings.TrimSpace(sshKey),
-				SSHPort:       sshPort,
+				SSHUser:       sshCfg.SSHUser,
+				SSHKeyPath:    sshCfg.SSHKeyPath,
+				SSHPort:       sshCfg.SSHPort,
 				APIToken:      apiToken,
 				GitHubRuntime: githubRuntimeToken,
 				WebhookSecret: webhookSecret,

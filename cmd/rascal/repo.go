@@ -175,7 +175,7 @@ func (a *app) newRepoEnableCmd() *cobra.Command {
 }
 
 func (a *app) fetchServerWebhookSecret() (string, error) {
-	cfg, err := a.resolveSSHLogConfig("", "", "", 0)
+	cfg, err := a.resolveSSHConfig("", "", "", 0)
 	if err != nil {
 		return "", err
 	}

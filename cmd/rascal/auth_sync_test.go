@@ -1,10 +1,13 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rtzll/rascal/internal/config"
 )
 
 func TestSyncRemoteAuthValidation(t *testing.T) {
@@ -155,6 +158,41 @@ func TestSyncRemoteAuthCodexOnlyWithoutRestart(t *testing.T) {
 	}
 	if strings.Contains(sshCalls, `systemctl restart "rascal@$slot"`) {
 		t.Fatalf("did not expect restart command when Restart=false, got:\n%s", sshCalls)
+	}
+}
+
+func TestAuthSyncCommandUsesConfiguredSSHHost(t *testing.T) {
+	logDir := setupSyncCommandFakes(t)
+	codexAuthPath := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(codexAuthPath, []byte(`{"access_token":"abc"}`), 0o600); err != nil {
+		t.Fatalf("write codex auth file: %v", err)
+	}
+
+	a := &app{
+		cfg: config.ClientConfig{
+			SSHHost: "configured-host",
+		},
+		output: "json",
+	}
+	cmd := a.newAuthSyncCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--codex-auth", codexAuthPath,
+		"--restart-service=false",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("auth sync command: %v", err)
+	}
+
+	sshLog, err := os.ReadFile(filepath.Join(logDir, "ssh_calls.log"))
+	if err != nil {
+		t.Fatalf("read ssh log: %v", err)
+	}
+	sshCalls := string(sshLog)
+	if !strings.Contains(sshCalls, "root@configured-host") {
+		t.Fatalf("expected configured ssh host in calls, got:\n%s", sshCalls)
 	}
 }
 
