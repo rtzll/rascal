@@ -25,21 +25,42 @@ import (
 )
 
 type fakeLauncher struct {
-	mu     sync.Mutex
-	calls  int
-	specs  []runner.Spec
-	waitCh <-chan struct{}
-	res    runner.Result
-	err    error
-	resSeq []runner.Result
-	errSeq []error
+	mu       sync.Mutex
+	calls    int
+	specs    []runner.Spec
+	waitCh   <-chan struct{}
+	res      fakeRunResult
+	err      error
+	resSeq   []fakeRunResult
+	errSeq   []error
+	execs    map[string]*fakeExecution
+	nextExec int
 }
 
 type stubbornLauncher struct {
-	mu    sync.Mutex
-	calls int
-	wait  <-chan struct{}
-	res   runner.Result
+	mu       sync.Mutex
+	calls    int
+	wait     <-chan struct{}
+	res      fakeRunResult
+	lastSpec runner.Spec
+	stopped  bool
+}
+
+type fakeRunResult struct {
+	PRNumber int
+	PRURL    string
+	HeadSHA  string
+	ExitCode int
+	Error    string
+}
+
+type fakeExecution struct {
+	handle    runner.ExecutionHandle
+	spec      runner.Spec
+	waitCh    <-chan struct{}
+	result    fakeRunResult
+	stopped   bool
+	finalized bool
 }
 
 type postedIssueComment struct {
@@ -92,7 +113,7 @@ type fakeGitHubClient struct {
 	createIssueCommentCalls  int
 }
 
-func (f *fakeLauncher) Start(ctx context.Context, spec runner.Spec) (runner.Result, error) {
+func (f *fakeLauncher) StartDetached(_ context.Context, spec runner.Spec) (runner.ExecutionHandle, error) {
 	f.mu.Lock()
 	f.calls++
 	f.specs = append(f.specs, spec)
@@ -105,26 +126,189 @@ func (f *fakeLauncher) Start(ctx context.Context, spec runner.Spec) (runner.Resu
 	if callIdx < len(f.errSeq) {
 		err = f.errSeq[callIdx]
 	}
-	f.mu.Unlock()
-
-	if f.waitCh != nil {
-		select {
-		case <-f.waitCh:
-		case <-ctx.Done():
-			return runner.Result{}, ctx.Err()
-		}
+	if err != nil {
+		f.mu.Unlock()
+		return runner.ExecutionHandle{}, err
 	}
-	return res, err
+	if f.execs == nil {
+		f.execs = make(map[string]*fakeExecution)
+	}
+	f.nextExec++
+	handle := runner.ExecutionHandle{
+		Backend: "fake",
+		ID:      fmt.Sprintf("exec-%d", f.nextExec),
+		Name:    fmt.Sprintf("rascal-%s", spec.RunID),
+	}
+	execRec := &fakeExecution{
+		handle: handle,
+		spec:   spec,
+		waitCh: f.waitCh,
+		result: res,
+	}
+	f.execs[handle.ID] = execRec
+	f.execs[handle.Name] = execRec
+	f.mu.Unlock()
+	return handle, nil
 }
 
-func (l *stubbornLauncher) Start(_ context.Context, _ runner.Spec) (runner.Result, error) {
+func (f *fakeLauncher) lookupExecution(handle runner.ExecutionHandle) (*fakeExecution, bool) {
+	if execRec, ok := f.execs[handle.ID]; ok {
+		return execRec, true
+	}
+	if execRec, ok := f.execs[handle.Name]; ok {
+		return execRec, true
+	}
+	return nil, false
+}
+
+func (f *fakeLauncher) Inspect(_ context.Context, handle runner.ExecutionHandle) (runner.ExecutionState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	execRec, ok := f.lookupExecution(handle)
+	if !ok {
+		return runner.ExecutionState{}, runner.ErrExecutionNotFound
+	}
+	running := false
+	if !execRec.stopped {
+		if execRec.waitCh == nil {
+			running = false
+		} else {
+			select {
+			case <-execRec.waitCh:
+				running = false
+			default:
+				running = true
+			}
+		}
+	}
+	if running {
+		return runner.ExecutionState{Running: true}, nil
+	}
+	if !execRec.finalized {
+		_ = writeFakeMeta(execRec.spec, execRec.result)
+		execRec.finalized = true
+	}
+	exitCode := execRec.result.ExitCode
+	return runner.ExecutionState{Running: false, ExitCode: &exitCode}, nil
+}
+
+func (f *fakeLauncher) Stop(_ context.Context, handle runner.ExecutionHandle, _ time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	execRec, ok := f.lookupExecution(handle)
+	if !ok {
+		return runner.ErrExecutionNotFound
+	}
+	if execRec.waitCh != nil {
+		select {
+		case <-execRec.waitCh:
+			return nil
+		default:
+		}
+	}
+	execRec.stopped = true
+	if execRec.result.ExitCode == 0 {
+		execRec.result.ExitCode = 137
+	}
+	if execRec.result.Error == "" {
+		execRec.result.Error = "canceled"
+	}
+	return nil
+}
+
+func (f *fakeLauncher) Remove(_ context.Context, handle runner.ExecutionHandle) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	execRec, ok := f.lookupExecution(handle)
+	if !ok {
+		return nil
+	}
+	delete(f.execs, execRec.handle.ID)
+	delete(f.execs, execRec.handle.Name)
+	return nil
+}
+
+func (l *stubbornLauncher) StartDetached(_ context.Context, spec runner.Spec) (runner.ExecutionHandle, error) {
 	l.mu.Lock()
 	l.calls++
+	l.lastSpec = spec
 	l.mu.Unlock()
-	if l.wait != nil {
-		<-l.wait
+	return runner.ExecutionHandle{
+		Backend: "fake",
+		ID:      "stubborn-exec",
+		Name:    "stubborn-" + spec.RunID,
+	}, nil
+}
+
+func (l *stubbornLauncher) Inspect(_ context.Context, _ runner.ExecutionHandle) (runner.ExecutionState, error) {
+	l.mu.Lock()
+	spec := l.lastSpec
+	waitCh := l.wait
+	res := l.res
+	stopped := l.stopped
+	l.mu.Unlock()
+	running := false
+	if !stopped {
+		if waitCh == nil {
+			running = false
+		} else {
+			select {
+			case <-waitCh:
+				running = false
+			default:
+				running = true
+			}
+		}
 	}
-	return l.res, nil
+	if running {
+		return runner.ExecutionState{Running: true}, nil
+	}
+	if stopped {
+		if res.ExitCode == 0 {
+			res.ExitCode = 137
+		}
+		if res.Error == "" {
+			res.Error = "canceled"
+		}
+	}
+	_ = writeFakeMeta(spec, res)
+	exitCode := res.ExitCode
+	return runner.ExecutionState{Running: false, ExitCode: &exitCode}, nil
+}
+
+func (l *stubbornLauncher) Stop(_ context.Context, _ runner.ExecutionHandle, _ time.Duration) error {
+	l.mu.Lock()
+	if l.wait != nil {
+		select {
+		case <-l.wait:
+			l.mu.Unlock()
+			return nil
+		default:
+		}
+	}
+	l.stopped = true
+	l.mu.Unlock()
+	return nil
+}
+
+func (l *stubbornLauncher) Remove(_ context.Context, _ runner.ExecutionHandle) error {
+	return nil
+}
+
+func writeFakeMeta(spec runner.Spec, res fakeRunResult) error {
+	meta := runner.Meta{
+		RunID:      spec.RunID,
+		TaskID:     spec.TaskID,
+		Repo:       spec.Repo,
+		BaseBranch: spec.BaseBranch,
+		HeadBranch: spec.HeadBranch,
+		PRNumber:   res.PRNumber,
+		PRURL:      res.PRURL,
+		HeadSHA:    res.HeadSHA,
+		ExitCode:   res.ExitCode,
+		Error:      strings.TrimSpace(res.Error),
+	}
+	return runner.WriteMeta(filepath.Join(spec.RunDir, "meta.json"), meta)
 }
 
 func (f *fakeGitHubClient) GetIssue(_ context.Context, _ string, _ int) (ghapi.IssueData, error) {
@@ -282,9 +466,15 @@ func newTestServer(t *testing.T, launcher runner.Launcher) *server {
 	t.Helper()
 
 	dataDir := t.TempDir()
+	return newTestServerWithPaths(t, launcher, dataDir, filepath.Join(dataDir, "state.db"), "test-instance")
+}
+
+func newTestServerWithPaths(t *testing.T, launcher runner.Launcher, dataDir, statePath, instanceID string) *server {
+	t.Helper()
+
 	cfg := config.ServerConfig{
 		DataDir:    dataDir,
-		StatePath:  filepath.Join(dataDir, "state.db"),
+		StatePath:  statePath,
 		MaxRuns:    200,
 		RunnerMode: "noop",
 	}
@@ -298,10 +488,23 @@ func newTestServer(t *testing.T, launcher runner.Launcher) *server {
 		launcher:      launcher,
 		gh:            ghapi.NewAPIClient(""),
 		runCancels:    make(map[string]context.CancelFunc),
-		runCancelNote: make(map[string]string),
 		maxConcurrent: defaultMaxConcurrent(),
-		instanceID:    "test-instance",
+		instanceID:    strings.TrimSpace(instanceID),
 	}
+}
+
+func waitForRunExecution(t *testing.T, s *server, runID string) state.RunExecution {
+	t.Helper()
+	var execRec state.RunExecution
+	waitFor(t, 2*time.Second, func() bool {
+		rec, ok := s.store.GetRunExecution(runID)
+		if !ok {
+			return false
+		}
+		execRec = rec
+		return true
+	}, "run execution persisted")
+	return execRec
 }
 
 func webhookRequest(t *testing.T, payload []byte, eventType, deliveryID, secret string) *http.Request {
@@ -332,9 +535,9 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 
 func waitForServerIdle(t *testing.T, s *server) {
 	t.Helper()
-	if err := s.waitForNoActiveRuns(5 * time.Second); err != nil {
-		t.Fatalf("timeout waiting for condition: server idle: %v", err)
-	}
+	waitFor(t, 5*time.Second, func() bool {
+		return s.activeRunCount() == 0
+	}, "server idle")
 }
 
 func markRunSucceeded(t *testing.T, s *server, runID string) {
@@ -429,6 +632,7 @@ func TestHandleWebhookIssueClosedCancelsRunsAndCompletesTask(t *testing.T) {
 		t.Fatalf("create queued run: %v", err)
 	}
 	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to be active")
+	_ = waitForRunExecution(t, s, runningRun.ID)
 
 	payload := []byte(`{"action":"closed","issue":{"number":7,"title":"Title","body":"Body","labels":[{"name":"rascal"}]},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
 	req := webhookRequest(t, payload, "issues", "delivery-closed", "")
@@ -443,7 +647,7 @@ func TestHandleWebhookIssueClosedCancelsRunsAndCompletesTask(t *testing.T) {
 		r, ok := s.store.GetRun(queuedRun.ID)
 		return ok && r.Status == state.StatusCanceled
 	}, "queued run canceled")
-	waitFor(t, time.Second, func() bool {
+	waitFor(t, 3*time.Second, func() bool {
 		r, ok := s.store.GetRun(runningRun.ID)
 		return ok && r.Status == state.StatusCanceled
 	}, "running run canceled")
@@ -1691,7 +1895,7 @@ func TestCleanupStaleGooseSessionDirs(t *testing.T) {
 
 func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	launcher := &fakeLauncher{
-		res: runner.Result{
+		res: fakeRunResult{
 			PRNumber: 77,
 			PRURL:    "https://example.com/pr/77",
 			HeadSHA:  "0123456789abcdef0123456789abcdef01234567",
@@ -1766,7 +1970,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 
 func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *testing.T) {
 	launcher := &fakeLauncher{
-		res: runner.Result{
+		res: fakeRunResult{
 			PRNumber: 52,
 			PRURL:    "https://example.com/pr/52",
 			HeadSHA:  "0109106ceba61adf1735bc980f83c15506b8da7a",
@@ -2084,7 +2288,7 @@ func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
 	done := make(chan struct{})
 	launcher := &stubbornLauncher{
 		wait: done,
-		res: runner.Result{
+		res: fakeRunResult{
 			PRNumber: 42,
 			PRURL:    "https://example.com/pr/42",
 		},
@@ -2353,6 +2557,440 @@ func TestRecoverRunningRunWithoutLeaseOldStartRequeues(t *testing.T) {
 	if updated.Status != state.StatusQueued {
 		t.Fatalf("expected queued status without lease and old start, got %s", updated.Status)
 	}
+}
+
+func TestExecuteRunPersistsRunExecutionHandle(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "task_exec_handle", Repo: "owner/repo", Task: "persist execution handle"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	execRec := waitForRunExecution(t, s, run.ID)
+	if execRec.Backend == "" || execRec.ContainerID == "" || execRec.ContainerName == "" {
+		t.Fatalf("unexpected execution record: %+v", execRec)
+	}
+
+	close(waitCh)
+	waitFor(t, 2*time.Second, func() bool {
+		updated, ok := s.store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusSucceeded
+	}, "run completion")
+}
+
+func TestRecoverRunningRunAdoptsDetachedExecution(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	dataDir := t.TempDir()
+	statePath := filepath.Join(dataDir, "state.db")
+
+	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
+	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_adopt", Repo: "owner/repo", Task: "adopt detached"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	execRec := waitForRunExecution(t, s1, run.ID)
+
+	waitFor(t, 2*time.Second, func() bool {
+		lease, ok := s1.store.GetRunLease(run.ID)
+		return ok && lease.OwnerID == "instance-a"
+	}, "instance-a lease ownership")
+
+	s1.beginDrain()
+	s1.stopRunSupervisors()
+	if err := s1.store.DeleteRunLease(run.ID); err != nil {
+		t.Fatalf("delete s1 lease: %v", err)
+	}
+
+	s2 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-b")
+	defer waitForServerIdle(t, s2)
+	s2.recoverRunningRuns()
+
+	waitFor(t, 2*time.Second, func() bool {
+		lease, ok := s2.store.GetRunLease(run.ID)
+		return ok && lease.OwnerID == "instance-b"
+	}, "instance-b lease ownership")
+
+	adoptedExec, ok := s2.store.GetRunExecution(run.ID)
+	if !ok {
+		t.Fatalf("expected execution after adoption")
+	}
+	if adoptedExec.ContainerID != execRec.ContainerID {
+		t.Fatalf("expected same container id after adoption: got %s want %s", adoptedExec.ContainerID, execRec.ContainerID)
+	}
+
+	close(waitCh)
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s2.store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusSucceeded
+	}, "adopted run completion")
+}
+
+func TestDrainReleaseDoesNotDeleteAdoptedLease(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	dataDir := t.TempDir()
+	statePath := filepath.Join(dataDir, "state.db")
+
+	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
+	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_safe_lease_release", Repo: "owner/repo", Task: "safe lease release"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_ = waitForRunExecution(t, s1, run.ID)
+
+	s2 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-b")
+	defer waitForServerIdle(t, s2)
+	s2.recoverRunningRuns()
+
+	waitFor(t, 2*time.Second, func() bool {
+		lease, ok := s2.store.GetRunLease(run.ID)
+		return ok && lease.OwnerID == "instance-b"
+	}, "instance-b lease ownership")
+
+	s1.beginDrain()
+	s1.stopRunSupervisors()
+	if err := s1.waitForNoActiveRuns(3 * time.Second); err != nil {
+		t.Fatalf("wait for s1 idle: %v", err)
+	}
+
+	lease, ok := s2.store.GetRunLease(run.ID)
+	if !ok || lease.OwnerID != "instance-b" {
+		t.Fatalf("expected adopted lease to remain with instance-b, got %+v ok=%t", lease, ok)
+	}
+
+	close(waitCh)
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s2.store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusSucceeded
+	}, "completion after safe lease release")
+}
+
+func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
+	launcher := &fakeLauncher{}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_recover_exited_exec",
+		TaskID:     "task_recover_exited_exec",
+		Repo:       "owner/repo",
+		Task:       "recover exited detached run",
+		BaseBranch: "main",
+		HeadBranch: "rascal/recover-exited",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+
+	handle, err := launcher.StartDetached(context.Background(), runner.Spec{
+		RunID:       run.ID,
+		TaskID:      run.TaskID,
+		Repo:        run.Repo,
+		Task:        run.Task,
+		BaseBranch:  run.BaseBranch,
+		HeadBranch:  run.HeadBranch,
+		Trigger:     run.Trigger,
+		RunDir:      run.RunDir,
+		IssueNumber: run.IssueNumber,
+		PRNumber:    run.PRNumber,
+		Context:     run.Context,
+		Debug:       run.Debug,
+	})
+	if err != nil {
+		t.Fatalf("start detached fake execution: %v", err)
+	}
+	if err := runner.WriteMeta(filepath.Join(run.RunDir, "meta.json"), runner.Meta{
+		RunID:      run.ID,
+		TaskID:     run.TaskID,
+		Repo:       run.Repo,
+		BaseBranch: run.BaseBranch,
+		HeadBranch: run.HeadBranch,
+		ExitCode:   0,
+	}); err != nil {
+		t.Fatalf("write meta: %v", err)
+	}
+	if _, err := s.store.UpsertRunExecution(state.RunExecution{
+		RunID:         run.ID,
+		Backend:       handle.Backend,
+		ContainerName: handle.Name,
+		ContainerID:   handle.ID,
+		Status:        "running",
+	}); err != nil {
+		t.Fatalf("upsert run execution: %v", err)
+	}
+
+	s.recoverRunningRuns()
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s.store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusSucceeded
+	}, "recover exited execution finalization")
+	if _, ok := s.store.GetRunExecution(run.ID); ok {
+		t.Fatalf("expected execution record to be removed after finalization")
+	}
+}
+
+func TestRecoverRunningRunMissingDetachedExecutionFails(t *testing.T) {
+	launcher := &fakeLauncher{}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_recover_missing_exec",
+		TaskID:     "task_recover_missing_exec",
+		Repo:       "owner/repo",
+		Task:       "recover missing detached run",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	if _, err := s.store.UpsertRunExecution(state.RunExecution{
+		RunID:         run.ID,
+		Backend:       "docker",
+		ContainerName: "rascal-run_recover_missing_exec",
+		ContainerID:   "missing-execution-id",
+		Status:        "running",
+	}); err != nil {
+		t.Fatalf("upsert run execution: %v", err)
+	}
+
+	s.recoverRunningRuns()
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s.store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusFailed && strings.Contains(updated.Error, "detached container missing during adoption")
+	}, "recover missing execution failure")
+	if _, ok := s.store.GetRunExecution(run.ID); ok {
+		t.Fatalf("expected missing execution record to be cleared")
+	}
+}
+
+func TestRecoverRunningRunAdoptsByStableContainerName(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_recover_by_name",
+		TaskID:     "task_recover_by_name",
+		Repo:       "owner/repo",
+		Task:       "recover by stable name",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+
+	handle, err := launcher.StartDetached(context.Background(), runner.Spec{
+		RunID:      run.ID,
+		TaskID:     run.TaskID,
+		Repo:       run.Repo,
+		Task:       run.Task,
+		BaseBranch: run.BaseBranch,
+		RunDir:     run.RunDir,
+	})
+	if err != nil {
+		t.Fatalf("start detached fake execution: %v", err)
+	}
+	if _, err := s.store.UpsertRunExecution(state.RunExecution{
+		RunID:         run.ID,
+		Backend:       handle.Backend,
+		ContainerName: handle.Name,
+		ContainerID:   handle.Name,
+		Status:        "created",
+	}); err != nil {
+		t.Fatalf("upsert placeholder execution: %v", err)
+	}
+
+	s.recoverRunningRuns()
+	waitFor(t, 2*time.Second, func() bool {
+		lease, ok := s.store.GetRunLease(run.ID)
+		return ok && lease.OwnerID == s.instanceID
+	}, "name-based adoption lease ownership")
+
+	close(waitCh)
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s.store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusSucceeded
+	}, "name-based adoption completion")
+}
+
+func TestCancelRunWorksAfterAdoptionByDifferentInstance(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	dataDir := t.TempDir()
+	statePath := filepath.Join(dataDir, "state.db")
+
+	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
+	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_cancel_adopt", Repo: "owner/repo", Task: "cancel after adopt"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_ = waitForRunExecution(t, s1, run.ID)
+
+	s1.beginDrain()
+	s1.stopRunSupervisors()
+	if err := s1.waitForNoActiveRuns(3 * time.Second); err != nil {
+		t.Fatalf("wait for s1 idle: %v", err)
+	}
+
+	s2 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-b")
+	defer waitForServerIdle(t, s2)
+	s2.recoverRunningRuns()
+	waitFor(t, 2*time.Second, func() bool {
+		lease, ok := s2.store.GetRunLease(run.ID)
+		return ok && lease.OwnerID == "instance-b"
+	}, "instance-b lease ownership")
+
+	rec := httptest.NewRecorder()
+	s2.handleCancelRun(rec, run.ID)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for adopted run cancel, got %d", rec.Code)
+	}
+
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s2.store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusCanceled && strings.Contains(updated.Error, "canceled by user")
+	}, "adopted run canceled")
+}
+
+func TestLateCancelDoesNotOverwriteSuccessfulCompletion(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "task_late_cancel_success", Repo: "owner/repo", Task: "late cancel success"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_ = waitForRunExecution(t, s, run.ID)
+
+	close(waitCh)
+
+	rec := httptest.NewRecorder()
+	s.handleCancelRun(rec, run.ID)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for running cancel, got %d", rec.Code)
+	}
+
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s.store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusSucceeded
+	}, "successful completion wins over late cancel")
+}
+
+func TestRepeatedHandoffPreservesDetachedExecutionHandle(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	dataDir := t.TempDir()
+	statePath := filepath.Join(dataDir, "state.db")
+
+	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
+	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_repeated_handoff", Repo: "owner/repo", Task: "repeated handoff"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	execRec := waitForRunExecution(t, s1, run.ID)
+
+	s1.beginDrain()
+	s1.stopRunSupervisors()
+	if err := s1.waitForNoActiveRuns(3 * time.Second); err != nil {
+		t.Fatalf("wait for s1 idle: %v", err)
+	}
+
+	s2 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-b")
+	s2.recoverRunningRuns()
+	waitFor(t, 2*time.Second, func() bool {
+		lease, ok := s2.store.GetRunLease(run.ID)
+		return ok && lease.OwnerID == "instance-b"
+	}, "instance-b lease ownership")
+	midExec, ok := s2.store.GetRunExecution(run.ID)
+	if !ok {
+		t.Fatalf("expected execution after first handoff")
+	}
+	if midExec.ContainerID != execRec.ContainerID {
+		t.Fatalf("expected same container id after first handoff: got %s want %s", midExec.ContainerID, execRec.ContainerID)
+	}
+
+	s2.beginDrain()
+	s2.stopRunSupervisors()
+	if err := s2.store.DeleteRunLease(run.ID); err != nil {
+		t.Fatalf("delete s2 lease: %v", err)
+	}
+
+	s3 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-c")
+	defer waitForServerIdle(t, s3)
+	s3.recoverRunningRuns()
+	waitFor(t, 2*time.Second, func() bool {
+		lease, ok := s3.store.GetRunLease(run.ID)
+		return ok && lease.OwnerID == "instance-c"
+	}, "instance-c lease ownership")
+	lastExec, ok := s3.store.GetRunExecution(run.ID)
+	if !ok {
+		t.Fatalf("expected execution after second handoff")
+	}
+	if lastExec.ContainerID != execRec.ContainerID {
+		t.Fatalf("expected same container id after second handoff: got %s want %s", lastExec.ContainerID, execRec.ContainerID)
+	}
+
+	close(waitCh)
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s3.store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusSucceeded
+	}, "run completion after repeated handoff")
+}
+
+func TestDrainStopsSupervisionWithoutCancelingDetachedRun(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "task_drain_detached", Repo: "owner/repo", Task: "drain without cancel"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	execRec := waitForRunExecution(t, s, run.ID)
+
+	s.beginDrain()
+	s.stopRunSupervisors()
+	if err := s.waitForNoActiveRuns(3 * time.Second); err != nil {
+		t.Fatalf("wait for no active runs: %v", err)
+	}
+
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if updated.Status != state.StatusRunning {
+		t.Fatalf("expected run to remain running during drain, got %s", updated.Status)
+	}
+	afterExec, ok := s.store.GetRunExecution(run.ID)
+	if !ok {
+		t.Fatalf("expected execution record to remain after drain")
+	}
+	if afterExec.ContainerID != execRec.ContainerID {
+		t.Fatalf("expected same execution handle after drain")
+	}
+
+	close(waitCh)
 }
 
 func TestHandleRunLogsRespectsLines(t *testing.T) {

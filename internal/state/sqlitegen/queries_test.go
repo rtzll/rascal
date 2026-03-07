@@ -60,6 +60,21 @@ CREATE TABLE run_leases (
 
 CREATE INDEX idx_run_leases_expires ON run_leases (lease_expires_at ASC);
 
+CREATE TABLE run_executions (
+  run_id TEXT PRIMARY KEY,
+  backend TEXT NOT NULL,
+  container_name TEXT NOT NULL,
+  container_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'created',
+  exit_code INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_observed_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX idx_run_executions_container_id ON run_executions (container_id);
+CREATE INDEX idx_run_executions_status ON run_executions (status);
+
 CREATE TABLE run_cancels (
   run_id TEXT PRIMARY KEY,
   reason TEXT NOT NULL,
@@ -422,6 +437,68 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatalf("DeleteRunLease: %v", err)
 	} else if rows != 1 {
 		t.Fatalf("expected DeleteRunLease rows=1, got %d", rows)
+	}
+
+	if err := q.UpsertRunLease(ctx, UpsertRunLeaseParams{
+		RunID:          "run_lease_owner_1",
+		OwnerID:        "instance-a",
+		HeartbeatAt:    later + 50,
+		LeaseExpiresAt: later + 60,
+	}); err != nil {
+		t.Fatalf("UpsertRunLease owner delete coverage: %v", err)
+	}
+	if rows, err := q.DeleteRunLeaseForOwner(ctx, DeleteRunLeaseForOwnerParams{
+		RunID:   "run_lease_owner_1",
+		OwnerID: "instance-b",
+	}); err != nil {
+		t.Fatalf("DeleteRunLeaseForOwner wrong owner: %v", err)
+	} else if rows != 0 {
+		t.Fatalf("expected DeleteRunLeaseForOwner wrong owner rows=0, got %d", rows)
+	}
+	if rows, err := q.DeleteRunLeaseForOwner(ctx, DeleteRunLeaseForOwnerParams{
+		RunID:   "run_lease_owner_1",
+		OwnerID: "instance-a",
+	}); err != nil {
+		t.Fatalf("DeleteRunLeaseForOwner: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected DeleteRunLeaseForOwner rows=1, got %d", rows)
+	}
+
+	if err := q.UpsertRunExecution(ctx, UpsertRunExecutionParams{
+		RunID:          "run_exec_1",
+		Backend:        "docker",
+		ContainerName:  "rascal-run_exec_1",
+		ContainerID:    "container-1",
+		Status:         "running",
+		ExitCode:       0,
+		CreatedAt:      later + 60,
+		UpdatedAt:      later + 60,
+		LastObservedAt: later + 60,
+	}); err != nil {
+		t.Fatalf("UpsertRunExecution: %v", err)
+	}
+	if rows, err := q.UpdateRunExecutionState(ctx, UpdateRunExecutionStateParams{
+		Status:         "exited",
+		ExitCode:       137,
+		UpdatedAt:      later + 61,
+		LastObservedAt: later + 61,
+		RunID:          "run_exec_1",
+	}); err != nil {
+		t.Fatalf("UpdateRunExecutionState: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected UpdateRunExecutionState rows=1, got %d", rows)
+	}
+	execRow, err := q.GetRunExecution(ctx, "run_exec_1")
+	if err != nil {
+		t.Fatalf("GetRunExecution: %v", err)
+	}
+	if execRow.Status != "exited" || execRow.ExitCode != 137 {
+		t.Fatalf("unexpected run execution state: status=%s exit=%d", execRow.Status, execRow.ExitCode)
+	}
+	if rows, err := q.DeleteRunExecution(ctx, "run_exec_1"); err != nil {
+		t.Fatalf("DeleteRunExecution: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected DeleteRunExecution rows=1, got %d", rows)
 	}
 
 	if err := q.UpsertRunCancel(ctx, UpsertRunCancelParams{

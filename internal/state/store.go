@@ -535,6 +535,19 @@ func (s *Store) DeleteRunLease(runID string) error {
 	return err
 }
 
+func (s *Store) DeleteRunLeaseForOwner(runID, ownerID string) error {
+	runID = strings.TrimSpace(runID)
+	ownerID = strings.TrimSpace(ownerID)
+	if runID == "" || ownerID == "" {
+		return nil
+	}
+	_, err := s.q.DeleteRunLeaseForOwner(context.Background(), sqlitegen.DeleteRunLeaseForOwnerParams{
+		RunID:   runID,
+		OwnerID: ownerID,
+	})
+	return err
+}
+
 func (s *Store) GetRunLease(runID string) (RunLease, bool) {
 	row, err := s.q.GetRunLease(context.Background(), strings.TrimSpace(runID))
 	if err != nil {
@@ -561,6 +574,100 @@ func (s *Store) CountRunLeasesByOwner(ownerID string) int {
 		return 0
 	}
 	return int(count)
+}
+
+func (s *Store) UpsertRunExecution(exec RunExecution) (RunExecution, error) {
+	exec.RunID = strings.TrimSpace(exec.RunID)
+	exec.Backend = strings.TrimSpace(exec.Backend)
+	exec.ContainerName = strings.TrimSpace(exec.ContainerName)
+	exec.ContainerID = strings.TrimSpace(exec.ContainerID)
+	exec.Status = strings.TrimSpace(exec.Status)
+	if exec.RunID == "" {
+		return RunExecution{}, fmt.Errorf("run id is required")
+	}
+	if exec.Backend == "" {
+		exec.Backend = "docker"
+	}
+	if exec.ContainerName == "" {
+		return RunExecution{}, fmt.Errorf("container name is required")
+	}
+	if exec.ContainerID == "" {
+		return RunExecution{}, fmt.Errorf("container id is required")
+	}
+	if exec.Status == "" {
+		exec.Status = "created"
+	}
+	now := time.Now().UTC()
+	if err := s.q.UpsertRunExecution(context.Background(), sqlitegen.UpsertRunExecutionParams{
+		RunID:          exec.RunID,
+		Backend:        exec.Backend,
+		ContainerName:  exec.ContainerName,
+		ContainerID:    exec.ContainerID,
+		Status:         exec.Status,
+		ExitCode:       int64(exec.ExitCode),
+		CreatedAt:      now.UnixNano(),
+		UpdatedAt:      now.UnixNano(),
+		LastObservedAt: now.UnixNano(),
+	}); err != nil {
+		return RunExecution{}, err
+	}
+	row, err := s.q.GetRunExecution(context.Background(), exec.RunID)
+	if err != nil {
+		return RunExecution{}, err
+	}
+	return fromDBRunExecution(row), nil
+}
+
+func (s *Store) UpdateRunExecutionState(runID, status string, exitCode int, lastObservedAt time.Time) (RunExecution, error) {
+	runID = strings.TrimSpace(runID)
+	status = strings.TrimSpace(status)
+	if runID == "" {
+		return RunExecution{}, fmt.Errorf("run id is required")
+	}
+	if status == "" {
+		status = "created"
+	}
+	if lastObservedAt.IsZero() {
+		lastObservedAt = time.Now().UTC()
+	}
+	rows, err := s.q.UpdateRunExecutionState(context.Background(), sqlitegen.UpdateRunExecutionStateParams{
+		Status:         status,
+		ExitCode:       int64(exitCode),
+		UpdatedAt:      time.Now().UTC().UnixNano(),
+		LastObservedAt: lastObservedAt.UTC().UnixNano(),
+		RunID:          runID,
+	})
+	if err != nil {
+		return RunExecution{}, err
+	}
+	if rows == 0 {
+		return RunExecution{}, fmt.Errorf("run execution %q not found", runID)
+	}
+	row, err := s.q.GetRunExecution(context.Background(), runID)
+	if err != nil {
+		return RunExecution{}, err
+	}
+	return fromDBRunExecution(row), nil
+}
+
+func (s *Store) GetRunExecution(runID string) (RunExecution, bool) {
+	row, err := s.q.GetRunExecution(context.Background(), strings.TrimSpace(runID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RunExecution{}, false
+		}
+		return RunExecution{}, false
+	}
+	return fromDBRunExecution(row), true
+}
+
+func (s *Store) DeleteRunExecution(runID string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil
+	}
+	_, err := s.q.DeleteRunExecution(context.Background(), runID)
+	return err
 }
 
 func (s *Store) RequestRunCancel(runID, reason, source string) error {
@@ -813,6 +920,20 @@ func fromDBRun(r sqlitegen.Run) Run {
 		out.CompletedAt = &t
 	}
 	return out
+}
+
+func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {
+	return RunExecution{
+		RunID:          r.RunID,
+		Backend:        r.Backend,
+		ContainerName:  r.ContainerName,
+		ContainerID:    r.ContainerID,
+		Status:         r.Status,
+		ExitCode:       int(r.ExitCode),
+		CreatedAt:      time.Unix(0, r.CreatedAt).UTC(),
+		UpdatedAt:      time.Unix(0, r.UpdatedAt).UTC(),
+		LastObservedAt: time.Unix(0, r.LastObservedAt).UTC(),
+	}
 }
 
 func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
