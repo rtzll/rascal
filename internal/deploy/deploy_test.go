@@ -3,6 +3,7 @@ package deploy
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -176,6 +177,21 @@ func TestExecuteRollsOutRunnerBinaryBeforeImageBuild(t *testing.T) {
 	}
 	if !foundBuildScript {
 		t.Fatalf("expected deploy script containing rascal-runner install and docker build, got %d scripts", len(scripts))
+	}
+}
+
+func TestExecuteDoesNotEmitLegacySingleUnitSystemdCommands(t *testing.T) {
+	logDir := setupFakeDeployCommands(t, "")
+
+	if err := Execute(testDeployConfig()); err != nil {
+		t.Fatalf("execute deploy: %v", err)
+	}
+
+	scripts := readCapturedSSHScripts(t, logDir)
+	for _, script := range scripts {
+		if containsLegacySingleUnitCommand(script) {
+			t.Fatalf("unexpected legacy single-unit command in deploy script:\n%s", script)
+		}
 	}
 }
 
@@ -412,4 +428,9 @@ func firstLineContaining(lines []string, needle string) string {
 		}
 	}
 	return ""
+}
+
+func containsLegacySingleUnitCommand(script string) bool {
+	legacyPattern := regexp.MustCompile(`\bsystemctl\s+(?:is-active --quiet|stop|disable)\s+rascal(?:\s|;|$)`)
+	return legacyPattern.MatchString(script)
 }

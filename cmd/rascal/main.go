@@ -1118,7 +1118,7 @@ rascal logs run run_abc123 --follow --interval 4s
 	rascaldCmd := &cobra.Command{
 		Use:   "rascald",
 		Short: "Fetch rascald system logs over SSH",
-		Long:  "Stream logs from the remote `rascal`/`rascal@slot` systemd service over SSH.",
+		Long:  "Stream logs from the remote active `rascal@<slot>` systemd service over SSH.",
 		Example: strings.TrimSpace(`
 rascal logs rascald
 rascal logs rascald --follow
@@ -1345,14 +1345,11 @@ func rascaldJournalctlRemoteCmd(lines int, follow bool) string {
 		`case "$slot" in`,
 		`  blue|green) unit="rascal@$slot" ;;`,
 		`  *)`,
-		`    if systemctl is-active --quiet rascal@green; then`,
+		`    if systemctl is-active --quiet 'rascal@green'; then`,
 		`      unit=rascal@green`,
-		`    elif systemctl is-active --quiet rascal@blue; then`,
+		`    elif systemctl is-active --quiet 'rascal@blue'; then`,
 		`      unit=rascal@blue`,
-		`    elif systemctl is-active --quiet rascal; then`,
-		`      unit=rascal`,
-		`    else`,
-		`      unit=rascal@green`,
+		`    else unit=rascal@blue`,
 		`    fi`,
 		`    ;;`,
 		`esac`,
@@ -1550,14 +1547,9 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				}
 				if remote != nil {
 					if synced, ok := remote["auth_runtime_synced"].(bool); ok && !synced {
-						activeSlot := strings.TrimSpace(fmt.Sprintf("%v", remote["active_slot"]))
 						targetUser := firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root")
 						targetHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
-						if activeSlot == "legacy" {
-							a.println("hint: remote rascal.env changed after service start; restart service: `ssh %s@%s 'systemctl restart rascal'`", targetUser, targetHost)
-						} else {
-							a.println("hint: remote rascal.env changed after service start; restart active slot: `ssh %s@%s 'slot=$(cat /etc/rascal/active_slot 2>/dev/null || echo blue); systemctl restart rascal@$slot'`", targetUser, targetHost)
-						}
+						a.println("hint: remote rascal.env changed after service start; restart active slot: `ssh %s@%s 'slot=$(cat /etc/rascal/active_slot 2>/dev/null || echo blue); systemctl restart rascal@$slot'`", targetUser, targetHost)
 					}
 				}
 				return nil
@@ -2684,7 +2676,7 @@ func (c apiClient) doOverSSH(method, path string, body io.Reader) (*http.Respons
 		"case \"$slot\" in",
 		fmt.Sprintf("  %s) port=%d ;;", rascalSlotBlue, rascalSlotBluePort),
 		fmt.Sprintf("  %s) port=%d ;;", rascalSlotGreen, rascalSlotGreenPort),
-		fmt.Sprintf("  *) if systemctl is-active --quiet rascal; then port=%d; else port=%d; fi ;;", rascalProxyPort, rascalSlotBluePort),
+		fmt.Sprintf("  *) if systemctl is-active --quiet 'rascal@green'; then port=%d; elif systemctl is-active --quiet 'rascal@blue'; then port=%d; else port=%d; fi ;;", rascalSlotGreenPort, rascalSlotBluePort, rascalSlotBluePort),
 		"esac",
 		"url=$(printf 'http://127.0.0.1:%s%s' \"$port\" " + shellSingleQuote(path) + ")",
 		curlCmd + " \"$url\"",
@@ -2758,7 +2750,6 @@ const (
 	rascalSlotGreen     = deployengine.SlotGreen
 	rascalSlotBluePort  = deployengine.SlotBluePort
 	rascalSlotGreenPort = deployengine.SlotGreenPort
-	rascalProxyPort     = deployengine.ProxyPort
 )
 
 func deployToExistingHost(cfg deployConfig) error {
