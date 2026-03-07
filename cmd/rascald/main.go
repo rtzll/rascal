@@ -628,23 +628,23 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
-		taskID, ok := s.activeTaskForPR(ev.Repository.FullName, ev.Issue.Number)
+		task, ok := s.activeTaskForPR(ev.Repository.FullName, ev.Issue.Number)
 		if !ok {
 			return nil
 		}
 		s.addIssueCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
 
 		_, err := s.createAndQueueRun(runRequest{
-			TaskID:      taskID,
+			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
 			Task:        fmt.Sprintf("Address PR #%d feedback", ev.Issue.Number),
 			Trigger:     "pr_comment",
-			IssueNumber: ev.Issue.Number,
+			IssueNumber: task.IssueNumber,
 			PRNumber:    ev.Issue.Number,
 			PRStatus:    state.PRStatusOpen,
 			Context:     strings.TrimSpace(ev.Comment.Body),
-			BaseBranch:  s.defaultBaseBranchForTask(taskID),
-			HeadBranch:  s.defaultHeadBranchForTask(taskID),
+			BaseBranch:  s.defaultBaseBranchForTask(task.ID),
+			HeadBranch:  s.defaultHeadBranchForTask(task.ID),
 			Debug:       boolPtr(true),
 			ResponseTarget: &runResponseTarget{
 				Repo:        ev.Repository.FullName,
@@ -668,7 +668,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if s.isBotActor(ev.Review.User.Login) || s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
-		taskID, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
+		task, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
 		if !ok {
 			return nil
 		}
@@ -679,16 +679,16 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			contextText = fmt.Sprintf("review state: %s", ev.Review.State)
 		}
 		_, err := s.createAndQueueRun(runRequest{
-			TaskID:      taskID,
+			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
 			Task:        fmt.Sprintf("Address PR #%d review feedback", ev.PullRequest.Number),
 			Trigger:     "pr_review",
-			IssueNumber: ev.PullRequest.Number,
+			IssueNumber: task.IssueNumber,
 			PRNumber:    ev.PullRequest.Number,
 			PRStatus:    state.PRStatusOpen,
 			Context:     contextText,
-			BaseBranch:  s.defaultBaseBranchForTask(taskID),
-			HeadBranch:  s.defaultHeadBranchForTask(taskID),
+			BaseBranch:  s.defaultBaseBranchForTask(task.ID),
+			HeadBranch:  s.defaultHeadBranchForTask(task.ID),
 			Debug:       boolPtr(true),
 			ResponseTarget: &runResponseTarget{
 				Repo:        ev.Repository.FullName,
@@ -718,7 +718,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
-		taskID, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
+		task, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
 		if !ok {
 			return nil
 		}
@@ -735,16 +735,16 @@ Inline comment location: %s`, contextText, location)
 			}
 		}
 		_, err := s.createAndQueueRun(runRequest{
-			TaskID:      taskID,
+			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
 			Task:        fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
 			Trigger:     "pr_review_comment",
-			IssueNumber: ev.PullRequest.Number,
+			IssueNumber: task.IssueNumber,
 			PRNumber:    ev.PullRequest.Number,
 			PRStatus:    state.PRStatusOpen,
 			Context:     contextText,
-			BaseBranch:  s.defaultBaseBranchForTask(taskID),
-			HeadBranch:  s.defaultHeadBranchForTask(taskID),
+			BaseBranch:  s.defaultBaseBranchForTask(task.ID),
+			HeadBranch:  s.defaultHeadBranchForTask(task.ID),
 			Debug:       boolPtr(true),
 			ResponseTarget: &runResponseTarget{
 				Repo:        ev.Repository.FullName,
@@ -1536,12 +1536,12 @@ func (s *server) taskForPR(repo string, prNumber int) (state.Task, bool) {
 	return s.store.FindTaskByPR(repo, prNumber)
 }
 
-func (s *server) activeTaskForPR(repo string, prNumber int) (string, bool) {
+func (s *server) activeTaskForPR(repo string, prNumber int) (state.Task, bool) {
 	task, ok := s.taskForPR(repo, prNumber)
 	if !ok || task.Status != state.TaskOpen {
-		return "", false
+		return state.Task{}, false
 	}
-	return task.ID, true
+	return task, true
 }
 
 func (s *server) defaultBaseBranchForTask(taskID string) string {

@@ -142,8 +142,9 @@ func BuildCompletionComment(in CompletionCommentInput) (string, error) {
 		return commentBody, nil
 	}
 
+	hasCommitMessage := strings.TrimSpace(string(in.CommitMessage)) != ""
 	headSHA := strings.TrimSpace(in.HeadSHA)
-	if headSHA == "" {
+	if headSHA == "" || !hasCommitMessage {
 		return fmt.Sprintf("@%s posted the run details below.\n\n%s", requestedBy, commentBody), nil
 	}
 

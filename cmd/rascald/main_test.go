@@ -694,13 +694,14 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 	defer waitForServerIdle(t, s)
 
 	const (
-		repo    = "owner/repo"
-		taskID  = "owner/repo#7"
-		prNum   = 7
-		baseRef = "develop"
-		headRef = "rascal/task-7"
+		repo     = "owner/repo"
+		taskID   = "owner/repo#7"
+		issueNum = 16
+		prNum    = 7
+		baseRef  = "develop"
+		headRef  = "rascal/task-7"
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, PRNumber: prNum}); err != nil {
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
 	seedRun, err := s.store.AddRun(state.CreateRunInput{
@@ -745,6 +746,9 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 	if got.PRNumber != prNum {
 		t.Fatalf("pr number = %d, want %d", got.PRNumber, prNum)
 	}
+	if got.IssueNumber != issueNum {
+		t.Fatalf("issue number = %d, want %d", got.IssueNumber, issueNum)
+	}
 	if got.BaseBranch != baseRef {
 		t.Fatalf("base branch = %q, want %q", got.BaseBranch, baseRef)
 	}
@@ -754,6 +758,13 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 	if got.Context != "please address review notes" {
 		t.Fatalf("context = %q, want trimmed comment body", got.Context)
 	}
+	task, ok := s.store.GetTask(taskID)
+	if !ok {
+		t.Fatalf("expected task %q", taskID)
+	}
+	if task.IssueNumber != issueNum {
+		t.Fatalf("task issue number = %d, want %d", task.IssueNumber, issueNum)
+	}
 }
 
 func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
@@ -761,13 +772,14 @@ func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	const (
-		repo    = "owner/repo"
-		taskID  = "owner/repo#17"
-		prNum   = 17
-		baseRef = "main"
-		headRef = "rascal/pr-17"
+		repo     = "owner/repo"
+		taskID   = "owner/repo#17"
+		issueNum = 23
+		prNum    = 17
+		baseRef  = "main"
+		headRef  = "rascal/pr-17"
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, PRNumber: prNum}); err != nil {
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
 	seedRun, err := s.store.AddRun(state.CreateRunInput{
@@ -811,6 +823,9 @@ func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
 	}
 	if got.PRNumber != prNum {
 		t.Fatalf("pr number = %d, want %d", got.PRNumber, prNum)
+	}
+	if got.IssueNumber != issueNum {
+		t.Fatalf("issue number = %d, want %d", got.IssueNumber, issueNum)
 	}
 	if got.BaseBranch != baseRef {
 		t.Fatalf("base branch = %q, want %q", got.BaseBranch, baseRef)
@@ -872,13 +887,14 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	const (
-		repo    = "owner/repo"
-		taskID  = "owner/repo#11"
-		prNum   = 11
-		baseRef = "main"
-		headRef = "rascal/pr-11"
+		repo     = "owner/repo"
+		taskID   = "owner/repo#11"
+		issueNum = 31
+		prNum    = 11
+		baseRef  = "main"
+		headRef  = "rascal/pr-11"
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, PRNumber: prNum}); err != nil {
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
 	seedRun, err := s.store.AddRun(state.CreateRunInput{
@@ -923,6 +939,9 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 	if got.PRNumber != prNum {
 		t.Fatalf("pr number = %d, want %d", got.PRNumber, prNum)
 	}
+	if got.IssueNumber != issueNum {
+		t.Fatalf("issue number = %d, want %d", got.IssueNumber, issueNum)
+	}
 	if got.BaseBranch != baseRef {
 		t.Fatalf("base branch = %q, want %q", got.BaseBranch, baseRef)
 	}
@@ -964,13 +983,14 @@ func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.
 	defer waitForServerIdle(t, s)
 
 	const (
-		repo    = "owner/repo"
-		taskID  = "owner/repo#12"
-		prNum   = 12
-		baseRef = "main"
-		headRef = "rascal/pr-12"
+		repo     = "owner/repo"
+		taskID   = "owner/repo#12"
+		issueNum = 44
+		prNum    = 12
+		baseRef  = "main"
+		headRef  = "rascal/pr-12"
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, PRNumber: prNum}); err != nil {
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
 	seedRun, err := s.store.AddRun(state.CreateRunInput{
@@ -1015,6 +1035,9 @@ func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.
 	if got.PRNumber != prNum {
 		t.Fatalf("pr number = %d, want %d", got.PRNumber, prNum)
 	}
+	if got.IssueNumber != issueNum {
+		t.Fatalf("issue number = %d, want %d", got.IssueNumber, issueNum)
+	}
 	if got.BaseBranch != baseRef {
 		t.Fatalf("base branch = %q, want %q", got.BaseBranch, baseRef)
 	}
@@ -1032,13 +1055,14 @@ func TestHandleWebhookPullRequestReviewCommentEditedBodyChangedQueuesRun(t *test
 	defer waitForServerIdle(t, s)
 
 	const (
-		repo    = "owner/repo"
-		taskID  = "owner/repo#13"
-		prNum   = 13
-		baseRef = "main"
-		headRef = "rascal/pr-13"
+		repo     = "owner/repo"
+		taskID   = "owner/repo#13"
+		issueNum = 45
+		prNum    = 13
+		baseRef  = "main"
+		headRef  = "rascal/pr-13"
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, PRNumber: prNum}); err != nil {
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
 	seedRun, err := s.store.AddRun(state.CreateRunInput{
@@ -1079,6 +1103,9 @@ func TestHandleWebhookPullRequestReviewCommentEditedBodyChangedQueuesRun(t *test
 
 	if got.Context != "Refined inline feedback\n\nInline comment location: cmd/rascald/main.go:600" {
 		t.Fatalf("context = %q, want edited inline comment body with location", got.Context)
+	}
+	if got.IssueNumber != issueNum {
+		t.Fatalf("issue number = %d, want %d", got.IssueNumber, issueNum)
 	}
 }
 
@@ -1678,15 +1705,16 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	s.cfg.GitHubToken = "token"
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_comment_completion",
-		TaskID:     "owner/repo#77",
-		Repo:       "owner/repo",
-		Task:       "Address PR #77 feedback",
-		BaseBranch: "main",
-		HeadBranch: "rascal/pr-77",
-		Trigger:    "pr_comment",
-		RunDir:     t.TempDir(),
-		PRNumber:   77,
+		ID:          "run_comment_completion",
+		TaskID:      "owner/repo#77",
+		Repo:        "owner/repo",
+		Task:        "Address PR #77 feedback",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/pr-77",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		IssueNumber: 16,
+		PRNumber:    77,
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -1719,6 +1747,9 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	if !strings.Contains(comment.body, "@alice implemented in commit [`0123456789ab`]") {
 		t.Fatalf("expected requester mention with short sha, got body:\n%s", comment.body)
 	}
+	if !strings.Contains(comment.body, "Closes #16") {
+		t.Fatalf("expected original issue reference, got body:\n%s", comment.body)
+	}
 	if !strings.Contains(comment.body, runCompletionCommentBodyMarker) {
 		t.Fatalf("expected completion marker in comment body, got body:\n%s", comment.body)
 	}
@@ -1730,6 +1761,69 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	}
 	if !strings.Contains(comment.body, "Rascal run `run_comment_completion` completed in ") || !strings.Contains(comment.body, "123K tokens") {
 		t.Fatalf("expected runtime and token summary, got:\n%s", comment.body)
+	}
+}
+
+func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *testing.T) {
+	launcher := &fakeLauncher{
+		res: runner.Result{
+			PRNumber: 52,
+			PRURL:    "https://example.com/pr/52",
+			HeadSHA:  "0109106ceba61adf1735bc980f83c15506b8da7a",
+		},
+	}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_comment_no_commit",
+		TaskID:      "owner/repo#16",
+		Repo:        "owner/repo",
+		Task:        "Address PR #52 feedback",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/pr-52",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		IssueNumber: 16,
+		PRNumber:    52,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 52,
+		RequestedBy: "alice",
+		Trigger:     "pr_comment",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(`{"type":"message","message":{"content":[{"type":"text","text":"Request failed"}]}}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write goose log: %v", err)
+	}
+
+	s.executeRun(run.ID)
+
+	comments := fakeGH.postedComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted comment, got %d", len(comments))
+	}
+	comment := comments[0]
+	if comment.issueNumber != 52 {
+		t.Fatalf("comment target issue number = %d, want 52", comment.issueNumber)
+	}
+	if strings.Contains(comment.body, "implemented in commit") {
+		t.Fatalf("did not expect commit claim without commit message, got body:\n%s", comment.body)
+	}
+	if !strings.Contains(comment.body, "@alice posted the run details below.") {
+		t.Fatalf("expected neutral requester summary, got body:\n%s", comment.body)
+	}
+	if !strings.Contains(comment.body, "Closes #16") {
+		t.Fatalf("expected original issue reference, got body:\n%s", comment.body)
 	}
 }
 
