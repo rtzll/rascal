@@ -440,7 +440,7 @@ func (s *Store) MarkRunCompletionCommentPosted(runID string) error {
 		return fmt.Errorf("run id is required")
 	}
 	rows, err := s.q.MarkRunCompletionCommentPosted(context.Background(), sqlitegen.MarkRunCompletionCommentPostedParams{
-		PostedAt: time.Now().UTC().UnixNano(),
+		PostedAt: sql.NullInt64{Int64: time.Now().UTC().UnixNano(), Valid: true},
 		ID:       runID,
 	})
 	if err != nil {

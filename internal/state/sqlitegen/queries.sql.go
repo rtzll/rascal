@@ -352,6 +352,31 @@ func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQu
 	return i, err
 }
 
+const claimRunCompletionComment = `-- name: ClaimRunCompletionComment :execrows
+UPDATE runs
+SET
+  completion_comment_state = 'posting',
+  completion_comment_claimed_by = ?1,
+  completion_comment_claimed_at = ?2,
+  completion_comment_error = ''
+WHERE id = ?3
+  AND completion_comment_state IN ('pending', 'failed')
+`
+
+type ClaimRunCompletionCommentParams struct {
+	ClaimedBy string `json:"claimed_by"`
+	ClaimedAt int64  `json:"claimed_at"`
+	ID        string `json:"id"`
+}
+
+func (q *Queries) ClaimRunCompletionComment(ctx context.Context, arg ClaimRunCompletionCommentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, claimRunCompletionComment, arg.ClaimedBy, arg.ClaimedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const claimRunStart = `-- name: ClaimRunStart :execrows
 UPDATE runs
 SET status = 'running', error = '', updated_at = ?, started_at = ?
@@ -966,6 +991,49 @@ func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]Run, error) {
 	return items, nil
 }
 
+const markRunCompletionCommentFailed = `-- name: MarkRunCompletionCommentFailed :execrows
+UPDATE runs
+SET
+  completion_comment_state = 'failed',
+  completion_comment_error = ?1
+WHERE id = ?2
+`
+
+type MarkRunCompletionCommentFailedParams struct {
+	CompletionCommentError string `json:"completion_comment_error"`
+	ID                     string `json:"id"`
+}
+
+func (q *Queries) MarkRunCompletionCommentFailed(ctx context.Context, arg MarkRunCompletionCommentFailedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markRunCompletionCommentFailed, arg.CompletionCommentError, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const markRunCompletionCommentPosted = `-- name: MarkRunCompletionCommentPosted :execrows
+UPDATE runs
+SET
+  completion_comment_state = 'posted',
+  completion_comment_posted_at = ?1,
+  completion_comment_error = ''
+WHERE id = ?2
+`
+
+type MarkRunCompletionCommentPostedParams struct {
+	PostedAt sql.NullInt64 `json:"posted_at"`
+	ID       string        `json:"id"`
+}
+
+func (q *Queries) MarkRunCompletionCommentPosted(ctx context.Context, arg MarkRunCompletionCommentPostedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markRunCompletionCommentPosted, arg.PostedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const markTaskCompleted = `-- name: MarkTaskCompleted :execrows
 UPDATE tasks
 SET status = 'completed', updated_at = ?
@@ -1212,74 +1280,6 @@ func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (int64, er
 		arg.CompletedAt,
 		arg.ID,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const claimRunCompletionComment = `-- name: ClaimRunCompletionComment :execrows
-UPDATE runs
-SET
-  completion_comment_state = 'posting',
-  completion_comment_claimed_by = ?,
-  completion_comment_claimed_at = ?,
-  completion_comment_error = ''
-WHERE id = ?
-  AND completion_comment_state IN ('pending', 'failed')
-`
-
-type ClaimRunCompletionCommentParams struct {
-	ClaimedBy string `json:"claimed_by"`
-	ClaimedAt int64  `json:"claimed_at"`
-	ID        string `json:"id"`
-}
-
-func (q *Queries) ClaimRunCompletionComment(ctx context.Context, arg ClaimRunCompletionCommentParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, claimRunCompletionComment, arg.ClaimedBy, arg.ClaimedAt, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const markRunCompletionCommentPosted = `-- name: MarkRunCompletionCommentPosted :execrows
-UPDATE runs
-SET
-  completion_comment_state = 'posted',
-  completion_comment_posted_at = ?,
-  completion_comment_error = ''
-WHERE id = ?
-`
-
-type MarkRunCompletionCommentPostedParams struct {
-	PostedAt int64  `json:"posted_at"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) MarkRunCompletionCommentPosted(ctx context.Context, arg MarkRunCompletionCommentPostedParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, markRunCompletionCommentPosted, arg.PostedAt, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const markRunCompletionCommentFailed = `-- name: MarkRunCompletionCommentFailed :execrows
-UPDATE runs
-SET
-  completion_comment_state = 'failed',
-  completion_comment_error = ?
-WHERE id = ?
-`
-
-type MarkRunCompletionCommentFailedParams struct {
-	CompletionCommentError string `json:"completion_comment_error"`
-	ID                     string `json:"id"`
-}
-
-func (q *Queries) MarkRunCompletionCommentFailed(ctx context.Context, arg MarkRunCompletionCommentFailedParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, markRunCompletionCommentFailed, arg.CompletionCommentError, arg.ID)
 	if err != nil {
 		return 0, err
 	}

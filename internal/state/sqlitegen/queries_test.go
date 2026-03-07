@@ -335,7 +335,7 @@ func TestQueriesCoverage(t *testing.T) {
 	}
 
 	if rows, err := q.MarkRunCompletionCommentPosted(ctx, MarkRunCompletionCommentPostedParams{
-		PostedAt: later + 31,
+		PostedAt: sql.NullInt64{Int64: later + 31, Valid: true},
 		ID:       run2.ID,
 	}); err != nil {
 		t.Fatalf("MarkRunCompletionCommentPosted: %v", err)
