@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -28,36 +27,40 @@ const (
 	runtimeGID = 10001
 )
 
-func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
+func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (ExecutionHandle, error) {
 	if l.Image == "" {
-		return Result{}, fmt.Errorf("docker image is required")
+		return ExecutionHandle{}, fmt.Errorf("docker image is required")
 	}
 	if err := os.MkdirAll(spec.RunDir, 0o755); err != nil {
-		return Result{}, fmt.Errorf("create run dir: %w", err)
+		return ExecutionHandle{}, fmt.Errorf("create run dir: %w", err)
 	}
 	workspaceDir := filepath.Join(spec.RunDir, "workspace")
 	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
-		return Result{}, fmt.Errorf("create workspace dir: %w", err)
+		return ExecutionHandle{}, fmt.Errorf("create workspace dir: %w", err)
 	}
 	sessionDir := strings.TrimSpace(spec.GooseSessionTaskDir)
 	if spec.GooseSessionResume && sessionDir != "" {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-			return Result{}, fmt.Errorf("create goose session dir: %w", err)
+			return ExecutionHandle{}, fmt.Errorf("create goose session dir: %w", err)
 		}
 	}
 	if err := prepareMountAccess(spec.RunDir, workspaceDir, sessionDir); err != nil {
-		return Result{}, err
+		return ExecutionHandle{}, err
 	}
 
 	logPath := filepath.Join(spec.RunDir, "runner.log")
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return Result{}, fmt.Errorf("open runner log: %w", err)
+		return ExecutionHandle{}, fmt.Errorf("open runner log: %w", err)
 	}
 	defer logFile.Close()
 
-	_, _ = fmt.Fprintf(logFile, "[%s] starting docker runner image=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), l.Image, spec.RunID)
+	_, _ = fmt.Fprintf(logFile, "[%s] starting detached docker runner image=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), l.Image, spec.RunID)
 
+	goosePathRoot := "/rascal-meta/goose"
+	if spec.GooseSessionResume && sessionDir != "" {
+		goosePathRoot = "/rascal-goose-session"
+	}
 	envPairs := map[string]string{
 		"RASCAL_RUN_ID":                spec.RunID,
 		"RASCAL_TASK_ID":               spec.TaskID,
@@ -84,30 +87,30 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 		"GOOSE_CONTEXT_STRATEGY":       "summarize",
 		"GH_PROMPT_DISABLED":           "1",
 		"GIT_TERMINAL_PROMPT":          "0",
+		"GOOSE_PATH_ROOT":              goosePathRoot,
 	}
 	if strings.TrimSpace(l.GitHubToken) != "" {
 		envPairs["GH_TOKEN"] = l.GitHubToken
 	}
 
-	goosePathRoot := "/rascal-meta/goose"
-	if spec.GooseSessionResume && sessionDir != "" {
-		goosePathRoot = "/rascal-goose-session"
-	}
-	envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
-
 	containerName := sanitizeContainerName("rascal-" + spec.RunID)
-	args := []string{"run", "--rm", "--name", containerName}
+	args := []string{
+		"run",
+		"-d",
+		"--name", containerName,
+		"--label", fmt.Sprintf("rascal.run_id=%s", spec.RunID),
+		"--label", fmt.Sprintf("rascal.task_id=%s", spec.TaskID),
+		"--label", fmt.Sprintf("rascal.repo=%s", spec.Repo),
+	}
 	envKeys := make([]string, 0, len(envPairs))
 	for k := range envPairs {
 		envKeys = append(envKeys, k)
 	}
 	sort.Strings(envKeys)
 	for _, k := range envKeys {
-		v := envPairs[k]
-		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, envPairs[k]))
 	}
 	args = append(args,
-		// Harden container execution against privilege escalation.
 		"--security-opt", "no-new-privileges:true",
 		"-v", fmt.Sprintf("%s:/rascal-meta", spec.RunDir),
 		"-v", fmt.Sprintf("%s:/work", workspaceDir),
@@ -127,76 +130,116 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-
-	err = cmd.Run()
-	if ctx.Err() != nil {
-		// Context cancellation can terminate the local docker client before the
-		// remote container is fully cleaned up, so force cleanup deterministically.
-		forceStopContainer(containerName, logFile)
-		err = context.Canceled
-	}
-	exitCode := 0
+	out, err := cmd.Output()
 	if err != nil {
-		if exitErr := new(exec.ExitError); errors.As(err, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = -1
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return ExecutionHandle{}, context.Canceled
 		}
+		return ExecutionHandle{}, fmt.Errorf("start detached docker runner: %w", unwrapSyscallError(err))
 	}
 
-	metaPath := filepath.Join(spec.RunDir, "meta.json")
-	meta, metaErr := ReadMeta(metaPath)
-	if metaErr != nil {
-		meta = Meta{
-			RunID:      spec.RunID,
-			TaskID:     spec.TaskID,
-			Repo:       spec.Repo,
-			BaseBranch: spec.BaseBranch,
-			HeadBranch: spec.HeadBranch,
-			ExitCode:   exitCode,
-		}
-		if err != nil {
-			meta.Error = err.Error()
-		}
-		_ = WriteMeta(metaPath, meta)
+	containerID := strings.TrimSpace(string(out))
+	if containerID == "" {
+		return ExecutionHandle{}, fmt.Errorf("docker run -d returned empty container id")
 	}
-
-	res := Result{
-		PRNumber: meta.PRNumber,
-		PRURL:    meta.PRURL,
-		HeadSHA:  meta.HeadSHA,
-		ExitCode: meta.ExitCode,
-	}
-	if res.ExitCode == 0 {
-		res.ExitCode = exitCode
-	}
-
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return res, context.Canceled
-		}
-		return res, fmt.Errorf("docker runner failed (exit=%d): %w", exitCode, unwrapSyscallError(err))
-	}
-	if exitCode != 0 {
-		return res, fmt.Errorf("docker runner failed with exit code %d", exitCode)
-	}
-	return res, nil
+	_, _ = fmt.Fprintf(logFile, "[%s] detached container started name=%s id=%s\n", time.Now().UTC().Format(time.RFC3339), containerName, containerID)
+	return ExecutionHandle{
+		Backend: "docker",
+		ID:      containerID,
+		Name:    containerName,
+	}, nil
 }
 
-func forceStopContainer(containerName string, logOut io.Writer) {
-	if strings.TrimSpace(containerName) == "" {
-		return
+func (l DockerLauncher) Inspect(ctx context.Context, handle ExecutionHandle) (ExecutionState, error) {
+	target := dockerExecutionTarget(handle)
+	if target == "" {
+		return ExecutionState{}, fmt.Errorf("execution target is required")
 	}
-	stopCmd := exec.Command("docker", "stop", "--time", "5", containerName)
-	stopCmd.Stdout = logOut
-	stopCmd.Stderr = logOut
-	_ = stopCmd.Run()
-	rmCmd := exec.Command("docker", "rm", "-f", containerName)
-	rmCmd.Stdout = logOut
-	rmCmd.Stderr = logOut
-	_ = rmCmd.Run()
+	cmd := exec.CommandContext(ctx, "docker", "inspect", "--type", "container", "--format", "{{.State.Running}} {{.State.ExitCode}}", target)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if dockerNotFoundOutput(err, out) {
+			return ExecutionState{}, ErrExecutionNotFound
+		}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return ExecutionState{}, context.Canceled
+		}
+		return ExecutionState{}, fmt.Errorf("inspect docker container %s: %w", target, unwrapSyscallError(err))
+	}
+	parts := strings.Fields(strings.TrimSpace(string(out)))
+	if len(parts) < 2 {
+		return ExecutionState{}, fmt.Errorf("unexpected docker inspect output for %s: %q", target, strings.TrimSpace(string(out)))
+	}
+	running := parts[0] == "true"
+	if running {
+		return ExecutionState{Running: true}, nil
+	}
+	exitCode, convErr := strconv.Atoi(parts[1])
+	if convErr != nil {
+		return ExecutionState{}, fmt.Errorf("parse docker exit code %q: %w", parts[1], convErr)
+	}
+	return ExecutionState{Running: false, ExitCode: &exitCode}, nil
+}
+
+func (l DockerLauncher) Stop(ctx context.Context, handle ExecutionHandle, timeout time.Duration) error {
+	target := dockerExecutionTarget(handle)
+	if target == "" {
+		return fmt.Errorf("execution target is required")
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	stopSeconds := int(timeout.Round(time.Second) / time.Second)
+	if stopSeconds < 1 {
+		stopSeconds = 1
+	}
+	cmd := exec.CommandContext(ctx, "docker", "stop", "--time", strconv.Itoa(stopSeconds), target)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if dockerNotFoundOutput(err, out) {
+			return ErrExecutionNotFound
+		}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return context.Canceled
+		}
+		return fmt.Errorf("stop docker container %s: %w", target, unwrapSyscallError(err))
+	}
+	return nil
+}
+
+func (l DockerLauncher) Remove(ctx context.Context, handle ExecutionHandle) error {
+	target := dockerExecutionTarget(handle)
+	if target == "" {
+		return fmt.Errorf("execution target is required")
+	}
+	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", target)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if dockerNotFoundOutput(err, out) {
+			return nil
+		}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return context.Canceled
+		}
+		return fmt.Errorf("remove docker container %s: %w", target, unwrapSyscallError(err))
+	}
+	return nil
+}
+
+func dockerExecutionTarget(handle ExecutionHandle) string {
+	if strings.TrimSpace(handle.ID) != "" {
+		return strings.TrimSpace(handle.ID)
+	}
+	return strings.TrimSpace(handle.Name)
+}
+
+func dockerNotFoundOutput(err error, output []byte) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(string(output)))
+	return strings.Contains(text, "no such object") || strings.Contains(text, "no such container")
 }
 
 func prepareMountAccess(runDir, workspaceDir, sessionDir string) error {

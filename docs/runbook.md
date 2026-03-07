@@ -112,6 +112,12 @@ If no progress across runs, inspect server:
 ./bin/rascal logs rascald --host "$HOST" --follow
 ```
 
+Check detached execution state on host:
+
+```bash
+ssh root@"$HOST" "docker ps -a --format '{{.Names}} {{.Status}}' | rg '^rascal-' || true"
+```
+
 ## 4) Cancel Does Not Take Effect Quickly
 
 Request cancel:
@@ -126,6 +132,9 @@ Verify container stop on remote host:
 ```bash
 ssh root@"$HOST" "docker ps --format '{{.Names}}' | rg '^rascal-' || true"
 ```
+
+If a deploy recently rotated slots, remember execution is detached: the new
+active slot should adopt supervision and continue cancellation/finalization.
 
 If run remains active unexpectedly, capture:
 

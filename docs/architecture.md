@@ -13,7 +13,8 @@ Rascal has three runtime parts.
 
 - Receives API requests and GitHub webhooks.
 - Persists run/task state.
-- Schedules and executes runs serially per task.
+- Schedules runs serially per task.
+- Supervises detached runner executions that can be adopted by another slot.
 
 3. Runner container (`rascal-runner`)
 
@@ -22,14 +23,17 @@ Rascal has three runtime parts.
 - Commits changes, pushes branch, opens/updates PR.
 - Runtime logic lives in Go (`cmd/rascal-runner`).
 - `runner/entrypoint.sh` is a thin shim that only executes `/usr/local/bin/rascal-runner`.
+- Writes canonical logs/artifacts into mounted `/rascal-meta` (`runner.log`, `goose.ndjson`, `meta.json`).
 
 ## Flow
 
 1. User triggers run via CLI or GitHub event.
 2. `rascald` creates run + task context and queues execution.
-3. Runner executes task and writes artifacts/logs.
-4. Result is persisted (status, PR URL/number, head SHA).
-5. User monitors via `ps`, `logs`, and `open`.
+3. `rascald` starts a detached runner container and persists execution handle metadata.
+4. Active slot supervises by inspecting/stopping/removing that detached execution.
+5. On slot rotation, new slot adopts supervision from persisted execution handle state.
+6. Result is finalized from run artifacts (`meta.json`, logs) and persisted.
+7. User monitors via `ps`, `logs`, and `open`.
 
 ## State
 
@@ -45,6 +49,13 @@ Each run stores:
 
 - metadata (`run_id`, task, repo, branches, trigger)
 - artifacts (`context.json`, instructions, logs, `meta.json`)
+
+Detached execution metadata is stored separately in `run_executions`:
+
+- backend (`docker`)
+- container name/id
+- observed execution status and exit code
+- observation timestamps for adoption/cleanup
 
 ## Runner Env Contract
 

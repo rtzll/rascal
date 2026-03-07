@@ -57,7 +57,6 @@ type server struct {
 
 	mu            sync.Mutex
 	runCancels    map[string]context.CancelFunc
-	runCancelNote map[string]string
 	scheduleMu    sync.Mutex
 	maxConcurrent int
 	draining      bool
@@ -128,7 +127,6 @@ func main() {
 		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
 		runCancels:    make(map[string]context.CancelFunc),
-		runCancelNote: make(map[string]string),
 		maxConcurrent: defaultMaxConcurrent(),
 		instanceID:    fmt.Sprintf("%s-%d-%d", strings.TrimSpace(cfg.Slot), os.Getpid(), time.Now().UTC().UnixNano()),
 	}
@@ -179,10 +177,9 @@ func main() {
 		log.Printf("http shutdown warning: %v", err)
 	}
 
-	if err := s.waitForNoActiveRuns(5 * time.Minute); err != nil {
-		log.Printf("active runs did not finish within drain timeout; canceling remaining runs")
-		s.cancelActiveRuns("orchestrator shutdown drain timeout")
-		_ = s.waitForNoActiveRuns(30 * time.Second)
+	s.stopRunSupervisors()
+	if err := s.waitForNoActiveRuns(10 * time.Second); err != nil {
+		log.Printf("shutdown exiting with active detached runs still executing: %v", err)
 	}
 }
 
@@ -204,6 +201,10 @@ func (s *server) recoverRunningRuns() {
 	now := time.Now().UTC()
 	runs := s.store.ListRunningRuns()
 	for _, run := range runs {
+		if exec, ok := s.store.GetRunExecution(run.ID); ok {
+			s.recoverDetachedRun(run, exec)
+			continue
+		}
 		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
 			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
 			_ = s.store.ClearRunCancel(run.ID)
@@ -231,6 +232,54 @@ func (s *server) recoverRunningRuns() {
 			log.Printf("recover run %s without lease: %v", run.ID, err)
 		}
 	}
+}
+
+func (s *server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
+	handle := runExecutionHandle(execRec)
+	inspectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	execState, err := s.launcher.Inspect(inspectCtx, handle)
+	switch {
+	case errors.Is(err, runner.ErrExecutionNotFound):
+		s.failRunForMissingExecution(run, "detached container missing during adoption")
+		return
+	case err != nil:
+		log.Printf("recover run %s inspect failed, adopting with retry loop: %v", run.ID, err)
+		if err := s.store.UpsertRunLease(run.ID, s.instanceID, runLeaseTTL); err != nil {
+			log.Printf("recover run %s claim run lease failed: %v", run.ID, err)
+			return
+		}
+		go s.superviseDetachedRunLoop(run.ID, execRec)
+		return
+	}
+
+	if execState.Running {
+		if _, err := s.store.UpdateRunExecutionState(run.ID, "running", 0, time.Now().UTC()); err != nil {
+			log.Printf("recover run %s update execution running state failed: %v", run.ID, err)
+		}
+		if err := s.store.UpsertRunLease(run.ID, s.instanceID, runLeaseTTL); err != nil {
+			log.Printf("recover run %s claim run lease failed: %v", run.ID, err)
+			return
+		}
+		go s.superviseDetachedRunLoop(run.ID, execRec)
+		return
+	}
+
+	exitCode := 0
+	if execState.ExitCode != nil {
+		exitCode = *execState.ExitCode
+	}
+	if _, err := s.store.UpdateRunExecutionState(run.ID, "exited", exitCode, time.Now().UTC()); err != nil {
+		log.Printf("recover run %s update execution exited state failed: %v", run.ID, err)
+	}
+	s.finalizeDetachedRun(run.ID, execRec, exitCode)
+}
+
+func (s *server) failRunForMissingExecution(run state.Run, reason string) {
+	updated := s.setRunStatusWithFallback(run, state.StatusFailed, reason)
+	_ = s.store.DeleteRunExecution(run.ID)
+	_ = s.store.DeleteRunLease(run.ID)
+	s.finishRun(updated)
 }
 
 func (s *server) withAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -853,13 +902,6 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 		return
 	}
 
-	s.mu.Lock()
-	if cancel, ok := s.runCancels[runID]; ok {
-		s.runCancelNote[runID] = "canceled by user"
-		cancel()
-	}
-	s.mu.Unlock()
-
 	if run.Status == state.StatusQueued {
 		updated, err := s.store.SetRunStatus(runID, state.StatusCanceled, "canceled by user")
 		if err != nil {
@@ -874,15 +916,8 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 		return
 	}
 
-	updated, err := s.store.SetRunStatus(runID, state.StatusCanceled, "canceled by user")
-	if err != nil {
-		writeJSON(w, http.StatusAccepted, map[string]any{"run_id": runID, "cancel_requested": true})
-		return
-	}
-	if !s.isDraining() {
-		s.scheduleRuns(run.TaskID)
-	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"run": updated, "cancel_requested": true})
+	s.stopRunExecutionBestEffort(runID, "user cancel requested")
+	writeJSON(w, http.StatusAccepted, map[string]any{"run_id": runID, "cancel_requested": true})
 }
 
 func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID string) {
@@ -1187,13 +1222,11 @@ func (s *server) executeRun(runID string) {
 		return
 	}
 	defer func() {
-		if err := s.store.DeleteRunLease(run.ID); err != nil {
+		if err := s.store.DeleteRunLeaseForOwner(run.ID, s.instanceID); err != nil {
 			log.Printf("failed to delete run lease for %s: %v", run.ID, err)
 		}
-		if !s.isDraining() {
-			s.scheduleRuns(run.TaskID)
-		}
 	}()
+
 	if reason, ok := s.pendingRunCancelReason(runID); ok {
 		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, reason)
 		s.finishRun(updated)
@@ -1244,89 +1277,234 @@ func (s *server) executeRun(runID string) {
 		GooseSessionName:    sessionName,
 	}
 	log.Printf("run %s goose session mode=%s resume=%t key=%s name=%s", run.ID, sessionMode, sessionResume, sessionTaskKey, sessionName)
+	execRec, hasExec := s.store.GetRunExecution(run.ID)
+	if !hasExec {
+		// Persist a deterministic handle before launch so the next slot can
+		// adopt the container even if this process exits mid-startup.
+		pendingHandle := runner.ExecutionHandleForRun(run.ID)
+		if _, err := s.store.UpsertRunExecution(state.RunExecution{
+			RunID:         run.ID,
+			Backend:       pendingHandle.Backend,
+			ContainerName: pendingHandle.Name,
+			ContainerID:   pendingHandle.Name,
+			Status:        "created",
+			ExitCode:      0,
+		}); err != nil {
+			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("persist run execution: %v", err))
+			s.finishRun(updated)
+			return
+		}
+
+		handle, err := s.startDetachedWithRetry(context.Background(), spec)
+		if err != nil {
+			_ = s.store.DeleteRunExecution(run.ID)
+			updated := s.setRunStatusWithFallback(run, state.StatusFailed, err.Error())
+			s.finishRun(updated)
+			return
+		}
+		execRec, err = s.store.UpsertRunExecution(state.RunExecution{
+			RunID:         run.ID,
+			Backend:       strings.TrimSpace(handle.Backend),
+			ContainerName: strings.TrimSpace(handle.Name),
+			ContainerID:   strings.TrimSpace(handle.ID),
+			Status:        "running",
+			ExitCode:      0,
+		})
+		if err != nil {
+			s.stopRunExecutionBestEffort(run.ID, "failed to persist run execution")
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
+			_ = s.launcher.Remove(stopCtx, handle)
+			stopCancel()
+			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("persist run execution: %v", err))
+			s.finishRun(updated)
+			return
+		}
+	}
+
+	s.superviseDetachedRunLoop(run.ID, execRec)
+}
+
+func (s *server) superviseDetachedRunLoop(runID string, execRec state.RunExecution) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	s.mu.Lock()
+	if _, exists := s.runCancels[runID]; exists {
+		s.mu.Unlock()
+		cancel()
+		return
+	}
 	s.runCancels[runID] = cancel
 	s.mu.Unlock()
-
-	leaseDone := make(chan struct{})
-	go func() {
-		defer close(leaseDone)
-		s.superviseRun(ctx, run.ID, cancel)
+	defer func() {
+		s.mu.Lock()
+		delete(s.runCancels, runID)
+		s.mu.Unlock()
+		if err := s.store.DeleteRunLeaseForOwner(runID, s.instanceID); err != nil {
+			log.Printf("failed to delete run lease for %s: %v", runID, err)
+		}
 	}()
 
-	result, err := s.runLauncherWithRetry(ctx, spec)
-	cancel()
-	<-leaseDone
+	s.superviseRun(ctx, runID, execRec)
+}
 
-	s.mu.Lock()
-	delete(s.runCancels, runID)
-	reason := strings.TrimSpace(s.runCancelNote[runID])
-	delete(s.runCancelNote, runID)
-	s.mu.Unlock()
-
-	if err != nil {
-		status := state.StatusFailed
-		errText := err.Error()
-		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
-			status = state.StatusCanceled
-			if reason == "" {
-				reason = "canceled"
+func (s *server) superviseRun(ctx context.Context, runID string, execRec state.RunExecution) {
+	interval := runSupervisorTick
+	if interval <= 0 {
+		interval = time.Second
+	}
+	renewEvery := runLeaseTTL / 3
+	if renewEvery <= 0 {
+		renewEvery = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	nextRenewAt := time.Now().UTC().Add(renewEvery)
+	stopRequested := false
+	handle := runExecutionHandle(execRec)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if time.Now().UTC().Before(nextRenewAt) {
+				// Continue with inspect/cancel handling on every tick.
+			} else {
+				ok, err := s.store.RenewRunLease(runID, s.instanceID, runLeaseTTL)
+				if err != nil {
+					log.Printf("run %s lease heartbeat failed: %v", runID, err)
+					nextRenewAt = time.Now().UTC().Add(renewEvery)
+					continue
+				}
+				if !ok {
+					log.Printf("run %s lease ownership lost; stopping local supervision", runID)
+					return
+				}
+				nextRenewAt = time.Now().UTC().Add(renewEvery)
 			}
-			errText = reason
+
+			now := time.Now().UTC()
+			execState, err := s.launcher.Inspect(ctx, handle)
+			if errors.Is(err, runner.ErrExecutionNotFound) {
+				run, ok := s.store.GetRun(runID)
+				if ok {
+					s.failRunForMissingExecution(run, "detached container missing during adoption")
+				}
+				return
+			}
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Printf("run %s inspect failed: %v", runID, err)
+				}
+				continue
+			}
+
+			if execState.Running {
+				execStatus := "running"
+				if reason, ok := s.pendingRunCancelReason(runID); ok {
+					execStatus = "stopping"
+					if !stopRequested {
+						stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
+						stopErr := s.launcher.Stop(stopCtx, handle, 10*time.Second)
+						stopCancel()
+						if stopErr != nil && !errors.Is(stopErr, runner.ErrExecutionNotFound) && !errors.Is(stopErr, context.Canceled) {
+							log.Printf("run %s stop failed: %v", runID, stopErr)
+						}
+						log.Printf("run %s cancel requested: %s", runID, reason)
+						stopRequested = true
+					}
+				}
+				if _, err := s.store.UpdateRunExecutionState(runID, execStatus, 0, now); err != nil {
+					log.Printf("run %s update execution state %q failed: %v", runID, execStatus, err)
+				}
+				continue
+			}
+
+			exitCode := 0
+			if execState.ExitCode != nil {
+				exitCode = *execState.ExitCode
+			}
+			if _, err := s.store.UpdateRunExecutionState(runID, "exited", exitCode, now); err != nil {
+				log.Printf("run %s update execution exited state failed: %v", runID, err)
+			}
+			s.finalizeDetachedRun(runID, execRec, exitCode)
+			return
 		}
-		updated, ok := s.store.GetRun(run.ID)
-		if !ok || updated.Status != state.StatusCanceled {
-			updated = s.setRunStatusWithFallback(run, status, errText)
-		}
-		switch updated.Status {
-		case state.StatusFailed:
-			s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionConfused)
-		case state.StatusCanceled:
-			s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionMinusOne)
-		}
-		s.finishRun(updated)
+	}
+}
+
+func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, observedExitCode int) {
+	run, ok := s.store.GetRun(runID)
+	if !ok {
+		s.cleanupDetachedExecution(runID, execRec)
 		return
 	}
 
-	now := time.Now().UTC()
+	if state.IsFinalRunStatus(run.Status) {
+		s.cleanupDetachedExecution(runID, execRec)
+		s.finishRun(run)
+		return
+	}
+
+	metaPath := filepath.Join(run.RunDir, "meta.json")
+	meta, metaErr := runner.ReadMeta(metaPath)
+	if metaErr != nil {
+		meta = runner.Meta{
+			RunID:      run.ID,
+			TaskID:     run.TaskID,
+			Repo:       run.Repo,
+			BaseBranch: run.BaseBranch,
+			HeadBranch: run.HeadBranch,
+			ExitCode:   observedExitCode,
+		}
+		if observedExitCode != 0 {
+			meta.Error = fmt.Sprintf("docker runner failed with exit code %d", observedExitCode)
+		}
+		_ = runner.WriteMeta(metaPath, meta)
+	}
+	if meta.ExitCode == 0 && observedExitCode != 0 {
+		meta.ExitCode = observedExitCode
+	}
+
 	status := state.StatusSucceeded
 	prStatus := state.PRStatusNone
-	if result.PRNumber > 0 || strings.TrimSpace(result.PRURL) != "" || run.PRNumber > 0 || strings.TrimSpace(run.PRURL) != "" {
+	errText := ""
+	if meta.ExitCode != 0 || strings.TrimSpace(meta.Error) != "" {
+		status = state.StatusFailed
+		if strings.TrimSpace(meta.Error) != "" {
+			errText = strings.TrimSpace(meta.Error)
+		} else {
+			errText = fmt.Sprintf("docker runner failed with exit code %d", meta.ExitCode)
+		}
+	} else if meta.PRNumber > 0 || strings.TrimSpace(meta.PRURL) != "" || run.PRNumber > 0 || strings.TrimSpace(run.PRURL) != "" {
 		status = state.StatusReview
 		prStatus = state.PRStatusOpen
 	}
-	var errRunCanceled = errors.New("run already canceled")
-	updated, uErr := s.store.UpdateRun(run.ID, func(r *state.Run) error {
-		if r.Status == state.StatusCanceled {
-			return errRunCanceled
-		}
+	if reason, canceled := s.pendingRunCancelReason(runID); canceled && status == state.StatusFailed {
+		// Cancellation should explain a stopped execution, but it should not
+		// overwrite a successful terminal result that raced with the request.
+		status = state.StatusCanceled
+		errText = reason
+	}
+
+	now := time.Now().UTC()
+	updated, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
 		r.Status = status
-		r.Error = ""
-		r.PRNumber = maxInt(r.PRNumber, result.PRNumber)
-		if strings.TrimSpace(result.PRURL) != "" {
-			r.PRURL = strings.TrimSpace(result.PRURL)
+		r.Error = errText
+		r.PRNumber = maxInt(r.PRNumber, meta.PRNumber)
+		if strings.TrimSpace(meta.PRURL) != "" {
+			r.PRURL = strings.TrimSpace(meta.PRURL)
 		}
-		if strings.TrimSpace(result.HeadSHA) != "" {
-			r.HeadSHA = strings.TrimSpace(result.HeadSHA)
+		if strings.TrimSpace(meta.HeadSHA) != "" {
+			r.HeadSHA = strings.TrimSpace(meta.HeadSHA)
 		}
 		r.PRStatus = prStatus
 		r.CompletedAt = &now
 		return nil
 	})
-	if errors.Is(uErr, errRunCanceled) {
-		if latest, ok := s.store.GetRun(run.ID); ok {
-			s.finishRun(latest)
-			return
-		}
-		s.finishRun(s.setRunStatusWithFallback(run, state.StatusCanceled, "canceled"))
-		return
+	if err != nil {
+		log.Printf("failed to persist detached run result for %s: %v", run.ID, err)
+		updated = s.setRunStatusWithFallback(run, state.StatusFailed, err.Error())
 	}
-	if uErr != nil {
-		log.Printf("failed to persist run result for %s: %v", run.ID, uErr)
-		updated = s.setRunStatusWithFallback(run, state.StatusFailed, uErr.Error())
-	}
+
 	switch updated.Status {
 	case state.StatusSucceeded:
 		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionRocket)
@@ -1343,54 +1521,95 @@ func (s *server) executeRun(runID string) {
 	if updated.Status == state.StatusSucceeded || updated.Status == state.StatusReview {
 		s.postRunCompletionCommentBestEffort(updated)
 	}
+
+	s.cleanupDetachedExecution(runID, execRec)
 	s.finishRun(updated)
 }
 
-func (s *server) superviseRun(ctx context.Context, runID string, cancel context.CancelFunc) {
-	interval := runSupervisorTick
-	if interval <= 0 {
-		interval = time.Second
+func (s *server) cleanupDetachedExecution(runID string, execRec state.RunExecution) {
+	removeCtx, removeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	err := s.launcher.Remove(removeCtx, runExecutionHandle(execRec))
+	removeCancel()
+	if err != nil && !errors.Is(err, runner.ErrExecutionNotFound) && !errors.Is(err, context.Canceled) {
+		log.Printf("run %s remove detached container failed: %v", runID, err)
 	}
-	renewEvery := runLeaseTTL / 3
-	if renewEvery <= 0 {
-		renewEvery = 30 * time.Second
+	if err := s.store.DeleteRunExecution(runID); err != nil {
+		log.Printf("run %s clear execution state failed: %v", runID, err)
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	nextRenewAt := time.Now().UTC().Add(renewEvery)
-	for {
+	if err := s.store.DeleteRunLease(runID); err != nil {
+		log.Printf("run %s clear run lease failed: %v", runID, err)
+	}
+}
+
+func (s *server) stopRunExecutionBestEffort(runID string, note string) {
+	execRec, ok := s.store.GetRunExecution(runID)
+	if !ok {
+		return
+	}
+	if _, err := s.store.UpdateRunExecutionState(runID, "stopping", execRec.ExitCode, time.Now().UTC()); err != nil {
+		log.Printf("run %s mark execution stopping failed: %v", runID, err)
+	}
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	err := s.launcher.Stop(stopCtx, runExecutionHandle(execRec), 10*time.Second)
+	stopCancel()
+	if err != nil && !errors.Is(err, runner.ErrExecutionNotFound) && !errors.Is(err, context.Canceled) {
+		log.Printf("run %s stop execution failed (%s): %v", runID, note, err)
+	}
+}
+
+func runExecutionHandle(execRec state.RunExecution) runner.ExecutionHandle {
+	return runner.ExecutionHandle{
+		Backend: strings.TrimSpace(execRec.Backend),
+		ID:      strings.TrimSpace(execRec.ContainerID),
+		Name:    strings.TrimSpace(execRec.ContainerName),
+	}
+}
+
+func (s *server) startDetachedWithRetry(ctx context.Context, spec runner.Spec) (runner.ExecutionHandle, error) {
+	maxAttempts := s.cfg.RunnerMaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	var (
+		handle runner.ExecutionHandle
+		err    error
+	)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return handle, err
+		}
+		handle, err = s.launcher.StartDetached(ctx, spec)
+		if err == nil {
+			return handle, nil
+		}
+		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
+			return handle, context.Canceled
+		}
+		if attempt == maxAttempts {
+			break
+		}
+		backoff := time.Duration(attempt) * time.Second
+		log.Printf("run %s attempt %d/%d failed: %v (retrying in %s)", spec.RunID, attempt, maxAttempts, err, backoff)
+		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if reason, ok := s.pendingRunCancelReason(runID); ok {
-				s.mu.Lock()
-				s.runCancelNote[runID] = reason
-				s.mu.Unlock()
-				cancel()
-				return
-			}
-			if time.Now().UTC().Before(nextRenewAt) {
-				continue
-			}
-			ok, err := s.store.RenewRunLease(runID, s.instanceID, runLeaseTTL)
-			if err != nil {
-				log.Printf("run %s lease heartbeat failed: %v", runID, err)
-				nextRenewAt = time.Now().UTC().Add(renewEvery)
-				continue
-			}
-			if !ok {
-				log.Printf("run %s lease ownership lost; canceling run context", runID)
-				s.mu.Lock()
-				if _, exists := s.runCancelNote[runID]; !exists {
-					s.runCancelNote[runID] = "lease ownership lost"
-				}
-				s.mu.Unlock()
-				cancel()
-				return
-			}
-			nextRenewAt = time.Now().UTC().Add(renewEvery)
+			timer.Stop()
+			return handle, context.Canceled
+		case <-timer.C:
 		}
+	}
+	return handle, err
+}
+
+func (s *server) stopRunSupervisors() {
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.runCancels))
+	for _, cancel := range s.runCancels {
+		cancels = append(cancels, cancel)
+	}
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
 	}
 }
 
@@ -1842,12 +2061,7 @@ func (s *server) cancelRunningTaskRuns(taskID, reason string) {
 			log.Printf("failed to request run cancel for %s: %v", run.ID, err)
 			continue
 		}
-		s.mu.Lock()
-		if cancel, ok := s.runCancels[run.ID]; ok {
-			s.runCancelNote[run.ID] = reason
-			cancel()
-		}
-		s.mu.Unlock()
+		s.stopRunExecutionBestEffort(run.ID, "task cancellation")
 	}
 }
 
@@ -1856,16 +2070,9 @@ func (s *server) cancelActiveRuns(reason string) {
 	if reason == "" {
 		reason = "canceled"
 	}
-	s.mu.Lock()
-	cancels := make([]context.CancelFunc, 0, len(s.runCancels))
-	for runID, cancel := range s.runCancels {
-		s.runCancelNote[runID] = reason
-		_ = s.store.RequestRunCancel(runID, reason, "shutdown")
-		cancels = append(cancels, cancel)
-	}
-	s.mu.Unlock()
-	for _, cancel := range cancels {
-		cancel()
+	for _, run := range s.store.ListRunningRuns() {
+		_ = s.store.RequestRunCancel(run.ID, reason, "shutdown")
+		s.stopRunExecutionBestEffort(run.ID, "shutdown cancellation")
 	}
 }
 
@@ -2243,43 +2450,6 @@ func (s *server) addPullRequestReviewCommentReactionBestEffort(repo string, comm
 	if err := s.gh.AddPullRequestReviewCommentReaction(ctx, repo, commentID, reaction); err != nil {
 		log.Printf("failed to add %q reaction for PR review comment %d in %s: %v", reaction, commentID, repo, err)
 	}
-}
-
-func (s *server) runLauncherWithRetry(ctx context.Context, spec runner.Spec) (runner.Result, error) {
-	maxAttempts := s.cfg.RunnerMaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = 1
-	}
-
-	var (
-		res runner.Result
-		err error
-	)
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return res, err
-		}
-		res, err = s.launcher.Start(ctx, spec)
-		if err == nil {
-			return res, nil
-		}
-		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
-			return res, context.Canceled
-		}
-		if attempt == maxAttempts {
-			break
-		}
-		backoff := time.Duration(attempt) * time.Second
-		log.Printf("run %s attempt %d/%d failed: %v (retrying in %s)", spec.RunID, attempt, maxAttempts, err, backoff)
-		timer := time.NewTimer(backoff)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return res, context.Canceled
-		case <-timer.C:
-		}
-	}
-	return res, err
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {

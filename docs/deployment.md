@@ -54,7 +54,7 @@ Given active slot `A` and inactive slot `B`, deploy does:
 12. Stop old slot `A` with `systemctl stop --no-block` (non-blocking).
 13. Disable old slot unit; keep new slot unit enabled/active.
 
-Important: deploy success is no longer coupled to waiting for old-slot drain.
+Important: deploy success is no longer coupled to waiting for old-slot run completion.
 
 ## Drain Behavior
 
@@ -62,12 +62,11 @@ When old slot gets `SIGTERM`:
 
 1. Enters draining mode.
 2. Stops accepting new work.
-3. Cancels queued runs immediately.
-4. Waits up to 5 minutes for active runs to finish.
-5. If timeout hits, cancels remaining active runs with drain-timeout reason.
-6. Waits a short final window, then exits.
+3. Stops local run supervision goroutines.
+4. Releases run leases quickly.
+5. Exits without canceling active detached run containers.
 
-This allows fast cutover while old work winds down in the background.
+This allows fast cutover while the next slot adopts supervision.
 
 ## Runner Entrypoint
 
@@ -88,15 +87,16 @@ Additional safeguards:
 - Webhook delivery dedupe is atomic claim/finalize (no check-then-insert race).
 - Run start is DB-atomic (`queued -> running`) with task-level exclusivity, so
   two instances cannot both start work for the same queued run/task.
+- Detached execution handles are persisted, so startup recovery can adopt
+  active runs immediately after slot rotation.
 
 ## Cancellation Semantics
 
-- User cancel marks run as `canceled` immediately.
-- Active cancellation propagates to runner context.
-- Docker launcher explicitly stops and removes the run container on cancel.
-- Final success write is guarded so canceled runs cannot later become
-  `succeeded` or `review`.
-- Cancel reason distinguishes user cancel vs shutdown/drain timeout.
+- Cancel intent is persisted in `run_cancels`.
+- Active cancellation stops the detached container by persisted execution
+  handle, even after supervision handoff.
+- Final run state is written after terminal observation/finalization.
+- Containers are explicitly removed during terminal cleanup.
 
 ## Rollback Behavior
 
@@ -126,7 +126,6 @@ Example: `blue` is active and running a job, deploy is triggered.
 2. Caddy upstream switches to `green`.
 3. `active_slot` flips to `green`.
 4. `blue` gets stop request with `--no-block`; deploy returns success quickly.
-5. `blue` drains in background; existing job can finish or be canceled on
-   timeout.
-6. If canceled, runner container is explicitly stopped/removed and run stays
-   terminally `canceled`.
+5. `blue` relinquishes supervision and exits; detached run container keeps executing.
+6. `green` adopts supervision using persisted execution handle state.
+7. On terminal completion, `green` finalizes run state and removes container.

@@ -135,6 +135,18 @@ type RunLease struct {
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 }
 
+type RunExecution struct {
+	RunID          string    `json:"run_id"`
+	Backend        string    `json:"backend"`
+	ContainerName  string    `json:"container_name"`
+	ContainerID    string    `json:"container_id"`
+	Status         string    `json:"status"`
+	ExitCode       int       `json:"exit_code"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	LastObservedAt time.Time `json:"last_observed_at"`
+}
+
 type RunCancelRequest struct {
 	RunID       string    `json:"run_id"`
 	Reason      string    `json:"reason"`

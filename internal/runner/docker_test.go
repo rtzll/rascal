@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,31 +27,16 @@ func TestSanitizeContainerName(t *testing.T) {
 	}
 }
 
-func TestDockerLauncherStopsContainerOnCancel(t *testing.T) {
+func TestDockerLauncherStartDetachedUsesStableNameAndNoRM(t *testing.T) {
 	tmp := t.TempDir()
 	logPath := filepath.Join(tmp, "docker_calls.log")
-	stopFile := filepath.Join(tmp, "stop.flag")
-	stopCalled := filepath.Join(tmp, "stop.called")
-	rmCalled := filepath.Join(tmp, "rm.called")
-
 	fakeDocker := filepath.Join(tmp, "docker")
 	script := `#!/bin/sh
 set -eu
 echo "$@" >> "` + logPath + `"
 cmd="${1:-}"
 if [ "$cmd" = "run" ]; then
-  while [ ! -f "` + stopFile + `" ]; do
-    sleep 0.05
-  done
-  exit 143
-fi
-if [ "$cmd" = "stop" ]; then
-  : > "` + stopCalled + `"
-  : > "` + stopFile + `"
-  exit 0
-fi
-if [ "$cmd" = "rm" ]; then
-  : > "` + rmCalled + `"
+  echo "container-123"
   exit 0
 fi
 exit 0
@@ -68,52 +54,124 @@ exit 0
 	}
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest"}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		_, err := launcher.Start(ctx, Spec{
-			RunID:      "run_cancel",
-			TaskID:     "task_cancel",
-			Repo:       "owner/repo",
-			Task:       "cancel",
-			BaseBranch: "main",
-			HeadBranch: "rascal/task-cancel",
-			Trigger:    "cli",
-			Debug:      true,
-			RunDir:     runDir,
-		})
-		done <- err
-	}()
+	handle, err := launcher.StartDetached(context.Background(), Spec{
+		RunID:      "run_detached",
+		TaskID:     "task_detached",
+		Repo:       "owner/repo",
+		Task:       "detached",
+		BaseBranch: "main",
+		HeadBranch: "rascal/task-detached",
+		Trigger:    "cli",
+		Debug:      true,
+		RunDir:     runDir,
+	})
+	if err != nil {
+		t.Fatalf("start detached: %v", err)
+	}
+	if handle.Backend != "docker" || handle.ID != "container-123" {
+		t.Fatalf("unexpected handle: %+v", handle)
+	}
+	if handle.Name != "rascal-run_detached" {
+		t.Fatalf("unexpected handle name: %s", handle.Name)
+	}
 
-	time.Sleep(150 * time.Millisecond)
-	cancel()
-
-	select {
-	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "context canceled") {
-			t.Fatalf("expected context canceled error, got %v", err)
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker call log: %v", err)
+	}
+	logText := string(data)
+	if strings.Contains(logText, "--rm") {
+		t.Fatalf("detached run should not pass --rm: %s", logText)
+	}
+	for _, want := range []string{
+		"run -d --name rascal-run_detached",
+		"--label rascal.run_id=run_detached",
+		"--label rascal.task_id=task_detached",
+		"--label rascal.repo=owner/repo",
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("expected %q in docker call log:\n%s", want, logText)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for launcher to stop after cancel")
+	}
+}
+
+func TestDockerLauncherInspectStopAndRemove(t *testing.T) {
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "docker_calls.log")
+	fakeDocker := filepath.Join(tmp, "docker")
+	script := `#!/bin/sh
+set -eu
+echo "$@" >> "` + logPath + `"
+cmd="${1:-}"
+target="${6:-}"
+if [ "$cmd" = "inspect" ]; then
+  if [ "$target" = "running-id" ]; then
+    echo "true 0"
+    exit 0
+  fi
+  if [ "$target" = "exited-id" ]; then
+    echo "false 17"
+    exit 0
+  fi
+  echo "Error: No such object: $target" >&2
+  exit 1
+fi
+if [ "$cmd" = "stop" ]; then
+  exit 0
+fi
+if [ "$cmd" = "rm" ]; then
+  exit 0
+fi
+exit 0
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
 	}
 
-	waitForFile := func(path string) error {
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
-			if _, err := os.Stat(path); err == nil {
-				return nil
-			}
-			time.Sleep(20 * time.Millisecond)
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+oldPath)
+
+	launcher := DockerLauncher{Image: "rascal-runner:latest"}
+	runningState, err := launcher.Inspect(context.Background(), ExecutionHandle{ID: "running-id"})
+	if err != nil {
+		t.Fatalf("inspect running container: %v", err)
+	}
+	if !runningState.Running || runningState.ExitCode != nil {
+		t.Fatalf("unexpected running state: %+v", runningState)
+	}
+
+	exitedState, err := launcher.Inspect(context.Background(), ExecutionHandle{ID: "exited-id"})
+	if err != nil {
+		t.Fatalf("inspect exited container: %v", err)
+	}
+	if exitedState.Running || exitedState.ExitCode == nil || *exitedState.ExitCode != 17 {
+		t.Fatalf("unexpected exited state: %+v", exitedState)
+	}
+
+	if _, err := launcher.Inspect(context.Background(), ExecutionHandle{ID: "missing-id"}); !errors.Is(err, ErrExecutionNotFound) {
+		t.Fatalf("expected ErrExecutionNotFound for missing container, got %v", err)
+	}
+
+	if err := launcher.Stop(context.Background(), ExecutionHandle{ID: "running-id"}, 3*time.Second); err != nil {
+		t.Fatalf("stop running container: %v", err)
+	}
+	if err := launcher.Remove(context.Background(), ExecutionHandle{ID: "running-id"}); err != nil {
+		t.Fatalf("remove running container: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker call log: %v", err)
+	}
+	logText := string(data)
+	for _, want := range []string{
+		"inspect --type container --format {{.State.Running}} {{.State.ExitCode}} running-id",
+		"stop --time 3 running-id",
+		"rm -f running-id",
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("expected %q in docker call log:\n%s", want, logText)
 		}
-		_, err := os.Stat(path)
-		return err
-	}
-
-	if err := waitForFile(stopCalled); err != nil {
-		t.Fatalf("expected docker stop to be called: %v", err)
-	}
-	if err := waitForFile(rmCalled); err != nil {
-		t.Fatalf("expected docker rm to be called: %v", err)
 	}
 }
 
@@ -124,6 +182,9 @@ func TestDockerLauncherUsesTaskSessionMountWhenResumeEnabled(t *testing.T) {
 	script := `#!/bin/sh
 set -eu
 echo "$@" >> "` + logPath + `"
+if [ "${1:-}" = "run" ]; then
+  echo "container-uses-session"
+fi
 exit 0
 `
 	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
@@ -138,7 +199,7 @@ exit 0
 	}
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
-	_, err := launcher.Start(context.Background(), Spec{
+	_, err := launcher.StartDetached(context.Background(), Spec{
 		RunID:               "run_1",
 		TaskID:              "owner/repo#1",
 		Repo:                "owner/repo",
@@ -200,6 +261,9 @@ func TestDockerLauncherKeepsRunScopedGoosePathWhenSessionResumeDisabled(t *testi
 	script := `#!/bin/sh
 set -eu
 echo "$@" >> "` + logPath + `"
+if [ "${1:-}" = "run" ]; then
+  echo "container-run-scoped"
+fi
 exit 0
 `
 	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
@@ -213,7 +277,7 @@ exit 0
 	}
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest"}
-	_, err := launcher.Start(context.Background(), Spec{
+	_, err := launcher.StartDetached(context.Background(), Spec{
 		RunID:            "run_2",
 		TaskID:           "owner/repo#2",
 		Repo:             "owner/repo",
@@ -249,6 +313,9 @@ func TestDockerLauncherIncludesNoNewPrivilegesSecurityOpt(t *testing.T) {
 	script := `#!/bin/sh
 set -eu
 echo "$@" >> "` + logPath + `"
+if [ "${1:-}" = "run" ]; then
+  echo "container-security"
+fi
 exit 0
 `
 	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
@@ -264,7 +331,7 @@ exit 0
 	}
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest"}
-	_, err := launcher.Start(context.Background(), Spec{
+	_, err := launcher.StartDetached(context.Background(), Spec{
 		RunID:      "run_security",
 		TaskID:     "task_security",
 		Repo:       "owner/repo",

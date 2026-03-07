@@ -394,6 +394,82 @@ func TestStoreRunLeaseLifecycle(t *testing.T) {
 	}
 }
 
+func TestStoreDeleteRunLeaseForOwner(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if err := store.UpsertRunLease("run_lease_owner", "instance-a", 2*time.Minute); err != nil {
+		t.Fatalf("upsert run lease: %v", err)
+	}
+
+	if err := store.DeleteRunLeaseForOwner("run_lease_owner", "instance-b"); err != nil {
+		t.Fatalf("delete run lease for wrong owner: %v", err)
+	}
+	if lease, ok := store.GetRunLease("run_lease_owner"); !ok || lease.OwnerID != "instance-a" {
+		t.Fatalf("expected lease to remain with instance-a, got %+v ok=%t", lease, ok)
+	}
+
+	if err := store.DeleteRunLeaseForOwner("run_lease_owner", "instance-a"); err != nil {
+		t.Fatalf("delete run lease for owner: %v", err)
+	}
+	if _, ok := store.GetRunLease("run_lease_owner"); ok {
+		t.Fatal("expected run lease to be deleted for the matching owner")
+	}
+}
+
+func TestStoreRunExecutionLifecycle(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	exec, err := store.UpsertRunExecution(RunExecution{
+		RunID:         "run_exec_1",
+		Backend:       "docker",
+		ContainerName: "rascal-run_exec_1",
+		ContainerID:   "container-abc",
+		Status:        "running",
+		ExitCode:      0,
+	})
+	if err != nil {
+		t.Fatalf("upsert run execution: %v", err)
+	}
+	if exec.Status != "running" {
+		t.Fatalf("unexpected initial execution status: %s", exec.Status)
+	}
+
+	loaded, ok := store.GetRunExecution("run_exec_1")
+	if !ok {
+		t.Fatal("expected persisted run execution")
+	}
+	if loaded.ContainerID != "container-abc" {
+		t.Fatalf("unexpected container id: %s", loaded.ContainerID)
+	}
+
+	updated, err := store.UpdateRunExecutionState("run_exec_1", "exited", 137, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("update run execution state: %v", err)
+	}
+	if updated.Status != "exited" {
+		t.Fatalf("expected exited status, got %s", updated.Status)
+	}
+	if updated.ExitCode != 137 {
+		t.Fatalf("expected exit code 137, got %d", updated.ExitCode)
+	}
+
+	if err := store.DeleteRunExecution("run_exec_1"); err != nil {
+		t.Fatalf("delete run execution: %v", err)
+	}
+	if _, ok := store.GetRunExecution("run_exec_1"); ok {
+		t.Fatal("expected run execution to be deleted")
+	}
+}
+
 func TestStoreListRunningRuns(t *testing.T) {
 	t.Parallel()
 

@@ -314,6 +314,10 @@ WHERE run_id = ? AND owner_id = ?;
 DELETE FROM run_leases
 WHERE run_id = ?;
 
+-- name: DeleteRunLeaseForOwner :execrows
+DELETE FROM run_leases
+WHERE run_id = ? AND owner_id = ?;
+
 -- name: GetRunLease :one
 SELECT run_id, owner_id, heartbeat_at, lease_expires_at
 FROM run_leases
@@ -323,6 +327,46 @@ WHERE run_id = ?;
 SELECT COUNT(*)
 FROM run_leases
 WHERE owner_id = ?;
+
+-- name: UpsertRunExecution :exec
+INSERT INTO run_executions (
+  run_id,
+  backend,
+  container_name,
+  container_id,
+  status,
+  exit_code,
+  created_at,
+  updated_at,
+  last_observed_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET
+  backend = excluded.backend,
+  container_name = excluded.container_name,
+  container_id = excluded.container_id,
+  status = excluded.status,
+  exit_code = excluded.exit_code,
+  updated_at = excluded.updated_at,
+  last_observed_at = excluded.last_observed_at;
+
+-- name: UpdateRunExecutionState :execrows
+UPDATE run_executions
+SET
+  status = ?,
+  exit_code = ?,
+  updated_at = ?,
+  last_observed_at = ?
+WHERE run_id = ?;
+
+-- name: GetRunExecution :one
+SELECT run_id, backend, container_name, container_id, status, exit_code, created_at, updated_at, last_observed_at
+FROM run_executions
+WHERE run_id = ?;
+
+-- name: DeleteRunExecution :execrows
+DELETE FROM run_executions
+WHERE run_id = ?;
 
 -- name: UpsertRunCancel :exec
 INSERT INTO run_cancels (run_id, reason, source, requested_at)

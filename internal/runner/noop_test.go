@@ -20,12 +20,24 @@ func TestNoopLauncherWritesArtifacts(t *testing.T) {
 		RunDir:     runDir,
 	}
 
-	res, err := (NoopLauncher{}).Start(context.Background(), spec)
+	launcher := NoopLauncher{}
+	handle, err := launcher.StartDetached(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("start noop launcher: %v", err)
 	}
-	if res.ExitCode != 0 {
-		t.Fatalf("expected exit code 0, got %d", res.ExitCode)
+	if handle.Backend != "noop" || handle.ID != spec.RunID {
+		t.Fatalf("unexpected execution handle: %+v", handle)
+	}
+
+	state, err := launcher.Inspect(context.Background(), handle)
+	if err != nil {
+		t.Fatalf("inspect noop launcher: %v", err)
+	}
+	if state.Running {
+		t.Fatal("expected noop execution to be terminal")
+	}
+	if state.ExitCode == nil || *state.ExitCode != 0 {
+		t.Fatalf("expected exit code 0, got %+v", state.ExitCode)
 	}
 
 	for _, name := range []string{"runner.log", "goose.ndjson", "meta.json"} {
