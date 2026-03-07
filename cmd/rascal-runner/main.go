@@ -678,6 +678,7 @@ func isSessionResumeFailure(err error, logPath string) bool {
 	}
 	for _, marker := range []string{
 		"not found",
+		"no session found",
 		"no such file",
 		"no existing",
 		"cannot find",

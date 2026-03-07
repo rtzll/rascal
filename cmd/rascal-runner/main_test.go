@@ -463,6 +463,18 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 	}
 }
 
+func TestIsSessionResumeFailureDetectsMissingNamedSession(t *testing.T) {
+	root := t.TempDir()
+	logPath := filepath.Join(root, "goose.ndjson")
+	if err := os.WriteFile(logPath, []byte("Error: No session found with name 'rascal-owner-repo-task-abc123'\n"), 0o644); err != nil {
+		t.Fatalf("write goose log: %v", err)
+	}
+
+	if !isSessionResumeFailure(errors.New("exit status 1"), logPath) {
+		t.Fatal("expected missing named session to trigger resume fallback detection")
+	}
+}
+
 func TestRunEndToEndWithFakeCommands(t *testing.T) {
 	root := t.TempDir()
 	binDir := filepath.Join(root, "bin")
