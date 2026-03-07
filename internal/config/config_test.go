@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestLoadServerConfigRunnerEnvPrefersRuntimeFields(t *testing.T) {
 	t.Setenv("RASCAL_RUNNER_RUNTIME", "docker")
