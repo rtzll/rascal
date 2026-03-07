@@ -36,13 +36,13 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		return strings.TrimSpace(out) == "ok"
 	}
 
-	status.RascalService = check("if systemctl is-active --quiet 'rascal@blue' || systemctl is-active --quiet 'rascal@green' || systemctl is-active --quiet rascal; then echo ok; fi")
+	status.RascalService = check("if systemctl is-active --quiet 'rascal@blue' || systemctl is-active --quiet 'rascal@green'; then echo ok; fi")
 	activeSlot, _ := runLocalCapture("ssh", sshArgs(cfg, strings.Join([]string{
 		"set -eu",
 		"slot=''",
 		"if [ -f /etc/rascal/active_slot ]; then slot=$(tr -d '[:space:]' </etc/rascal/active_slot); fi",
 		"case \"$slot\" in blue|green) echo \"$slot\" ;;",
-		"*) if systemctl is-active --quiet 'rascal@blue'; then echo blue; elif systemctl is-active --quiet 'rascal@green'; then echo green; elif systemctl is-active --quiet rascal; then echo legacy; fi ;; esac",
+		"*) if systemctl is-active --quiet 'rascal@blue'; then echo blue; elif systemctl is-active --quiet 'rascal@green'; then echo green; fi ;; esac",
 	}, "\n"))...)
 	status.ActiveSlot = strings.TrimSpace(activeSlot)
 	status.DockerInstalled = check("command -v docker >/dev/null 2>&1 && echo ok")
@@ -55,9 +55,9 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		"slot=''",
 		"if [ -f /etc/rascal/active_slot ]; then slot=$(tr -d '[:space:]' </etc/rascal/active_slot); fi",
 		"case \"$slot\" in blue|green) ;;",
-		"*) if systemctl is-active --quiet 'rascal@blue'; then slot=blue; elif systemctl is-active --quiet 'rascal@green'; then slot=green; elif systemctl is-active --quiet rascal; then slot=legacy; else slot=''; fi ;; esac",
+		"*) if systemctl is-active --quiet 'rascal@blue'; then slot=blue; elif systemctl is-active --quiet 'rascal@green'; then slot=green; else slot=''; fi ;; esac",
 		`[ -n "$slot" ]`,
-		`if [ "$slot" = "legacy" ]; then svc_ts=$(systemctl show rascal -p ExecMainStartTimestamp --value 2>/dev/null || true); else svc_ts=$(systemctl show "rascal@$slot" -p ExecMainStartTimestamp --value 2>/dev/null || true); fi`,
+		`svc_ts=$(systemctl show "rascal@$slot" -p ExecMainStartTimestamp --value 2>/dev/null || true)`,
 		`[ -n "$svc_ts" ]`,
 		`svc_epoch=$(date -d "$svc_ts" +%s 2>/dev/null || echo 0)`,
 		`[ "$svc_epoch" -ge "$env_epoch" ]`,
@@ -145,7 +145,7 @@ func checkServerHealthSSH(cfg deployConfig) (bool, string) {
 		"      exit 0",
 		"    fi",
 		"  fi",
-		"if systemctl is-active --quiet 'rascal@blue' || systemctl is-active --quiet 'rascal@green' || systemctl is-active --quiet rascal; then",
+		"if systemctl is-active --quiet 'rascal@blue' || systemctl is-active --quiet 'rascal@green'; then",
 		"  echo ok",
 		"  exit 0",
 		"fi",

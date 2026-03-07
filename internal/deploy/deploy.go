@@ -316,11 +316,6 @@ fi
 	if err := runRemoteScript(cfg, fmt.Sprintf("set -eu\ncat >/etc/caddy/rascal-upstream.caddy <<'EOF_UPSTREAM'\nreverse_proxy 127.0.0.1:%d\nEOF_UPSTREAM\n", inactivePort)); err != nil {
 		return err
 	}
-	if strings.TrimSpace(cfg.Domain) == "" {
-		if err := runRemoteScript(cfg, "set -eu\nif systemctl is-active --quiet rascal; then systemctl stop rascal || true; systemctl disable rascal >/dev/null 2>&1 || true; fi\n"); err != nil {
-			return err
-		}
-	}
 
 	if err := runRemoteScript(cfg, "set -eu\nsystemctl enable caddy --now\nsystemctl reload caddy || systemctl restart caddy\n"); err != nil {
 		_ = rollback(cfg, activeSlot, inactiveSlot, activePort)
@@ -336,10 +331,6 @@ set -eu
 echo %s >/etc/rascal/active_slot
 sync
 sleep 3
-if systemctl is-active --quiet rascal; then
-  systemctl stop rascal || true
-  systemctl disable rascal >/dev/null 2>&1 || true
-fi
 if [ %s != %s ]; then
   systemctl stop --no-block "rascal@%s" || true
   systemctl disable "rascal@%s" >/dev/null 2>&1 || true

@@ -25,6 +25,7 @@ It also writes:
 - `rascal@blue` listens on `127.0.0.1:18080`
 - `rascal@green` listens on `127.0.0.1:18081`
 - Caddy proxies external traffic to the currently selected slot
+- Legacy single-unit `rascal` service mode is not supported
 - Slot identity is set by env:
   - `rascal@blue` gets `RASCAL_SLOT=blue`
   - `rascal@green` gets `RASCAL_SLOT=green`
