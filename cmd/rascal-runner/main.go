@@ -528,7 +528,10 @@ func runGoose(ex commandExecutor, cfg config) (string, error) {
 		env = append(env, "GOOSE_CODEX_DEBUG=1")
 	}
 
-	if err := ex.Run(cfg.RepoDir, env, logFile, logFile, "goose", args...); err != nil {
+	// Keep goose.ndjson reserved for structured stdout. Goose debug output goes to
+	// stderr, and mixing the two makes token extraction flaky because the final
+	// complete event can be corrupted by interleaved debug lines.
+	if err := ex.Run(cfg.RepoDir, env, logFile, os.Stderr, "goose", args...); err != nil {
 		if stat, statErr := os.Stat(cfg.GooseLogPath); statErr == nil && stat.Size() == 0 {
 			_ = os.WriteFile(cfg.GooseLogPath, []byte(`{"event":"error","message":"goose run failed"}`+"\n"), 0o644)
 		}
