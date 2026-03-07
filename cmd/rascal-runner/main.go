@@ -27,6 +27,7 @@ const (
 	defaultInstructionsFile = "instructions.md"
 	defaultCommitMsgFile    = "commit_message.txt"
 	defaultPRBodyFile       = "pr_body.md"
+	defaultPRLabel          = "rascal"
 )
 
 var (
@@ -303,6 +304,7 @@ func runWithExecutor(ex commandExecutor) error {
 				"--repo", cfg.Repo,
 				"--base", cfg.BaseBranch,
 				"--head", cfg.HeadBranch,
+				"--label", defaultPRLabel,
 				"--title", commitTitle,
 				"--body-file", cfg.PRBodyPath,
 			)

@@ -670,6 +670,18 @@ case "$cmd" in
         exit 1
         ;;
       create)
+        has_label=false
+        while [ "$#" -gt 0 ]; do
+          if [ "$1" = "--label" ] && [ "$#" -ge 2 ] && [ "$2" = "rascal" ]; then
+            has_label=true
+            break
+          fi
+          shift
+        done
+        if [ "$has_label" != true ]; then
+          echo "expected gh pr create to include --label rascal" >&2
+          exit 1
+        fi
         : > "$state_dir/pr_created"
         printf 'https://github.com/owner/repo/pull/77\n'
         exit 0
