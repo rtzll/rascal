@@ -29,6 +29,8 @@ RUN set -eux; \
 
 FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
+ARG RUNTIME_UID=10001
+ARG RUNTIME_GID=10001
 RUN apt-get -qq update && apt-get -y -qq install --no-install-recommends \
     ca-certificates curl gnupg bzip2 xz-utils zip unzip \
     git gh \
@@ -60,5 +62,9 @@ WORKDIR /work
 COPY rascal-runner /usr/local/bin/rascal-runner
 COPY entrypoint.sh /usr/local/bin/rascal-entrypoint
 RUN chmod +x /usr/local/bin/rascal-runner /usr/local/bin/rascal-entrypoint
+RUN groupadd --system --gid "${RUNTIME_GID}" rascal \
+    && useradd --system --uid "${RUNTIME_UID}" --gid "${RUNTIME_GID}" --create-home --home-dir /home/rascal --shell /usr/sbin/nologin rascal \
+    && install -d -m 0755 -o rascal -g rascal /work /rascal-meta
+USER rascal:rascal
 
 ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]

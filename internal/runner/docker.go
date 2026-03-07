@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,12 @@ type DockerLauncher struct {
 	GitHubToken string
 }
 
+const (
+	// Keep in sync with runner/Dockerfile runtime user UID/GID.
+	runtimeUID = 10001
+	runtimeGID = 10001
+)
+
 func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	if l.Image == "" {
 		return Result{}, fmt.Errorf("docker image is required")
@@ -31,6 +38,9 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	workspaceDir := filepath.Join(spec.RunDir, "workspace")
 	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		return Result{}, fmt.Errorf("create workspace dir: %w", err)
+	}
+	if err := prepareMountAccess(spec.RunDir, workspaceDir); err != nil {
+		return Result{}, err
 	}
 
 	logPath := filepath.Join(spec.RunDir, "runner.log")
@@ -82,6 +92,8 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 	args = append(args,
+		// Harden container execution against privilege escalation.
+		"--security-opt", "no-new-privileges:true",
 		"-v", fmt.Sprintf("%s:/rascal-meta", spec.RunDir),
 		"-v", fmt.Sprintf("%s:/work", workspaceDir),
 		l.Image,
@@ -158,6 +170,45 @@ func forceStopContainer(containerName string, logOut io.Writer) {
 	rmCmd.Stdout = logOut
 	rmCmd.Stderr = logOut
 	_ = rmCmd.Run()
+}
+
+func prepareMountAccess(runDir, workspaceDir string) error {
+	if os.Geteuid() == 0 {
+		if err := chownTree(runDir, runtimeUID, runtimeGID); err != nil {
+			return fmt.Errorf("prepare run dir ownership: %w", err)
+		}
+		return nil
+	}
+
+	// Non-root launcher fallback: make bind mounts writable by the runtime UID.
+	for _, target := range []string{runDir, workspaceDir, filepath.Join(runDir, "codex"), filepath.Join(runDir, "goose")} {
+		if err := chmodIfExists(target, 0o777); err != nil {
+			return fmt.Errorf("prepare writable mount %s: %w", target, err)
+		}
+	}
+	if err := chmodIfExists(filepath.Join(runDir, "codex", "auth.json"), 0o644); err != nil {
+		return fmt.Errorf("prepare codex auth readability: %w", err)
+	}
+	return nil
+}
+
+func chownTree(root string, uid, gid int) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Lchown(path, uid, gid)
+	})
+}
+
+func chmodIfExists(path string, mode os.FileMode) error {
+	if err := os.Chmod(path, mode); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func sanitizeContainerName(s string) string {

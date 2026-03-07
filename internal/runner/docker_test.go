@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -112,5 +113,56 @@ exit 0
 	}
 	if err := waitForFile(rmCalled); err != nil {
 		t.Fatalf("expected docker rm to be called: %v", err)
+	}
+}
+
+func TestDockerLauncherIncludesNoNewPrivilegesSecurityOpt(t *testing.T) {
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "docker_calls.log")
+	fakeDocker := filepath.Join(tmp, "docker")
+	script := `#!/bin/sh
+set -eu
+echo "$@" >> "` + logPath + `"
+exit 0
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+oldPath)
+
+	runDir := filepath.Join(tmp, "run")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("create run dir: %v", err)
+	}
+
+	launcher := DockerLauncher{Image: "rascal-runner:latest"}
+	_, err := launcher.Start(context.Background(), Spec{
+		RunID:      "run_security",
+		TaskID:     "task_security",
+		Repo:       "owner/repo",
+		Task:       "security",
+		BaseBranch: "main",
+		HeadBranch: "rascal/task-security",
+		Trigger:    "cli",
+		Debug:      true,
+		RunDir:     runDir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected start error: %v", err)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake docker log: %v", err)
+	}
+	fields := strings.Fields(string(logData))
+	securityOptIdx := slices.Index(fields, "--security-opt")
+	if securityOptIdx == -1 {
+		t.Fatalf("expected --security-opt in docker args, got: %s", string(logData))
+	}
+	if securityOptIdx+1 >= len(fields) || fields[securityOptIdx+1] != "no-new-privileges:true" {
+		t.Fatalf("expected no-new-privileges:true in docker args, got: %s", string(logData))
 	}
 }
