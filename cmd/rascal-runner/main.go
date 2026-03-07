@@ -641,11 +641,18 @@ func resetGooseSessionRoot(path string) error {
 	if path == "" {
 		return nil
 	}
-	if err := os.RemoveAll(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove goose session root: %w", err)
-	}
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return fmt.Errorf("recreate goose session root: %w", err)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return fmt.Errorf("read goose session root: %w", err)
+	}
+	for _, entry := range entries {
+		child := filepath.Join(path, entry.Name())
+		if err := os.RemoveAll(child); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove goose session root entry %s: %w", child, err)
+		}
 	}
 	return nil
 }

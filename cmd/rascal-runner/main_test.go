@@ -347,8 +347,18 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
 		t.Fatalf("mkdir session root: %v", err)
 	}
+	beforeInfo, err := os.Stat(sessionRoot)
+	if err != nil {
+		t.Fatalf("stat session root before run: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(sessionRoot, "stale.json"), []byte("bad"), 0o644); err != nil {
 		t.Fatalf("write stale marker: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(sessionRoot, "state", "logs"), 0o755); err != nil {
+		t.Fatalf("mkdir nested stale session data: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionRoot, "state", "logs", "old.log"), []byte("old"), 0o644); err != nil {
+		t.Fatalf("write nested stale session data: %v", err)
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
@@ -385,6 +395,37 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(sessionRoot, "stale.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected stale marker to be removed during fallback reset, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sessionRoot, "state")); !os.IsNotExist(err) {
+		t.Fatalf("expected nested session state to be removed during fallback reset, stat err=%v", err)
+	}
+	afterInfo, err := os.Stat(sessionRoot)
+	if err != nil {
+		t.Fatalf("stat session root after run: %v", err)
+	}
+	if !os.SameFile(beforeInfo, afterInfo) {
+		t.Fatal("expected fallback reset to preserve the session root mountpoint")
+	}
+}
+
+func TestResetGooseSessionRootCreatesRootWhenMissing(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing-goose-root")
+	if err := resetGooseSessionRoot(root); err != nil {
+		t.Fatalf("resetGooseSessionRoot returned error: %v", err)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatalf("stat root after reset: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %s to be a directory", root)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read root after reset: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected empty root after reset, found %d entries", len(entries))
 	}
 }
 
