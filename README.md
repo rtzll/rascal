@@ -61,7 +61,7 @@ make build
 ./bin/rascal --version
 ```
 
-Tagged CLI releases are packaged and published with GoReleaser via GitHub Actions.
+Tagged CLI releases are packaged and published with GoReleaser.
 
 ## Core Commands
 
