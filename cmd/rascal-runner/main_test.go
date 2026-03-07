@@ -222,7 +222,7 @@ func TestLoadConfigRespectsGooseSessionEnv(t *testing.T) {
 	t.Setenv("RASCAL_RUN_ID", "run_3")
 	t.Setenv("RASCAL_TASK_ID", "owner/repo#3")
 	t.Setenv("RASCAL_REPO", "owner/repo")
-	t.Setenv("GH_TOKEN", "token")
+	setGitHubTokenFile(t, "token")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "pr-only")
