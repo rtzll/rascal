@@ -187,6 +187,44 @@ func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
 	}
 }
 
+func TestRunGooseKeepsNDJSONCleanWhenStderrIsNoisy(t *testing.T) {
+	metaDir := t.TempDir()
+	cfg := config{
+		RepoDir:      t.TempDir(),
+		MetaDir:      metaDir,
+		GooseLogPath: filepath.Join(metaDir, "goose.ndjson"),
+	}
+
+	ex := fakeExecutor{
+		runFn: func(dir string, extraEnv []string, stdout, stderr io.Writer, name string, args ...string) error {
+			if _, err := io.WriteString(stderr, "=== DEBUG ===\nprovider chatter\n"); err != nil {
+				return err
+			}
+			_, err := io.WriteString(stdout, "{\"event\":\"message\"}\n{\"type\":\"complete\",\"total_tokens\":321}\n")
+			return err
+		},
+	}
+
+	got, err := runGoose(ex, cfg)
+	if err != nil {
+		t.Fatalf("runGoose returned error: %v", err)
+	}
+	if strings.Contains(got, "DEBUG") {
+		t.Fatalf("expected goose output to exclude stderr chatter:\n%s", got)
+	}
+	if !strings.Contains(got, `"total_tokens":321`) {
+		t.Fatalf("expected clean ndjson output with tokens:\n%s", got)
+	}
+
+	data, err := os.ReadFile(cfg.GooseLogPath)
+	if err != nil {
+		t.Fatalf("read goose log: %v", err)
+	}
+	if strings.Contains(string(data), "DEBUG") {
+		t.Fatalf("expected goose log to exclude stderr chatter:\n%s", string(data))
+	}
+}
+
 func TestRunEndToEndWithFakeCommands(t *testing.T) {
 	root := t.TempDir()
 	binDir := filepath.Join(root, "bin")
@@ -340,6 +378,149 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 		t.Fatalf("expected goose details block in pr body:\n%s", prBody)
 	}
 	if !strings.Contains(prBody, "Rascal run `run_fake` completed in ") || !strings.Contains(prBody, "· 321 tokens") {
+		t.Fatalf("expected token summary in pr body:\n%s", prBody)
+	}
+}
+
+func TestRunEndToEndWithGooseDebugOnStderrStillIncludesTokens(t *testing.T) {
+	root := t.TempDir()
+	binDir := filepath.Join(root, "bin")
+	stateDir := filepath.Join(root, "state")
+	metaDir := filepath.Join(root, "meta")
+	workRoot := filepath.Join(root, "work")
+	repoDir := filepath.Join(workRoot, "repo")
+	for _, dir := range []string{binDir, stateDir, metaDir, workRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	writeExe(t, filepath.Join(binDir, "git"), fmt.Sprintf(`#!/usr/bin/env bash
+set -eu
+state_dir=%q
+
+if [ "$#" -ge 1 ] && [ "$1" = "-C" ]; then
+  shift
+  repo_dir="$1"
+  shift
+else
+  repo_dir=""
+fi
+
+cmd="$1"
+shift || true
+
+case "$cmd" in
+  clone)
+    target="$2"
+    mkdir -p "$target/.git"
+    exit 0
+    ;;
+  fetch|pull|checkout|add|commit|push)
+    exit 0
+    ;;
+  status)
+    printf ' M touched.txt\n'
+    exit 0
+    ;;
+  rev-parse)
+    if [ "$#" -ge 1 ] && [ "$1" = "--verify" ]; then
+      exit 1
+    fi
+    if [ "$#" -ge 1 ] && [ "$1" = "HEAD" ]; then
+      printf '0123456789abcdef0123456789abcdef01234567\n'
+      exit 0
+    fi
+    exit 0
+    ;;
+  ls-remote)
+    exit 1
+    ;;
+  *)
+    echo "unexpected git command: $cmd $*" >&2
+    exit 1
+    ;;
+esac
+`, stateDir))
+
+	writeExe(t, filepath.Join(binDir, "gh"), fmt.Sprintf(`#!/usr/bin/env bash
+set -eu
+state_dir=%q
+cmd="$1"
+shift
+
+case "$cmd" in
+  api)
+    if [ "$1" = "user" ]; then
+      printf '{"login":"rascalbot"}\n'
+      exit 0
+    fi
+    ;;
+  pr)
+    sub="$1"
+    shift
+    case "$sub" in
+      view)
+        if [ -f "$state_dir/pr_created" ]; then
+          printf '{"number":77,"url":"https://github.com/owner/repo/pull/77"}\n'
+          exit 0
+        fi
+        exit 1
+        ;;
+      create)
+        : > "$state_dir/pr_created"
+        printf 'https://github.com/owner/repo/pull/77\n'
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+
+echo "unexpected gh command: $cmd $*" >&2
+exit 1
+`, stateDir))
+
+	writeExe(t, filepath.Join(binDir, "goose"), `#!/usr/bin/env bash
+set -eu
+printf '=== CODEX PROVIDER DEBUG ===\n' >&2
+printf 'provider chatter\n' >&2
+printf '{"type":"message","message":{"id":null}}\n'
+printf '{"type":"complete","total_tokens":654321}\n'
+`)
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RASCAL_RUN_ID", "run_debug_stderr")
+	t.Setenv("RASCAL_TASK_ID", "task_debug_stderr")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_TASK", "Address feedback")
+	t.Setenv("RASCAL_META_DIR", metaDir)
+	t.Setenv("RASCAL_WORK_ROOT", workRoot)
+	t.Setenv("RASCAL_REPO_DIR", repoDir)
+	t.Setenv("RASCAL_GOOSE_DEBUG", "true")
+
+	if err := run(); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	gooseLogData, err := os.ReadFile(filepath.Join(metaDir, "goose.ndjson"))
+	if err != nil {
+		t.Fatalf("read goose.ndjson: %v", err)
+	}
+	gooseLog := string(gooseLogData)
+	if strings.Contains(gooseLog, "CODEX PROVIDER DEBUG") {
+		t.Fatalf("expected structured goose log without stderr noise:\n%s", gooseLog)
+	}
+	if !strings.Contains(gooseLog, `"total_tokens":654321`) {
+		t.Fatalf("expected total tokens in goose log:\n%s", gooseLog)
+	}
+
+	prBodyData, err := os.ReadFile(filepath.Join(metaDir, "pr_body.md"))
+	if err != nil {
+		t.Fatalf("read pr_body.md: %v", err)
+	}
+	prBody := string(prBodyData)
+	if !strings.Contains(prBody, "Rascal run `run_debug_stderr` completed in ") || !strings.Contains(prBody, "· 654K tokens") {
 		t.Fatalf("expected token summary in pr body:\n%s", prBody)
 	}
 }
