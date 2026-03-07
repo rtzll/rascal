@@ -282,8 +282,8 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 	if !strings.Contains(argsText, "--no-session") {
 		t.Fatalf("expected --no-session args, got %q", argsText)
 	}
-	if strings.Contains(argsText, "--session") {
-		t.Fatalf("did not expect --session args, got %q", argsText)
+	if strings.Contains(argsText, "--name") {
+		t.Fatalf("did not expect --name args, got %q", argsText)
 	}
 }
 
@@ -320,7 +320,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
-	for _, want := range []string{"--session", cfg.GooseSessionName, "--resume"} {
+	for _, want := range []string{"--name", cfg.GooseSessionName, "--resume"} {
 		if !strings.Contains(argsText, want) {
 			t.Fatalf("expected %q in args, got %q", want, argsText)
 		}

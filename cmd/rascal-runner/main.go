@@ -599,7 +599,7 @@ func runGoose(ex commandExecutor, cfg config) (string, error) {
 func gooseRunArgs(cfg config, resume bool) []string {
 	args := []string{"run"}
 	if cfg.GooseSessionMode != runner.GooseSessionModeOff && cfg.GooseSessionName != "" {
-		args = append(args, "--session", cfg.GooseSessionName)
+		args = append(args, "--name", cfg.GooseSessionName)
 		if resume {
 			args = append(args, "--resume")
 		}
