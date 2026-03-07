@@ -54,6 +54,25 @@ type postedIssueReaction struct {
 	content     string
 }
 
+type postedIssueCommentReaction struct {
+	repo      string
+	commentID int64
+	content   string
+}
+
+type postedPullRequestReviewReaction struct {
+	repo       string
+	pullNumber int
+	reviewID   int64
+	content    string
+}
+
+type postedPullRequestReviewCommentReaction struct {
+	repo      string
+	commentID int64
+	content   string
+}
+
 type fakeGitHubClient struct {
 	mu sync.Mutex
 
@@ -62,6 +81,10 @@ type fakeGitHubClient struct {
 
 	issueReactions []postedIssueReaction
 	removedIssues  []string
+
+	issueCommentReactions             []postedIssueCommentReaction
+	pullRequestReviewReactions        []postedPullRequestReviewReaction
+	pullRequestReviewCommentReactions []postedPullRequestReviewCommentReaction
 
 	issueComments            []postedIssueComment
 	createIssueCommentErr    error
@@ -141,15 +164,37 @@ func (f *fakeGitHubClient) RemoveIssueReactions(_ context.Context, repo string, 
 	return nil
 }
 
-func (f *fakeGitHubClient) AddIssueCommentReaction(_ context.Context, _ string, _ int64, _ string) error {
+func (f *fakeGitHubClient) AddIssueCommentReaction(_ context.Context, repo string, commentID int64, content string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.issueCommentReactions = append(f.issueCommentReactions, postedIssueCommentReaction{
+		repo:      repo,
+		commentID: commentID,
+		content:   content,
+	})
 	return nil
 }
 
-func (f *fakeGitHubClient) AddPullRequestReviewReaction(_ context.Context, _ string, _ int, _ int64, _ string) error {
+func (f *fakeGitHubClient) AddPullRequestReviewReaction(_ context.Context, repo string, pullNumber int, reviewID int64, content string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pullRequestReviewReactions = append(f.pullRequestReviewReactions, postedPullRequestReviewReaction{
+		repo:       repo,
+		pullNumber: pullNumber,
+		reviewID:   reviewID,
+		content:    content,
+	})
 	return nil
 }
 
-func (f *fakeGitHubClient) AddPullRequestReviewCommentReaction(_ context.Context, _ string, _ int64, _ string) error {
+func (f *fakeGitHubClient) AddPullRequestReviewCommentReaction(_ context.Context, repo string, commentID int64, content string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pullRequestReviewCommentReactions = append(f.pullRequestReviewCommentReactions, postedPullRequestReviewCommentReaction{
+		repo:      repo,
+		commentID: commentID,
+		content:   content,
+	})
 	return nil
 }
 
@@ -192,6 +237,30 @@ func (f *fakeGitHubClient) postedReactions() []postedIssueReaction {
 	defer f.mu.Unlock()
 	out := make([]postedIssueReaction, len(f.issueReactions))
 	copy(out, f.issueReactions)
+	return out
+}
+
+func (f *fakeGitHubClient) postedIssueCommentReactions() []postedIssueCommentReaction {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]postedIssueCommentReaction, len(f.issueCommentReactions))
+	copy(out, f.issueCommentReactions)
+	return out
+}
+
+func (f *fakeGitHubClient) postedPullRequestReviewReactions() []postedPullRequestReviewReaction {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]postedPullRequestReviewReaction, len(f.pullRequestReviewReactions))
+	copy(out, f.pullRequestReviewReactions)
+	return out
+}
+
+func (f *fakeGitHubClient) postedPullRequestReviewCommentReactions() []postedPullRequestReviewCommentReaction {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]postedPullRequestReviewCommentReaction, len(f.pullRequestReviewCommentReactions))
+	copy(out, f.pullRequestReviewCommentReactions)
 	return out
 }
 
@@ -773,6 +842,31 @@ func TestHandleWebhookIssueCommentEditedSkipsUnchangedBody(t *testing.T) {
 	}
 }
 
+func TestHandleWebhookIssueCommentIgnoresUnmanagedPR(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	payload := []byte(`{"action":"created","issue":{"number":44,"pull_request":{}},"comment":{"id":707,"body":"please fix this","user":{"login":"alice"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-unmanaged", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	for _, run := range s.store.ListRuns(10) {
+		if run.Trigger == "pr_comment" {
+			t.Fatalf("expected no pr_comment run for unmanaged pr")
+		}
+	}
+	if got := fakeGH.postedIssueCommentReactions(); len(got) != 0 {
+		t.Fatalf("expected no issue comment reactions for unmanaged pr, got %+v", got)
+	}
+}
+
 func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
@@ -837,6 +931,31 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 	}
 	if got.Context != "review state: changes_requested" {
 		t.Fatalf("context = %q, want review state fallback", got.Context)
+	}
+}
+
+func TestHandleWebhookPullRequestReviewIgnoresUnmanagedPR(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	payload := []byte(`{"action":"submitted","review":{"id":808,"body":"needs changes","state":"changes_requested","user":{"login":"bob"}},"pull_request":{"number":45},"repository":{"full_name":"owner/repo"},"sender":{"login":"bob"}}`)
+	req := webhookRequest(t, payload, "pull_request_review", "delivery-review-unmanaged", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	for _, run := range s.store.ListRuns(10) {
+		if run.Trigger == "pr_review" {
+			t.Fatalf("expected no pr_review run for unmanaged pr")
+		}
+	}
+	if got := fakeGH.postedPullRequestReviewReactions(); len(got) != 0 {
+		t.Fatalf("expected no review reactions for unmanaged pr, got %+v", got)
 	}
 }
 
@@ -979,6 +1098,31 @@ func TestHandleWebhookPullRequestReviewCommentEditedSkipsUnchangedBody(t *testin
 		if run.Trigger == "pr_review_comment" {
 			t.Fatalf("expected no pr_review_comment run for unchanged edit")
 		}
+	}
+}
+
+func TestHandleWebhookPullRequestReviewCommentIgnoresUnmanagedPR(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	payload := []byte(`{"action":"created","comment":{"id":909,"body":"Please rename this helper","path":"cmd/rascald/main.go","line":515,"user":{"login":"eve"}},"pull_request":{"number":46},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-unmanaged", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	for _, run := range s.store.ListRuns(10) {
+		if run.Trigger == "pr_review_comment" {
+			t.Fatalf("expected no pr_review_comment run for unmanaged pr")
+		}
+	}
+	if got := fakeGH.postedPullRequestReviewCommentReactions(); len(got) != 0 {
+		t.Fatalf("expected no review comment reactions for unmanaged pr, got %+v", got)
 	}
 }
 
@@ -1200,6 +1344,29 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 		t.Fatalf("expected merged PR rocket reaction, got %+v", reactions)
 	}
 
+}
+
+func TestPullRequestClosedIgnoresUnmanagedPR(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	payload := []byte(`{"action":"closed","pull_request":{"number":456,"merged":true},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "pull_request", "delivery-merged-unmanaged", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for unmanaged pr event, got %d", rec.Code)
+	}
+
+	if _, ok := s.store.FindTaskByPR("owner/repo", 456); ok {
+		t.Fatal("expected no task to be created for unmanaged pr")
+	}
+	if got := fakeGH.postedReactions(); len(got) != 0 {
+		t.Fatalf("expected no issue reactions for unmanaged pr, got %+v", got)
+	}
 }
 
 func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {

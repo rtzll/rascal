@@ -628,9 +628,12 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
+		taskID, ok := s.activeTaskForPR(ev.Repository.FullName, ev.Issue.Number)
+		if !ok {
+			return nil
+		}
 		s.addIssueCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
 
-		taskID := s.resolveTaskForPR(ev.Repository.FullName, ev.Issue.Number)
 		_, err := s.createAndQueueRun(runRequest{
 			TaskID:      taskID,
 			Repo:        ev.Repository.FullName,
@@ -665,9 +668,12 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if s.isBotActor(ev.Review.User.Login) || s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
+		taskID, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
+		if !ok {
+			return nil
+		}
 		s.addPullRequestReviewReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ev.Review.ID, ghapi.ReactionEyes)
 
-		taskID := s.resolveTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
 		contextText := strings.TrimSpace(ev.Review.Body)
 		if contextText == "" {
 			contextText = fmt.Sprintf("review state: %s", ev.Review.State)
@@ -712,9 +718,12 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
+		taskID, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
+		if !ok {
+			return nil
+		}
 		s.addPullRequestReviewCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
 
-		taskID := s.resolveTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
 		contextText := strings.TrimSpace(ev.Comment.Body)
 		if location := formatReviewCommentLocation(ev.Comment.Path, ev.Comment.StartLine, ev.Comment.Line); location != "" {
 			if contextText == "" {
@@ -753,9 +762,12 @@ Inline comment location: %s`, contextText, location)
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return fmt.Errorf("decode pull_request event: %w", err)
 		}
+		task, ok := s.taskForPR(ev.Repository.FullName, ev.PullRequest.Number)
+		if !ok {
+			return nil
+		}
 		if ev.Action == "closed" {
-			taskID := s.resolveTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
-			_, _ = s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: ev.Repository.FullName, PRNumber: ev.PullRequest.Number})
+			taskID := task.ID
 			if ev.PullRequest.Merged {
 				if err := s.store.MarkTaskCompleted(taskID); err != nil {
 					return err
@@ -1517,12 +1529,19 @@ func (s *server) reconcileReopenedPRRuns(repo string, prNumber int) {
 	}
 }
 
-func (s *server) resolveTaskForPR(repo string, prNumber int) string {
-	task, ok := s.store.FindTaskByPR(repo, prNumber)
-	if ok {
-		return task.ID
+func (s *server) taskForPR(repo string, prNumber int) (state.Task, bool) {
+	if strings.TrimSpace(repo) == "" || prNumber <= 0 {
+		return state.Task{}, false
 	}
-	return fmt.Sprintf("%s#pr-%d", repo, prNumber)
+	return s.store.FindTaskByPR(repo, prNumber)
+}
+
+func (s *server) activeTaskForPR(repo string, prNumber int) (string, bool) {
+	task, ok := s.taskForPR(repo, prNumber)
+	if !ok || task.Status != state.TaskOpen {
+		return "", false
+	}
+	return task.ID, true
 }
 
 func (s *server) defaultBaseBranchForTask(taskID string) string {
