@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,8 +29,11 @@ const (
 	defaultMetaFile         = "meta.json"
 	defaultInstructionsFile = "instructions.md"
 	defaultCommitMsgFile    = "commit_message.txt"
+	defaultAgentOutputFile  = "agent_output.txt"
 	defaultPRBodyFile       = "pr_body.md"
 	defaultPRLabel          = "rascal"
+	defaultCodexAuthFile    = "auth.json"
+	defaultCodexSessionDir  = "sessions"
 )
 
 var (
@@ -58,12 +63,14 @@ type config struct {
 	MetaPath         string
 	InstructionsPath string
 	CommitMsgPath    string
+	AgentOutputPath  string
 	PRBodyPath       string
 
 	GooseDebug   bool
 	AgentBackend agent.Backend
 
 	GoosePathRoot      string
+	CodexHome          string
 	AgentSessionMode   agent.SessionMode
 	AgentSessionResume bool
 	AgentSessionKey    string
@@ -88,6 +95,7 @@ type commandExecutor interface {
 	LookPath(name string) error
 	CombinedOutput(dir string, extraEnv []string, name string, args ...string) (string, error)
 	Run(dir string, extraEnv []string, stdout, stderr io.Writer, name string, args ...string) error
+	RunWithInput(dir string, extraEnv []string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) error
 }
 
 type osExecutor struct{}
@@ -115,11 +123,16 @@ func (osExecutor) CombinedOutput(dir string, extraEnv []string, name string, arg
 }
 
 func (osExecutor) Run(dir string, extraEnv []string, stdout, stderr io.Writer, name string, args ...string) error {
+	return osExecutor{}.RunWithInput(dir, extraEnv, nil, stdout, stderr, name, args...)
+}
+
+func (osExecutor) RunWithInput(dir string, extraEnv []string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	if strings.TrimSpace(dir) != "" {
 		cmd.Dir = dir
 	}
 	cmd.Env = append(os.Environ(), extraEnv...)
+	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
@@ -174,6 +187,9 @@ func runWithExecutor(ex commandExecutor) error {
 		if err := os.MkdirAll(filepath.Join(cfg.MetaDir, "codex"), 0o755); err != nil {
 			return fmt.Errorf("create codex dir: %w", err)
 		}
+		if err := os.MkdirAll(cfg.CodexHome, 0o755); err != nil {
+			return fmt.Errorf("create codex home: %w", err)
+		}
 		if err := os.MkdirAll(cfg.WorkRoot, 0o755); err != nil {
 			return fmt.Errorf("create work dir: %w", err)
 		}
@@ -215,7 +231,11 @@ func runWithExecutor(ex commandExecutor) error {
 	var agentOutput string
 	if err := runStage("run_agent", func() error {
 		var err error
-		agentOutput, err = runAgent(ex, cfg)
+		var agentSessionID string
+		agentOutput, agentSessionID, err = runAgent(ex, cfg)
+		if strings.TrimSpace(agentSessionID) != "" {
+			meta.AgentSessionID = strings.TrimSpace(agentSessionID)
+		}
 		return err
 	}); err != nil {
 		return fail(err)
@@ -431,6 +451,7 @@ func loadConfig() (config, error) {
 		}
 	}
 	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))
+	codexHome := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CODEX_HOME")), filepath.Join(metaDir, "codex"))
 
 	return config{
 		RunID:              runID,
@@ -449,10 +470,12 @@ func loadConfig() (config, error) {
 		MetaPath:           filepath.Join(metaDir, defaultMetaFile),
 		InstructionsPath:   filepath.Join(metaDir, defaultInstructionsFile),
 		CommitMsgPath:      filepath.Join(metaDir, defaultCommitMsgFile),
+		AgentOutputPath:    filepath.Join(metaDir, defaultAgentOutputFile),
 		PRBodyPath:         filepath.Join(metaDir, defaultPRBodyFile),
 		GooseDebug:         debug,
 		AgentBackend:       agentBackend,
 		GoosePathRoot:      goosePathRoot,
+		CodexHome:          codexHome,
 		AgentSessionMode:   agentSessionMode,
 		AgentSessionResume: agentSessionResume,
 		AgentSessionKey:    agentSessionKey,
@@ -619,16 +642,16 @@ func checkoutRepo(ex commandExecutor, cfg config) error {
 	return err
 }
 
-func runAgent(ex commandExecutor, cfg config) (string, error) {
+func runAgent(ex commandExecutor, cfg config) (string, string, error) {
 	switch configuredAgentBackend(cfg) {
 	case agent.BackendCodex:
-		return "", fmt.Errorf("agent backend %q is not implemented yet", configuredAgentBackend(cfg))
+		return runCodex(ex, cfg)
 	default:
 		return runGoose(ex, cfg)
 	}
 }
 
-func runGoose(ex commandExecutor, cfg config) (string, error) {
+func runGoose(ex commandExecutor, cfg config) (string, string, error) {
 	sessionID := configuredBackendSessionID(cfg)
 	sessionMode := configuredSessionMode(cfg)
 	sessionKey := configuredSessionKey(cfg)
@@ -664,22 +687,22 @@ func runGoose(ex commandExecutor, cfg config) (string, error) {
 			fallbackArgs := gooseRunArgs(cfg, false)
 			if retryErr := runGooseOnce(ex, cfg, fallbackArgs); retryErr != nil {
 				ensureGooseLogHasError(cfg.GooseLogPath)
-				return "", fmt.Errorf("goose run failed after session fallback: %w", retryErr)
+				return "", sessionID, fmt.Errorf("goose run failed after session fallback: %w", retryErr)
 			}
 			log.Printf("[%s] goose session fallback succeeded; started fresh session name=%s", nowUTC(), sessionID)
 		} else {
 			ensureGooseLogHasError(cfg.GooseLogPath)
-			return "", fmt.Errorf("goose run failed: %w", err)
+			return "", sessionID, fmt.Errorf("goose run failed: %w", err)
 		}
 	}
 	data, err := os.ReadFile(cfg.GooseLogPath)
 	if err != nil {
-		return "", fmt.Errorf("read goose log: %w", err)
+		return "", sessionID, fmt.Errorf("read goose log: %w", err)
 	}
 	if strings.TrimSpace(string(data)) == "" {
-		return "(no goose output captured)", nil
+		return "(no goose output captured)", sessionID, nil
 	}
-	return string(data), nil
+	return string(data), sessionID, nil
 }
 
 func gooseRunArgs(cfg config, resume bool) []string {
@@ -714,6 +737,219 @@ func runGooseOnce(ex commandExecutor, cfg config, args []string) error {
 		return err
 	}
 	return nil
+}
+
+func runCodex(ex commandExecutor, cfg config) (string, string, error) {
+	if err := ensureCodexHome(cfg); err != nil {
+		return "", "", err
+	}
+
+	instructions, err := os.ReadFile(cfg.InstructionsPath)
+	if err != nil {
+		return "", "", fmt.Errorf("read instructions: %w", err)
+	}
+
+	args := codexRunArgs(cfg)
+	log.Printf("[%s] running codex (backend=%s session_mode=%s session_key=%s session_id=%s resume=%t home=%s)",
+		nowUTC(),
+		configuredAgentBackend(cfg),
+		configuredSessionMode(cfg),
+		configuredSessionKey(cfg),
+		configuredBackendSessionID(cfg),
+		configuredSessionResume(cfg) && strings.TrimSpace(configuredBackendSessionID(cfg)) != "",
+		cfg.CodexHome,
+	)
+
+	logFile, err := os.OpenFile(cfg.GooseLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return "", "", fmt.Errorf("open codex log: %w", err)
+	}
+	defer logFile.Close()
+
+	if err := ex.RunWithInput(cfg.RepoDir, nil, strings.NewReader(string(instructions)), logFile, logFile, "codex", args...); err != nil {
+		sessionID, discoverErr := discoverLatestCodexSessionID(cfg.CodexHome)
+		if discoverErr != nil {
+			log.Printf("[%s] codex session discovery warning: %v", nowUTC(), discoverErr)
+		}
+		return "", sessionID, fmt.Errorf("codex run failed: %w", err)
+	}
+
+	sessionID, err := discoverLatestCodexSessionID(cfg.CodexHome)
+	if err != nil {
+		return "", "", fmt.Errorf("discover codex session: %w", err)
+	}
+
+	output, err := loadAgentOutput(cfg.AgentOutputPath, cfg.GooseLogPath, "codex")
+	if err != nil {
+		return "", sessionID, err
+	}
+	return output, sessionID, nil
+}
+
+func codexRunArgs(cfg config) []string {
+	args := []string{"exec"}
+	sessionID := strings.TrimSpace(configuredBackendSessionID(cfg))
+	if configuredSessionResume(cfg) && sessionID != "" {
+		args = append(args, "resume")
+	}
+	args = append(args, "--json", "--full-auto", "--skip-git-repo-check", "-o", cfg.AgentOutputPath)
+	if configuredSessionResume(cfg) && sessionID != "" {
+		args = append(args, sessionID)
+	} else {
+		args = append(args, "-s", "workspace-write")
+	}
+	args = append(args, "-")
+	return args
+}
+
+func ensureCodexHome(cfg config) error {
+	if err := os.MkdirAll(cfg.CodexHome, 0o755); err != nil {
+		return fmt.Errorf("create codex home: %w", err)
+	}
+	sourcePath := filepath.Join(cfg.MetaDir, "codex", defaultCodexAuthFile)
+	if _, err := os.Stat(sourcePath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("stat codex auth: %w", err)
+	}
+	targetPath := filepath.Join(cfg.CodexHome, defaultCodexAuthFile)
+	if samePath(sourcePath, targetPath) {
+		return nil
+	}
+	if err := copyFile(sourcePath, targetPath, 0o600); err != nil {
+		return fmt.Errorf("copy codex auth into home: %w", err)
+	}
+	return nil
+}
+
+func loadAgentOutput(outputPath, fallbackLogPath, backend string) (string, error) {
+	if data, err := os.ReadFile(outputPath); err == nil {
+		if text := strings.TrimSpace(string(data)); text != "" {
+			return text, nil
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("read agent output: %w", err)
+	}
+
+	data, err := os.ReadFile(fallbackLogPath)
+	if err != nil {
+		return "", fmt.Errorf("read %s log: %w", backend, err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return fmt.Sprintf("(no %s output captured)", backend), nil
+	}
+	return string(data), nil
+}
+
+func discoverLatestCodexSessionID(codexHome string) (string, error) {
+	sessionFiles, err := listCodexSessionFiles(filepath.Join(strings.TrimSpace(codexHome), defaultCodexSessionDir))
+	if err != nil {
+		return "", err
+	}
+	for _, sessionFile := range sessionFiles {
+		sessionID, err := parseCodexSessionID(sessionFile)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(sessionID) != "" {
+			return strings.TrimSpace(sessionID), nil
+		}
+	}
+	return "", nil
+}
+
+func listCodexSessionFiles(root string) ([]string, error) {
+	if strings.TrimSpace(root) == "" {
+		return nil, nil
+	}
+	if _, err := os.Stat(root); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat codex sessions root: %w", err)
+	}
+
+	type sessionFile struct {
+		path    string
+		modTime time.Time
+	}
+	var sessionFiles []sessionFile
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || filepath.Ext(path) != ".jsonl" {
+			return nil
+		}
+		sessionFiles = append(sessionFiles, sessionFile{path: path, modTime: info.ModTime()})
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("walk codex sessions: %w", err)
+	}
+
+	sort.Slice(sessionFiles, func(i, j int) bool {
+		if sessionFiles[i].modTime.Equal(sessionFiles[j].modTime) {
+			return sessionFiles[i].path > sessionFiles[j].path
+		}
+		return sessionFiles[i].modTime.After(sessionFiles[j].modTime)
+	})
+
+	paths := make([]string, 0, len(sessionFiles))
+	for _, sessionFile := range sessionFiles {
+		paths = append(paths, sessionFile.path)
+	}
+	return paths, nil
+}
+
+func parseCodexSessionID(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open codex session file: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", fmt.Errorf("read codex session file: %w", err)
+		}
+		return "", nil
+	}
+
+	var record struct {
+		Type    string `json:"type"`
+		Payload struct {
+			ID string `json:"id"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+		return "", fmt.Errorf("decode codex session metadata: %w", err)
+	}
+	return strings.TrimSpace(record.Payload.ID), nil
+}
+
+func samePath(left, right string) bool {
+	return filepath.Clean(strings.TrimSpace(left)) == filepath.Clean(strings.TrimSpace(right))
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 func gooseSessionExists(ex commandExecutor, cfg config, name string) (bool, error) {

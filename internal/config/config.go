@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/defaults"
 	"github.com/spf13/viper"
 )
 
@@ -68,8 +69,8 @@ func LoadServerConfig() ServerConfig {
 		BotLogin:            strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
 		RunnerMode:          envOrDefault("RASCAL_RUNNER_MODE", "noop"),
 		AgentBackend:        loadAgentBackend(),
-		RunnerImageGoose:    envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", envOrDefault("RASCAL_RUNNER_IMAGE", "rascal-runner:latest")),
-		RunnerImageCodex:    envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", "rascal-runner-codex:latest"),
+		RunnerImageGoose:    envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", envOrDefault("RASCAL_RUNNER_IMAGE", defaults.GooseRunnerImageTag)),
+		RunnerImageCodex:    envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
 		RunnerMaxAttempts:   envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
 		CodexAuthPath:       envOrDefault("RASCAL_CODEX_AUTH_PATH", "/etc/rascal/codex_auth.json"),
 		AgentSessionMode:    loadAgentSessionMode(),
@@ -97,7 +98,7 @@ func (c ServerConfig) Ensure() error {
 	if c.EffectiveAgentSessionMode() != agent.SessionModeOff {
 		root := strings.TrimSpace(c.EffectiveAgentSessionRoot())
 		if root == "" {
-			root = filepath.Join(c.DataDir, "agent-sessions")
+			root = filepath.Join(c.DataDir, defaults.AgentSessionDirName)
 		}
 		if err := os.MkdirAll(root, 0o755); err != nil {
 			return fmt.Errorf("create agent sessions directory: %w", err)
@@ -280,7 +281,7 @@ func loadAgentSessionMode() agent.SessionMode {
 }
 
 func loadAgentSessionRoot(dataDir string) string {
-	return envOrDefault("RASCAL_AGENT_SESSION_ROOT", envOrDefault("RASCAL_GOOSE_SESSION_ROOT", filepath.Join(dataDir, "goose-sessions")))
+	return envOrDefault("RASCAL_AGENT_SESSION_ROOT", envOrDefault("RASCAL_GOOSE_SESSION_ROOT", filepath.Join(dataDir, defaults.AgentSessionDirName)))
 }
 
 func loadAgentSessionTTLDays() int {

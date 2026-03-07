@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/defaults"
 )
 
 func TestGoarchFromUnameMachine(t *testing.T) {
@@ -162,7 +165,7 @@ func TestExecuteRollsOutRunnerBinaryBeforeImageBuild(t *testing.T) {
 	foundBuildScript := false
 	for _, script := range scripts {
 		installIdx := strings.Index(script, "install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner")
-		dockerIdx := strings.Index(script, "docker build -t")
+		dockerIdx := strings.Index(script, "docker build --target goose-runner -t")
 		if installIdx < 0 || dockerIdx < 0 {
 			continue
 		}
@@ -226,10 +229,10 @@ func TestSystemdServiceContentUsesMixedKillModeForDrain(t *testing.T) {
 	}
 }
 
-func TestServerEnvFileEnablesGooseSessionsByDefault(t *testing.T) {
+func TestServerEnvFileEnablesAgentSessionsByDefault(t *testing.T) {
 	content := serverEnvFile(testDeployConfig())
-	if !strings.Contains(content, "RASCAL_GOOSE_SESSION_MODE=all") {
-		t.Fatalf("expected goose sessions enabled by default, got:\n%s", content)
+	if !strings.Contains(content, "RASCAL_AGENT_SESSION_MODE=all") {
+		t.Fatalf("expected agent sessions enabled by default, got:\n%s", content)
 	}
 }
 
@@ -239,7 +242,10 @@ func testDeployConfig() Config {
 		SSHUser:            "root",
 		SSHPort:            22,
 		Domain:             "rascal.example.com",
-		RunnerImage:        "rascal-runner:latest",
+		AgentBackend:       agent.BackendGoose,
+		RunnerImage:        defaults.GooseRunnerImageTag,
+		RunnerImageGoose:   defaults.GooseRunnerImageTag,
+		RunnerImageCodex:   defaults.CodexRunnerImageTag,
 		ServerListenAddr:   ":8080",
 		ServerDataDir:      "/var/lib/rascal",
 		ServerStatePath:    "/var/lib/rascal/state.db",

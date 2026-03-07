@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/rtzll/rascal/internal/agent"
 )
 
 func TestSanitizeContainerName(t *testing.T) {
@@ -303,6 +305,72 @@ exit 0
 	}
 	if strings.Contains(call, ":/rascal-goose-session") {
 		t.Fatalf("did not expect persistent session mount when resume disabled, got:\n%s", call)
+	}
+}
+
+func TestDockerLauncherUsesTaskScopedCodexHomeWhenResumeEnabled(t *testing.T) {
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "docker_calls.log")
+	fakeDocker := filepath.Join(tmp, "docker")
+	script := `#!/bin/sh
+set -eu
+echo "$@" >> "` + logPath + `"
+if [ "${1:-}" = "run" ]; then
+  echo "container-codex-session"
+fi
+exit 0
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	runDir := filepath.Join(tmp, "run")
+	sessionDir := filepath.Join(tmp, "sessions", "task")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("create run dir: %v", err)
+	}
+
+	launcher := DockerLauncher{Image: "rascal-runner-codex:latest", GitHubToken: "gh-token"}
+	_, err := launcher.StartDetached(context.Background(), Spec{
+		RunID:        "run_codex_1",
+		TaskID:       "owner/repo#1",
+		Repo:         "owner/repo",
+		Task:         "task",
+		AgentBackend: agent.BackendCodex,
+		BaseBranch:   "main",
+		HeadBranch:   "rascal/task-1",
+		Trigger:      "pr_comment",
+		Debug:        true,
+		RunDir:       runDir,
+		AgentSession: SessionSpec{
+			Mode:             agent.SessionModePROnly,
+			Resume:           true,
+			TaskDir:          sessionDir,
+			TaskKey:          "owner-repo-1-abc123",
+			BackendSessionID: "session-123",
+		},
+	})
+	if err != nil {
+		t.Fatalf("launcher start: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker calls log: %v", err)
+	}
+	call := string(data)
+	if !strings.Contains(call, "-e CODEX_HOME=/rascal-codex-session") {
+		t.Fatalf("expected persistent codex home env, got:\n%s", call)
+	}
+	if !strings.Contains(call, "-e RASCAL_AGENT_SESSION_ID=session-123") {
+		t.Fatalf("expected generic session id env, got:\n%s", call)
+	}
+	if !strings.Contains(call, sessionDir+":/rascal-codex-session") {
+		t.Fatalf("expected task session mount, got:\n%s", call)
+	}
+	if strings.Contains(call, "-e GOOSE_PROVIDER=") {
+		t.Fatalf("did not expect goose env for codex backend, got:\n%s", call)
 	}
 }
 

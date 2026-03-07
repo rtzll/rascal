@@ -10,13 +10,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/runner"
 )
 
 type fakeExecutor struct {
-	lookPathFn func(name string) error
-	combinedFn func(dir string, extraEnv []string, name string, args ...string) (string, error)
-	runFn      func(dir string, extraEnv []string, stdout, stderr io.Writer, name string, args ...string) error
+	lookPathFn     func(name string) error
+	combinedFn     func(dir string, extraEnv []string, name string, args ...string) (string, error)
+	runFn          func(dir string, extraEnv []string, stdout, stderr io.Writer, name string, args ...string) error
+	runWithInputFn func(dir string, extraEnv []string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) error
 }
 
 func (f fakeExecutor) LookPath(name string) error {
@@ -34,6 +36,16 @@ func (f fakeExecutor) CombinedOutput(dir string, extraEnv []string, name string,
 }
 
 func (f fakeExecutor) Run(dir string, extraEnv []string, stdout, stderr io.Writer, name string, args ...string) error {
+	if f.runFn != nil {
+		return f.runFn(dir, extraEnv, stdout, stderr, name, args...)
+	}
+	return nil
+}
+
+func (f fakeExecutor) RunWithInput(dir string, extraEnv []string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) error {
+	if f.runWithInputFn != nil {
+		return f.runWithInputFn(dir, extraEnv, stdin, stdout, stderr, name, args...)
+	}
 	if f.runFn != nil {
 		return f.runFn(dir, extraEnv, stdout, stderr, name, args...)
 	}
@@ -278,7 +290,7 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 		},
 	}
 
-	if _, err := runGoose(ex, cfg); err != nil {
+	if _, _, err := runGoose(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -325,7 +337,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 		},
 	}
 
-	if _, err := runGoose(ex, cfg); err != nil {
+	if _, _, err := runGoose(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -374,7 +386,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 		},
 	}
 
-	if _, err := runGoose(ex, cfg); err != nil {
+	if _, _, err := runGoose(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -441,7 +453,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 		},
 	}
 
-	if _, err := runGoose(ex, cfg); err != nil {
+	if _, _, err := runGoose(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	if len(calls) != 2 {
@@ -522,7 +534,7 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 		},
 	}
 
-	_, err := runGoose(ex, cfg)
+	_, _, err := runGoose(ex, cfg)
 	if err == nil {
 		t.Fatal("expected runGoose to fail")
 	}
@@ -578,12 +590,154 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 		},
 	}
 
-	if _, err := runGoose(ex, cfg); err != nil {
+	if _, _, err := runGoose(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
 	if !strings.Contains(argsText, "--resume") {
 		t.Fatalf("expected resume args when session preflight fails, got %q", argsText)
+	}
+}
+
+func TestRunCodexFreshSession(t *testing.T) {
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex-home")
+	sessionPath := filepath.Join(codexHome, "sessions", "2026", "03", "session.jsonl")
+	cfg := config{
+		RepoDir:          root,
+		MetaDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
+		CodexHome:        codexHome,
+		AgentBackend:     agent.BackendCodex,
+	}
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatalf("mkdir codex sessions: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "codex"), 0o755); err != nil {
+		t.Fatalf("mkdir codex auth dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "codex", "auth.json"), []byte(`{"token":"test"}`), 0o600); err != nil {
+		t.Fatalf("write codex auth: %v", err)
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var gotArgs []string
+	var gotInput string
+	ex := fakeExecutor{
+		runWithInputFn: func(_ string, _ []string, stdin io.Reader, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "codex" {
+				t.Fatalf("unexpected command: %s", name)
+			}
+			gotArgs = append([]string(nil), args...)
+			input, err := io.ReadAll(stdin)
+			if err != nil {
+				t.Fatalf("read stdin: %v", err)
+			}
+			gotInput = string(input)
+			if err := os.WriteFile(cfg.AgentOutputPath, []byte("final codex response"), 0o644); err != nil {
+				t.Fatalf("write agent output: %v", err)
+			}
+			if err := os.WriteFile(sessionPath, []byte(`{"type":"session_meta","payload":{"id":"session-123"}}`+"\n"), 0o644); err != nil {
+				t.Fatalf("write codex session: %v", err)
+			}
+			_, _ = io.WriteString(stdout, `{"type":"message"}`+"\n")
+			return nil
+		},
+	}
+
+	output, sessionID, err := runCodex(ex, cfg)
+	if err != nil {
+		t.Fatalf("runCodex returned error: %v", err)
+	}
+	if output != "final codex response" {
+		t.Fatalf("output = %q, want final codex response", output)
+	}
+	if sessionID != "session-123" {
+		t.Fatalf("sessionID = %q, want session-123", sessionID)
+	}
+	if gotInput != "do thing" {
+		t.Fatalf("codex stdin = %q, want %q", gotInput, "do thing")
+	}
+	argsText := strings.Join(gotArgs, " ")
+	for _, want := range []string{"exec", "--json", "--full-auto", "--skip-git-repo-check", "-s", "workspace-write", "-"} {
+		if !strings.Contains(argsText, want) {
+			t.Fatalf("expected %q in args, got %q", want, argsText)
+		}
+	}
+	if strings.Contains(argsText, " resume ") {
+		t.Fatalf("did not expect resume args in fresh codex run, got %q", argsText)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err != nil {
+		t.Fatalf("expected codex auth copied into home: %v", err)
+	}
+}
+
+func TestRunCodexResumeSession(t *testing.T) {
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex-home")
+	sessionPath := filepath.Join(codexHome, "sessions", "2026", "03", "session.jsonl")
+	cfg := config{
+		RepoDir:            root,
+		MetaDir:            root,
+		InstructionsPath:   filepath.Join(root, "instructions.md"),
+		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
+		AgentOutputPath:    filepath.Join(root, "agent_output.txt"),
+		CodexHome:          codexHome,
+		AgentBackend:       agent.BackendCodex,
+		AgentSessionMode:   agent.SessionModeAll,
+		AgentSessionResume: true,
+		BackendSessionID:   "session-abc",
+	}
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatalf("mkdir codex sessions: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "codex"), 0o755); err != nil {
+		t.Fatalf("mkdir codex auth dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "codex", "auth.json"), []byte(`{"token":"test"}`), 0o600); err != nil {
+		t.Fatalf("write codex auth: %v", err)
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("continue"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var gotArgs []string
+	ex := fakeExecutor{
+		runWithInputFn: func(_ string, _ []string, _ io.Reader, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "codex" {
+				t.Fatalf("unexpected command: %s", name)
+			}
+			gotArgs = append([]string(nil), args...)
+			if err := os.WriteFile(cfg.AgentOutputPath, []byte("continued"), 0o644); err != nil {
+				t.Fatalf("write agent output: %v", err)
+			}
+			if err := os.WriteFile(sessionPath, []byte(`{"type":"session_meta","payload":{"id":"session-abc"}}`+"\n"), 0o644); err != nil {
+				t.Fatalf("write codex session: %v", err)
+			}
+			_, _ = io.WriteString(stdout, `{"type":"message"}`+"\n")
+			return nil
+		},
+	}
+
+	_, sessionID, err := runCodex(ex, cfg)
+	if err != nil {
+		t.Fatalf("runCodex returned error: %v", err)
+	}
+	if sessionID != "session-abc" {
+		t.Fatalf("sessionID = %q, want session-abc", sessionID)
+	}
+	argsText := strings.Join(gotArgs, " ")
+	for _, want := range []string{"exec", "resume", "--json", "--full-auto", "--skip-git-repo-check", "session-abc", "-"} {
+		if !strings.Contains(argsText, want) {
+			t.Fatalf("expected %q in args, got %q", want, argsText)
+		}
+	}
+	if strings.Contains(argsText, "workspace-write") {
+		t.Fatalf("did not expect explicit sandbox arg on resume, got %q", argsText)
 	}
 }
 

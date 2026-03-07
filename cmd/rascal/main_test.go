@@ -213,8 +213,8 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := deployCmd.Flags().Lookup("goarch").DefValue; got != "" {
 		t.Fatalf("deploy default goarch = %q, want empty for auto-detect", got)
 	}
-	if got := deployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner:latest" {
-		t.Fatalf("deploy default runner-image = %q, want rascal-runner:latest", got)
+	if got := deployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner-goose:latest" {
+		t.Fatalf("deploy default runner-image = %q, want rascal-runner-goose:latest", got)
 	}
 	if got := deployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
 		t.Fatalf("deploy default upload-env = %q, want false", got)
@@ -238,8 +238,8 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := infraDeployCmd.Flags().Lookup("goarch").DefValue; got != "" {
 		t.Fatalf("infra deploy-existing default goarch = %q, want empty for auto-detect", got)
 	}
-	if got := infraDeployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner:latest" {
-		t.Fatalf("infra deploy-existing default runner-image = %q, want rascal-runner:latest", got)
+	if got := infraDeployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner-goose:latest" {
+		t.Fatalf("infra deploy-existing default runner-image = %q, want rascal-runner-goose:latest", got)
 	}
 	if got := infraDeployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
 		t.Fatalf("infra deploy-existing default upload-env = %q, want false", got)

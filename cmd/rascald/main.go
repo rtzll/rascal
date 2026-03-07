@@ -24,6 +24,7 @@ import (
 
 	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/config"
+	"github.com/rtzll/rascal/internal/defaults"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/logs"
 	"github.com/rtzll/rascal/internal/runner"
@@ -1247,7 +1248,7 @@ func (s *server) executeRun(runID string) {
 	backendSessionID := ""
 	sessionRoot := strings.TrimSpace(s.cfg.EffectiveAgentSessionRoot())
 	if sessionRoot == "" {
-		sessionRoot = filepath.Join(s.cfg.DataDir, "agent-sessions")
+		sessionRoot = filepath.Join(s.cfg.DataDir, defaults.AgentSessionDirName)
 	}
 	if sessionResume {
 		sessionTaskKey = agent.SessionTaskKey(run.Repo, run.TaskID)
@@ -1491,6 +1492,19 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	}
 	if meta.ExitCode == 0 && observedExitCode != 0 {
 		meta.ExitCode = observedExitCode
+	}
+	if strings.TrimSpace(meta.AgentSessionID) != "" {
+		existing, _ := s.store.GetTaskAgentSession(run.TaskID)
+		if _, err := s.store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
+			TaskID:           run.TaskID,
+			AgentBackend:     run.AgentBackend,
+			BackendSessionID: strings.TrimSpace(meta.AgentSessionID),
+			SessionKey:       existing.SessionKey,
+			SessionRoot:      existing.SessionRoot,
+			LastRunID:        run.ID,
+		}); err != nil {
+			log.Printf("run %s failed to persist resolved agent session id %q: %v", run.ID, meta.AgentSessionID, err)
+		}
 	}
 
 	status := state.StatusSucceeded
@@ -2157,7 +2171,7 @@ func (s *server) cleanupAgentSessionsBestEffort() {
 	}
 	root := strings.TrimSpace(s.cfg.EffectiveAgentSessionRoot())
 	if root == "" {
-		root = filepath.Join(s.cfg.DataDir, "agent-sessions")
+		root = filepath.Join(s.cfg.DataDir, defaults.AgentSessionDirName)
 	}
 	removed, err := cleanupStaleAgentSessionDirs(root, ttlDays, time.Now().UTC())
 	if err != nil {

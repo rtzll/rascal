@@ -125,7 +125,7 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 	if cfg.GooseSessionMode != "all" {
 		t.Fatalf("GooseSessionMode = %q, want all", cfg.GooseSessionMode)
 	}
-	wantRoot := filepath.Join(dataDir, "goose-sessions")
+	wantRoot := filepath.Join(dataDir, "agent-sessions")
 	if cfg.GooseSessionRoot != wantRoot {
 		t.Fatalf("GooseSessionRoot = %q, want %q", cfg.GooseSessionRoot, wantRoot)
 	}

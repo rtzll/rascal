@@ -8,16 +8,17 @@ import (
 
 // Meta mirrors /rascal-meta/meta.json produced by the container entrypoint.
 type Meta struct {
-	RunID      string `json:"run_id"`
-	TaskID     string `json:"task_id"`
-	Repo       string `json:"repo"`
-	BaseBranch string `json:"base_branch"`
-	HeadBranch string `json:"head_branch"`
-	PRNumber   int    `json:"pr_number"`
-	PRURL      string `json:"pr_url"`
-	HeadSHA    string `json:"head_sha"`
-	ExitCode   int    `json:"exit_code"`
-	Error      string `json:"error,omitempty"`
+	RunID          string `json:"run_id"`
+	TaskID         string `json:"task_id"`
+	Repo           string `json:"repo"`
+	BaseBranch     string `json:"base_branch"`
+	HeadBranch     string `json:"head_branch"`
+	PRNumber       int    `json:"pr_number"`
+	PRURL          string `json:"pr_url"`
+	HeadSHA        string `json:"head_sha"`
+	AgentSessionID string `json:"agent_session_id,omitempty"`
+	ExitCode       int    `json:"exit_code"`
+	Error          string `json:"error,omitempty"`
 }
 
 func ReadMeta(path string) (Meta, error) {

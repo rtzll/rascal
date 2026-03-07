@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
+	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/defaults"
 	"github.com/spf13/cobra"
 )
 
@@ -195,7 +197,10 @@ func (a *app) newInfraUpCmd() *cobra.Command {
 		webhookSecret      string
 		codexAuthPath      string
 		domain             string
+		agentBackend       string
 		runnerImage        string
+		runnerImageGoose   string
+		runnerImageCodex   string
 		skipEnvUpload      bool
 		skipAuthUpload     bool
 	)
@@ -251,7 +256,10 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 				WebhookSecret:      webhookSecret,
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
+				AgentBackend:       agentBackend,
 				RunnerImage:        runnerImage,
+				RunnerImageGoose:   runnerImageGoose,
+				RunnerImageCodex:   runnerImageCodex,
 				SkipEnvUpload:      skipEnvUpload,
 				SkipAuthUpload:     skipAuthUpload,
 			})
@@ -292,7 +300,10 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
-	cmd.Flags().StringVar(&runnerImage, "runner-image", "rascal-runner:latest", "runner docker image tag")
+	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.BackendGoose), "agent backend to use on the server (goose or codex)")
+	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
+	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
+	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
 	cmd.Flags().BoolVar(&skipEnvUpload, "skip-env-upload", false, "keep existing /etc/rascal/rascal.env on server")
 	cmd.Flags().BoolVar(&skipAuthUpload, "skip-auth-upload", false, "keep existing codex auth file on server")
 	return cmd
@@ -310,7 +321,10 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 		webhookSecret      string
 		codexAuthPath      string
 		domain             string
+		agentBackend       string
 		runnerImage        string
+		runnerImageGoose   string
+		runnerImageCodex   string
 		uploadEnv          bool
 		uploadAuth         bool
 	)
@@ -330,7 +344,10 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 				WebhookSecret:      webhookSecret,
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
+				AgentBackend:       agentBackend,
 				RunnerImage:        runnerImage,
+				RunnerImageGoose:   runnerImageGoose,
+				RunnerImageCodex:   runnerImageCodex,
 				SkipEnvUpload:      !uploadEnv,
 				SkipAuthUpload:     !uploadAuth,
 			})
@@ -363,7 +380,10 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
-	cmd.Flags().StringVar(&runnerImage, "runner-image", "rascal-runner:latest", "runner docker image tag")
+	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.BackendGoose), "agent backend to use on the server (goose or codex)")
+	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
+	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
+	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
 	cmd.Flags().BoolVar(&uploadEnv, "upload-env", false, "upload/update /etc/rascal/rascal.env on server")
 	cmd.Flags().BoolVar(&uploadAuth, "upload-auth", false, "upload/update codex auth file on server")
 	return cmd
@@ -381,7 +401,10 @@ type deployExistingInput struct {
 	WebhookSecret      string
 	CodexAuthPath      string
 	Domain             string
+	AgentBackend       string
 	RunnerImage        string
+	RunnerImageGoose   string
+	RunnerImageCodex   string
 	SkipEnvUpload      bool
 	SkipAuthUpload     bool
 	SkipIfHealthy      bool
@@ -409,7 +432,10 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	provisionedArch := strings.TrimSpace(input.ProvisionedArch)
 	codexAuthPath := strings.TrimSpace(input.CodexAuthPath)
 	domain := firstNonEmpty(strings.TrimSpace(input.Domain), strings.TrimSpace(a.cfg.Domain))
-	runnerImage := firstNonEmpty(strings.TrimSpace(input.RunnerImage), "rascal-runner:latest")
+	agentBackend := agent.NormalizeBackend(input.AgentBackend)
+	runnerImage := firstNonEmpty(strings.TrimSpace(input.RunnerImage), defaults.GooseRunnerImageTag)
+	runnerImageGoose := firstNonEmpty(strings.TrimSpace(input.RunnerImageGoose), runnerImage, defaults.GooseRunnerImageTag)
+	runnerImageCodex := firstNonEmpty(strings.TrimSpace(input.RunnerImageCodex), defaults.CodexRunnerImageTag)
 	sshPort := input.SSHPort
 	apiToken := strings.TrimSpace(input.APIToken)
 	githubRuntimeToken := strings.TrimSpace(input.GitHubRuntimeToken)
@@ -508,7 +534,10 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		GitHubRuntimeToken: githubRuntimeToken,
 		CodexAuthPath:      expandedAuthPath,
 		RunnerMode:         "docker",
-		RunnerImage:        runnerImage,
+		AgentBackend:       agentBackend,
+		RunnerImage:        runnerImageGoose,
+		RunnerImageGoose:   runnerImageGoose,
+		RunnerImageCodex:   runnerImageCodex,
 		ServerListenAddr:   ":8080",
 		ServerDataDir:      "/var/lib/rascal",
 		ServerStatePath:    "/var/lib/rascal/state.db",

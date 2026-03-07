@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/defaults"
 )
 
 const (
@@ -31,7 +34,10 @@ type Config struct {
 	GitHubRuntimeToken string
 	CodexAuthPath      string
 	RunnerMode         string
+	AgentBackend       agent.Backend
 	RunnerImage        string
+	RunnerImageGoose   string
+	RunnerImageCodex   string
 	ServerListenAddr   string
 	ServerDataDir      string
 	ServerStatePath    string
@@ -47,15 +53,18 @@ type remoteUpload struct {
 }
 
 type plan struct {
-	Version         int      `json:"version"`
-	CreatedAt       string   `json:"created_at"`
-	Host            string   `json:"host"`
-	Domain          string   `json:"domain,omitempty"`
-	GOARCH          string   `json:"goarch"`
-	RunnerImage     string   `json:"runner_image"`
-	UploadEnvFile   bool     `json:"upload_env_file"`
-	UploadCodexAuth bool     `json:"upload_codex_auth"`
-	Steps           []string `json:"steps"`
+	Version          int      `json:"version"`
+	CreatedAt        string   `json:"created_at"`
+	Host             string   `json:"host"`
+	Domain           string   `json:"domain,omitempty"`
+	GOARCH           string   `json:"goarch"`
+	AgentBackend     string   `json:"agent_backend"`
+	RunnerImage      string   `json:"runner_image"`
+	RunnerImageGoose string   `json:"runner_image_goose"`
+	RunnerImageCodex string   `json:"runner_image_codex"`
+	UploadEnvFile    bool     `json:"upload_env_file"`
+	UploadCodexAuth  bool     `json:"upload_codex_auth"`
+	Steps            []string `json:"steps"`
 }
 
 //go:embed assets/install_docker.sh assets/Caddyfile.tmpl
@@ -135,19 +144,22 @@ func Execute(cfg Config) error {
 
 	planPath := filepath.Join(tmpDir, "plan.json")
 	data, err := json.MarshalIndent(plan{
-		Version:         1,
-		Host:            cfg.Host,
-		Domain:          strings.TrimSpace(cfg.Domain),
-		GOARCH:          strings.TrimSpace(cfg.GOARCH),
-		RunnerImage:     strings.TrimSpace(cfg.RunnerImage),
-		UploadEnvFile:   cfg.UploadEnvFile,
-		UploadCodexAuth: cfg.UploadCodexAuth,
-		CreatedAt:       time.Now().UTC().Format(time.RFC3339),
+		Version:          1,
+		Host:             cfg.Host,
+		Domain:           strings.TrimSpace(cfg.Domain),
+		GOARCH:           strings.TrimSpace(cfg.GOARCH),
+		AgentBackend:     string(agent.NormalizeBackend(string(cfg.AgentBackend))),
+		RunnerImage:      strings.TrimSpace(cfg.RunnerImage),
+		RunnerImageGoose: strings.TrimSpace(cfg.RunnerImageGoose),
+		RunnerImageCodex: strings.TrimSpace(cfg.RunnerImageCodex),
+		UploadEnvFile:    cfg.UploadEnvFile,
+		UploadCodexAuth:  cfg.UploadCodexAuth,
+		CreatedAt:        time.Now().UTC().Format(time.RFC3339),
 		Steps: []string{
 			"prepare_remote_dirs",
 			"upload_artifacts",
 			"ensure_dependencies",
-			"build_runner_image",
+			"build_runner_images",
 			"install_rascal_files",
 			"switch_blue_green_slot",
 			"reload_caddy",
@@ -211,10 +223,11 @@ set -eu
 mkdir -p /opt/rascal /etc/rascal
 tar -xzf /tmp/rascal-bootstrap/runner.tgz -C /opt/rascal
 install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner
-docker build -t %s /opt/rascal/runner
+docker build --target goose-runner -t %s /opt/rascal/runner
+docker build --target codex-runner -t %s /opt/rascal/runner
 install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald
 install -m 0644 /tmp/rascal-bootstrap/rascal@.service /etc/systemd/system/rascal@.service
-`)+"\n", shellSingleQuote(cfg.RunnerImage))); err != nil {
+`)+"\n", shellSingleQuote(cfg.RunnerImageGoose), shellSingleQuote(cfg.RunnerImageCodex))); err != nil {
 		return err
 	}
 	if cfg.UploadEnvFile {
@@ -631,7 +644,27 @@ func remoteTarget(cfg Config, path string) string {
 	return fmt.Sprintf("%s@%s:%s", cfg.SSHUser, cfg.Host, path)
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
 func serverEnvFile(cfg Config) string {
+	backend := agent.NormalizeBackend(string(cfg.AgentBackend))
+	gooseImage := strings.TrimSpace(cfg.RunnerImageGoose)
+	if gooseImage == "" {
+		gooseImage = firstNonEmpty(strings.TrimSpace(cfg.RunnerImage), defaults.GooseRunnerImageTag)
+	}
+	codexImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageCodex), defaults.CodexRunnerImageTag)
+	selectedImage := gooseImage
+	if backend == agent.BackendCodex {
+		selectedImage = codexImage
+	}
+
 	return fmt.Sprintf(strings.TrimSpace(`
 RASCAL_LISTEN_ADDR=%s
 RASCAL_DATA_DIR=%s
@@ -640,11 +673,14 @@ RASCAL_API_TOKEN=%s
 RASCAL_GITHUB_TOKEN=%s
 RASCAL_GITHUB_WEBHOOK_SECRET=%s
 RASCAL_RUNNER_MODE=%s
+RASCAL_AGENT_BACKEND=%s
 RASCAL_RUNNER_IMAGE=%s
+RASCAL_RUNNER_IMAGE_GOOSE=%s
+RASCAL_RUNNER_IMAGE_CODEX=%s
 RASCAL_RUNNER_MAX_ATTEMPTS=1
-RASCAL_GOOSE_SESSION_MODE=all
-RASCAL_GOOSE_SESSION_ROOT=%s
-RASCAL_GOOSE_SESSION_TTL_DAYS=14
+RASCAL_AGENT_SESSION_MODE=all
+RASCAL_AGENT_SESSION_ROOT=%s
+RASCAL_AGENT_SESSION_TTL_DAYS=14
 RASCAL_CODEX_AUTH_PATH=%s
 	`)+"\n",
 		cfg.ServerListenAddr,
@@ -654,8 +690,11 @@ RASCAL_CODEX_AUTH_PATH=%s
 		cfg.GitHubRuntimeToken,
 		cfg.WebhookSecret,
 		cfg.RunnerMode,
-		cfg.RunnerImage,
-		filepath.Join(cfg.ServerDataDir, "goose-sessions"),
+		backend,
+		selectedImage,
+		gooseImage,
+		codexImage,
+		filepath.Join(cfg.ServerDataDir, defaults.AgentSessionDirName),
 		cfg.ServerCodexAuthDst,
 	)
 }

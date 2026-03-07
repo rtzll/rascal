@@ -27,7 +27,7 @@ RUN set -eux; \
     install -m 0755 /tmp/goose /usr/local/bin/goose; \
     rm -f /tmp/goose.tar.bz2 /tmp/goose
 
-FROM ubuntu:24.04
+FROM ubuntu:24.04 AS runner-base
 ARG DEBIAN_FRONTEND=noninteractive
 ARG RUNTIME_UID=10001
 ARG RUNTIME_GID=10001
@@ -40,21 +40,13 @@ RUN apt-get -qq update && apt-get -y -qq install --no-install-recommends \
 
 COPY --from=codex-runtime /usr/local/ /usr/local/
 COPY --from=go-runtime /usr/local/go/ /usr/local/go/
-COPY --from=goose-runtime /usr/local/bin/goose /usr/local/bin/goose
 
 RUN node --version \
     && npm --version \
     && codex --version \
-    && /usr/local/go/bin/go version \
-    && goose --version
+    && /usr/local/go/bin/go version
 
-ENV GOOSE_PROVIDER=codex \
-    GOOSE_MODEL=gpt-5.4 \
-    GOOSE_MODE=auto \
-    GOOSE_DISABLE_KEYRING=1 \
-    GOOSE_DISABLE_SESSION_NAMING=true \
-    GOOSE_CONTEXT_STRATEGY=summarize \
-    PATH=/usr/local/go/bin:$PATH \
+ENV PATH=/usr/local/go/bin:$PATH \
     GH_PROMPT_DISABLED=1 \
     GIT_TERMINAL_PROMPT=0
 
@@ -65,6 +57,19 @@ RUN chmod +x /usr/local/bin/rascal-runner /usr/local/bin/rascal-entrypoint
 RUN groupadd --system --gid "${RUNTIME_GID}" rascal \
     && useradd --system --uid "${RUNTIME_UID}" --gid "${RUNTIME_GID}" --create-home --home-dir /home/rascal --shell /usr/sbin/nologin rascal \
     && install -d -m 0755 -o rascal -g rascal /work /rascal-meta
-USER rascal:rascal
 
+FROM runner-base AS goose-runner
+COPY --from=goose-runtime /usr/local/bin/goose /usr/local/bin/goose
+RUN goose --version
+ENV GOOSE_PROVIDER=codex \
+    GOOSE_MODEL=gpt-5.4 \
+    GOOSE_MODE=auto \
+    GOOSE_DISABLE_KEYRING=1 \
+    GOOSE_DISABLE_SESSION_NAMING=true \
+    GOOSE_CONTEXT_STRATEGY=summarize
+USER rascal:rascal
+ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]
+
+FROM runner-base AS codex-runner
+USER rascal:rascal
 ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]

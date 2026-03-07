@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/rtzll/rascal/internal/defaults"
 )
 
 type remoteDoctorStatus struct {
@@ -62,7 +64,19 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		"echo ok",
 	}, "\n"))
 	status.CodexAuthPresent = check("[ -f /etc/rascal/codex_auth.json ] && echo ok")
-	status.RunnerImagePresent = check("docker image inspect rascal-runner:latest >/dev/null 2>&1 && echo ok")
+	status.RunnerImagePresent = check(fmt.Sprintf(strings.Join([]string{
+		"set -eu",
+		`goose_image=%q`,
+		`codex_image=%q`,
+		`if [ -f /etc/rascal/rascal.env ]; then`,
+		`  set -a`,
+		`  . /etc/rascal/rascal.env`,
+		`  set +a`,
+		`  goose_image=${RASCAL_RUNNER_IMAGE_GOOSE:-${RASCAL_RUNNER_IMAGE:-$goose_image}}`,
+		`  codex_image=${RASCAL_RUNNER_IMAGE_CODEX:-$codex_image}`,
+		`fi`,
+		`docker image inspect "$goose_image" "$codex_image" >/dev/null 2>&1 && echo ok`,
+	}, "\n"), defaults.GooseRunnerImageTag, defaults.CodexRunnerImageTag))
 	return status, nil
 }
 
