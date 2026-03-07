@@ -118,6 +118,12 @@ func TestSyncRemoteAuthIncludesRestartWhenEnabled(t *testing.T) {
 	if !strings.Contains(sshCalls, `systemctl restart "rascal@$slot"`) {
 		t.Fatalf("expected restart command when Restart=true, got:\n%s", sshCalls)
 	}
+	if strings.Contains(sshCalls, ";; &&") {
+		t.Fatalf("expected valid case statement in restart command, got:\n%s", sshCalls)
+	}
+	if !strings.Contains(sshCalls, `case "$slot" in blue|green) ;; *) if systemctl is-active --quiet 'rascal@blue'; then slot=blue; elif systemctl is-active --quiet 'rascal@green'; then slot=green; else slot=blue; fi ;; esac`) {
+		t.Fatalf("expected slot selection case statement in restart command, got:\n%s", sshCalls)
+	}
 }
 
 func TestSyncRemoteAuthCodexOnlyWithoutRestart(t *testing.T) {

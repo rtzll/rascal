@@ -23,7 +23,7 @@ func syncRemoteAuth(cfg syncRemoteAuthConfig) error {
 	cfg.SSHUser = firstNonEmpty(strings.TrimSpace(cfg.SSHUser), "root")
 	cfg.SSHKeyPath = strings.TrimSpace(cfg.SSHKeyPath)
 	if cfg.SSHPort <= 0 {
-	cfg.SSHPort = 22
+		cfg.SSHPort = 22
 	}
 	cfg.APIToken = strings.TrimSpace(cfg.APIToken)
 	cfg.GitHubRuntime = strings.TrimSpace(cfg.GitHubRuntime)
@@ -108,8 +108,7 @@ func syncRemoteAuth(cfg syncRemoteAuthConfig) error {
 	if cfg.Restart {
 		steps = append(steps,
 			"slot=$(tr -d '[:space:]' </etc/rascal/active_slot 2>/dev/null || true)",
-			"case \"$slot\" in blue|green) ;;",
-			"*) if systemctl is-active --quiet 'rascal@blue'; then slot=blue; elif systemctl is-active --quiet 'rascal@green'; then slot=green; else slot=blue; fi ;; esac",
+			"case \"$slot\" in blue|green) ;; *) if systemctl is-active --quiet 'rascal@blue'; then slot=blue; elif systemctl is-active --quiet 'rascal@green'; then slot=green; else slot=blue; fi ;; esac",
 			"systemctl restart \"rascal@$slot\"",
 		)
 	}
