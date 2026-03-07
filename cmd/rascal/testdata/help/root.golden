@@ -48,5 +48,6 @@ Flags:
   -q, --quiet                    reduce non-essential output
       --server-url string        orchestrator URL
       --transport string         API transport: auto|http|ssh
+  -v, --version                  version for rascal
 
 Use "rascal [command] --help" for more information about a command.

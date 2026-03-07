@@ -147,7 +147,12 @@ func TestExecuteRollsOutRunnerBinaryBeforeImageBuild(t *testing.T) {
 	if runnerCall == "" {
 		t.Fatalf("missing runner build call in go calls: %v", goCalls)
 	}
-	for _, needle := range []string{"-ldflags", "main.buildVersion=v-test", "main.buildCommit=deadbee", "main.buildTime=2026-03-03T00:00:00Z"} {
+	for _, needle := range []string{
+		"-ldflags",
+		"github.com/rtzll/rascal/internal/buildinfo.Version=v-test",
+		"github.com/rtzll/rascal/internal/buildinfo.Commit=deadbee",
+		"github.com/rtzll/rascal/internal/buildinfo.Date=2026-03-03T00:00:00Z",
+	} {
 		if !strings.Contains(runnerCall, needle) {
 			t.Fatalf("expected runner build call to contain %q, got: %s", needle, runnerCall)
 		}
@@ -181,7 +186,7 @@ func TestResolveRunnerBuildInfoUsesEnv(t *testing.T) {
 	t.Setenv("RASCAL_BUILD_COMMIT", "abc1234")
 	t.Setenv("RASCAL_BUILD_TIME", "2026-03-03T00:00:00Z")
 
-	version, commit, builtAt := resolveRunnerBuildInfo()
+	version, commit, builtAt := resolveBuildInfo()
 	if version != "v1.2.3" {
 		t.Fatalf("version = %q, want v1.2.3", version)
 	}
@@ -198,7 +203,7 @@ func TestResolveRunnerBuildInfoDefaults(t *testing.T) {
 	t.Setenv("RASCAL_BUILD_COMMIT", "")
 	t.Setenv("RASCAL_BUILD_TIME", "")
 
-	version, commit, builtAt := resolveRunnerBuildInfo()
+	version, commit, builtAt := resolveBuildInfo()
 	if version != "dev" {
 		t.Fatalf("version = %q, want dev", version)
 	}

@@ -52,6 +52,17 @@ GITHUB_RUNTIME_TOKEN=...
 ./bin/rascal run -t "Add a short CONTRIBUTING.md section for local dev setup"
 ```
 
+## Builds
+
+Local builds include version metadata for `rascal` and `rascald`:
+
+```bash
+make build
+./bin/rascal --version
+```
+
+Tagged CLI releases are packaged and published with GoReleaser via GitHub Actions.
+
 ## Core Commands
 
 ```bash

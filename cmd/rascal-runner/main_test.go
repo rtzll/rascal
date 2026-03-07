@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rtzll/rascal/internal/buildinfo"
 	"github.com/rtzll/rascal/internal/runner"
 )
 
@@ -91,14 +92,14 @@ func TestIsConventionalTitle(t *testing.T) {
 }
 
 func TestBuildInfoSummary(t *testing.T) {
-	origVersion, origCommit, origTime := buildVersion, buildCommit, buildTime
+	origVersion, origCommit, origTime := buildinfo.Version, buildinfo.Commit, buildinfo.Date
 	t.Cleanup(func() {
-		buildVersion, buildCommit, buildTime = origVersion, origCommit, origTime
+		buildinfo.Version, buildinfo.Commit, buildinfo.Date = origVersion, origCommit, origTime
 	})
 
-	buildVersion = "v1.2.3"
-	buildCommit = "abcdef0"
-	buildTime = "2026-03-03T12:00:00Z"
+	buildinfo.Version = "v1.2.3"
+	buildinfo.Commit = "abcdef0"
+	buildinfo.Date = "2026-03-03T12:00:00Z"
 	got := buildInfoSummary()
 	want := "version=v1.2.3 commit=abcdef0 built=2026-03-03T12:00:00Z"
 	if got != want {

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rtzll/rascal/internal/buildinfo"
 )
 
 const (
@@ -379,7 +381,8 @@ func buildLinuxRascald(outputPath, goarch string) error {
 	if strings.TrimSpace(goarch) == "" {
 		goarch = "amd64"
 	}
-	cmd := exec.Command("go", "build", "-o", outputPath, "./cmd/rascald")
+	version, commit, builtAt := resolveBuildInfo()
+	cmd := exec.Command("go", "build", "-ldflags", buildinfo.LinkerFlags(version, commit, builtAt, false), "-o", outputPath, "./cmd/rascald")
 	cmd.Dir = repoRootPath()
 	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goarch, "CGO_ENABLED=0")
 	cmd.Stdout = os.Stdout
@@ -394,9 +397,8 @@ func buildLinuxRascalRunner(outputPath, goarch string) error {
 	if strings.TrimSpace(goarch) == "" {
 		goarch = "amd64"
 	}
-	version, commit, builtAt := resolveRunnerBuildInfo()
-	ldflags := fmt.Sprintf("-X main.buildVersion=%s -X main.buildCommit=%s -X main.buildTime=%s", version, commit, builtAt)
-	cmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", outputPath, "./cmd/rascal-runner")
+	version, commit, builtAt := resolveBuildInfo()
+	cmd := exec.Command("go", "build", "-ldflags", buildinfo.LinkerFlags(version, commit, builtAt, false), "-o", outputPath, "./cmd/rascal-runner")
 	cmd.Dir = repoRootPath()
 	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goarch, "CGO_ENABLED=0")
 	cmd.Stdout = os.Stdout
@@ -407,7 +409,7 @@ func buildLinuxRascalRunner(outputPath, goarch string) error {
 	return nil
 }
 
-func resolveRunnerBuildInfo() (version, commit, builtAt string) {
+func resolveBuildInfo() (version, commit, builtAt string) {
 	version = normalizeBuildMeta(strings.TrimSpace(os.Getenv("RASCAL_BUILD_VERSION")), "dev")
 	commit = normalizeBuildMeta(strings.TrimSpace(os.Getenv("RASCAL_BUILD_COMMIT")), "unknown")
 	builtAt = normalizeBuildMeta(strings.TrimSpace(os.Getenv("RASCAL_BUILD_TIME")), time.Now().UTC().Format(time.RFC3339))

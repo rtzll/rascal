@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/rtzll/rascal/internal/buildinfo"
 	"github.com/rtzll/rascal/internal/config"
 	deployengine "github.com/rtzll/rascal/internal/deploy"
 	"github.com/rtzll/rascal/internal/state"
@@ -110,6 +111,7 @@ func newRootCmd() *cobra.Command {
 		Long:          "Rascal is a CLI for starting, inspecting, and iterating autonomous coding runs on rascald.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Version:       buildinfo.BinaryVersion("rascal"),
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if err := a.loadGlobalEnv(); err != nil {
 				return &cliError{Code: exitConfig, Message: "failed to load env file", Cause: err}
@@ -120,6 +122,7 @@ func newRootCmd() *cobra.Command {
 			return cmd.Help()
 		},
 	}
+	root.SetVersionTemplate("{{.Version}}\n")
 
 	root.AddGroup(
 		&cobra.Group{ID: "setup", Title: "Setup:"},

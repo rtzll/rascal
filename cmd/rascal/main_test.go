@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/rtzll/rascal/internal/buildinfo"
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -106,6 +107,22 @@ func TestRetryCommandAliasesRerun(t *testing.T) {
 	}
 	if cmd.Name() != "retry" {
 		t.Fatalf("expected rerun alias to resolve to retry, got %q", cmd.Name())
+	}
+}
+
+func TestRootVersionUsesBuildInfo(t *testing.T) {
+	origVersion, origCommit, origDate := buildinfo.Version, buildinfo.Commit, buildinfo.Date
+	t.Cleanup(func() {
+		buildinfo.Version, buildinfo.Commit, buildinfo.Date = origVersion, origCommit, origDate
+	})
+
+	buildinfo.Version = "v1.2.3"
+	buildinfo.Commit = "abcdef0"
+	buildinfo.Date = "2026-03-03T12:00:00Z"
+
+	root := newRootCmd()
+	if got, want := root.Version, "rascal v1.2.3 (commit: abcdef0, built: 2026-03-03T12:00:00Z)"; got != want {
+		t.Fatalf("root.Version = %q, want %q", got, want)
 	}
 }
 

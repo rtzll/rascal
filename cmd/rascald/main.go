@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rtzll/rascal/internal/buildinfo"
 	"github.com/rtzll/rascal/internal/config"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/logs"
@@ -112,6 +113,13 @@ type createIssueTaskRequest struct {
 type requestIDKey struct{}
 
 func main() {
+	if buildinfo.IsVersionRequest(os.Args[1:]) {
+		if err := buildinfo.PrintVersion(os.Stdout, "rascald"); err != nil {
+			log.Fatalf("version: %v", err)
+		}
+		return
+	}
+
 	cfg := config.LoadServerConfig()
 	if err := cfg.Ensure(); err != nil {
 		log.Fatalf("config: %v", err)
@@ -152,6 +160,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	log.Printf("starting rascald %s", buildinfo.Summary())
 	log.Printf("rascald listening on %s (runner=%s)", cfg.ListenAddr, cfg.RunnerMode)
 	serverErr := make(chan error, 1)
 	go func() {

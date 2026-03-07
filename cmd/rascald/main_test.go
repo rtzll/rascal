@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rtzll/rascal/internal/buildinfo"
 	"github.com/rtzll/rascal/internal/config"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/runner"
@@ -232,6 +233,23 @@ func newTestServer(t *testing.T, launcher runner.Launcher) *server {
 		runCancelNote: make(map[string]string),
 		maxConcurrent: defaultMaxConcurrent(),
 		instanceID:    "test-instance",
+	}
+}
+
+func TestVersionStringUsesBuildInfo(t *testing.T) {
+	t.Parallel()
+
+	origVersion, origCommit, origDate := buildinfo.Version, buildinfo.Commit, buildinfo.Date
+	t.Cleanup(func() {
+		buildinfo.Version, buildinfo.Commit, buildinfo.Date = origVersion, origCommit, origDate
+	})
+
+	buildinfo.Version = "v1.2.3"
+	buildinfo.Commit = "abcdef0"
+	buildinfo.Date = "2026-03-03T12:00:00Z"
+
+	if got, want := buildinfo.BinaryVersion("rascald"), "rascald v1.2.3 (commit: abcdef0, built: 2026-03-03T12:00:00Z)"; got != want {
+		t.Fatalf("BinaryVersion() = %q, want %q", got, want)
 	}
 }
 

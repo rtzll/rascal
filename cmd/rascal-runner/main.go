@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rtzll/rascal/internal/buildinfo"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runsummary"
 )
@@ -32,10 +33,6 @@ const (
 var (
 	convCommitPattern = regexp.MustCompile(`^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?(!)?:[[:space:]].+`)
 	prURLPattern      = regexp.MustCompile(`https://github\.com/[^[:space:]]+/pull/[0-9]+`)
-
-	buildVersion = "dev"
-	buildCommit  = "unknown"
-	buildTime    = "unknown"
 )
 
 type config struct {
@@ -118,6 +115,13 @@ func (osExecutor) Run(dir string, extraEnv []string, stdout, stderr io.Writer, n
 }
 
 func main() {
+	if buildinfo.IsVersionRequest(os.Args[1:]) {
+		if err := buildinfo.PrintVersion(os.Stdout, "rascal-runner"); err != nil {
+			log.Fatalf("version: %v", err)
+		}
+		return
+	}
+
 	log.SetFlags(0)
 	log.Printf("[%s] starting rascal-runner %s", nowUTC(), buildInfoSummary())
 	if err := run(); err != nil {
@@ -810,5 +814,5 @@ func nowUTC() string {
 }
 
 func buildInfoSummary() string {
-	return fmt.Sprintf("version=%s commit=%s built=%s", buildVersion, buildCommit, buildTime)
+	return buildinfo.Summary()
 }
