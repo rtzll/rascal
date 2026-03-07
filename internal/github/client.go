@@ -45,6 +45,13 @@ type WebhookData struct {
 	Events []string `json:"events"`
 }
 
+type issueReaction struct {
+	ID   int64 `json:"id"`
+	User struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
 func NewAPIClient(token string) *APIClient {
 	return &APIClient{
 		token:   strings.TrimSpace(token),
@@ -182,6 +189,52 @@ func (c *APIClient) AddIssueReaction(ctx context.Context, repo string, issueNumb
 	return nil
 }
 
+func (c *APIClient) RemoveIssueReactions(ctx context.Context, repo string, issueNumber int) error {
+	if issueNumber <= 0 {
+		return fmt.Errorf("issue number must be positive")
+	}
+	owner, repoName, err := splitRepo(repo)
+	if err != nil {
+		return err
+	}
+	login, err := c.viewerLogin(ctx)
+	if err != nil {
+		return err
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/reactions?per_page=100", owner, repoName, issueNumber)
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github list issue reactions failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var reactions []issueReaction
+	if err := json.NewDecoder(resp.Body).Decode(&reactions); err != nil {
+		return fmt.Errorf("decode issue reactions: %w", err)
+	}
+	for _, reaction := range reactions {
+		if reaction.ID <= 0 || !strings.EqualFold(strings.TrimSpace(reaction.User.Login), login) {
+			continue
+		}
+		deletePath := fmt.Sprintf("/repos/%s/%s/issues/%d/reactions/%d", owner, repoName, issueNumber, reaction.ID)
+		deleteResp, err := c.do(ctx, http.MethodDelete, deletePath, nil)
+		if err != nil {
+			return err
+		}
+		body, _ := io.ReadAll(deleteResp.Body)
+		deleteResp.Body.Close()
+		if deleteResp.StatusCode >= 300 {
+			return fmt.Errorf("github delete issue reaction failed (%d): %s", deleteResp.StatusCode, strings.TrimSpace(string(body)))
+		}
+	}
+	return nil
+}
+
 func (c *APIClient) AddIssueCommentReaction(ctx context.Context, repo string, commentID int64, content string) error {
 	if commentID <= 0 {
 		return fmt.Errorf("comment id must be positive")
@@ -294,6 +347,29 @@ func validateReactionContent(content string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported reaction content %q", content)
 	}
+}
+
+func (c *APIClient) viewerLogin(ctx context.Context) (string, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/user", nil)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("github get viewer failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var out struct {
+		Login string `json:"login"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("decode viewer: %w", err)
+	}
+	login := strings.TrimSpace(out.Login)
+	if login == "" {
+		return "", fmt.Errorf("github viewer login is empty")
+	}
+	return login, nil
 }
 
 func (c *APIClient) UpsertWebhook(ctx context.Context, repo, webhookURL, secret string, events []string) error {

@@ -42,6 +42,7 @@ const runCompletionCommentBodyMarker = "<!-- rascal:completion-comment -->"
 type githubClient interface {
 	GetIssue(ctx context.Context, repo string, issueNumber int) (ghapi.IssueData, error)
 	AddIssueReaction(ctx context.Context, repo string, issueNumber int, content string) error
+	RemoveIssueReactions(ctx context.Context, repo string, issueNumber int) error
 	AddIssueCommentReaction(ctx context.Context, repo string, commentID int64, content string) error
 	AddPullRequestReviewReaction(ctx context.Context, repo string, pullNumber int, reviewID int64, content string) error
 	AddPullRequestReviewCommentReaction(ctx context.Context, repo string, commentID int64, content string) error
@@ -525,6 +526,12 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				return nil
 			}
 			return err
+		case "unlabeled":
+			if !strings.EqualFold(ev.Label.Name, "rascal") {
+				return nil
+			}
+			s.removeIssueReactionsBestEffort(ev.Repository.FullName, ev.Issue.Number)
+			return nil
 		case "edited":
 			if !issueHasLabel(ev.Issue.Labels, "rascal") {
 				return nil
@@ -2160,6 +2167,20 @@ func (s *server) addIssueReactionBestEffort(repo string, issueNumber int, reacti
 	defer cancel()
 	if err := s.gh.AddIssueReaction(ctx, repo, issueNumber, reaction); err != nil {
 		log.Printf("failed to add %q reaction for %s#%d: %v", reaction, repo, issueNumber, err)
+	}
+}
+
+func (s *server) removeIssueReactionsBestEffort(repo string, issueNumber int) {
+	if issueNumber <= 0 || strings.TrimSpace(repo) == "" {
+		return
+	}
+	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := s.gh.RemoveIssueReactions(ctx, repo, issueNumber); err != nil {
+		log.Printf("failed to remove reactions for %s#%d: %v", repo, issueNumber, err)
 	}
 }
 

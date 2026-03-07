@@ -61,6 +61,7 @@ type fakeGitHubClient struct {
 	issueErr  error
 
 	issueReactions []postedIssueReaction
+	removedIssues  []string
 
 	issueComments            []postedIssueComment
 	createIssueCommentErr    error
@@ -125,6 +126,21 @@ func (f *fakeGitHubClient) AddIssueReaction(_ context.Context, repo string, issu
 	return nil
 }
 
+func (f *fakeGitHubClient) RemoveIssueReactions(_ context.Context, repo string, issueNumber int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removedIssues = append(f.removedIssues, fmt.Sprintf("%s#%d", repo, issueNumber))
+	filtered := f.issueReactions[:0]
+	for _, reaction := range f.issueReactions {
+		if reaction.repo == repo && reaction.issueNumber == issueNumber {
+			continue
+		}
+		filtered = append(filtered, reaction)
+	}
+	f.issueReactions = filtered
+	return nil
+}
+
 func (f *fakeGitHubClient) AddIssueCommentReaction(_ context.Context, _ string, _ int64, _ string) error {
 	return nil
 }
@@ -176,6 +192,14 @@ func (f *fakeGitHubClient) postedReactions() []postedIssueReaction {
 	defer f.mu.Unlock()
 	out := make([]postedIssueReaction, len(f.issueReactions))
 	copy(out, f.issueReactions)
+	return out
+}
+
+func (f *fakeGitHubClient) removedIssueKeys() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.removedIssues))
+	copy(out, f.removedIssues)
 	return out
 }
 
@@ -434,6 +458,33 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 		t.Fatalf("expected new run for edit, got existing run id %q", editedRun.ID)
 	}
 
+}
+
+func TestHandleWebhookIssueUnlabeledRemovesPastReactions(t *testing.T) {
+	fakeGH := &fakeGitHubClient{}
+	fakeGH.addIssueReaction("owner/repo", 7, ghapi.ReactionEyes)
+	fakeGH.addIssueReaction("owner/repo", 7, ghapi.ReactionRocket)
+	fakeGH.addIssueReaction("owner/repo", 8, ghapi.ReactionEyes)
+
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	payload := []byte(`{"action":"unlabeled","label":{"name":"rascal"},"issue":{"number":7,"title":"Title","body":"Body","labels":[]},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "issues", "delivery-unlabeled", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for unlabeled issue event, got %d", rec.Code)
+	}
+
+	if got := fakeGH.removedIssueKeys(); len(got) != 1 || got[0] != "owner/repo#7" {
+		t.Fatalf("unexpected removed reaction calls: %v", got)
+	}
+	if got := fakeGH.postedReactions(); len(got) != 1 || got[0].issueNumber != 8 {
+		t.Fatalf("expected only unrelated issue reactions to remain, got %+v", got)
+	}
 }
 
 func TestHandleListRunsSupportsAllQuery(t *testing.T) {

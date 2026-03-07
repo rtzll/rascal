@@ -159,6 +159,46 @@ func TestAddIssueReaction(t *testing.T) {
 	})
 }
 
+func TestRemoveIssueReactions(t *testing.T) {
+	t.Run("removes only authenticated user reactions", func(t *testing.T) {
+		deleted := []string{}
+		client := newGitHubMockClient(t,
+			githubRoute(http.MethodGet, "/user", func(w http.ResponseWriter, _ *http.Request) {
+				writeJSONResponse(t, w, http.StatusOK, map[string]any{"login": "rascalbot"})
+			}),
+			githubRoute(http.MethodGet, "/repos/owner/repo/issues/42/reactions", func(w http.ResponseWriter, _ *http.Request) {
+				writeJSONResponse(t, w, http.StatusOK, []map[string]any{
+					{"id": 1, "user": map[string]any{"login": "rascalbot"}},
+					{"id": 2, "user": map[string]any{"login": "someone-else"}},
+					{"id": 3, "user": map[string]any{"login": "RASCALBOT"}},
+				})
+			}),
+			githubRoute(http.MethodDelete, "/repos/owner/repo/issues/42/reactions/1", func(w http.ResponseWriter, _ *http.Request) {
+				deleted = append(deleted, "1")
+				w.WriteHeader(http.StatusNoContent)
+			}),
+			githubRoute(http.MethodDelete, "/repos/owner/repo/issues/42/reactions/3", func(w http.ResponseWriter, _ *http.Request) {
+				deleted = append(deleted, "3")
+				w.WriteHeader(http.StatusNoContent)
+			}),
+		)
+		if err := client.RemoveIssueReactions(context.Background(), "owner/repo", 42); err != nil {
+			t.Fatalf("RemoveIssueReactions returned error: %v", err)
+		}
+		if strings.Join(deleted, ",") != "1,3" {
+			t.Fatalf("unexpected deleted reactions: %v", deleted)
+		}
+	})
+
+	t.Run("rejects invalid issue number", func(t *testing.T) {
+		client := NewAPIClient("token")
+		err := client.RemoveIssueReactions(context.Background(), "owner/repo", 0)
+		if err == nil || !strings.Contains(err.Error(), "issue number must be positive") {
+			t.Fatalf("expected issue number error, got: %v", err)
+		}
+	})
+}
+
 func TestAddIssueCommentReaction(t *testing.T) {
 	t.Run("posts reaction", func(t *testing.T) {
 		client := newGitHubMockClient(t,
