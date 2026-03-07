@@ -25,6 +25,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/rtzll/rascal/internal/config"
 	deployengine "github.com/rtzll/rascal/internal/deploy"
+	"github.com/rtzll/rascal/internal/issueref"
 	"github.com/rtzll/rascal/internal/state"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -896,13 +897,13 @@ rascal run --issue OWNER/REPO#123
 				if cmd.Flags().Changed("repo") || cmd.Flags().Changed("task") || cmd.Flags().Changed("base-branch") {
 					return &cliError{Code: exitInput, Message: "--issue cannot be combined with --repo, --task, or --base-branch"}
 				}
-				repo, issueNumber, err := parseIssueRef(issueRef)
+				parsedIssue, err := issueref.Parse(issueRef)
 				if err != nil {
 					return &cliError{Code: exitInput, Message: err.Error()}
 				}
 				payload := map[string]any{
-					"repo":         repo,
-					"issue_number": issueNumber,
+					"repo":         parsedIssue.Repo,
+					"issue_number": parsedIssue.Number,
 				}
 				if cmd.Flags().Changed("debug") {
 					payload["debug"] = debug
@@ -2594,22 +2595,6 @@ func filterLogsSince(input string, since time.Time) string {
 		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
-}
-
-func parseIssueRef(input string) (string, int, error) {
-	parts := strings.Split(input, "#")
-	if len(parts) != 2 {
-		return "", 0, fmt.Errorf("invalid issue ref %q, expected OWNER/REPO#123", input)
-	}
-	repo := strings.TrimSpace(parts[0])
-	var issue int
-	if _, err := fmt.Sscanf(parts[1], "%d", &issue); err != nil || issue <= 0 {
-		return "", 0, fmt.Errorf("invalid issue number in %q", input)
-	}
-	if repo == "" {
-		return "", 0, fmt.Errorf("invalid repo in %q", input)
-	}
-	return repo, issue, nil
 }
 
 func (c apiClient) doJSON(method, path string, payload any) (*http.Response, error) {

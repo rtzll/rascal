@@ -24,6 +24,7 @@ import (
 
 	"github.com/rtzll/rascal/internal/config"
 	ghapi "github.com/rtzll/rascal/internal/github"
+	"github.com/rtzll/rascal/internal/issueref"
 	"github.com/rtzll/rascal/internal/logs"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runsummary"
@@ -366,17 +367,17 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	req.Repo = strings.TrimSpace(req.Repo)
-	if req.Repo == "" || req.IssueNumber <= 0 {
-		http.Error(w, "repo and issue_number are required", http.StatusBadRequest)
+	issueRef, err := issueref.Normalize(req.Repo, req.IssueNumber)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	taskID := fmt.Sprintf("%s#%d", req.Repo, req.IssueNumber)
-	taskText := fmt.Sprintf("Work on issue #%d in %s", req.IssueNumber, req.Repo)
+	taskID := issueRef.String()
+	taskText := fmt.Sprintf("Work on issue #%d in %s", issueRef.Number, issueRef.Repo)
 	ctxText := ""
 	if strings.TrimSpace(s.cfg.GitHubToken) != "" {
-		issue, err := s.gh.GetIssue(r.Context(), req.Repo, req.IssueNumber)
+		issue, err := s.gh.GetIssue(r.Context(), issueRef.Repo, issueRef.Number)
 		if err != nil {
 			http.Error(w, "failed to fetch issue: "+err.Error(), http.StatusBadGateway)
 			return
@@ -387,10 +388,10 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 
 	run, err := s.createAndQueueRun(runRequest{
 		TaskID:      taskID,
-		Repo:        req.Repo,
+		Repo:        issueRef.Repo,
 		Task:        taskText,
 		Trigger:     "issue_api",
-		IssueNumber: req.IssueNumber,
+		IssueNumber: issueRef.Number,
 		Context:     ctxText,
 		Debug:       req.Debug,
 	})
@@ -512,14 +513,17 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if !strings.EqualFold(ev.Label.Name, "rascal") {
 				return nil
 			}
-			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
-			_, err := s.createAndQueueRun(runRequest{
-				TaskID:      taskID,
-				Repo:        ev.Repository.FullName,
+			issueRef, err := issueref.Normalize(ev.Repository.FullName, ev.Issue.Number)
+			if err != nil {
+				return err
+			}
+			_, err = s.createAndQueueRun(runRequest{
+				TaskID:      issueRef.String(),
+				Repo:        issueRef.Repo,
 				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
 				Trigger:     "issue_label",
-				IssueNumber: ev.Issue.Number,
-				Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number),
+				IssueNumber: issueRef.Number,
+				Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", issueRef.Number),
 				Debug:       boolPtr(true),
 			})
 			if errors.Is(err, errTaskCompleted) {
@@ -530,23 +534,31 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if !strings.EqualFold(ev.Label.Name, "rascal") {
 				return nil
 			}
-			s.removeIssueReactionsBestEffort(ev.Repository.FullName, ev.Issue.Number)
+			issueRef, err := issueref.Normalize(ev.Repository.FullName, ev.Issue.Number)
+			if err != nil {
+				return err
+			}
+			s.removeIssueReactionsBestEffort(issueRef.Repo, issueRef.Number)
 			return nil
 		case "edited":
 			if !issueHasLabel(ev.Issue.Labels, "rascal") {
 				return nil
 			}
-			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
+			issueRef, err := issueref.Normalize(ev.Repository.FullName, ev.Issue.Number)
+			if err != nil {
+				return err
+			}
+			taskID := issueRef.String()
 			if err := s.store.CancelQueuedRuns(taskID, "issue edited"); err != nil {
 				return err
 			}
-			_, err := s.createAndQueueRun(runRequest{
+			_, err = s.createAndQueueRun(runRequest{
 				TaskID:      taskID,
-				Repo:        ev.Repository.FullName,
+				Repo:        issueRef.Repo,
 				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
 				Trigger:     "issue_edited",
-				IssueNumber: ev.Issue.Number,
-				Context:     fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number),
+				IssueNumber: issueRef.Number,
+				Context:     fmt.Sprintf("Triggered by issue edit on issue #%d", issueRef.Number),
 				Debug:       boolPtr(true),
 			})
 			if errors.Is(err, errTaskCompleted) {
@@ -557,11 +569,15 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if !issueHasLabel(ev.Issue.Labels, "rascal") {
 				return nil
 			}
-			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
+			issueRef, err := issueref.Normalize(ev.Repository.FullName, ev.Issue.Number)
+			if err != nil {
+				return err
+			}
+			taskID := issueRef.String()
 			if _, err := s.store.UpsertTask(state.UpsertTaskInput{
 				ID:          taskID,
-				Repo:        ev.Repository.FullName,
-				IssueNumber: ev.Issue.Number,
+				Repo:        issueRef.Repo,
+				IssueNumber: issueRef.Number,
 			}); err != nil {
 				return err
 			}
@@ -577,25 +593,29 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if !issueHasLabel(ev.Issue.Labels, "rascal") {
 				return nil
 			}
-			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
+			issueRef, err := issueref.Normalize(ev.Repository.FullName, ev.Issue.Number)
+			if err != nil {
+				return err
+			}
+			taskID := issueRef.String()
 			if _, err := s.store.UpsertTask(state.UpsertTaskInput{
 				ID:          taskID,
-				Repo:        ev.Repository.FullName,
-				IssueNumber: ev.Issue.Number,
+				Repo:        issueRef.Repo,
+				IssueNumber: issueRef.Number,
 			}); err != nil {
 				return err
 			}
 			if err := s.store.MarkTaskOpen(taskID); err != nil {
 				return err
 			}
-			_, err := s.createAndQueueRun(runRequest{
+			_, err = s.createAndQueueRun(runRequest{
 				TaskID:      taskID,
-				Repo:        ev.Repository.FullName,
+				Repo:        issueRef.Repo,
 				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
 				Trigger:     "issue_reopened",
-				IssueNumber: ev.Issue.Number,
+				IssueNumber: issueRef.Number,
 				PRStatus:    state.PRStatusNone,
-				Context:     fmt.Sprintf("Triggered by issue reopen on issue #%d", ev.Issue.Number),
+				Context:     fmt.Sprintf("Triggered by issue reopen on issue #%d", issueRef.Number),
 				Debug:       boolPtr(true),
 			})
 			if errors.Is(err, errTaskCompleted) {
