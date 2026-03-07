@@ -11,7 +11,7 @@ import (
 )
 
 const activeRunForTask = `-- name: ActiveRunForTask :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ? AND status IN ('queued', 'running')
 ORDER BY seq DESC
@@ -27,6 +27,7 @@ func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (Run, err
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
+		&i.AgentBackend,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -182,6 +183,7 @@ RETURNING
   task_id,
   repo,
   task,
+  agent_backend,
   base_branch,
   head_branch,
   trigger,
@@ -215,6 +217,7 @@ func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRun
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
+		&i.AgentBackend,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -272,6 +275,7 @@ RETURNING
   task_id,
   repo,
   task,
+  agent_backend,
   base_branch,
   head_branch,
   trigger,
@@ -306,6 +310,7 @@ func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQu
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
+		&i.AgentBackend,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -485,6 +490,19 @@ func (q *Queries) DeleteRunLeaseForOwner(ctx context.Context, arg DeleteRunLease
 	return result.RowsAffected()
 }
 
+const deleteTaskAgentSession = `-- name: DeleteTaskAgentSession :execrows
+DELETE FROM task_agent_sessions
+WHERE task_id = ?
+`
+
+func (q *Queries) DeleteTaskAgentSession(ctx context.Context, taskID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteTaskAgentSession, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deliverySeen = `-- name: DeliverySeen :one
 SELECT EXISTS(SELECT 1 FROM deliveries WHERE id = ?)
 `
@@ -500,6 +518,7 @@ const findTaskByPR = `-- name: FindTaskByPR :one
 SELECT
   tasks.id,
   tasks.repo,
+  tasks.agent_backend,
   tasks.issue_number,
   tasks.pr_number,
   tasks.status,
@@ -524,6 +543,7 @@ type FindTaskByPRParams struct {
 type FindTaskByPRRow struct {
 	ID           string `json:"id"`
 	Repo         string `json:"repo"`
+	AgentBackend string `json:"agent_backend"`
 	IssueNumber  int64  `json:"issue_number"`
 	PrNumber     int64  `json:"pr_number"`
 	Status       string `json:"status"`
@@ -539,6 +559,7 @@ func (q *Queries) FindTaskByPR(ctx context.Context, arg FindTaskByPRParams) (Fin
 	err := row.Scan(
 		&i.ID,
 		&i.Repo,
+		&i.AgentBackend,
 		&i.IssueNumber,
 		&i.PrNumber,
 		&i.Status,
@@ -551,7 +572,7 @@ func (q *Queries) FindTaskByPR(ctx context.Context, arg FindTaskByPRParams) (Fin
 }
 
 const getRun = `-- name: GetRun :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?
 `
@@ -565,6 +586,7 @@ func (q *Queries) GetRun(ctx context.Context, id string) (Run, error) {
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
+		&i.AgentBackend,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -649,6 +671,7 @@ const getTask = `-- name: GetTask :one
 SELECT
   tasks.id,
   tasks.repo,
+  tasks.agent_backend,
   tasks.issue_number,
   tasks.pr_number,
   tasks.status,
@@ -668,6 +691,7 @@ WHERE tasks.id = ?
 type GetTaskRow struct {
 	ID           string `json:"id"`
 	Repo         string `json:"repo"`
+	AgentBackend string `json:"agent_backend"`
 	IssueNumber  int64  `json:"issue_number"`
 	PrNumber     int64  `json:"pr_number"`
 	Status       string `json:"status"`
@@ -683,10 +707,41 @@ func (q *Queries) GetTask(ctx context.Context, id string) (GetTaskRow, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.Repo,
+		&i.AgentBackend,
 		&i.IssueNumber,
 		&i.PrNumber,
 		&i.Status,
 		&i.PendingInput,
+		&i.LastRunID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getTaskAgentSession = `-- name: GetTaskAgentSession :one
+SELECT
+  task_id,
+  agent_backend,
+  backend_session_id,
+  session_key,
+  session_root,
+  last_run_id,
+  created_at,
+  updated_at
+FROM task_agent_sessions
+WHERE task_id = ?
+`
+
+func (q *Queries) GetTaskAgentSession(ctx context.Context, taskID string) (TaskAgentSession, error) {
+	row := q.db.QueryRowContext(ctx, getTaskAgentSession, taskID)
+	var i TaskAgentSession
+	err := row.Scan(
+		&i.TaskID,
+		&i.AgentBackend,
+		&i.BackendSessionID,
+		&i.SessionKey,
+		&i.SessionRoot,
 		&i.LastRunID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -700,6 +755,7 @@ INSERT INTO runs (
   task_id,
   repo,
   task,
+  agent_backend,
   base_branch,
   head_branch,
   trigger,
@@ -718,32 +774,33 @@ INSERT INTO runs (
   started_at,
   completed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 `
 
 type InsertRunParams struct {
-	ID          string        `json:"id"`
-	TaskID      string        `json:"task_id"`
-	Repo        string        `json:"repo"`
-	Task        string        `json:"task"`
-	BaseBranch  string        `json:"base_branch"`
-	HeadBranch  string        `json:"head_branch"`
-	Trigger     string        `json:"trigger"`
-	Debug       bool          `json:"debug"`
-	Status      string        `json:"status"`
-	RunDir      string        `json:"run_dir"`
-	IssueNumber int64         `json:"issue_number"`
-	PrNumber    int64         `json:"pr_number"`
-	PrUrl       string        `json:"pr_url"`
-	PrStatus    string        `json:"pr_status"`
-	HeadSha     string        `json:"head_sha"`
-	Context     string        `json:"context"`
-	Error       string        `json:"error"`
-	CreatedAt   int64         `json:"created_at"`
-	UpdatedAt   int64         `json:"updated_at"`
-	StartedAt   sql.NullInt64 `json:"started_at"`
-	CompletedAt sql.NullInt64 `json:"completed_at"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (Run, error) {
@@ -752,6 +809,7 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (Run, erro
 		arg.TaskID,
 		arg.Repo,
 		arg.Task,
+		arg.AgentBackend,
 		arg.BaseBranch,
 		arg.HeadBranch,
 		arg.Trigger,
@@ -777,6 +835,7 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (Run, erro
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
+		&i.AgentBackend,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -812,7 +871,7 @@ func (q *Queries) IsTaskCompleted(ctx context.Context, id string) (bool, error) 
 }
 
 const lastRunForTask = `-- name: LastRunForTask :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ?
 ORDER BY seq DESC
@@ -828,6 +887,7 @@ func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (Run, error
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
+		&i.AgentBackend,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -850,7 +910,7 @@ func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (Run, error
 }
 
 const listRunningRuns = `-- name: ListRunningRuns :many
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE status = 'running'
 ORDER BY seq DESC
@@ -871,6 +931,7 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]Run, error) {
 			&i.TaskID,
 			&i.Repo,
 			&i.Task,
+			&i.AgentBackend,
 			&i.BaseBranch,
 			&i.HeadBranch,
 			&i.Trigger,
@@ -903,7 +964,7 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]Run, error) {
 }
 
 const listRuns = `-- name: ListRuns :many
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
 ORDER BY seq DESC
 LIMIT ?
@@ -924,6 +985,7 @@ func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]Run, error) {
 			&i.TaskID,
 			&i.Repo,
 			&i.Task,
+			&i.AgentBackend,
 			&i.BaseBranch,
 			&i.HeadBranch,
 			&i.Trigger,
@@ -1118,6 +1180,7 @@ SET
   task_id = ?,
   repo = ?,
   task = ?,
+  agent_backend = ?,
   base_branch = ?,
   head_branch = ?,
   trigger = ?,
@@ -1139,27 +1202,28 @@ WHERE id = ?
 `
 
 type UpdateRunParams struct {
-	TaskID      string        `json:"task_id"`
-	Repo        string        `json:"repo"`
-	Task        string        `json:"task"`
-	BaseBranch  string        `json:"base_branch"`
-	HeadBranch  string        `json:"head_branch"`
-	Trigger     string        `json:"trigger"`
-	Debug       bool          `json:"debug"`
-	Status      string        `json:"status"`
-	RunDir      string        `json:"run_dir"`
-	IssueNumber int64         `json:"issue_number"`
-	PrNumber    int64         `json:"pr_number"`
-	PrUrl       string        `json:"pr_url"`
-	PrStatus    string        `json:"pr_status"`
-	HeadSha     string        `json:"head_sha"`
-	Context     string        `json:"context"`
-	Error       string        `json:"error"`
-	CreatedAt   int64         `json:"created_at"`
-	UpdatedAt   int64         `json:"updated_at"`
-	StartedAt   sql.NullInt64 `json:"started_at"`
-	CompletedAt sql.NullInt64 `json:"completed_at"`
-	ID          string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	ID           string        `json:"id"`
 }
 
 func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (int64, error) {
@@ -1167,6 +1231,7 @@ func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (int64, er
 		arg.TaskID,
 		arg.Repo,
 		arg.Task,
+		arg.AgentBackend,
 		arg.BaseBranch,
 		arg.HeadBranch,
 		arg.Trigger,
@@ -1330,6 +1395,7 @@ const upsertTask = `-- name: UpsertTask :exec
 INSERT INTO tasks (
   id,
   repo,
+  agent_backend,
   issue_number,
   pr_number,
   status,
@@ -1337,7 +1403,7 @@ INSERT INTO tasks (
   created_at,
   updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   repo = excluded.repo,
   issue_number = CASE WHEN excluded.issue_number > 0 THEN excluded.issue_number ELSE tasks.issue_number END,
@@ -1346,23 +1412,71 @@ ON CONFLICT(id) DO UPDATE SET
 `
 
 type UpsertTaskParams struct {
-	ID          string `json:"id"`
-	Repo        string `json:"repo"`
-	IssueNumber int64  `json:"issue_number"`
-	PrNumber    int64  `json:"pr_number"`
-	Status      string `json:"status"`
-	LastRunID   string `json:"last_run_id"`
-	CreatedAt   int64  `json:"created_at"`
-	UpdatedAt   int64  `json:"updated_at"`
+	ID           string `json:"id"`
+	Repo         string `json:"repo"`
+	AgentBackend string `json:"agent_backend"`
+	IssueNumber  int64  `json:"issue_number"`
+	PrNumber     int64  `json:"pr_number"`
+	Status       string `json:"status"`
+	LastRunID    string `json:"last_run_id"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
 }
 
 func (q *Queries) UpsertTask(ctx context.Context, arg UpsertTaskParams) error {
 	_, err := q.db.ExecContext(ctx, upsertTask,
 		arg.ID,
 		arg.Repo,
+		arg.AgentBackend,
 		arg.IssueNumber,
 		arg.PrNumber,
 		arg.Status,
+		arg.LastRunID,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertTaskAgentSession = `-- name: UpsertTaskAgentSession :exec
+INSERT INTO task_agent_sessions (
+  task_id,
+  agent_backend,
+  backend_session_id,
+  session_key,
+  session_root,
+  last_run_id,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(task_id) DO UPDATE SET
+  agent_backend = excluded.agent_backend,
+  backend_session_id = excluded.backend_session_id,
+  session_key = excluded.session_key,
+  session_root = excluded.session_root,
+  last_run_id = excluded.last_run_id,
+  updated_at = excluded.updated_at
+`
+
+type UpsertTaskAgentSessionParams struct {
+	TaskID           string `json:"task_id"`
+	AgentBackend     string `json:"agent_backend"`
+	BackendSessionID string `json:"backend_session_id"`
+	SessionKey       string `json:"session_key"`
+	SessionRoot      string `json:"session_root"`
+	LastRunID        string `json:"last_run_id"`
+	CreatedAt        int64  `json:"created_at"`
+	UpdatedAt        int64  `json:"updated_at"`
+}
+
+func (q *Queries) UpsertTaskAgentSession(ctx context.Context, arg UpsertTaskAgentSessionParams) error {
+	_, err := q.db.ExecContext(ctx, upsertTaskAgentSession,
+		arg.TaskID,
+		arg.AgentBackend,
+		arg.BackendSessionID,
+		arg.SessionKey,
+		arg.SessionRoot,
 		arg.LastRunID,
 		arg.CreatedAt,
 		arg.UpdatedAt,

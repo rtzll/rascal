@@ -3,6 +3,8 @@ package state
 import (
 	"fmt"
 	"time"
+
+	"github.com/rtzll/rascal/internal/agent"
 )
 
 type RunStatus string
@@ -90,16 +92,17 @@ const (
 )
 
 type Run struct {
-	ID         string    `json:"id"`
-	TaskID     string    `json:"task_id"`
-	Repo       string    `json:"repo"`
-	Task       string    `json:"task"`
-	BaseBranch string    `json:"base_branch"`
-	HeadBranch string    `json:"head_branch"`
-	Trigger    string    `json:"trigger"`
-	Debug      bool      `json:"debug"`
-	Status     RunStatus `json:"status"`
-	RunDir     string    `json:"run_dir"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend agent.Backend `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       RunStatus     `json:"status"`
+	RunDir       string        `json:"run_dir"`
 
 	IssueNumber int      `json:"issue_number,omitempty"`
 	PRNumber    int      `json:"pr_number,omitempty"`
@@ -116,13 +119,14 @@ type Run struct {
 }
 
 type Task struct {
-	ID           string     `json:"id"`
-	Repo         string     `json:"repo"`
-	IssueNumber  int        `json:"issue_number,omitempty"`
-	PRNumber     int        `json:"pr_number,omitempty"`
-	Status       TaskStatus `json:"status"`
-	PendingInput bool       `json:"pending_input"`
-	LastRunID    string     `json:"last_run_id,omitempty"`
+	ID           string        `json:"id"`
+	Repo         string        `json:"repo"`
+	AgentBackend agent.Backend `json:"agent_backend"`
+	IssueNumber  int           `json:"issue_number,omitempty"`
+	PRNumber     int           `json:"pr_number,omitempty"`
+	Status       TaskStatus    `json:"status"`
+	PendingInput bool          `json:"pending_input"`
+	LastRunID    string        `json:"last_run_id,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -155,24 +159,46 @@ type RunCancelRequest struct {
 }
 
 type CreateRunInput struct {
-	ID          string
-	TaskID      string
-	Repo        string
-	Task        string
-	BaseBranch  string
-	HeadBranch  string
-	Trigger     string
-	Debug       *bool
-	RunDir      string
-	IssueNumber int
-	PRNumber    int
-	PRStatus    PRStatus
-	Context     string
+	ID           string
+	TaskID       string
+	Repo         string
+	Task         string
+	AgentBackend agent.Backend
+	BaseBranch   string
+	HeadBranch   string
+	Trigger      string
+	Debug        *bool
+	RunDir       string
+	IssueNumber  int
+	PRNumber     int
+	PRStatus     PRStatus
+	Context      string
 }
 
 type UpsertTaskInput struct {
-	ID          string
-	Repo        string
-	IssueNumber int
-	PRNumber    int
+	ID           string
+	Repo         string
+	AgentBackend agent.Backend
+	IssueNumber  int
+	PRNumber     int
+}
+
+type TaskAgentSession struct {
+	TaskID           string        `json:"task_id"`
+	AgentBackend     agent.Backend `json:"agent_backend"`
+	BackendSessionID string        `json:"backend_session_id,omitempty"`
+	SessionKey       string        `json:"session_key,omitempty"`
+	SessionRoot      string        `json:"session_root,omitempty"`
+	LastRunID        string        `json:"last_run_id,omitempty"`
+	CreatedAt        time.Time     `json:"created_at"`
+	UpdatedAt        time.Time     `json:"updated_at"`
+}
+
+type UpsertTaskAgentSessionInput struct {
+	TaskID           string
+	AgentBackend     agent.Backend
+	BackendSessionID string
+	SessionKey       string
+	SessionRoot      string
+	LastRunID        string
 }

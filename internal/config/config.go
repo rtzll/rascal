@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rtzll/rascal/internal/agent"
 	"github.com/spf13/viper"
 )
 
@@ -22,12 +23,18 @@ type ServerConfig struct {
 	GitHubWebhookSecret string
 	BotLogin            string
 	RunnerMode          string
+	AgentBackend        agent.Backend
 	RunnerImage         string
+	RunnerImageGoose    string
+	RunnerImageCodex    string
 	RunnerMaxAttempts   int
 	CodexAuthPath       string
 	GooseSessionMode    string
 	GooseSessionRoot    string
 	GooseSessionTTLDays int
+	AgentSessionMode    agent.SessionMode
+	AgentSessionRoot    string
+	AgentSessionTTLDays int
 	MaxRuns             int
 }
 
@@ -49,7 +56,7 @@ func LoadServerConfig() ServerConfig {
 	dataDir := envOrDefault("RASCAL_DATA_DIR", "./var/lib/rascal")
 	statePath := envOrDefault("RASCAL_STATE_PATH", filepath.Join(dataDir, "state.db"))
 
-	return ServerConfig{
+	cfg := ServerConfig{
 		ListenAddr:          envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
 		DataDir:             dataDir,
 		StatePath:           statePath,
@@ -60,14 +67,21 @@ func LoadServerConfig() ServerConfig {
 		GitHubWebhookSecret: strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
 		BotLogin:            strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
 		RunnerMode:          envOrDefault("RASCAL_RUNNER_MODE", "noop"),
-		RunnerImage:         envOrDefault("RASCAL_RUNNER_IMAGE", "rascal-runner:latest"),
+		AgentBackend:        loadAgentBackend(),
+		RunnerImageGoose:    envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", envOrDefault("RASCAL_RUNNER_IMAGE", "rascal-runner:latest")),
+		RunnerImageCodex:    envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", "rascal-runner-codex:latest"),
 		RunnerMaxAttempts:   envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
 		CodexAuthPath:       envOrDefault("RASCAL_CODEX_AUTH_PATH", "/etc/rascal/codex_auth.json"),
-		GooseSessionMode:    normalizeGooseSessionMode(envOrDefault("RASCAL_GOOSE_SESSION_MODE", "all")),
-		GooseSessionRoot:    envOrDefault("RASCAL_GOOSE_SESSION_ROOT", filepath.Join(dataDir, "goose-sessions")),
-		GooseSessionTTLDays: envNonNegativeIntOrDefault("RASCAL_GOOSE_SESSION_TTL_DAYS", 14),
+		AgentSessionMode:    loadAgentSessionMode(),
+		AgentSessionRoot:    loadAgentSessionRoot(dataDir),
+		AgentSessionTTLDays: loadAgentSessionTTLDays(),
 		MaxRuns:             200,
 	}
+	cfg.RunnerImage = cfg.RunnerImageForBackend(cfg.AgentBackend)
+	cfg.GooseSessionMode = string(cfg.AgentSessionMode)
+	cfg.GooseSessionRoot = cfg.AgentSessionRoot
+	cfg.GooseSessionTTLDays = cfg.AgentSessionTTLDays
+	return cfg
 }
 
 func (c ServerConfig) Ensure() error {
@@ -80,16 +94,49 @@ func (c ServerConfig) Ensure() error {
 	if err := os.MkdirAll(filepath.Join(c.DataDir, "runs"), 0o755); err != nil {
 		return fmt.Errorf("create runs directory: %w", err)
 	}
-	if normalizeGooseSessionMode(c.GooseSessionMode) != "off" {
-		root := strings.TrimSpace(c.GooseSessionRoot)
+	if c.EffectiveAgentSessionMode() != agent.SessionModeOff {
+		root := strings.TrimSpace(c.EffectiveAgentSessionRoot())
 		if root == "" {
-			root = filepath.Join(c.DataDir, "goose-sessions")
+			root = filepath.Join(c.DataDir, "agent-sessions")
 		}
 		if err := os.MkdirAll(root, 0o755); err != nil {
-			return fmt.Errorf("create goose sessions directory: %w", err)
+			return fmt.Errorf("create agent sessions directory: %w", err)
 		}
 	}
 	return nil
+}
+
+func (c ServerConfig) RunnerImageForBackend(backend agent.Backend) string {
+	switch agent.NormalizeBackend(string(backend)) {
+	case agent.BackendCodex:
+		return strings.TrimSpace(c.RunnerImageCodex)
+	default:
+		return strings.TrimSpace(c.RunnerImageGoose)
+	}
+}
+
+func (c ServerConfig) EffectiveAgentSessionMode() agent.SessionMode {
+	if raw := strings.TrimSpace(c.GooseSessionMode); raw != "" && raw != string(c.AgentSessionMode) {
+		return agent.NormalizeSessionMode(raw)
+	}
+	return agent.NormalizeSessionMode(string(c.AgentSessionMode))
+}
+
+func (c ServerConfig) EffectiveAgentSessionRoot() string {
+	if root := strings.TrimSpace(c.GooseSessionRoot); root != "" && root != strings.TrimSpace(c.AgentSessionRoot) {
+		return root
+	}
+	return strings.TrimSpace(c.AgentSessionRoot)
+}
+
+func (c ServerConfig) EffectiveAgentSessionTTLDays() int {
+	if c.GooseSessionTTLDays != 0 && c.GooseSessionTTLDays != c.AgentSessionTTLDays {
+		return c.GooseSessionTTLDays
+	}
+	if c.GooseSessionTTLDays == 0 && c.AgentSessionTTLDays != 0 && strings.TrimSpace(c.GooseSessionRoot) != strings.TrimSpace(c.AgentSessionRoot) {
+		return 0
+	}
+	return c.AgentSessionTTLDays
 }
 
 func (c ServerConfig) AuthEnabled() bool {
@@ -224,13 +271,30 @@ func envNonNegativeIntOrDefault(key string, fallback int) int {
 	return out
 }
 
-func normalizeGooseSessionMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "pr-only":
-		return "pr-only"
-	case "all":
-		return "all"
-	default:
-		return "off"
+func loadAgentBackend() agent.Backend {
+	return agent.NormalizeBackend(envOrDefault("RASCAL_AGENT_BACKEND", "goose"))
+}
+
+func loadAgentSessionMode() agent.SessionMode {
+	return agent.NormalizeSessionMode(envOrDefault("RASCAL_AGENT_SESSION_MODE", envOrDefault("RASCAL_GOOSE_SESSION_MODE", "all")))
+}
+
+func loadAgentSessionRoot(dataDir string) string {
+	return envOrDefault("RASCAL_AGENT_SESSION_ROOT", envOrDefault("RASCAL_GOOSE_SESSION_ROOT", filepath.Join(dataDir, "goose-sessions")))
+}
+
+func loadAgentSessionTTLDays() int {
+	if v := strings.TrimSpace(os.Getenv("RASCAL_AGENT_SESSION_TTL_DAYS")); v != "" {
+		return envNonNegativeIntOrDefault("RASCAL_AGENT_SESSION_TTL_DAYS", 14)
 	}
+	return envNonNegativeIntOrDefault("RASCAL_GOOSE_SESSION_TTL_DAYS", 14)
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return ""
 }

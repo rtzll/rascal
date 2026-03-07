@@ -2,6 +2,7 @@
 INSERT INTO tasks (
   id,
   repo,
+  agent_backend,
   issue_number,
   pr_number,
   status,
@@ -9,7 +10,7 @@ INSERT INTO tasks (
   created_at,
   updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   repo = excluded.repo,
   issue_number = CASE WHEN excluded.issue_number > 0 THEN excluded.issue_number ELSE tasks.issue_number END,
@@ -20,6 +21,7 @@ ON CONFLICT(id) DO UPDATE SET
 SELECT
   tasks.id,
   tasks.repo,
+  tasks.agent_backend,
   tasks.issue_number,
   tasks.pr_number,
   tasks.status,
@@ -39,6 +41,7 @@ WHERE tasks.id = ?;
 SELECT
   tasks.id,
   tasks.repo,
+  tasks.agent_backend,
   tasks.issue_number,
   tasks.pr_number,
   tasks.status,
@@ -84,6 +87,7 @@ INSERT INTO runs (
   task_id,
   repo,
   task,
+  agent_backend,
   base_branch,
   head_branch,
   trigger,
@@ -102,35 +106,35 @@ INSERT INTO runs (
   started_at,
   completed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at;
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at;
 
 -- name: GetRun :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?;
 
 -- name: ListRuns :many
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
 ORDER BY seq DESC
 LIMIT ?;
 
 -- name: ListRunningRuns :many
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE status = 'running'
 ORDER BY seq DESC;
 
 -- name: LastRunForTask :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ?
 ORDER BY seq DESC
 LIMIT 1;
 
 -- name: ActiveRunForTask :one
-SELECT seq, id, task_id, repo, task, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ? AND status IN ('queued', 'running')
 ORDER BY seq DESC
@@ -142,6 +146,7 @@ SET
   task_id = ?,
   repo = ?,
   task = ?,
+  agent_backend = ?,
   base_branch = ?,
   head_branch = ?,
   trigger = ?,
@@ -215,6 +220,7 @@ RETURNING
   task_id,
   repo,
   task,
+  agent_backend,
   base_branch,
   head_branch,
   trigger,
@@ -268,6 +274,7 @@ RETURNING
   task_id,
   repo,
   task,
+  agent_backend,
   base_branch,
   head_branch,
   trigger,
@@ -478,3 +485,40 @@ WHERE id IN (
   ORDER BY seen_at ASC
   LIMIT ?
 );
+
+-- name: UpsertTaskAgentSession :exec
+INSERT INTO task_agent_sessions (
+  task_id,
+  agent_backend,
+  backend_session_id,
+  session_key,
+  session_root,
+  last_run_id,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(task_id) DO UPDATE SET
+  agent_backend = excluded.agent_backend,
+  backend_session_id = excluded.backend_session_id,
+  session_key = excluded.session_key,
+  session_root = excluded.session_root,
+  last_run_id = excluded.last_run_id,
+  updated_at = excluded.updated_at;
+
+-- name: GetTaskAgentSession :one
+SELECT
+  task_id,
+  agent_backend,
+  backend_session_id,
+  session_key,
+  session_root,
+  last_run_id,
+  created_at,
+  updated_at
+FROM task_agent_sessions
+WHERE task_id = ?;
+
+-- name: DeleteTaskAgentSession :execrows
+DELETE FROM task_agent_sessions
+WHERE task_id = ?;

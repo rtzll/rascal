@@ -5,22 +5,27 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/rtzll/rascal/internal/agent"
 )
 
 // Spec defines the input contract for a single run.
 type Spec struct {
-	RunID       string
-	TaskID      string
-	Repo        string
-	Task        string
-	BaseBranch  string
-	HeadBranch  string
-	Trigger     string
-	Debug       bool
-	RunDir      string
-	IssueNumber int
-	PRNumber    int
-	Context     string
+	RunID        string
+	TaskID       string
+	Repo         string
+	Task         string
+	AgentBackend agent.Backend
+	RunnerImage  string
+	BaseBranch   string
+	HeadBranch   string
+	Trigger      string
+	Debug        bool
+	RunDir       string
+	IssueNumber  int
+	PRNumber     int
+	Context      string
+	AgentSession SessionSpec
 
 	GooseSessionMode    string
 	GooseSessionResume  bool
@@ -51,6 +56,14 @@ func ExecutionHandleForRun(runID string) ExecutionHandle {
 	}
 }
 
+type SessionSpec struct {
+	Mode             agent.SessionMode
+	Resume           bool
+	TaskDir          string
+	TaskKey          string
+	BackendSessionID string
+}
+
 // Launcher starts a run inside an execution environment (Docker in v1).
 type Launcher interface {
 	StartDetached(ctx context.Context, spec Spec) (ExecutionHandle, error)
@@ -62,7 +75,7 @@ type Launcher interface {
 func NewLauncher(mode, image, githubToken string) Launcher {
 	switch mode {
 	case "docker":
-		return DockerLauncher{Image: image, GitHubToken: githubToken}
+		return DockerLauncher{DefaultImage: image, GitHubToken: githubToken}
 	default:
 		return NoopLauncher{}
 	}

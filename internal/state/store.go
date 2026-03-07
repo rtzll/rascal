@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pressly/goose/v3"
+	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/state/sqlitegen"
 	_ "modernc.org/sqlite"
 )
@@ -97,19 +98,24 @@ func NewRunID() (string, error) {
 func (s *Store) UpsertTask(in UpsertTaskInput) (Task, error) {
 	in.ID = strings.TrimSpace(in.ID)
 	in.Repo = strings.TrimSpace(in.Repo)
+	in.AgentBackend = agent.NormalizeBackend(string(in.AgentBackend))
 	if in.ID == "" || in.Repo == "" {
 		return Task{}, fmt.Errorf("task id and repo are required")
 	}
+	if existing, ok := s.GetTask(in.ID); ok && existing.AgentBackend != in.AgentBackend {
+		return Task{}, fmt.Errorf("task %q already uses agent backend %q", in.ID, existing.AgentBackend)
+	}
 	now := time.Now().UTC().UnixNano()
 	if err := s.q.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
-		ID:          in.ID,
-		Repo:        in.Repo,
-		IssueNumber: int64(in.IssueNumber),
-		PrNumber:    int64(in.PRNumber),
-		Status:      string(TaskOpen),
-		LastRunID:   "",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:           in.ID,
+		Repo:         in.Repo,
+		AgentBackend: in.AgentBackend.String(),
+		IssueNumber:  int64(in.IssueNumber),
+		PrNumber:     int64(in.PRNumber),
+		Status:       string(TaskOpen),
+		LastRunID:    "",
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}); err != nil {
 		return Task{}, err
 	}
@@ -204,6 +210,60 @@ func (s *Store) MarkTaskOpen(taskID string) error {
 	return nil
 }
 
+func (s *Store) UpsertTaskAgentSession(in UpsertTaskAgentSessionInput) (TaskAgentSession, error) {
+	in.TaskID = strings.TrimSpace(in.TaskID)
+	in.AgentBackend = agent.NormalizeBackend(string(in.AgentBackend))
+	in.BackendSessionID = strings.TrimSpace(in.BackendSessionID)
+	in.SessionKey = strings.TrimSpace(in.SessionKey)
+	in.SessionRoot = strings.TrimSpace(in.SessionRoot)
+	in.LastRunID = strings.TrimSpace(in.LastRunID)
+	if in.TaskID == "" {
+		return TaskAgentSession{}, fmt.Errorf("task id is required")
+	}
+	if task, ok := s.GetTask(in.TaskID); ok && task.AgentBackend != in.AgentBackend {
+		return TaskAgentSession{}, fmt.Errorf("task %q already uses agent backend %q", in.TaskID, task.AgentBackend)
+	}
+
+	now := time.Now().UTC().UnixNano()
+	if err := s.q.UpsertTaskAgentSession(context.Background(), sqlitegen.UpsertTaskAgentSessionParams{
+		TaskID:           in.TaskID,
+		AgentBackend:     in.AgentBackend.String(),
+		BackendSessionID: in.BackendSessionID,
+		SessionKey:       in.SessionKey,
+		SessionRoot:      in.SessionRoot,
+		LastRunID:        in.LastRunID,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		return TaskAgentSession{}, err
+	}
+	row, err := s.q.GetTaskAgentSession(context.Background(), in.TaskID)
+	if err != nil {
+		return TaskAgentSession{}, err
+	}
+	return fromDBTaskAgentSession(row), nil
+}
+
+func (s *Store) GetTaskAgentSession(taskID string) (TaskAgentSession, bool) {
+	row, err := s.q.GetTaskAgentSession(context.Background(), strings.TrimSpace(taskID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return TaskAgentSession{}, false
+		}
+		return TaskAgentSession{}, false
+	}
+	return fromDBTaskAgentSession(row), true
+}
+
+func (s *Store) DeleteTaskAgentSession(taskID string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	_, err := s.q.DeleteTaskAgentSession(context.Background(), taskID)
+	return err
+}
+
 func (s *Store) IsTaskCompleted(taskID string) bool {
 	ok, err := s.q.IsTaskCompleted(context.Background(), strings.TrimSpace(taskID))
 	if err != nil {
@@ -216,6 +276,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	in.ID = strings.TrimSpace(in.ID)
 	in.TaskID = strings.TrimSpace(in.TaskID)
 	in.Repo = strings.TrimSpace(in.Repo)
+	in.AgentBackend = agent.NormalizeBackend(string(in.AgentBackend))
 	if in.ID == "" || in.TaskID == "" || in.Repo == "" {
 		return Run{}, fmt.Errorf("id, task_id and repo are required")
 	}
@@ -248,41 +309,51 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	defer tx.Rollback()
 	qtx := s.q.WithTx(tx)
 
+	if taskRow, err := qtx.GetTask(context.Background(), in.TaskID); err == nil {
+		if agent.NormalizeBackend(taskRow.AgentBackend) != in.AgentBackend {
+			return Run{}, fmt.Errorf("task %q already uses agent backend %q", in.TaskID, agent.NormalizeBackend(taskRow.AgentBackend))
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Run{}, err
+	}
+
 	if err := qtx.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
-		ID:          in.TaskID,
-		Repo:        in.Repo,
-		IssueNumber: int64(in.IssueNumber),
-		PrNumber:    int64(in.PRNumber),
-		Status:      string(TaskOpen),
-		LastRunID:   "",
-		CreatedAt:   now.UnixNano(),
-		UpdatedAt:   now.UnixNano(),
+		ID:           in.TaskID,
+		Repo:         in.Repo,
+		AgentBackend: in.AgentBackend.String(),
+		IssueNumber:  int64(in.IssueNumber),
+		PrNumber:     int64(in.PRNumber),
+		Status:       string(TaskOpen),
+		LastRunID:    "",
+		CreatedAt:    now.UnixNano(),
+		UpdatedAt:    now.UnixNano(),
 	}); err != nil {
 		return Run{}, err
 	}
 
 	row, err := qtx.InsertRun(context.Background(), sqlitegen.InsertRunParams{
-		ID:          in.ID,
-		TaskID:      in.TaskID,
-		Repo:        in.Repo,
-		Task:        in.Task,
-		BaseBranch:  baseBranch,
-		HeadBranch:  in.HeadBranch,
-		Trigger:     trigger,
-		Debug:       debugEnabled,
-		Status:      string(StatusQueued),
-		RunDir:      in.RunDir,
-		IssueNumber: int64(in.IssueNumber),
-		PrNumber:    int64(in.PRNumber),
-		PrUrl:       "",
-		PrStatus:    string(prStatus),
-		HeadSha:     "",
-		Context:     in.Context,
-		Error:       "",
-		CreatedAt:   now.UnixNano(),
-		UpdatedAt:   now.UnixNano(),
-		StartedAt:   sql.NullInt64{},
-		CompletedAt: sql.NullInt64{},
+		ID:           in.ID,
+		TaskID:       in.TaskID,
+		Repo:         in.Repo,
+		Task:         in.Task,
+		AgentBackend: in.AgentBackend.String(),
+		BaseBranch:   baseBranch,
+		HeadBranch:   in.HeadBranch,
+		Trigger:      trigger,
+		Debug:        debugEnabled,
+		Status:       string(StatusQueued),
+		RunDir:       in.RunDir,
+		IssueNumber:  int64(in.IssueNumber),
+		PrNumber:     int64(in.PRNumber),
+		PrUrl:        "",
+		PrStatus:     string(prStatus),
+		HeadSha:      "",
+		Context:      in.Context,
+		Error:        "",
+		CreatedAt:    now.UnixNano(),
+		UpdatedAt:    now.UnixNano(),
+		StartedAt:    sql.NullInt64{},
+		CompletedAt:  sql.NullInt64{},
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: runs.id") {
@@ -867,10 +938,11 @@ func newClaimToken() (string, error) {
 	return "claim_" + hex.EncodeToString(buf), nil
 }
 
-func fromDBTaskParts(id, repo string, issueNumber, prNumber int64, status string, pendingInput int64, lastRunID string, createdAt, updatedAt int64) Task {
+func fromDBTaskParts(id, repo, agentBackend string, issueNumber, prNumber int64, status string, pendingInput int64, lastRunID string, createdAt, updatedAt int64) Task {
 	return Task{
 		ID:           id,
 		Repo:         repo,
+		AgentBackend: agent.NormalizeBackend(agentBackend),
 		IssueNumber:  int(issueNumber),
 		PRNumber:     int(prNumber),
 		Status:       TaskStatus(status),
@@ -882,34 +954,35 @@ func fromDBTaskParts(id, repo string, issueNumber, prNumber int64, status string
 }
 
 func fromDBGetTaskRow(t sqlitegen.GetTaskRow) Task {
-	return fromDBTaskParts(t.ID, t.Repo, t.IssueNumber, t.PrNumber, t.Status, t.PendingInput, t.LastRunID, t.CreatedAt, t.UpdatedAt)
+	return fromDBTaskParts(t.ID, t.Repo, t.AgentBackend, t.IssueNumber, t.PrNumber, t.Status, t.PendingInput, t.LastRunID, t.CreatedAt, t.UpdatedAt)
 }
 
 func fromDBFindTaskByPRRow(t sqlitegen.FindTaskByPRRow) Task {
-	return fromDBTaskParts(t.ID, t.Repo, t.IssueNumber, t.PrNumber, t.Status, t.PendingInput, t.LastRunID, t.CreatedAt, t.UpdatedAt)
+	return fromDBTaskParts(t.ID, t.Repo, t.AgentBackend, t.IssueNumber, t.PrNumber, t.Status, t.PendingInput, t.LastRunID, t.CreatedAt, t.UpdatedAt)
 }
 
 func fromDBRun(r sqlitegen.Run) Run {
 	out := Run{
-		ID:          r.ID,
-		TaskID:      r.TaskID,
-		Repo:        r.Repo,
-		Task:        r.Task,
-		BaseBranch:  r.BaseBranch,
-		HeadBranch:  r.HeadBranch,
-		Trigger:     r.Trigger,
-		Debug:       r.Debug,
-		Status:      CanonicalRunStatus(RunStatus(r.Status)),
-		RunDir:      r.RunDir,
-		IssueNumber: int(r.IssueNumber),
-		PRNumber:    int(r.PrNumber),
-		PRURL:       r.PrUrl,
-		PRStatus:    normalizePRStatus(PRStatus(r.PrStatus)),
-		HeadSHA:     r.HeadSha,
-		Context:     r.Context,
-		Error:       r.Error,
-		CreatedAt:   time.Unix(0, r.CreatedAt).UTC(),
-		UpdatedAt:   time.Unix(0, r.UpdatedAt).UTC(),
+		ID:           r.ID,
+		TaskID:       r.TaskID,
+		Repo:         r.Repo,
+		Task:         r.Task,
+		AgentBackend: agent.NormalizeBackend(r.AgentBackend),
+		BaseBranch:   r.BaseBranch,
+		HeadBranch:   r.HeadBranch,
+		Trigger:      r.Trigger,
+		Debug:        r.Debug,
+		Status:       CanonicalRunStatus(RunStatus(r.Status)),
+		RunDir:       r.RunDir,
+		IssueNumber:  int(r.IssueNumber),
+		PRNumber:     int(r.PrNumber),
+		PRURL:        r.PrUrl,
+		PRStatus:     normalizePRStatus(PRStatus(r.PrStatus)),
+		HeadSHA:      r.HeadSha,
+		Context:      r.Context,
+		Error:        r.Error,
+		CreatedAt:    time.Unix(0, r.CreatedAt).UTC(),
+		UpdatedAt:    time.Unix(0, r.UpdatedAt).UTC(),
 	}
 	if r.StartedAt.Valid {
 		t := time.Unix(0, r.StartedAt.Int64).UTC()
@@ -936,6 +1009,19 @@ func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {
 	}
 }
 
+func fromDBTaskAgentSession(s sqlitegen.TaskAgentSession) TaskAgentSession {
+	return TaskAgentSession{
+		TaskID:           s.TaskID,
+		AgentBackend:     agent.NormalizeBackend(s.AgentBackend),
+		BackendSessionID: s.BackendSessionID,
+		SessionKey:       s.SessionKey,
+		SessionRoot:      s.SessionRoot,
+		LastRunID:        s.LastRunID,
+		CreatedAt:        time.Unix(0, s.CreatedAt).UTC(),
+		UpdatedAt:        time.Unix(0, s.UpdatedAt).UTC(),
+	}
+}
+
 func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 	prStatus := normalizePRStatus(r.PRStatus)
 	if prStatus == PRStatusNone && r.PRNumber > 0 {
@@ -949,27 +1035,28 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 		}
 	}
 	return sqlitegen.UpdateRunParams{
-		TaskID:      r.TaskID,
-		Repo:        r.Repo,
-		Task:        r.Task,
-		BaseBranch:  r.BaseBranch,
-		HeadBranch:  r.HeadBranch,
-		Trigger:     r.Trigger,
-		Debug:       r.Debug,
-		Status:      string(CanonicalRunStatus(r.Status)),
-		RunDir:      r.RunDir,
-		IssueNumber: int64(r.IssueNumber),
-		PrNumber:    int64(r.PRNumber),
-		PrUrl:       r.PRURL,
-		PrStatus:    string(prStatus),
-		HeadSha:     r.HeadSHA,
-		Context:     r.Context,
-		Error:       r.Error,
-		CreatedAt:   fallbackUnixNano(r.CreatedAt, time.Now().UTC()),
-		UpdatedAt:   fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
-		StartedAt:   toNullInt64(r.StartedAt),
-		CompletedAt: toNullInt64(r.CompletedAt),
-		ID:          r.ID,
+		TaskID:       r.TaskID,
+		Repo:         r.Repo,
+		Task:         r.Task,
+		AgentBackend: agent.NormalizeBackend(string(r.AgentBackend)).String(),
+		BaseBranch:   r.BaseBranch,
+		HeadBranch:   r.HeadBranch,
+		Trigger:      r.Trigger,
+		Debug:        r.Debug,
+		Status:       string(CanonicalRunStatus(r.Status)),
+		RunDir:       r.RunDir,
+		IssueNumber:  int64(r.IssueNumber),
+		PrNumber:     int64(r.PRNumber),
+		PrUrl:        r.PRURL,
+		PrStatus:     string(prStatus),
+		HeadSha:      r.HeadSHA,
+		Context:      r.Context,
+		Error:        r.Error,
+		CreatedAt:    fallbackUnixNano(r.CreatedAt, time.Now().UTC()),
+		UpdatedAt:    fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
+		StartedAt:    toNullInt64(r.StartedAt),
+		CompletedAt:  toNullInt64(r.CompletedAt),
+		ID:           r.ID,
 	}
 }
 

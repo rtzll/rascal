@@ -20,28 +20,29 @@ type Delivery struct {
 }
 
 type Run struct {
-	Seq         int64         `json:"seq"`
-	ID          string        `json:"id"`
-	TaskID      string        `json:"task_id"`
-	Repo        string        `json:"repo"`
-	Task        string        `json:"task"`
-	BaseBranch  string        `json:"base_branch"`
-	HeadBranch  string        `json:"head_branch"`
-	Trigger     string        `json:"trigger"`
-	Debug       bool          `json:"debug"`
-	Status      string        `json:"status"`
-	RunDir      string        `json:"run_dir"`
-	IssueNumber int64         `json:"issue_number"`
-	PrNumber    int64         `json:"pr_number"`
-	PrUrl       string        `json:"pr_url"`
-	PrStatus    string        `json:"pr_status"`
-	HeadSha     string        `json:"head_sha"`
-	Context     string        `json:"context"`
-	Error       string        `json:"error"`
-	CreatedAt   int64         `json:"created_at"`
-	UpdatedAt   int64         `json:"updated_at"`
-	StartedAt   sql.NullInt64 `json:"started_at"`
-	CompletedAt sql.NullInt64 `json:"completed_at"`
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
 }
 
 type RunCancel struct {
@@ -71,12 +72,24 @@ type RunLease struct {
 }
 
 type Task struct {
-	ID          string `json:"id"`
-	Repo        string `json:"repo"`
-	IssueNumber int64  `json:"issue_number"`
-	PrNumber    int64  `json:"pr_number"`
-	Status      string `json:"status"`
-	LastRunID   string `json:"last_run_id"`
-	CreatedAt   int64  `json:"created_at"`
-	UpdatedAt   int64  `json:"updated_at"`
+	ID           string `json:"id"`
+	Repo         string `json:"repo"`
+	AgentBackend string `json:"agent_backend"`
+	IssueNumber  int64  `json:"issue_number"`
+	PrNumber     int64  `json:"pr_number"`
+	Status       string `json:"status"`
+	LastRunID    string `json:"last_run_id"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+}
+
+type TaskAgentSession struct {
+	TaskID           string `json:"task_id"`
+	AgentBackend     string `json:"agent_backend"`
+	BackendSessionID string `json:"backend_session_id"`
+	SessionKey       string `json:"session_key"`
+	SessionRoot      string `json:"session_root"`
+	LastRunID        string `json:"last_run_id"`
+	CreatedAt        int64  `json:"created_at"`
+	UpdatedAt        int64  `json:"updated_at"`
 }

@@ -13,12 +13,15 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/rtzll/rascal/internal/agent"
 )
 
 // DockerLauncher runs a task inside a Docker container.
 type DockerLauncher struct {
-	Image       string
-	GitHubToken string
+	DefaultImage string
+	Image        string
+	GitHubToken  string
 }
 
 const (
@@ -28,7 +31,15 @@ const (
 )
 
 func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (ExecutionHandle, error) {
-	if l.Image == "" {
+	backend := agent.NormalizeBackend(string(spec.AgentBackend))
+	image := strings.TrimSpace(spec.RunnerImage)
+	if image == "" {
+		image = strings.TrimSpace(l.DefaultImage)
+	}
+	if image == "" {
+		image = strings.TrimSpace(l.Image)
+	}
+	if image == "" {
 		return ExecutionHandle{}, fmt.Errorf("docker image is required")
 	}
 	if err := os.MkdirAll(spec.RunDir, 0o755); err != nil {
@@ -38,10 +49,26 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (Execution
 	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("create workspace dir: %w", err)
 	}
-	sessionDir := strings.TrimSpace(spec.GooseSessionTaskDir)
-	if spec.GooseSessionResume && sessionDir != "" {
+	sessionDir := strings.TrimSpace(spec.AgentSession.TaskDir)
+	if sessionDir == "" {
+		sessionDir = strings.TrimSpace(spec.GooseSessionTaskDir)
+	}
+	sessionResume := spec.AgentSession.Resume || spec.GooseSessionResume
+	sessionMode := spec.AgentSession.Mode
+	if sessionMode == "" {
+		sessionMode = agent.NormalizeSessionMode(spec.GooseSessionMode)
+	}
+	sessionKey := strings.TrimSpace(spec.AgentSession.TaskKey)
+	if sessionKey == "" {
+		sessionKey = strings.TrimSpace(spec.GooseSessionTaskKey)
+	}
+	backendSessionID := strings.TrimSpace(spec.AgentSession.BackendSessionID)
+	if backendSessionID == "" {
+		backendSessionID = strings.TrimSpace(spec.GooseSessionName)
+	}
+	if sessionResume && sessionDir != "" {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-			return ExecutionHandle{}, fmt.Errorf("create goose session dir: %w", err)
+			return ExecutionHandle{}, fmt.Errorf("create agent session dir: %w", err)
 		}
 	}
 	if err := prepareMountAccess(spec.RunDir, workspaceDir, sessionDir); err != nil {
@@ -55,40 +82,45 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (Execution
 	}
 	defer logFile.Close()
 
-	_, _ = fmt.Fprintf(logFile, "[%s] starting detached docker runner image=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), l.Image, spec.RunID)
+	_, _ = fmt.Fprintf(logFile, "[%s] starting docker runner image=%s backend=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), image, backend, spec.RunID)
 
 	goosePathRoot := "/rascal-meta/goose"
-	if spec.GooseSessionResume && sessionDir != "" {
+	if sessionResume && sessionDir != "" {
 		goosePathRoot = "/rascal-goose-session"
 	}
 	envPairs := map[string]string{
-		"RASCAL_RUN_ID":                spec.RunID,
-		"RASCAL_TASK_ID":               spec.TaskID,
-		"RASCAL_TASK":                  spec.Task,
-		"RASCAL_REPO":                  spec.Repo,
-		"RASCAL_BASE_BRANCH":           spec.BaseBranch,
-		"RASCAL_HEAD_BRANCH":           spec.HeadBranch,
-		"RASCAL_TRIGGER":               spec.Trigger,
-		"RASCAL_GOOSE_DEBUG":           strconv.FormatBool(spec.Debug),
-		"RASCAL_CONTEXT":               spec.Context,
-		"RASCAL_CONTEXT_JSON":          "/rascal-meta/context.json",
-		"RASCAL_ISSUE_NUMBER":          strconv.Itoa(spec.IssueNumber),
-		"RASCAL_PR_NUMBER":             strconv.Itoa(spec.PRNumber),
-		"RASCAL_GOOSE_SESSION_MODE":    NormalizeGooseSessionMode(spec.GooseSessionMode),
-		"RASCAL_GOOSE_SESSION_RESUME":  strconv.FormatBool(spec.GooseSessionResume),
-		"RASCAL_GOOSE_SESSION_KEY":     strings.TrimSpace(spec.GooseSessionTaskKey),
-		"RASCAL_GOOSE_SESSION_NAME":    strings.TrimSpace(spec.GooseSessionName),
-		"CODEX_HOME":                   "/rascal-meta/codex",
-		"GOOSE_PROVIDER":               "codex",
-		"GOOSE_MODEL":                  "gpt-5.4",
-		"GOOSE_MODE":                   "auto",
-		"GOOSE_DISABLE_KEYRING":        "1",
-		"GOOSE_DISABLE_SESSION_NAMING": "true",
-		"GOOSE_CONTEXT_STRATEGY":       "summarize",
-		"GH_PROMPT_DISABLED":           "1",
-		"GIT_TERMINAL_PROMPT":          "0",
-		"GOOSE_PATH_ROOT":              goosePathRoot,
+		"RASCAL_RUN_ID":               spec.RunID,
+		"RASCAL_TASK_ID":              spec.TaskID,
+		"RASCAL_TASK":                 spec.Task,
+		"RASCAL_REPO":                 spec.Repo,
+		"RASCAL_AGENT_BACKEND":        backend.String(),
+		"RASCAL_BASE_BRANCH":          spec.BaseBranch,
+		"RASCAL_HEAD_BRANCH":          spec.HeadBranch,
+		"RASCAL_TRIGGER":              spec.Trigger,
+		"RASCAL_GOOSE_DEBUG":          strconv.FormatBool(spec.Debug),
+		"RASCAL_CONTEXT":              spec.Context,
+		"RASCAL_CONTEXT_JSON":         "/rascal-meta/context.json",
+		"RASCAL_ISSUE_NUMBER":         strconv.Itoa(spec.IssueNumber),
+		"RASCAL_PR_NUMBER":            strconv.Itoa(spec.PRNumber),
+		"RASCAL_AGENT_SESSION_MODE":   string(sessionMode),
+		"RASCAL_AGENT_SESSION_RESUME": strconv.FormatBool(sessionResume),
+		"RASCAL_AGENT_SESSION_KEY":    sessionKey,
+		"RASCAL_AGENT_SESSION_ID":     backendSessionID,
+		"CODEX_HOME":                  "/rascal-meta/codex",
+		"GH_PROMPT_DISABLED":          "1",
+		"GIT_TERMINAL_PROMPT":         "0",
+		"GOOSE_PATH_ROOT":             goosePathRoot,
 	}
+	envPairs["GOOSE_PROVIDER"] = "codex"
+	envPairs["GOOSE_MODEL"] = "gpt-5.4"
+	envPairs["GOOSE_MODE"] = "auto"
+	envPairs["GOOSE_DISABLE_KEYRING"] = "1"
+	envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
+	envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
+	envPairs["RASCAL_GOOSE_SESSION_MODE"] = NormalizeGooseSessionMode(string(sessionMode))
+	envPairs["RASCAL_GOOSE_SESSION_RESUME"] = strconv.FormatBool(sessionResume)
+	envPairs["RASCAL_GOOSE_SESSION_KEY"] = sessionKey
+	envPairs["RASCAL_GOOSE_SESSION_NAME"] = backendSessionID
 	if strings.TrimSpace(l.GitHubToken) != "" {
 		envPairs["GH_TOKEN"] = l.GitHubToken
 	}
@@ -115,17 +147,18 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (Execution
 		"-v", fmt.Sprintf("%s:/rascal-meta", spec.RunDir),
 		"-v", fmt.Sprintf("%s:/work", workspaceDir),
 	)
-	if spec.GooseSessionResume && sessionDir != "" {
+	if sessionResume && sessionDir != "" {
 		args = append(args, "-v", fmt.Sprintf("%s:%s", sessionDir, goosePathRoot))
 	}
-	args = append(args, l.Image)
+	args = append(args, image)
 
-	_, _ = fmt.Fprintf(logFile, "[%s] goose session mode=%s resume=%t key=%s name=%s path_root=%s\n",
+	_, _ = fmt.Fprintf(logFile, "[%s] agent session backend=%s mode=%s resume=%t key=%s session_id=%s path_root=%s\n",
 		time.Now().UTC().Format(time.RFC3339),
-		NormalizeGooseSessionMode(spec.GooseSessionMode),
-		spec.GooseSessionResume,
-		strings.TrimSpace(spec.GooseSessionTaskKey),
-		strings.TrimSpace(spec.GooseSessionName),
+		backend,
+		agent.NormalizeSessionMode(string(sessionMode)),
+		sessionResume,
+		sessionKey,
+		backendSessionID,
 		goosePathRoot,
 	)
 

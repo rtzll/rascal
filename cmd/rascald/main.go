@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/config"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/logs"
@@ -124,7 +125,7 @@ func main() {
 	s := &server{
 		cfg:           cfg,
 		store:         store,
-		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImage, cfg.GitHubToken),
+		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImageForBackend(cfg.AgentBackend), cfg.GitHubToken),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
 		runCancels:    make(map[string]context.CancelFunc),
 		maxConcurrent: defaultMaxConcurrent(),
@@ -150,7 +151,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("rascald listening on %s (runner=%s)", cfg.ListenAddr, cfg.RunnerMode)
+	log.Printf("rascald listening on %s (runner=%s backend=%s)", cfg.ListenAddr, cfg.RunnerMode, cfg.AgentBackend)
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- httpServer.ListenAndServe()
@@ -1057,29 +1058,31 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	}
 
 	_, err = s.store.UpsertTask(state.UpsertTaskInput{
-		ID:          req.TaskID,
-		Repo:        req.Repo,
-		IssueNumber: req.IssueNumber,
-		PRNumber:    req.PRNumber,
+		ID:           req.TaskID,
+		Repo:         req.Repo,
+		AgentBackend: s.cfg.AgentBackend,
+		IssueNumber:  req.IssueNumber,
+		PRNumber:     req.PRNumber,
 	})
 	if err != nil {
 		return state.Run{}, fmt.Errorf("upsert task: %w", err)
 	}
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:          runID,
-		TaskID:      req.TaskID,
-		Repo:        req.Repo,
-		Task:        req.Task,
-		BaseBranch:  req.BaseBranch,
-		HeadBranch:  req.HeadBranch,
-		Trigger:     req.Trigger,
-		RunDir:      runDir,
-		IssueNumber: req.IssueNumber,
-		PRNumber:    req.PRNumber,
-		PRStatus:    req.PRStatus,
-		Context:     req.Context,
-		Debug:       boolPtr(debugEnabled),
+		ID:           runID,
+		TaskID:       req.TaskID,
+		Repo:         req.Repo,
+		Task:         req.Task,
+		AgentBackend: s.cfg.AgentBackend,
+		BaseBranch:   req.BaseBranch,
+		HeadBranch:   req.HeadBranch,
+		Trigger:      req.Trigger,
+		RunDir:       runDir,
+		IssueNumber:  req.IssueNumber,
+		PRNumber:     req.PRNumber,
+		PRStatus:     req.PRStatus,
+		Context:      req.Context,
+		Debug:        boolPtr(debugEnabled),
 	})
 	if err != nil {
 		return state.Run{}, fmt.Errorf("persist run: %w", err)
@@ -1233,50 +1236,76 @@ func (s *server) executeRun(runID string) {
 		return
 	}
 
-	sessionMode := runner.NormalizeGooseSessionMode(s.cfg.GooseSessionMode)
-	if sessionMode != runner.GooseSessionModeOff {
-		s.cleanupGooseSessionsBestEffort()
+	sessionMode := s.cfg.EffectiveAgentSessionMode()
+	if sessionMode != agent.SessionModeOff {
+		s.cleanupAgentSessionsBestEffort()
 	}
 
-	sessionResume := runner.GooseSessionEnabled(sessionMode, run.Trigger)
+	sessionResume := agent.SessionEnabled(sessionMode, run.Trigger)
 	sessionTaskKey := ""
 	sessionTaskDir := ""
-	sessionName := ""
-	sessionRoot := strings.TrimSpace(s.cfg.GooseSessionRoot)
+	backendSessionID := ""
+	sessionRoot := strings.TrimSpace(s.cfg.EffectiveAgentSessionRoot())
 	if sessionRoot == "" {
-		sessionRoot = filepath.Join(s.cfg.DataDir, "goose-sessions")
+		sessionRoot = filepath.Join(s.cfg.DataDir, "agent-sessions")
 	}
 	if sessionResume {
-		sessionTaskKey = runner.GooseSessionTaskKey(run.Repo, run.TaskID)
+		sessionTaskKey = agent.SessionTaskKey(run.Repo, run.TaskID)
 		sessionTaskDir = filepath.Join(sessionRoot, sessionTaskKey)
-		sessionName = runner.GooseSessionName(run.Repo, run.TaskID)
+		if existing, ok := s.store.GetTaskAgentSession(run.TaskID); ok {
+			backendSessionID = strings.TrimSpace(existing.BackendSessionID)
+		}
+		if backendSessionID == "" && run.AgentBackend == agent.BackendGoose {
+			backendSessionID = runner.GooseSessionName(run.Repo, run.TaskID)
+		}
 		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {
-			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("create goose session dir: %v", err))
+			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("create agent session dir: %v", err))
+			s.finishRun(updated)
+			return
+		}
+		if _, err := s.store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
+			TaskID:           run.TaskID,
+			AgentBackend:     run.AgentBackend,
+			BackendSessionID: backendSessionID,
+			SessionKey:       sessionTaskKey,
+			SessionRoot:      sessionTaskDir,
+			LastRunID:        run.ID,
+		}); err != nil {
+			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("persist agent session: %v", err))
 			s.finishRun(updated)
 			return
 		}
 	}
 
 	spec := runner.Spec{
-		RunID:               run.ID,
-		TaskID:              run.TaskID,
-		Repo:                run.Repo,
-		Task:                run.Task,
-		BaseBranch:          run.BaseBranch,
-		HeadBranch:          run.HeadBranch,
-		Trigger:             run.Trigger,
-		RunDir:              run.RunDir,
-		IssueNumber:         run.IssueNumber,
-		PRNumber:            run.PRNumber,
-		Context:             run.Context,
-		Debug:               run.Debug,
-		GooseSessionMode:    sessionMode,
+		RunID:        run.ID,
+		TaskID:       run.TaskID,
+		Repo:         run.Repo,
+		Task:         run.Task,
+		AgentBackend: run.AgentBackend,
+		RunnerImage:  s.cfg.RunnerImageForBackend(run.AgentBackend),
+		BaseBranch:   run.BaseBranch,
+		HeadBranch:   run.HeadBranch,
+		Trigger:      run.Trigger,
+		RunDir:       run.RunDir,
+		IssueNumber:  run.IssueNumber,
+		PRNumber:     run.PRNumber,
+		Context:      run.Context,
+		Debug:        run.Debug,
+		AgentSession: runner.SessionSpec{
+			Mode:             sessionMode,
+			Resume:           sessionResume,
+			TaskDir:          sessionTaskDir,
+			TaskKey:          sessionTaskKey,
+			BackendSessionID: backendSessionID,
+		},
+		GooseSessionMode:    string(sessionMode),
 		GooseSessionResume:  sessionResume,
 		GooseSessionTaskDir: sessionTaskDir,
 		GooseSessionTaskKey: sessionTaskKey,
-		GooseSessionName:    sessionName,
+		GooseSessionName:    backendSessionID,
 	}
-	log.Printf("run %s goose session mode=%s resume=%t key=%s name=%s", run.ID, sessionMode, sessionResume, sessionTaskKey, sessionName)
+	log.Printf("run %s backend=%s session_mode=%s resume=%t key=%s session_id=%s", run.ID, run.AgentBackend, sessionMode, sessionResume, sessionTaskKey, backendSessionID)
 	execRec, hasExec := s.store.GetRunExecution(run.ID)
 	if !hasExec {
 		// Persist a deterministic handle before launch so the next slot can
@@ -2121,26 +2150,26 @@ func isCommentTriggeredRun(trigger string) bool {
 	}
 }
 
-func (s *server) cleanupGooseSessionsBestEffort() {
-	ttlDays := s.cfg.GooseSessionTTLDays
+func (s *server) cleanupAgentSessionsBestEffort() {
+	ttlDays := s.cfg.EffectiveAgentSessionTTLDays()
 	if ttlDays <= 0 {
 		return
 	}
-	root := strings.TrimSpace(s.cfg.GooseSessionRoot)
+	root := strings.TrimSpace(s.cfg.EffectiveAgentSessionRoot())
 	if root == "" {
-		root = filepath.Join(s.cfg.DataDir, "goose-sessions")
+		root = filepath.Join(s.cfg.DataDir, "agent-sessions")
 	}
-	removed, err := cleanupStaleGooseSessionDirs(root, ttlDays, time.Now().UTC())
+	removed, err := cleanupStaleAgentSessionDirs(root, ttlDays, time.Now().UTC())
 	if err != nil {
-		log.Printf("goose session cleanup warning: root=%s ttl_days=%d error=%v", root, ttlDays, err)
+		log.Printf("agent session cleanup warning: root=%s ttl_days=%d error=%v", root, ttlDays, err)
 		return
 	}
 	if removed > 0 {
-		log.Printf("goose session cleanup: root=%s ttl_days=%d removed=%d", root, ttlDays, removed)
+		log.Printf("agent session cleanup: root=%s ttl_days=%d removed=%d", root, ttlDays, removed)
 	}
 }
 
-func cleanupStaleGooseSessionDirs(root string, ttlDays int, now time.Time) (int, error) {
+func cleanupStaleAgentSessionDirs(root string, ttlDays int, now time.Time) (int, error) {
 	if ttlDays <= 0 {
 		return 0, nil
 	}
@@ -2182,6 +2211,10 @@ func cleanupStaleGooseSessionDirs(root string, ttlDays int, now time.Time) (int,
 		removed++
 	}
 	return removed, firstErr
+}
+
+func cleanupStaleGooseSessionDirs(root string, ttlDays int, now time.Time) (int, error) {
+	return cleanupStaleAgentSessionDirs(root, ttlDays, now)
 }
 
 func loadRunResponseTarget(runDir string) (runResponseTarget, bool, error) {

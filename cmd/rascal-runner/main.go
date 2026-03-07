@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runsummary"
 )
@@ -59,9 +60,15 @@ type config struct {
 	CommitMsgPath    string
 	PRBodyPath       string
 
-	GooseDebug bool
+	GooseDebug   bool
+	AgentBackend agent.Backend
 
 	GoosePathRoot      string
+	AgentSessionMode   agent.SessionMode
+	AgentSessionResume bool
+	AgentSessionKey    string
+	BackendSessionID   string
+
 	GooseSessionMode   string
 	GooseSessionResume bool
 	GooseSessionKey    string
@@ -183,7 +190,7 @@ func runWithExecutor(ex commandExecutor) error {
 	log.Printf("[%s] run started run_id=%s repo=%s", nowUTC(), cfg.RunID, cfg.Repo)
 
 	if err := runStage("validate_commands", func() error {
-		return requireCommands(ex, "git", "gh", "goose")
+		return validateCommands(ex, cfg)
 	}); err != nil {
 		return fail(err)
 	}
@@ -205,10 +212,10 @@ func runWithExecutor(ex commandExecutor) error {
 		return fail(err)
 	}
 
-	var gooseOutput string
-	if err := runStage("run_goose", func() error {
+	var agentOutput string
+	if err := runStage("run_agent", func() error {
 		var err error
-		gooseOutput, err = runGoose(ex, cfg)
+		agentOutput, err = runAgent(ex, cfg)
 		return err
 	}); err != nil {
 		return fail(err)
@@ -295,7 +302,7 @@ func runWithExecutor(ex commandExecutor) error {
 				closesSection = fmt.Sprintf("\n\nCloses #%d", cfg.IssueNumber)
 			}
 			runDuration := runsummary.FormatDuration(int64(time.Since(started).Seconds()))
-			body := runsummary.BuildPRBody(cfg.RunID, commitBody, gooseOutput, runDuration, closesSection)
+			body := runsummary.BuildPRBody(cfg.RunID, commitBody, agentOutput, runDuration, closesSection)
 			if err := os.WriteFile(cfg.PRBodyPath, []byte(body), 0o644); err != nil {
 				return fmt.Errorf("write pr body: %w", err)
 			}
@@ -407,19 +414,20 @@ func loadConfig() (config, error) {
 		}
 	}
 
-	gooseSessionMode := runner.NormalizeGooseSessionMode(os.Getenv("RASCAL_GOOSE_SESSION_MODE"))
-	gooseSessionResume := parseBoolEnv(strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_RESUME")), false)
-	if gooseSessionMode == runner.GooseSessionModeOff {
-		gooseSessionResume = false
+	agentBackend := agent.NormalizeBackend(os.Getenv("RASCAL_AGENT_BACKEND"))
+	agentSessionMode := agent.NormalizeSessionMode(firstNonEmptyValue(os.Getenv("RASCAL_AGENT_SESSION_MODE"), os.Getenv("RASCAL_GOOSE_SESSION_MODE")))
+	agentSessionResume := parseBoolEnv(firstNonEmptyValue(strings.TrimSpace(os.Getenv("RASCAL_AGENT_SESSION_RESUME")), strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_RESUME"))), false)
+	if agentSessionMode == agent.SessionModeOff {
+		agentSessionResume = false
 	}
-	gooseSessionKey := strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_KEY"))
-	gooseSessionName := strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_NAME"))
-	if gooseSessionResume {
-		if gooseSessionKey == "" {
-			gooseSessionKey = runner.GooseSessionTaskKey(repo, taskID)
+	agentSessionKey := firstNonEmptyValue(strings.TrimSpace(os.Getenv("RASCAL_AGENT_SESSION_KEY")), strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_KEY")))
+	backendSessionID := firstNonEmptyValue(strings.TrimSpace(os.Getenv("RASCAL_AGENT_SESSION_ID")), strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_NAME")))
+	if agentSessionResume {
+		if agentSessionKey == "" {
+			agentSessionKey = runner.GooseSessionTaskKey(repo, taskID)
 		}
-		if gooseSessionName == "" {
-			gooseSessionName = runner.GooseSessionName(repo, taskID)
+		if backendSessionID == "" && agentBackend == agent.BackendGoose {
+			backendSessionID = runner.GooseSessionName(repo, taskID)
 		}
 	}
 	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))
@@ -443,11 +451,16 @@ func loadConfig() (config, error) {
 		CommitMsgPath:      filepath.Join(metaDir, defaultCommitMsgFile),
 		PRBodyPath:         filepath.Join(metaDir, defaultPRBodyFile),
 		GooseDebug:         debug,
+		AgentBackend:       agentBackend,
 		GoosePathRoot:      goosePathRoot,
-		GooseSessionMode:   gooseSessionMode,
-		GooseSessionResume: gooseSessionResume,
-		GooseSessionKey:    gooseSessionKey,
-		GooseSessionName:   gooseSessionName,
+		AgentSessionMode:   agentSessionMode,
+		AgentSessionResume: agentSessionResume,
+		AgentSessionKey:    agentSessionKey,
+		BackendSessionID:   backendSessionID,
+		GooseSessionMode:   string(agentSessionMode),
+		GooseSessionResume: agentSessionResume,
+		GooseSessionKey:    agentSessionKey,
+		GooseSessionName:   backendSessionID,
 	}, nil
 }
 
@@ -472,6 +485,38 @@ func parseBoolEnv(raw string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func configuredAgentBackend(cfg config) agent.Backend {
+	return agent.NormalizeBackend(string(cfg.AgentBackend))
+}
+
+func configuredSessionMode(cfg config) agent.SessionMode {
+	if cfg.AgentSessionMode != "" {
+		return agent.NormalizeSessionMode(string(cfg.AgentSessionMode))
+	}
+	return agent.NormalizeSessionMode(cfg.GooseSessionMode)
+}
+
+func configuredSessionResume(cfg config) bool {
+	if cfg.AgentSessionResume {
+		return true
+	}
+	return cfg.GooseSessionResume
+}
+
+func configuredSessionKey(cfg config) string {
+	if strings.TrimSpace(cfg.AgentSessionKey) != "" {
+		return strings.TrimSpace(cfg.AgentSessionKey)
+	}
+	return strings.TrimSpace(cfg.GooseSessionKey)
+}
+
+func configuredBackendSessionID(cfg config) string {
+	if strings.TrimSpace(cfg.BackendSessionID) != "" {
+		return strings.TrimSpace(cfg.BackendSessionID)
+	}
+	return strings.TrimSpace(cfg.GooseSessionName)
 }
 
 func ensureInstructions(cfg config) error {
@@ -509,6 +554,17 @@ func requireCommands(ex commandExecutor, names ...string) error {
 		}
 	}
 	return nil
+}
+
+func validateCommands(ex commandExecutor, cfg config) error {
+	names := []string{"git", "gh"}
+	switch configuredAgentBackend(cfg) {
+	case agent.BackendCodex:
+		names = append(names, "codex")
+	default:
+		names = append(names, "goose")
+	}
+	return requireCommands(ex, names...)
 }
 
 func resolveGitIdentity(ex commandExecutor) (string, string, error) {
@@ -563,24 +619,37 @@ func checkoutRepo(ex commandExecutor, cfg config) error {
 	return err
 }
 
+func runAgent(ex commandExecutor, cfg config) (string, error) {
+	switch configuredAgentBackend(cfg) {
+	case agent.BackendCodex:
+		return "", fmt.Errorf("agent backend %q is not implemented yet", configuredAgentBackend(cfg))
+	default:
+		return runGoose(ex, cfg)
+	}
+}
+
 func runGoose(ex commandExecutor, cfg config) (string, error) {
-	resume := cfg.GooseSessionResume
-	if resume && strings.TrimSpace(cfg.GooseSessionName) != "" {
-		exists, err := gooseSessionExists(ex, cfg, cfg.GooseSessionName)
+	sessionID := configuredBackendSessionID(cfg)
+	sessionMode := configuredSessionMode(cfg)
+	sessionKey := configuredSessionKey(cfg)
+	resume := configuredSessionResume(cfg)
+	if resume && sessionID != "" {
+		exists, err := gooseSessionExists(ex, cfg, sessionID)
 		if err != nil {
-			log.Printf("[%s] goose session preflight warning: name=%s error=%v", nowUTC(), cfg.GooseSessionName, err)
+			log.Printf("[%s] goose session preflight warning: name=%s error=%v", nowUTC(), sessionID, err)
 		} else if !exists {
-			log.Printf("[%s] goose session missing; starting fresh session name=%s", nowUTC(), cfg.GooseSessionName)
+			log.Printf("[%s] goose session missing; starting fresh session name=%s", nowUTC(), sessionID)
 			resume = false
 		}
 	}
 
-	log.Printf("[%s] running goose (debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
+	log.Printf("[%s] running goose (backend=%s debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
 		nowUTC(),
+		configuredAgentBackend(cfg),
 		cfg.GooseDebug,
-		cfg.GooseSessionMode,
-		cfg.GooseSessionKey,
-		cfg.GooseSessionName,
+		sessionMode,
+		sessionKey,
+		sessionID,
 		resume,
 		cfg.GoosePathRoot,
 	)
@@ -588,7 +657,7 @@ func runGoose(ex commandExecutor, cfg config) (string, error) {
 	firstAttemptArgs := gooseRunArgs(cfg, resume)
 	if err := runGooseOnce(ex, cfg, firstAttemptArgs); err != nil {
 		if resume && isSessionResumeFailure(err, cfg.GooseLogPath) {
-			log.Printf("[%s] goose session resume failed; falling back to fresh session name=%s reason=%s", nowUTC(), cfg.GooseSessionName, strings.TrimSpace(err.Error()))
+			log.Printf("[%s] goose session resume failed; falling back to fresh session name=%s reason=%s", nowUTC(), sessionID, strings.TrimSpace(err.Error()))
 			if resetErr := resetGooseSessionRoot(cfg.GoosePathRoot); resetErr != nil {
 				log.Printf("[%s] goose session reset warning: %v", nowUTC(), resetErr)
 			}
@@ -597,7 +666,7 @@ func runGoose(ex commandExecutor, cfg config) (string, error) {
 				ensureGooseLogHasError(cfg.GooseLogPath)
 				return "", fmt.Errorf("goose run failed after session fallback: %w", retryErr)
 			}
-			log.Printf("[%s] goose session fallback succeeded; started fresh session name=%s", nowUTC(), cfg.GooseSessionName)
+			log.Printf("[%s] goose session fallback succeeded; started fresh session name=%s", nowUTC(), sessionID)
 		} else {
 			ensureGooseLogHasError(cfg.GooseLogPath)
 			return "", fmt.Errorf("goose run failed: %w", err)
@@ -615,8 +684,8 @@ func runGoose(ex commandExecutor, cfg config) (string, error) {
 
 func gooseRunArgs(cfg config, resume bool) []string {
 	args := []string{"run"}
-	if cfg.GooseSessionMode != runner.GooseSessionModeOff && cfg.GooseSessionName != "" {
-		args = append(args, "--name", cfg.GooseSessionName)
+	if configuredSessionMode(cfg) != agent.SessionModeOff && configuredBackendSessionID(cfg) != "" {
+		args = append(args, "--name", configuredBackendSessionID(cfg))
 		if resume {
 			args = append(args, "--resume")
 		}

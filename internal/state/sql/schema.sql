@@ -1,6 +1,7 @@
 CREATE TABLE tasks (
   id TEXT PRIMARY KEY,
   repo TEXT NOT NULL,
+  agent_backend TEXT NOT NULL DEFAULT 'goose',
   issue_number INTEGER NOT NULL DEFAULT 0,
   pr_number INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'open',
@@ -17,6 +18,7 @@ CREATE TABLE runs (
   task_id TEXT NOT NULL,
   repo TEXT NOT NULL,
   task TEXT NOT NULL,
+  agent_backend TEXT NOT NULL DEFAULT 'goose',
   base_branch TEXT NOT NULL,
   head_branch TEXT NOT NULL,
   trigger TEXT NOT NULL,
@@ -38,6 +40,19 @@ CREATE TABLE runs (
 
 CREATE INDEX idx_runs_status_seq ON runs (status, seq DESC);
 CREATE INDEX idx_runs_task_seq ON runs (task_id, seq DESC);
+
+CREATE TABLE task_agent_sessions (
+  task_id TEXT PRIMARY KEY,
+  agent_backend TEXT NOT NULL,
+  backend_session_id TEXT NOT NULL DEFAULT '',
+  session_key TEXT NOT NULL DEFAULT '',
+  session_root TEXT NOT NULL DEFAULT '',
+  last_run_id TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_task_agent_sessions_backend_updated ON task_agent_sessions (agent_backend, updated_at DESC);
 
 CREATE TABLE run_leases (
   run_id TEXT PRIMARY KEY,
