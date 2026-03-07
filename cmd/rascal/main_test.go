@@ -693,8 +693,187 @@ func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
 	if payload["issue_number"] != float64(123) {
 		t.Fatalf("unexpected issue number payload: %v", payload["issue_number"])
 	}
-	if payload["debug"] != true {
-		t.Fatalf("unexpected debug payload: %v", payload["debug"])
+	if _, ok := payload["debug"]; ok {
+		t.Fatalf("did not expect debug payload unless flag is set, got: %v", payload["debug"])
+	}
+}
+
+func TestRunIssueSendsExplicitDebugOverride(t *testing.T) {
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/v1/tasks/issue" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"run": map[string]any{"id": "run_issue", "status": "queued"},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "json",
+	}
+
+	cmd := a.newRunCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--issue", "owner/repo#123", "--debug=false"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("run --issue --debug=false: %v", err)
+	}
+
+	if payload["debug"] != false {
+		t.Fatalf("expected explicit debug override false, got: %v", payload["debug"])
+	}
+}
+
+func TestRetryOmitsDebugByDefault(t *testing.T) {
+	var retryPayload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"run": map[string]any{
+					"id":          "run_old",
+					"task_id":     "task_1",
+					"repo":        "owner/repo",
+					"task":        "Fix it",
+					"base_branch": "main",
+					"status":      string(state.StatusCanceled),
+				},
+			})
+			return
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/tasks":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read retry body: %v", err)
+			}
+			if err := json.Unmarshal(body, &retryPayload); err != nil {
+				t.Fatalf("decode retry payload: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"run": map[string]any{"id": "run_retry", "status": "queued"},
+			})
+			return
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "json",
+	}
+
+	cmd := a.newRetryCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"run_old"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+
+	if _, ok := retryPayload["debug"]; ok {
+		t.Fatalf("did not expect debug payload unless flag is set, got: %v", retryPayload["debug"])
+	}
+}
+
+func TestRetrySendsExplicitDebugOverride(t *testing.T) {
+	var retryPayload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"run": map[string]any{
+					"id":          "run_old",
+					"task_id":     "task_1",
+					"repo":        "owner/repo",
+					"task":        "Fix it",
+					"base_branch": "main",
+					"status":      string(state.StatusCanceled),
+				},
+			})
+			return
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/tasks":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read retry body: %v", err)
+			}
+			if err := json.Unmarshal(body, &retryPayload); err != nil {
+				t.Fatalf("decode retry payload: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"run": map[string]any{"id": "run_retry", "status": "queued"},
+			})
+			return
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "json",
+	}
+
+	cmd := a.newRetryCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"run_old", "--debug=false"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("retry --debug=false: %v", err)
+	}
+
+	if retryPayload["debug"] != false {
+		t.Fatalf("expected explicit debug override false, got: %v", retryPayload["debug"])
 	}
 }
 

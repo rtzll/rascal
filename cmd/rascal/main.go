@@ -892,23 +892,25 @@ rascal run --issue OWNER/REPO#123
 				return err
 			}
 			issueRef = strings.TrimSpace(issueRef)
-			if issueRef != "" {
-				if cmd.Flags().Changed("repo") || cmd.Flags().Changed("task") || cmd.Flags().Changed("base-branch") {
-					return &cliError{Code: exitInput, Message: "--issue cannot be combined with --repo, --task, or --base-branch"}
-				}
+				if issueRef != "" {
+					if cmd.Flags().Changed("repo") || cmd.Flags().Changed("task") || cmd.Flags().Changed("base-branch") {
+						return &cliError{Code: exitInput, Message: "--issue cannot be combined with --repo, --task, or --base-branch"}
+					}
 				repo, issueNumber, err := parseIssueRef(issueRef)
 				if err != nil {
 					return &cliError{Code: exitInput, Message: err.Error()}
 				}
-				payload := map[string]any{
-					"repo":         repo,
-					"issue_number": issueNumber,
-					"debug":        debug,
-				}
-				resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks/issue", payload)
-				if err != nil {
-					return &cliError{Code: exitServer, Message: "request failed", Cause: err}
-				}
+					payload := map[string]any{
+						"repo":         repo,
+						"issue_number": issueNumber,
+					}
+					if cmd.Flags().Changed("debug") {
+						payload["debug"] = debug
+					}
+					resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks/issue", payload)
+					if err != nil {
+						return &cliError{Code: exitServer, Message: "request failed", Cause: err}
+					}
 				defer resp.Body.Close()
 				if resp.StatusCode >= 300 {
 					return decodeServerError(resp)
@@ -932,16 +934,18 @@ rascal run --issue OWNER/REPO#123
 				return &cliError{Code: exitInput, Message: "both --repo/-R and --task/-t are required"}
 			}
 
-			payload := map[string]any{
-				"repo":        repo,
-				"task":        task,
-				"base_branch": baseBranch,
-				"debug":       debug,
-			}
-			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
-			if err != nil {
-				return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
-			}
+				payload := map[string]any{
+					"repo":        repo,
+					"task":        task,
+					"base_branch": baseBranch,
+				}
+				if cmd.Flags().Changed("debug") {
+					payload["debug"] = debug
+				}
+				resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
+				if err != nil {
+					return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
+				}
 			defer resp.Body.Close()
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
@@ -1580,7 +1584,7 @@ rascal open run_abc123 --print
 `),
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.requireServerAuth(); err != nil {
 				return err
 			}
@@ -1620,7 +1624,7 @@ rascal retry run_abc123 --debug=false
 `),
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.requireServerAuth(); err != nil {
 				return err
 			}
@@ -1636,7 +1640,9 @@ rascal retry run_abc123 --debug=false
 				"repo":        run.Repo,
 				"task":        run.Task,
 				"base_branch": run.BaseBranch,
-				"debug":       debug,
+			}
+			if cmd.Flags().Changed("debug") {
+				payload["debug"] = debug
 			}
 			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
 			if err != nil {
