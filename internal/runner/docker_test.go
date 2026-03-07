@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -173,6 +174,22 @@ exit 0
 	}
 	if !strings.Contains(call, sessionDir+":/rascal-goose-session") {
 		t.Fatalf("expected task session mount, got:\n%s", call)
+	}
+
+	info, err := os.Stat(sessionDir)
+	if err != nil {
+		t.Fatalf("stat session dir: %v", err)
+	}
+	if os.Geteuid() == 0 {
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			t.Fatalf("session dir stat type %T, want *syscall.Stat_t", info.Sys())
+		}
+		if int(stat.Uid) != runtimeUID || int(stat.Gid) != runtimeGID {
+			t.Fatalf("session dir ownership = %d:%d, want %d:%d", stat.Uid, stat.Gid, runtimeUID, runtimeGID)
+		}
+	} else if info.Mode().Perm() != 0o777 {
+		t.Fatalf("session dir mode = %o, want 777", info.Mode().Perm())
 	}
 }
 

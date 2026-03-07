@@ -39,7 +39,13 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		return Result{}, fmt.Errorf("create workspace dir: %w", err)
 	}
-	if err := prepareMountAccess(spec.RunDir, workspaceDir); err != nil {
+	sessionDir := strings.TrimSpace(spec.GooseSessionTaskDir)
+	if spec.GooseSessionResume && sessionDir != "" {
+		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+			return Result{}, fmt.Errorf("create goose session dir: %w", err)
+		}
+	}
+	if err := prepareMountAccess(spec.RunDir, workspaceDir, sessionDir); err != nil {
 		return Result{}, err
 	}
 
@@ -84,11 +90,7 @@ func (l DockerLauncher) Start(ctx context.Context, spec Spec) (Result, error) {
 	}
 
 	goosePathRoot := "/rascal-meta/goose"
-	sessionDir := strings.TrimSpace(spec.GooseSessionTaskDir)
 	if spec.GooseSessionResume && sessionDir != "" {
-		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-			return Result{}, fmt.Errorf("create goose session dir: %w", err)
-		}
 		goosePathRoot = "/rascal-goose-session"
 	}
 	envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
@@ -197,16 +199,25 @@ func forceStopContainer(containerName string, logOut io.Writer) {
 	_ = rmCmd.Run()
 }
 
-func prepareMountAccess(runDir, workspaceDir string) error {
+func prepareMountAccess(runDir, workspaceDir, sessionDir string) error {
 	if os.Geteuid() == 0 {
 		if err := chownTree(runDir, runtimeUID, runtimeGID); err != nil {
 			return fmt.Errorf("prepare run dir ownership: %w", err)
+		}
+		if strings.TrimSpace(sessionDir) != "" {
+			if err := chownTree(sessionDir, runtimeUID, runtimeGID); err != nil {
+				return fmt.Errorf("prepare goose session dir ownership: %w", err)
+			}
 		}
 		return nil
 	}
 
 	// Non-root launcher fallback: make bind mounts writable by the runtime UID.
-	for _, target := range []string{runDir, workspaceDir, filepath.Join(runDir, "codex"), filepath.Join(runDir, "goose")} {
+	targets := []string{runDir, workspaceDir, filepath.Join(runDir, "codex"), filepath.Join(runDir, "goose")}
+	if strings.TrimSpace(sessionDir) != "" {
+		targets = append(targets, sessionDir)
+	}
+	for _, target := range targets {
 		if err := chmodIfExists(target, 0o777); err != nil {
 			return fmt.Errorf("prepare writable mount %s: %w", target, err)
 		}
