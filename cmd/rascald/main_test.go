@@ -1061,7 +1061,7 @@ func TestHandleWebhookPullRequestReviewCommentEditedRefreshesContext(t *testing.
 		t.Fatalf("write run files: %v", err)
 	}
 
-	payload := []byte(`{"action":"edited","comment":{"id":405,"body":"Updated inline feedback","path":"cmd/rascald/main.go","line":522,"start_line":520,"user":{"login":"eve"}},"pull_request":{"number":12},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	payload := []byte(`{"action":"edited","comment":{"id":405,"body":"Updated inline feedback","path":"cmd/rascald/main.go","line":522,"start_line":520,"user":{"login":"eve"}},"changes":{"body":{"from":"Old inline feedback"}},"pull_request":{"number":12},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
 	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-edit", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1127,7 +1127,7 @@ func TestHandleWebhookPullRequestReviewCommentEditedUsesLocationFallback(t *test
 		t.Fatalf("write run files: %v", err)
 	}
 
-	payload := []byte(`{"action":"edited","comment":{"id":406,"body":" ","path":"cmd/rascald/main.go","line":515,"user":{"login":"eve"}},"pull_request":{"number":12},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	payload := []byte(`{"action":"edited","comment":{"id":406,"body":" ","path":"cmd/rascald/main.go","line":515,"user":{"login":"eve"}},"changes":{"body":{"from":"Old inline feedback"}},"pull_request":{"number":12},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
 	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-edit-fallback", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)

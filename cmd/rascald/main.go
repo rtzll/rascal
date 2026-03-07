@@ -709,15 +709,6 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
-		switch ev.Action {
-		case "created":
-		case "edited":
-			if !reviewCommentBodyChanged(ev) {
-				return nil
-			}
-		default:
-			return nil
-		}
 		taskID, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
 		if !ok {
 			return nil
