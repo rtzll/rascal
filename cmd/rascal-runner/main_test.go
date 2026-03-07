@@ -306,6 +306,12 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 
 	var gotArgs []string
 	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			if name == "goose" && len(args) == 4 && args[0] == "session" && args[1] == "list" && args[2] == "--format" && args[3] == "json" {
+				return fmt.Sprintf(`[{"name":%q}]`, cfg.GooseSessionName), nil
+			}
+			return "", nil
+		},
 		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, args ...string) error {
 			if name != "goose" {
 				t.Fatalf("unexpected command: %s", name)
@@ -327,6 +333,53 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 	}
 	if strings.Contains(argsText, "--no-session") {
 		t.Fatalf("did not expect --no-session args, got %q", argsText)
+	}
+}
+
+func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
+	root := t.TempDir()
+	cfg := config{
+		RepoDir:            root,
+		InstructionsPath:   filepath.Join(root, "instructions.md"),
+		GooseLogPath:       filepath.Join(root, "goose.ndjson"),
+		GooseDebug:         false,
+		GooseSessionMode:   runner.GooseSessionModePROnly,
+		GooseSessionResume: true,
+		GooseSessionName:   "rascal-owner-repo-task-missing",
+		GooseSessionKey:    "owner-repo-task-missing",
+		GoosePathRoot:      filepath.Join(root, "goose-sessions"),
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var gotArgs []string
+	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			if name == "goose" && len(args) == 4 && args[0] == "session" && args[1] == "list" && args[2] == "--format" && args[3] == "json" {
+				return "[]", nil
+			}
+			return "", nil
+		},
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "goose" {
+				t.Fatalf("unexpected command: %s", name)
+			}
+			gotArgs = append([]string(nil), args...)
+			_, _ = io.WriteString(stdout, `{"event":"message"}`+"\n")
+			return nil
+		},
+	}
+
+	if _, err := runGoose(ex, cfg); err != nil {
+		t.Fatalf("runGoose returned error: %v", err)
+	}
+	argsText := strings.Join(gotArgs, " ")
+	if strings.Contains(argsText, "--resume") {
+		t.Fatalf("did not expect --resume args when session is missing, got %q", argsText)
+	}
+	if !strings.Contains(argsText, "--name "+cfg.GooseSessionName) {
+		t.Fatalf("expected named fresh session args, got %q", argsText)
 	}
 }
 
@@ -366,6 +419,12 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 
 	var calls [][]string
 	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			if name == "goose" && len(args) == 4 && args[0] == "session" && args[1] == "list" && args[2] == "--format" && args[3] == "json" {
+				return fmt.Sprintf(`[{"name":%q}]`, cfg.GooseSessionName), nil
+			}
+			return "", nil
+		},
 		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, args ...string) error {
 			if name != "goose" {
 				t.Fatalf("unexpected command: %s", name)
@@ -448,6 +507,12 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 
 	calls := 0
 	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			if name == "goose" && len(args) == 4 && args[0] == "session" && args[1] == "list" && args[2] == "--format" && args[3] == "json" {
+				return fmt.Sprintf(`[{"name":%q}]`, cfg.GooseSessionName), nil
+			}
+			return "", nil
+		},
 		runFn: func(_ string, _ []string, _ io.Writer, _ io.Writer, _ string, _ ...string) error {
 			calls++
 			return errors.New("goose transport timeout")
@@ -472,6 +537,50 @@ func TestIsSessionResumeFailureDetectsMissingNamedSession(t *testing.T) {
 
 	if !isSessionResumeFailure(errors.New("exit status 1"), logPath) {
 		t.Fatal("expected missing named session to trigger resume fallback detection")
+	}
+}
+
+func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
+	root := t.TempDir()
+	cfg := config{
+		RepoDir:            root,
+		InstructionsPath:   filepath.Join(root, "instructions.md"),
+		GooseLogPath:       filepath.Join(root, "goose.ndjson"),
+		GooseDebug:         false,
+		GooseSessionMode:   runner.GooseSessionModePROnly,
+		GooseSessionResume: true,
+		GooseSessionName:   "rascal-owner-repo-task-abc123",
+		GooseSessionKey:    "owner-repo-task-abc123",
+		GoosePathRoot:      filepath.Join(root, "goose-sessions"),
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var gotArgs []string
+	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			if name == "goose" && len(args) == 4 && args[0] == "session" && args[1] == "list" && args[2] == "--format" && args[3] == "json" {
+				return "", errors.New("session list unavailable")
+			}
+			return "", nil
+		},
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "goose" {
+				t.Fatalf("unexpected command: %s", name)
+			}
+			gotArgs = append([]string(nil), args...)
+			_, _ = io.WriteString(stdout, `{"event":"message"}`+"\n")
+			return nil
+		},
+	}
+
+	if _, err := runGoose(ex, cfg); err != nil {
+		t.Fatalf("runGoose returned error: %v", err)
+	}
+	argsText := strings.Join(gotArgs, " ")
+	if !strings.Contains(argsText, "--resume") {
+		t.Fatalf("expected resume args when session preflight fails, got %q", argsText)
 	}
 }
 

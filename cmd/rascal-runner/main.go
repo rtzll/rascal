@@ -72,6 +72,10 @@ type prView struct {
 	URL    string `json:"url"`
 }
 
+type gooseSessionInfo struct {
+	Name string `json:"name"`
+}
+
 type commandExecutor interface {
 	LookPath(name string) error
 	CombinedOutput(dir string, extraEnv []string, name string, args ...string) (string, error)
@@ -558,19 +562,30 @@ func checkoutRepo(ex commandExecutor, cfg config) error {
 }
 
 func runGoose(ex commandExecutor, cfg config) (string, error) {
+	resume := cfg.GooseSessionResume
+	if resume && strings.TrimSpace(cfg.GooseSessionName) != "" {
+		exists, err := gooseSessionExists(ex, cfg, cfg.GooseSessionName)
+		if err != nil {
+			log.Printf("[%s] goose session preflight warning: name=%s error=%v", nowUTC(), cfg.GooseSessionName, err)
+		} else if !exists {
+			log.Printf("[%s] goose session missing; starting fresh session name=%s", nowUTC(), cfg.GooseSessionName)
+			resume = false
+		}
+	}
+
 	log.Printf("[%s] running goose (debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
 		nowUTC(),
 		cfg.GooseDebug,
 		cfg.GooseSessionMode,
 		cfg.GooseSessionKey,
 		cfg.GooseSessionName,
-		cfg.GooseSessionResume,
+		resume,
 		cfg.GoosePathRoot,
 	)
 
-	firstAttemptArgs := gooseRunArgs(cfg, cfg.GooseSessionResume)
+	firstAttemptArgs := gooseRunArgs(cfg, resume)
 	if err := runGooseOnce(ex, cfg, firstAttemptArgs); err != nil {
-		if cfg.GooseSessionResume && isSessionResumeFailure(err, cfg.GooseLogPath) {
+		if resume && isSessionResumeFailure(err, cfg.GooseLogPath) {
 			log.Printf("[%s] goose session resume failed; falling back to fresh session name=%s reason=%s", nowUTC(), cfg.GooseSessionName, strings.TrimSpace(err.Error()))
 			if resetErr := resetGooseSessionRoot(cfg.GoosePathRoot); resetErr != nil {
 				log.Printf("[%s] goose session reset warning: %v", nowUTC(), resetErr)
@@ -628,6 +643,23 @@ func runGooseOnce(ex commandExecutor, cfg config, args []string) error {
 		return err
 	}
 	return nil
+}
+
+func gooseSessionExists(ex commandExecutor, cfg config, name string) (bool, error) {
+	out, err := runCommand(ex, cfg.RepoDir, nil, "goose", "session", "list", "--format", "json")
+	if err != nil {
+		return false, err
+	}
+	var sessions []gooseSessionInfo
+	if err := json.Unmarshal([]byte(out), &sessions); err != nil {
+		return false, fmt.Errorf("decode goose session list: %w", err)
+	}
+	for _, session := range sessions {
+		if strings.TrimSpace(session.Name) == name {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func ensureGooseLogHasError(path string) {
