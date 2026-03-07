@@ -2,10 +2,8 @@ package github
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -20,15 +18,11 @@ func newTestAPIClient(serverURL string) *APIClient {
 
 func TestLabelExists(t *testing.T) {
 	t.Run("label exists", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/repos/owner/repo/labels/rascal" {
-				t.Fatalf("unexpected path: %s", r.URL.Path)
-			}
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer srv.Close()
-
-		client := newTestAPIClient(srv.URL)
+		client := newGitHubMockClient(t,
+			githubRoute(http.MethodGet, "/repos/owner/repo/labels/rascal", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}),
+		)
 		ok, err := client.LabelExists(context.Background(), "owner/repo", "rascal")
 		if err != nil {
 			t.Fatalf("LabelExists returned error: %v", err)
@@ -39,12 +33,11 @@ func TestLabelExists(t *testing.T) {
 	})
 
 	t.Run("label missing", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		}))
-		defer srv.Close()
-
-		client := newTestAPIClient(srv.URL)
+		client := newGitHubMockClient(t,
+			githubRoute(http.MethodGet, "/repos/owner/repo/labels/rascal", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+			}),
+		)
 		ok, err := client.LabelExists(context.Background(), "owner/repo", "rascal")
 		if err != nil {
 			t.Fatalf("LabelExists returned error: %v", err)
@@ -56,28 +49,24 @@ func TestLabelExists(t *testing.T) {
 }
 
 func TestFindWebhookByURL(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/owner/repo/hooks" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		_ = json.NewEncoder(w).Encode([]map[string]any{
-			{
-				"id":     1,
-				"active": true,
-				"events": []string{"issues"},
-				"config": map[string]any{"url": "https://example.com/a"},
-			},
-			{
-				"id":     2,
-				"active": true,
-				"events": []string{"issues", "issue_comment"},
-				"config": map[string]any{"url": "https://example.com/b"},
-			},
-		})
-	}))
-	defer srv.Close()
-
-	client := newTestAPIClient(srv.URL)
+	client := newGitHubMockClient(t,
+		githubRoute(http.MethodGet, "/repos/owner/repo/hooks", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSONResponse(t, w, http.StatusOK, []map[string]any{
+				{
+					"id":     1,
+					"active": true,
+					"events": []string{"issues"},
+					"config": map[string]any{"url": "https://example.com/a"},
+				},
+				{
+					"id":     2,
+					"active": true,
+					"events": []string{"issues", "issue_comment"},
+					"config": map[string]any{"url": "https://example.com/b"},
+				},
+			})
+		}),
+	)
 	hook, err := client.FindWebhookByURL(context.Background(), "owner/repo", "https://example.com/b")
 	if err != nil {
 		t.Fatalf("FindWebhookByURL returned error: %v", err)
@@ -92,10 +81,9 @@ func TestFindWebhookByURL(t *testing.T) {
 
 func TestDeleteWebhookByURL(t *testing.T) {
 	deleted := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/hooks":
-			_ = json.NewEncoder(w).Encode([]map[string]any{
+	client := newGitHubMockClient(t,
+		githubRoute(http.MethodGet, "/repos/owner/repo/hooks", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSONResponse(t, w, http.StatusOK, []map[string]any{
 				{
 					"id":     22,
 					"active": true,
@@ -103,16 +91,12 @@ func TestDeleteWebhookByURL(t *testing.T) {
 					"config": map[string]any{"url": "https://example.com/hook"},
 				},
 			})
-		case r.Method == http.MethodDelete && r.URL.Path == "/repos/owner/repo/hooks/22":
+		}),
+		githubRoute(http.MethodDelete, "/repos/owner/repo/hooks/22", func(w http.ResponseWriter, _ *http.Request) {
 			deleted = true
 			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer srv.Close()
-
-	client := newTestAPIClient(srv.URL)
+		}),
+	)
 	removed, err := client.DeleteWebhookByURL(context.Background(), "owner/repo", "https://example.com/hook")
 	if err != nil {
 		t.Fatalf("DeleteWebhookByURL returned error: %v", err)
@@ -139,25 +123,15 @@ func TestDescribeWebhookAuthFailure(t *testing.T) {
 
 func TestAddIssueReaction(t *testing.T) {
 	t.Run("posts reaction", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost {
-				t.Fatalf("unexpected method: %s", r.Method)
-			}
-			if r.URL.Path != "/repos/owner/repo/issues/42/reactions" {
-				t.Fatalf("unexpected path: %s", r.URL.Path)
-			}
-			var in map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-				t.Fatalf("decode request body: %v", err)
-			}
-			if in["content"] != ReactionEyes {
-				t.Fatalf("unexpected reaction payload: %v", in)
-			}
-			w.WriteHeader(http.StatusCreated)
-		}))
-		defer srv.Close()
-
-		client := newTestAPIClient(srv.URL)
+		client := newGitHubMockClient(t,
+			githubRoute(http.MethodPost, "/repos/owner/repo/issues/42/reactions", func(w http.ResponseWriter, r *http.Request) {
+				in := decodeJSONRequest[map[string]string](t, r)
+				if in["content"] != ReactionEyes {
+					t.Fatalf("unexpected reaction payload: %v", in)
+				}
+				w.WriteHeader(http.StatusCreated)
+			}),
+		)
 		if err := client.AddIssueReaction(context.Background(), "owner/repo", 42, ReactionEyes); err != nil {
 			t.Fatalf("AddIssueReaction returned error: %v", err)
 		}
@@ -172,13 +146,12 @@ func TestAddIssueReaction(t *testing.T) {
 	})
 
 	t.Run("surfaces github error", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = io.WriteString(w, `{"message":"forbidden"}`)
-		}))
-		defer srv.Close()
-
-		client := newTestAPIClient(srv.URL)
+		client := newGitHubMockClient(t,
+			githubRoute(http.MethodPost, "/repos/owner/repo/issues/42/reactions", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = io.WriteString(w, `{"message":"forbidden"}`)
+			}),
+		)
 		err := client.AddIssueReaction(context.Background(), "owner/repo", 42, ReactionRocket)
 		if err == nil || !strings.Contains(err.Error(), "github add issue reaction failed") {
 			t.Fatalf("expected github error, got: %v", err)
@@ -188,25 +161,15 @@ func TestAddIssueReaction(t *testing.T) {
 
 func TestAddIssueCommentReaction(t *testing.T) {
 	t.Run("posts reaction", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost {
-				t.Fatalf("unexpected method: %s", r.Method)
-			}
-			if r.URL.Path != "/repos/owner/repo/issues/comments/123/reactions" {
-				t.Fatalf("unexpected path: %s", r.URL.Path)
-			}
-			var in map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-				t.Fatalf("decode request body: %v", err)
-			}
-			if in["content"] != ReactionEyes {
-				t.Fatalf("unexpected reaction payload: %v", in)
-			}
-			w.WriteHeader(http.StatusCreated)
-		}))
-		defer srv.Close()
-
-		client := newTestAPIClient(srv.URL)
+		client := newGitHubMockClient(t,
+			githubRoute(http.MethodPost, "/repos/owner/repo/issues/comments/123/reactions", func(w http.ResponseWriter, r *http.Request) {
+				in := decodeJSONRequest[map[string]string](t, r)
+				if in["content"] != ReactionEyes {
+					t.Fatalf("unexpected reaction payload: %v", in)
+				}
+				w.WriteHeader(http.StatusCreated)
+			}),
+		)
 		if err := client.AddIssueCommentReaction(context.Background(), "owner/repo", 123, ReactionEyes); err != nil {
 			t.Fatalf("AddIssueCommentReaction returned error: %v", err)
 		}
@@ -223,25 +186,15 @@ func TestAddIssueCommentReaction(t *testing.T) {
 
 func TestCreateIssueComment(t *testing.T) {
 	t.Run("posts issue comment", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost {
-				t.Fatalf("unexpected method: %s", r.Method)
-			}
-			if r.URL.Path != "/repos/owner/repo/issues/42/comments" {
-				t.Fatalf("unexpected path: %s", r.URL.Path)
-			}
-			var in map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-				t.Fatalf("decode request body: %v", err)
-			}
-			if in["body"] != "hello from rascal" {
-				t.Fatalf("unexpected comment payload: %v", in)
-			}
-			w.WriteHeader(http.StatusCreated)
-		}))
-		defer srv.Close()
-
-		client := newTestAPIClient(srv.URL)
+		client := newGitHubMockClient(t,
+			githubRoute(http.MethodPost, "/repos/owner/repo/issues/42/comments", func(w http.ResponseWriter, r *http.Request) {
+				in := decodeJSONRequest[map[string]string](t, r)
+				if in["body"] != "hello from rascal" {
+					t.Fatalf("unexpected comment payload: %v", in)
+				}
+				w.WriteHeader(http.StatusCreated)
+			}),
+		)
 		if err := client.CreateIssueComment(context.Background(), "owner/repo", 42, "hello from rascal"); err != nil {
 			t.Fatalf("CreateIssueComment returned error: %v", err)
 		}
@@ -266,25 +219,15 @@ func TestCreateIssueComment(t *testing.T) {
 
 func TestAddPullRequestReviewReaction(t *testing.T) {
 	t.Run("posts reaction", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost {
-				t.Fatalf("unexpected method: %s", r.Method)
-			}
-			if r.URL.Path != "/repos/owner/repo/pulls/42/reviews/999/reactions" {
-				t.Fatalf("unexpected path: %s", r.URL.Path)
-			}
-			var in map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-				t.Fatalf("decode request body: %v", err)
-			}
-			if in["content"] != ReactionEyes {
-				t.Fatalf("unexpected reaction payload: %v", in)
-			}
-			w.WriteHeader(http.StatusCreated)
-		}))
-		defer srv.Close()
-
-		client := newTestAPIClient(srv.URL)
+		client := newGitHubMockClient(t,
+			githubRoute(http.MethodPost, "/repos/owner/repo/pulls/42/reviews/999/reactions", func(w http.ResponseWriter, r *http.Request) {
+				in := decodeJSONRequest[map[string]string](t, r)
+				if in["content"] != ReactionEyes {
+					t.Fatalf("unexpected reaction payload: %v", in)
+				}
+				w.WriteHeader(http.StatusCreated)
+			}),
+		)
 		if err := client.AddPullRequestReviewReaction(context.Background(), "owner/repo", 42, 999, ReactionEyes); err != nil {
 			t.Fatalf("AddPullRequestReviewReaction returned error: %v", err)
 		}
@@ -305,25 +248,15 @@ func TestAddPullRequestReviewReaction(t *testing.T) {
 
 func TestAddPullRequestReviewCommentReaction(t *testing.T) {
 	t.Run("posts reaction", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost {
-				t.Fatalf("unexpected method: %s", r.Method)
-			}
-			if r.URL.Path != "/repos/owner/repo/pulls/comments/777/reactions" {
-				t.Fatalf("unexpected path: %s", r.URL.Path)
-			}
-			var in map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-				t.Fatalf("decode request body: %v", err)
-			}
-			if in["content"] != ReactionEyes {
-				t.Fatalf("unexpected reaction payload: %v", in)
-			}
-			w.WriteHeader(http.StatusCreated)
-		}))
-		defer srv.Close()
-
-		client := newTestAPIClient(srv.URL)
+		client := newGitHubMockClient(t,
+			githubRoute(http.MethodPost, "/repos/owner/repo/pulls/comments/777/reactions", func(w http.ResponseWriter, r *http.Request) {
+				in := decodeJSONRequest[map[string]string](t, r)
+				if in["content"] != ReactionEyes {
+					t.Fatalf("unexpected reaction payload: %v", in)
+				}
+				w.WriteHeader(http.StatusCreated)
+			}),
+		)
 		if err := client.AddPullRequestReviewCommentReaction(context.Background(), "owner/repo", 777, ReactionEyes); err != nil {
 			t.Fatalf("AddPullRequestReviewCommentReaction returned error: %v", err)
 		}
@@ -341,27 +274,20 @@ func TestAddPullRequestReviewCommentReaction(t *testing.T) {
 func TestUpsertWebhookDefaultEventsIncludeReviewComment(t *testing.T) {
 	var receivedEvents []string
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/hooks":
-			_ = json.NewEncoder(w).Encode([]map[string]any{})
-		case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/repo/hooks":
-			var payload struct {
+	client := newGitHubMockClient(t,
+		githubRoute(http.MethodGet, "/repos/owner/repo/hooks", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSONResponse(t, w, http.StatusOK, []map[string]any{})
+		}),
+		githubRoute(http.MethodPost, "/repos/owner/repo/hooks", func(w http.ResponseWriter, r *http.Request) {
+			payload := decodeJSONRequest[struct {
 				Events []string `json:"events"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-				t.Fatalf("decode request body: %v", err)
-			}
+			}](t, r)
 			receivedEvents = append(receivedEvents, payload.Events...)
 			w.WriteHeader(http.StatusCreated)
 			_, _ = io.WriteString(w, `{"id":1}`)
-		default:
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer srv.Close()
+		}),
+	)
 
-	client := newTestAPIClient(srv.URL)
 	if err := client.UpsertWebhook(context.Background(), "owner/repo", "https://example.com/hook", "secret", nil); err != nil {
 		t.Fatalf("UpsertWebhook returned error: %v", err)
 	}
