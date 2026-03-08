@@ -195,6 +195,37 @@ func TestExecuteDoesNotEmitLegacySingleUnitSystemdCommands(t *testing.T) {
 	}
 }
 
+func TestEmbeddedInstallDockerScriptEnsuresRipgrep(t *testing.T) {
+	content, err := assetsFS.ReadFile("assets/install_docker.sh")
+	if err != nil {
+		t.Fatalf("read embedded install_docker.sh: %v", err)
+	}
+	script := string(content)
+	for _, want := range []string{
+		"have_ripgrep=0",
+		"command -v rg",
+		"docker, sqlite3, and ripgrep already installed",
+		"apt-get install -y -qq sqlite3 ripgrep >/dev/null",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("install_docker.sh missing %q:\n%s", want, script)
+		}
+	}
+}
+
+func TestExecuteBootstrapInstallsRipgrepWithCaddyPackages(t *testing.T) {
+	logDir := setupFakeDeployCommands(t, "")
+
+	if err := Execute(testDeployConfig()); err != nil {
+		t.Fatalf("execute deploy: %v", err)
+	}
+
+	scripts := readCapturedSSHScripts(t, logDir)
+	if !containsScript(scripts, "apt-get install -y -qq sqlite3 ripgrep curl gpg debian-keyring debian-archive-keyring apt-transport-https ca-certificates >/dev/null") {
+		t.Fatalf("expected bootstrap script to install ripgrep with caddy prerequisites, got %d scripts", len(scripts))
+	}
+}
+
 func TestResolveRunnerBuildInfoUsesEnv(t *testing.T) {
 	t.Setenv("RASCAL_BUILD_VERSION", "v1.2.3")
 	t.Setenv("RASCAL_BUILD_COMMIT", "abc1234")

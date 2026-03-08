@@ -3,23 +3,27 @@ set -euo pipefail
 
 have_docker=0
 have_sqlite=0
+have_ripgrep=0
 if command -v docker >/dev/null 2>&1; then
   have_docker=1
 fi
 if command -v sqlite3 >/dev/null 2>&1; then
   have_sqlite=1
 fi
+if command -v rg >/dev/null 2>&1; then
+  have_ripgrep=1
+fi
 
-if [[ "$have_docker" -eq 1 && "$have_sqlite" -eq 1 ]]; then
-  echo "docker and sqlite3 already installed"
+if [[ "$have_docker" -eq 1 && "$have_sqlite" -eq 1 && "$have_ripgrep" -eq 1 ]]; then
+  echo "docker, sqlite3, and ripgrep already installed"
   exit 0
 fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get -qq update >/dev/null
 
-if [[ "$have_sqlite" -eq 0 ]]; then
-  apt-get install -y -qq sqlite3 >/dev/null
+if [[ "$have_sqlite" -eq 0 || "$have_ripgrep" -eq 0 ]]; then
+  apt-get install -y -qq sqlite3 ripgrep >/dev/null
 fi
 
 if [[ "$have_docker" -eq 1 ]]; then

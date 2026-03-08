@@ -212,7 +212,7 @@ if command -v caddy >/dev/null 2>&1; then
   echo "caddy already installed"
 else
   apt-get -qq update >/dev/null
-  apt-get install -y -qq sqlite3 curl gpg debian-keyring debian-archive-keyring apt-transport-https ca-certificates >/dev/null
+  apt-get install -y -qq sqlite3 ripgrep curl gpg debian-keyring debian-archive-keyring apt-transport-https ca-certificates >/dev/null
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' -o /etc/apt/sources.list.d/caddy-stable.list
   chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg
