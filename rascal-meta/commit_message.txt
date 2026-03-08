@@ -1,0 +1,7 @@
+feat(cli): add --status filter to rascal ps
+
+Add a comma-separated --status flag to rascal ps with case-insensitive
+validation and normalization, including awaiting_feedback -> review.
+Apply filtering client-side for both one-shot and --watch mode output.
+Add tests for defaults, normalization, validation errors, and filtered
+rendering behavior.

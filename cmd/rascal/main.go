@@ -993,10 +993,11 @@ rascal run --issue OWNER/REPO#123
 
 func (a *app) newPSCmd() *cobra.Command {
 	var (
-		limit    int
-		all      bool
-		watch    bool
-		interval time.Duration
+		limit        int
+		all          bool
+		watch        bool
+		interval     time.Duration
+		statusFilter string
 	)
 	cmd := &cobra.Command{
 		Use:     "ps",
@@ -1006,6 +1007,7 @@ func (a *app) newPSCmd() *cobra.Command {
   rascal ps
   rascal ps --limit 25
   rascal ps --all
+  rascal ps --status queued,running
   rascal ps --watch
   rascal ps --output json
 `),
@@ -1018,6 +1020,10 @@ func (a *app) newPSCmd() *cobra.Command {
 			}
 			if watch && a.output != "table" {
 				return &cliError{Code: exitInput, Message: "--watch is only supported with --output table"}
+			}
+			statuses, err := parsePSStatusFilter(statusFilter)
+			if err != nil {
+				return &cliError{Code: exitInput, Message: err.Error()}
 			}
 
 			render := func(runs []state.Run) error {
@@ -1049,6 +1055,7 @@ func (a *app) newPSCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				runs = filterRunsByStatus(runs, statuses)
 				return render(runs)
 			}
 
@@ -1063,6 +1070,7 @@ func (a *app) newPSCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				runs = filterRunsByStatus(runs, statuses)
 				if a.ansiEnabled() {
 					if _, err := fmt.Fprint(os.Stdout, "\033[H\033[2J"); err != nil {
 						return fmt.Errorf("clear terminal: %w", err)
@@ -1081,6 +1089,7 @@ func (a *app) newPSCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&limit, "limit", 10, "max number of runs")
 	cmd.Flags().BoolVar(&all, "all", false, "show all retained runs")
+	cmd.Flags().StringVar(&statusFilter, "status", "", "comma-separated run statuses to include")
 	cmd.Flags().BoolVar(&watch, "watch", false, "refresh continuously")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "refresh interval when --watch is enabled")
 	return cmd
@@ -2390,6 +2399,49 @@ func psStatusLabel(run state.Run) string {
 	default:
 		return string(run.Status)
 	}
+}
+
+const allowedPSStatusValues = "queued, running, awaiting_feedback, succeeded, failed, canceled"
+
+func parsePSStatusFilter(raw string) (map[state.RunStatus]struct{}, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	out := make(map[state.RunStatus]struct{})
+	for _, part := range strings.Split(raw, ",") {
+		status := strings.ToLower(strings.TrimSpace(part))
+		switch status {
+		case "queued":
+			out[state.StatusQueued] = struct{}{}
+		case "running":
+			out[state.StatusRunning] = struct{}{}
+		case "awaiting_feedback":
+			out[state.StatusReview] = struct{}{}
+		case "succeeded":
+			out[state.StatusSucceeded] = struct{}{}
+		case "failed":
+			out[state.StatusFailed] = struct{}{}
+		case "canceled":
+			out[state.StatusCanceled] = struct{}{}
+		default:
+			return nil, fmt.Errorf("invalid --status value %q; allowed values: %s", strings.TrimSpace(part), allowedPSStatusValues)
+		}
+	}
+	return out, nil
+}
+
+func filterRunsByStatus(runs []state.Run, statuses map[state.RunStatus]struct{}) []state.Run {
+	if len(statuses) == 0 {
+		return runs
+	}
+	filtered := make([]state.Run, 0, len(runs))
+	for _, run := range runs {
+		if _, ok := statuses[state.CanonicalRunStatus(run.Status)]; ok {
+			filtered = append(filtered, run)
+		}
+	}
+	return filtered
 }
 
 func psPRLabel(run state.Run) string {
