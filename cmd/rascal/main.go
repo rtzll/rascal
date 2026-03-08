@@ -918,14 +918,13 @@ rascal run --issue OWNER/REPO#123
 				if err != nil {
 					return &cliError{Code: exitInput, Message: err.Error()}
 				}
-				payload := map[string]any{
-					"repo":         repo,
-					"issue_number": issueNumber,
-				}
-				if cmd.Flags().Changed("debug") {
-					payload["debug"] = debug
-				}
-				resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks/issue", payload)
+				debugValue := optionalBoolFlagValue(cmd, "debug", debug)
+				path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+					Repo:        repo,
+					IssueNumber: issueNumber,
+					Debug:       debugValue,
+				})
+				resp, err := a.client.doJSON(http.MethodPost, path, payload)
 				if err != nil {
 					return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 				}
@@ -952,15 +951,14 @@ rascal run --issue OWNER/REPO#123
 				return &cliError{Code: exitInput, Message: "both --repo/-R and --task/-t are required"}
 			}
 
-			payload := map[string]any{
-				"repo":        repo,
-				"task":        task,
-				"base_branch": baseBranch,
-			}
-			if cmd.Flags().Changed("debug") {
-				payload["debug"] = debug
-			}
-			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
+			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
+			path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+				Repo:       repo,
+				Task:       task,
+				BaseBranch: baseBranch,
+				Debug:      debugValue,
+			})
+			resp, err := a.client.doJSON(http.MethodPost, path, payload)
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
 			}
@@ -1748,17 +1746,16 @@ rascal retry run_abc123 --debug=false
 			if run.Status != state.StatusFailed && run.Status != state.StatusCanceled {
 				return &cliError{Code: exitInput, Message: "retry only supports failed or canceled runs"}
 			}
-			payload := map[string]any{
-				"task_id":     run.TaskID,
-				"repo":        run.Repo,
-				"task":        run.Task,
-				"base_branch": run.BaseBranch,
-				"trigger":     "retry",
-			}
-			if cmd.Flags().Changed("debug") {
-				payload["debug"] = debug
-			}
-			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
+			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
+			path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+				TaskID:     run.TaskID,
+				Repo:       run.Repo,
+				Task:       run.Task,
+				BaseBranch: run.BaseBranch,
+				Trigger:    "retry",
+				Debug:      debugValue,
+			})
+			resp, err := a.client.doJSON(http.MethodPost, path, payload)
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 			}
@@ -2775,6 +2772,53 @@ func parseIssueRef(input string) (string, int, error) {
 		return "", 0, fmt.Errorf("invalid repo in %q", input)
 	}
 	return repo, issue, nil
+}
+
+type createTaskPayloadInput struct {
+	TaskID      string
+	Repo        string
+	Task        string
+	BaseBranch  string
+	Trigger     string
+	IssueNumber int
+	Debug       *bool
+}
+
+func optionalBoolFlagValue(cmd *cobra.Command, name string, value bool) *bool {
+	if !cmd.Flags().Changed(name) {
+		return nil
+	}
+	v := value
+	return &v
+}
+
+func buildCreateTaskPayload(input createTaskPayloadInput) (string, map[string]any) {
+	if input.IssueNumber > 0 {
+		payload := map[string]any{
+			"repo":         input.Repo,
+			"issue_number": input.IssueNumber,
+		}
+		if input.Debug != nil {
+			payload["debug"] = *input.Debug
+		}
+		return "/v1/tasks/issue", payload
+	}
+
+	payload := map[string]any{
+		"repo":        input.Repo,
+		"task":        input.Task,
+		"base_branch": input.BaseBranch,
+	}
+	if strings.TrimSpace(input.TaskID) != "" {
+		payload["task_id"] = input.TaskID
+	}
+	if strings.TrimSpace(input.Trigger) != "" {
+		payload["trigger"] = input.Trigger
+	}
+	if input.Debug != nil {
+		payload["debug"] = *input.Debug
+	}
+	return "/v1/tasks", payload
 }
 
 func (c apiClient) doJSON(method, path string, payload any) (*http.Response, error) {
