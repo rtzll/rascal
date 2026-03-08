@@ -18,9 +18,35 @@ ORDER BY seq DESC
 LIMIT 1
 `
 
-func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (Run, error) {
+type ActiveRunForTaskRow struct {
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (ActiveRunForTaskRow, error) {
 	row := q.db.QueryRowContext(ctx, activeRunForTask, taskID)
-	var i Run
+	var i ActiveRunForTaskRow
 	err := row.Scan(
 		&i.Seq,
 		&i.ID,
@@ -208,9 +234,35 @@ type ClaimNextQueuedRunParams struct {
 	StartedAt sql.NullInt64 `json:"started_at"`
 }
 
-func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRunParams) (Run, error) {
+type ClaimNextQueuedRunRow struct {
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRunParams) (ClaimNextQueuedRunRow, error) {
 	row := q.db.QueryRowContext(ctx, claimNextQueuedRun, arg.UpdatedAt, arg.StartedAt)
-	var i Run
+	var i ClaimNextQueuedRunRow
 	err := row.Scan(
 		&i.Seq,
 		&i.ID,
@@ -301,9 +353,35 @@ type ClaimNextQueuedRunForTaskParams struct {
 	TaskID    string        `json:"task_id"`
 }
 
-func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQueuedRunForTaskParams) (Run, error) {
+type ClaimNextQueuedRunForTaskRow struct {
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQueuedRunForTaskParams) (ClaimNextQueuedRunForTaskRow, error) {
 	row := q.db.QueryRowContext(ctx, claimNextQueuedRunForTask, arg.UpdatedAt, arg.StartedAt, arg.TaskID)
-	var i Run
+	var i ClaimNextQueuedRunForTaskRow
 	err := row.Scan(
 		&i.Seq,
 		&i.ID,
@@ -416,6 +494,54 @@ func (q *Queries) CountRunLeasesByOwner(ctx context.Context, ownerID string) (in
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const createCodexCredential = `-- name: CreateCodexCredential :exec
+INSERT INTO codex_credentials (
+  id,
+  owner_user_id,
+  scope,
+  encrypted_auth_blob,
+  weight,
+  max_active_leases,
+  status,
+  cooldown_until,
+  last_error,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateCodexCredentialParams struct {
+	ID                string         `json:"id"`
+	OwnerUserID       sql.NullString `json:"owner_user_id"`
+	Scope             string         `json:"scope"`
+	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
+	Weight            int64          `json:"weight"`
+	MaxActiveLeases   int64          `json:"max_active_leases"`
+	Status            string         `json:"status"`
+	CooldownUntil     sql.NullInt64  `json:"cooldown_until"`
+	LastError         string         `json:"last_error"`
+	CreatedAt         int64          `json:"created_at"`
+	UpdatedAt         int64          `json:"updated_at"`
+}
+
+func (q *Queries) CreateCodexCredential(ctx context.Context, arg CreateCodexCredentialParams) error {
+	_, err := q.db.ExecContext(ctx, createCodexCredential,
+		arg.ID,
+		arg.OwnerUserID,
+		arg.Scope,
+		arg.EncryptedAuthBlob,
+		arg.Weight,
+		arg.MaxActiveLeases,
+		arg.Status,
+		arg.CooldownUntil,
+		arg.LastError,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
 }
 
 const deleteOldestDeliveries = `-- name: DeleteOldestDeliveries :exec
@@ -571,15 +697,155 @@ func (q *Queries) FindTaskByPR(ctx context.Context, arg FindTaskByPRParams) (Fin
 	return i, err
 }
 
+const getAPIKeyPrincipal = `-- name: GetAPIKeyPrincipal :one
+SELECT
+  api_keys.id AS api_key_id,
+  api_keys.user_id,
+  users.external_login,
+  users.role
+FROM api_keys
+JOIN users ON users.id = api_keys.user_id
+WHERE api_keys.key_hash = ?
+  AND api_keys.disabled_at IS NULL
+`
+
+type GetAPIKeyPrincipalRow struct {
+	ApiKeyID      string `json:"api_key_id"`
+	UserID        string `json:"user_id"`
+	ExternalLogin string `json:"external_login"`
+	Role          string `json:"role"`
+}
+
+func (q *Queries) GetAPIKeyPrincipal(ctx context.Context, keyHash string) (GetAPIKeyPrincipalRow, error) {
+	row := q.db.QueryRowContext(ctx, getAPIKeyPrincipal, keyHash)
+	var i GetAPIKeyPrincipalRow
+	err := row.Scan(
+		&i.ApiKeyID,
+		&i.UserID,
+		&i.ExternalLogin,
+		&i.Role,
+	)
+	return i, err
+}
+
+const getActiveCredentialLeaseByRunID = `-- name: GetActiveCredentialLeaseByRunID :one
+SELECT id, credential_id, run_id, user_id, strategy, acquired_at, expires_at, released_at
+FROM credential_leases
+WHERE run_id = ?
+  AND released_at IS NULL
+ORDER BY acquired_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetActiveCredentialLeaseByRunID(ctx context.Context, runID string) (CredentialLease, error) {
+	row := q.db.QueryRowContext(ctx, getActiveCredentialLeaseByRunID, runID)
+	var i CredentialLease
+	err := row.Scan(
+		&i.ID,
+		&i.CredentialID,
+		&i.RunID,
+		&i.UserID,
+		&i.Strategy,
+		&i.AcquiredAt,
+		&i.ExpiresAt,
+		&i.ReleasedAt,
+	)
+	return i, err
+}
+
+const getCodexCredential = `-- name: GetCodexCredential :one
+SELECT
+  id,
+  owner_user_id,
+  scope,
+  encrypted_auth_blob,
+  weight,
+  max_active_leases,
+  status,
+  cooldown_until,
+  last_error,
+  created_at,
+  updated_at
+FROM codex_credentials
+WHERE id = ?
+`
+
+func (q *Queries) GetCodexCredential(ctx context.Context, id string) (CodexCredential, error) {
+	row := q.db.QueryRowContext(ctx, getCodexCredential, id)
+	var i CodexCredential
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.Scope,
+		&i.EncryptedAuthBlob,
+		&i.Weight,
+		&i.MaxActiveLeases,
+		&i.Status,
+		&i.CooldownUntil,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getCredentialLease = `-- name: GetCredentialLease :one
+SELECT id, credential_id, run_id, user_id, strategy, acquired_at, expires_at, released_at
+FROM credential_leases
+WHERE id = ?
+`
+
+func (q *Queries) GetCredentialLease(ctx context.Context, id string) (CredentialLease, error) {
+	row := q.db.QueryRowContext(ctx, getCredentialLease, id)
+	var i CredentialLease
+	err := row.Scan(
+		&i.ID,
+		&i.CredentialID,
+		&i.RunID,
+		&i.UserID,
+		&i.Strategy,
+		&i.AcquiredAt,
+		&i.ExpiresAt,
+		&i.ReleasedAt,
+	)
+	return i, err
+}
+
 const getRun = `-- name: GetRun :one
 SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?
 `
 
-func (q *Queries) GetRun(ctx context.Context, id string) (Run, error) {
+type GetRunRow struct {
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) GetRun(ctx context.Context, id string) (GetRunRow, error) {
 	row := q.db.QueryRowContext(ctx, getRun, id)
-	var i Run
+	var i GetRunRow
 	err := row.Scan(
 		&i.Seq,
 		&i.ID,
@@ -623,6 +889,25 @@ func (q *Queries) GetRunCancel(ctx context.Context, runID string) (RunCancel, er
 		&i.Source,
 		&i.RequestedAt,
 	)
+	return i, err
+}
+
+const getRunCredentialInfo = `-- name: GetRunCredentialInfo :one
+SELECT id, created_by_user_id, credential_id
+FROM runs
+WHERE id = ?
+`
+
+type GetRunCredentialInfoRow struct {
+	ID              string `json:"id"`
+	CreatedByUserID string `json:"created_by_user_id"`
+	CredentialID    string `json:"credential_id"`
+}
+
+func (q *Queries) GetRunCredentialInfo(ctx context.Context, id string) (GetRunCredentialInfoRow, error) {
+	row := q.db.QueryRowContext(ctx, getRunCredentialInfo, id)
+	var i GetRunCredentialInfoRow
+	err := row.Scan(&i.ID, &i.CreatedByUserID, &i.CredentialID)
 	return i, err
 }
 
@@ -749,6 +1034,44 @@ func (q *Queries) GetTaskAgentSession(ctx context.Context, taskID string) (TaskA
 	return i, err
 }
 
+const getUserByExternalLogin = `-- name: GetUserByExternalLogin :one
+SELECT id, external_login, role, created_at, updated_at
+FROM users
+WHERE external_login = ?
+`
+
+func (q *Queries) GetUserByExternalLogin(ctx context.Context, externalLogin string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByExternalLogin, externalLogin)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalLogin,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserByID = `-- name: GetUserByID :one
+SELECT id, external_login, role, created_at, updated_at
+FROM users
+WHERE id = ?
+`
+
+func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByID, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalLogin,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertRun = `-- name: InsertRun :one
 INSERT INTO runs (
   id,
@@ -803,7 +1126,33 @@ type InsertRunParams struct {
 	CompletedAt  sql.NullInt64 `json:"completed_at"`
 }
 
-func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (Run, error) {
+type InsertRunRow struct {
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRunRow, error) {
 	row := q.db.QueryRowContext(ctx, insertRun,
 		arg.ID,
 		arg.TaskID,
@@ -828,7 +1177,7 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (Run, erro
 		arg.StartedAt,
 		arg.CompletedAt,
 	)
-	var i Run
+	var i InsertRunRow
 	err := row.Scan(
 		&i.Seq,
 		&i.ID,
@@ -878,9 +1227,35 @@ ORDER BY seq DESC
 LIMIT 1
 `
 
-func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (Run, error) {
+type LastRunForTaskRow struct {
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (LastRunForTaskRow, error) {
 	row := q.db.QueryRowContext(ctx, lastRunForTask, taskID)
-	var i Run
+	var i LastRunForTaskRow
 	err := row.Scan(
 		&i.Seq,
 		&i.ID,
@@ -909,6 +1284,208 @@ func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (Run, error
 	return i, err
 }
 
+const listAllCodexCredentials = `-- name: ListAllCodexCredentials :many
+SELECT
+  id,
+  owner_user_id,
+  scope,
+  encrypted_auth_blob,
+  weight,
+  max_active_leases,
+  status,
+  cooldown_until,
+  last_error,
+  created_at,
+  updated_at
+FROM codex_credentials
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAllCodexCredentials(ctx context.Context) ([]CodexCredential, error) {
+	rows, err := q.db.QueryContext(ctx, listAllCodexCredentials)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CodexCredential{}
+	for rows.Next() {
+		var i CodexCredential
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.Scope,
+			&i.EncryptedAuthBlob,
+			&i.Weight,
+			&i.MaxActiveLeases,
+			&i.Status,
+			&i.CooldownUntil,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCodexCredentialsByOwner = `-- name: ListCodexCredentialsByOwner :many
+SELECT
+  id,
+  owner_user_id,
+  scope,
+  encrypted_auth_blob,
+  weight,
+  max_active_leases,
+  status,
+  cooldown_until,
+  last_error,
+  created_at,
+  updated_at
+FROM codex_credentials
+WHERE owner_user_id = ?
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListCodexCredentialsByOwner(ctx context.Context, ownerUserID sql.NullString) ([]CodexCredential, error) {
+	rows, err := q.db.QueryContext(ctx, listCodexCredentialsByOwner, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CodexCredential{}
+	for rows.Next() {
+		var i CodexCredential
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.Scope,
+			&i.EncryptedAuthBlob,
+			&i.Weight,
+			&i.MaxActiveLeases,
+			&i.Status,
+			&i.CooldownUntil,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCredentialCandidates = `-- name: ListCredentialCandidates :many
+SELECT
+  c.id,
+  c.owner_user_id,
+  c.scope,
+  c.weight,
+  c.max_active_leases,
+  c.status,
+  c.cooldown_until,
+  CAST(COALESCE((
+    SELECT COUNT(*)
+    FROM credential_leases AS l
+    WHERE l.credential_id = c.id
+      AND l.released_at IS NULL
+      AND l.expires_at > ?1
+  ), 0) AS INTEGER) AS active_leases,
+  CAST(COALESCE((
+    SELECT SUM(u.tokens)
+    FROM credential_usage AS u
+    WHERE u.credential_id = c.id
+      AND u.window_start >= ?2
+  ), 0) AS INTEGER) AS usage_tokens,
+  CAST(COALESCE((
+    SELECT SUM(u.runs)
+    FROM credential_usage AS u
+    WHERE u.credential_id = c.id
+      AND u.window_start >= ?2
+  ), 0) AS INTEGER) AS usage_runs,
+  c.last_error,
+  c.created_at,
+  c.updated_at
+FROM codex_credentials AS c
+WHERE c.status = 'active'
+  AND (c.cooldown_until IS NULL OR c.cooldown_until <= ?1)
+  AND (c.scope = 'shared' OR c.owner_user_id = ?3)
+ORDER BY c.created_at ASC, c.id ASC
+`
+
+type ListCredentialCandidatesParams struct {
+	Now              int64          `json:"now"`
+	UsageWindowStart int64          `json:"usage_window_start"`
+	RequesterUserID  sql.NullString `json:"requester_user_id"`
+}
+
+type ListCredentialCandidatesRow struct {
+	ID              string         `json:"id"`
+	OwnerUserID     sql.NullString `json:"owner_user_id"`
+	Scope           string         `json:"scope"`
+	Weight          int64          `json:"weight"`
+	MaxActiveLeases int64          `json:"max_active_leases"`
+	Status          string         `json:"status"`
+	CooldownUntil   sql.NullInt64  `json:"cooldown_until"`
+	ActiveLeases    int64          `json:"active_leases"`
+	UsageTokens     int64          `json:"usage_tokens"`
+	UsageRuns       int64          `json:"usage_runs"`
+	LastError       string         `json:"last_error"`
+	CreatedAt       int64          `json:"created_at"`
+	UpdatedAt       int64          `json:"updated_at"`
+}
+
+func (q *Queries) ListCredentialCandidates(ctx context.Context, arg ListCredentialCandidatesParams) ([]ListCredentialCandidatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCredentialCandidates, arg.Now, arg.UsageWindowStart, arg.RequesterUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCredentialCandidatesRow{}
+	for rows.Next() {
+		var i ListCredentialCandidatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.Scope,
+			&i.Weight,
+			&i.MaxActiveLeases,
+			&i.Status,
+			&i.CooldownUntil,
+			&i.ActiveLeases,
+			&i.UsageTokens,
+			&i.UsageRuns,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunningRuns = `-- name: ListRunningRuns :many
 SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
@@ -916,15 +1493,41 @@ WHERE status = 'running'
 ORDER BY seq DESC
 `
 
-func (q *Queries) ListRunningRuns(ctx context.Context) ([]Run, error) {
+type ListRunningRunsRow struct {
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) ListRunningRuns(ctx context.Context) ([]ListRunningRunsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listRunningRuns)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Run{}
+	items := []ListRunningRunsRow{}
 	for rows.Next() {
-		var i Run
+		var i ListRunningRunsRow
 		if err := rows.Scan(
 			&i.Seq,
 			&i.ID,
@@ -970,15 +1573,41 @@ ORDER BY seq DESC
 LIMIT ?
 `
 
-func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]Run, error) {
+type ListRunsRow struct {
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]ListRunsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listRuns, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Run{}
+	items := []ListRunsRow{}
 	for rows.Next() {
-		var i Run
+		var i ListRunsRow
 		if err := rows.Scan(
 			&i.Seq,
 			&i.ID,
@@ -1017,6 +1646,59 @@ func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]Run, error) {
 	return items, nil
 }
 
+const listSharedCodexCredentials = `-- name: ListSharedCodexCredentials :many
+SELECT
+  id,
+  owner_user_id,
+  scope,
+  encrypted_auth_blob,
+  weight,
+  max_active_leases,
+  status,
+  cooldown_until,
+  last_error,
+  created_at,
+  updated_at
+FROM codex_credentials
+WHERE scope = 'shared'
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListSharedCodexCredentials(ctx context.Context) ([]CodexCredential, error) {
+	rows, err := q.db.QueryContext(ctx, listSharedCodexCredentials)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CodexCredential{}
+	for rows.Next() {
+		var i CodexCredential
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.Scope,
+			&i.EncryptedAuthBlob,
+			&i.Weight,
+			&i.MaxActiveLeases,
+			&i.Status,
+			&i.CooldownUntil,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markTaskCompleted = `-- name: MarkTaskCompleted :execrows
 UPDATE tasks
 SET status = 'completed', updated_at = ?
@@ -1030,6 +1712,26 @@ type MarkTaskCompletedParams struct {
 
 func (q *Queries) MarkTaskCompleted(ctx context.Context, arg MarkTaskCompletedParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, markTaskCompleted, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const reclaimExpiredCredentialLeases = `-- name: ReclaimExpiredCredentialLeases :execrows
+UPDATE credential_leases
+SET released_at = ?
+WHERE released_at IS NULL
+  AND expires_at <= ?
+`
+
+type ReclaimExpiredCredentialLeasesParams struct {
+	ReleasedAt sql.NullInt64 `json:"released_at"`
+	ExpiresAt  int64         `json:"expires_at"`
+}
+
+func (q *Queries) ReclaimExpiredCredentialLeases(ctx context.Context, arg ReclaimExpiredCredentialLeasesParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reclaimExpiredCredentialLeases, arg.ReleasedAt, arg.ExpiresAt)
 	if err != nil {
 		return 0, err
 	}
@@ -1061,6 +1763,55 @@ func (q *Queries) RecordDelivery(ctx context.Context, arg RecordDeliveryParams) 
 	return err
 }
 
+const releaseCredentialLease = `-- name: ReleaseCredentialLease :one
+UPDATE credential_leases
+SET released_at = ?
+WHERE id = ?
+  AND released_at IS NULL
+RETURNING id, credential_id, run_id, user_id, strategy, acquired_at, expires_at, released_at
+`
+
+type ReleaseCredentialLeaseParams struct {
+	ReleasedAt sql.NullInt64 `json:"released_at"`
+	ID         string        `json:"id"`
+}
+
+func (q *Queries) ReleaseCredentialLease(ctx context.Context, arg ReleaseCredentialLeaseParams) (CredentialLease, error) {
+	row := q.db.QueryRowContext(ctx, releaseCredentialLease, arg.ReleasedAt, arg.ID)
+	var i CredentialLease
+	err := row.Scan(
+		&i.ID,
+		&i.CredentialID,
+		&i.RunID,
+		&i.UserID,
+		&i.Strategy,
+		&i.AcquiredAt,
+		&i.ExpiresAt,
+		&i.ReleasedAt,
+	)
+	return i, err
+}
+
+const releaseCredentialLeaseByRunID = `-- name: ReleaseCredentialLeaseByRunID :execrows
+UPDATE credential_leases
+SET released_at = ?
+WHERE run_id = ?
+  AND released_at IS NULL
+`
+
+type ReleaseCredentialLeaseByRunIDParams struct {
+	ReleasedAt sql.NullInt64 `json:"released_at"`
+	RunID      string        `json:"run_id"`
+}
+
+func (q *Queries) ReleaseCredentialLeaseByRunID(ctx context.Context, arg ReleaseCredentialLeaseByRunIDParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, releaseCredentialLeaseByRunID, arg.ReleasedAt, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const releaseDeliveryClaim = `-- name: ReleaseDeliveryClaim :execrows
 DELETE FROM deliveries
 WHERE id = ? AND claim_token = ?
@@ -1073,6 +1824,28 @@ type ReleaseDeliveryClaimParams struct {
 
 func (q *Queries) ReleaseDeliveryClaim(ctx context.Context, arg ReleaseDeliveryClaimParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, releaseDeliveryClaim, arg.ID, arg.ClaimToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const renewCredentialLease = `-- name: RenewCredentialLease :execrows
+UPDATE credential_leases
+SET expires_at = ?
+WHERE id = ?
+  AND released_at IS NULL
+  AND expires_at > ?
+`
+
+type RenewCredentialLeaseParams struct {
+	ExpiresAt   int64  `json:"expires_at"`
+	ID          string `json:"id"`
+	ExpiresAt_2 int64  `json:"expires_at_2"`
+}
+
+func (q *Queries) RenewCredentialLease(ctx context.Context, arg RenewCredentialLeaseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renewCredentialLease, arg.ExpiresAt, arg.ID, arg.ExpiresAt_2)
 	if err != nil {
 		return 0, err
 	}
@@ -1101,6 +1874,98 @@ func (q *Queries) RenewRunLease(ctx context.Context, arg RenewRunLeaseParams) (i
 		arg.RunID,
 		arg.OwnerID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setCodexCredentialStatus = `-- name: SetCodexCredentialStatus :execrows
+UPDATE codex_credentials
+SET
+  status = ?,
+  cooldown_until = ?,
+  last_error = ?,
+  updated_at = ?
+WHERE id = ?
+`
+
+type SetCodexCredentialStatusParams struct {
+	Status        string        `json:"status"`
+	CooldownUntil sql.NullInt64 `json:"cooldown_until"`
+	LastError     string        `json:"last_error"`
+	UpdatedAt     int64         `json:"updated_at"`
+	ID            string        `json:"id"`
+}
+
+func (q *Queries) SetCodexCredentialStatus(ctx context.Context, arg SetCodexCredentialStatusParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setCodexCredentialStatus,
+		arg.Status,
+		arg.CooldownUntil,
+		arg.LastError,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setRunCreatedByUser = `-- name: SetRunCreatedByUser :execrows
+UPDATE runs
+SET created_by_user_id = ?, updated_at = ?
+WHERE id = ?
+`
+
+type SetRunCreatedByUserParams struct {
+	CreatedByUserID string `json:"created_by_user_id"`
+	UpdatedAt       int64  `json:"updated_at"`
+	ID              string `json:"id"`
+}
+
+func (q *Queries) SetRunCreatedByUser(ctx context.Context, arg SetRunCreatedByUserParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setRunCreatedByUser, arg.CreatedByUserID, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setRunCredentialID = `-- name: SetRunCredentialID :execrows
+UPDATE runs
+SET credential_id = ?, updated_at = ?
+WHERE id = ?
+`
+
+type SetRunCredentialIDParams struct {
+	CredentialID string `json:"credential_id"`
+	UpdatedAt    int64  `json:"updated_at"`
+	ID           string `json:"id"`
+}
+
+func (q *Queries) SetRunCredentialID(ctx context.Context, arg SetRunCredentialIDParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setRunCredentialID, arg.CredentialID, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setTaskCreatedByUser = `-- name: SetTaskCreatedByUser :execrows
+UPDATE tasks
+SET created_by_user_id = ?, updated_at = ?
+WHERE id = ?
+`
+
+type SetTaskCreatedByUserParams struct {
+	CreatedByUserID string `json:"created_by_user_id"`
+	UpdatedAt       int64  `json:"updated_at"`
+	ID              string `json:"id"`
+}
+
+func (q *Queries) SetTaskCreatedByUser(ctx context.Context, arg SetTaskCreatedByUserParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setTaskCreatedByUser, arg.CreatedByUserID, arg.UpdatedAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -1159,6 +2024,25 @@ func (q *Queries) SetTaskPR(ctx context.Context, arg SetTaskPRParams) (int64, er
 	return result.RowsAffected()
 }
 
+const touchAPIKeyLastUsed = `-- name: TouchAPIKeyLastUsed :execrows
+UPDATE api_keys
+SET last_used_at = ?
+WHERE id = ?
+`
+
+type TouchAPIKeyLastUsedParams struct {
+	LastUsedAt int64  `json:"last_used_at"`
+	ID         string `json:"id"`
+}
+
+func (q *Queries) TouchAPIKeyLastUsed(ctx context.Context, arg TouchAPIKeyLastUsedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, touchAPIKeyLastUsed, arg.LastUsedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const trimOldRuns = `-- name: TrimOldRuns :exec
 DELETE FROM runs
 WHERE id IN (
@@ -1172,6 +2056,128 @@ WHERE id IN (
 func (q *Queries) TrimOldRuns(ctx context.Context, offset int64) error {
 	_, err := q.db.ExecContext(ctx, trimOldRuns, offset)
 	return err
+}
+
+const tryCreateCredentialLease = `-- name: TryCreateCredentialLease :execrows
+INSERT INTO credential_leases (
+  id,
+  credential_id,
+  run_id,
+  user_id,
+  strategy,
+  acquired_at,
+  expires_at,
+  released_at
+)
+SELECT
+  ?1,
+  ?2,
+  ?3,
+  ?4,
+  ?5,
+  ?6,
+  ?7,
+  NULL
+WHERE EXISTS (
+  SELECT 1
+  FROM codex_credentials AS c
+  WHERE c.id = ?2
+    AND c.status = 'active'
+    AND (c.cooldown_until IS NULL OR c.cooldown_until <= ?8)
+    AND (
+      c.scope = 'shared'
+      OR (c.scope = 'personal' AND c.owner_user_id = ?4)
+    )
+    AND (
+      SELECT COUNT(*)
+      FROM credential_leases AS l
+      WHERE l.credential_id = c.id
+        AND l.released_at IS NULL
+        AND l.expires_at > ?8
+    ) < c.max_active_leases
+)
+AND NOT EXISTS (
+  SELECT 1
+  FROM credential_leases AS existing
+  WHERE existing.run_id = ?3
+    AND existing.released_at IS NULL
+    AND existing.expires_at > ?8
+)
+`
+
+type TryCreateCredentialLeaseParams struct {
+	ID           string        `json:"id"`
+	CredentialID string        `json:"credential_id"`
+	RunID        string        `json:"run_id"`
+	UserID       string        `json:"user_id"`
+	Strategy     string        `json:"strategy"`
+	AcquiredAt   int64         `json:"acquired_at"`
+	ExpiresAt    int64         `json:"expires_at"`
+	Now          sql.NullInt64 `json:"now"`
+}
+
+func (q *Queries) TryCreateCredentialLease(ctx context.Context, arg TryCreateCredentialLeaseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, tryCreateCredentialLease,
+		arg.ID,
+		arg.CredentialID,
+		arg.RunID,
+		arg.UserID,
+		arg.Strategy,
+		arg.AcquiredAt,
+		arg.ExpiresAt,
+		arg.Now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateCodexCredential = `-- name: UpdateCodexCredential :execrows
+UPDATE codex_credentials
+SET
+  owner_user_id = ?,
+  scope = ?,
+  encrypted_auth_blob = ?,
+  weight = ?,
+  max_active_leases = ?,
+  status = ?,
+  cooldown_until = ?,
+  last_error = ?,
+  updated_at = ?
+WHERE id = ?
+`
+
+type UpdateCodexCredentialParams struct {
+	OwnerUserID       sql.NullString `json:"owner_user_id"`
+	Scope             string         `json:"scope"`
+	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
+	Weight            int64          `json:"weight"`
+	MaxActiveLeases   int64          `json:"max_active_leases"`
+	Status            string         `json:"status"`
+	CooldownUntil     sql.NullInt64  `json:"cooldown_until"`
+	LastError         string         `json:"last_error"`
+	UpdatedAt         int64          `json:"updated_at"`
+	ID                string         `json:"id"`
+}
+
+func (q *Queries) UpdateCodexCredential(ctx context.Context, arg UpdateCodexCredentialParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateCodexCredential,
+		arg.OwnerUserID,
+		arg.Scope,
+		arg.EncryptedAuthBlob,
+		arg.Weight,
+		arg.MaxActiveLeases,
+		arg.Status,
+		arg.CooldownUntil,
+		arg.LastError,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateRun = `-- name: UpdateRun :execrows
@@ -1287,6 +2293,76 @@ func (q *Queries) UpdateRunExecutionState(ctx context.Context, arg UpdateRunExec
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const upsertAPIKey = `-- name: UpsertAPIKey :exec
+INSERT INTO api_keys (
+  id,
+  user_id,
+  key_hash,
+  label,
+  created_at,
+  last_used_at,
+  disabled_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(key_hash) DO UPDATE SET
+  user_id = excluded.user_id,
+  label = excluded.label,
+  disabled_at = excluded.disabled_at
+`
+
+type UpsertAPIKeyParams struct {
+	ID         string        `json:"id"`
+	UserID     string        `json:"user_id"`
+	KeyHash    string        `json:"key_hash"`
+	Label      string        `json:"label"`
+	CreatedAt  int64         `json:"created_at"`
+	LastUsedAt int64         `json:"last_used_at"`
+	DisabledAt sql.NullInt64 `json:"disabled_at"`
+}
+
+func (q *Queries) UpsertAPIKey(ctx context.Context, arg UpsertAPIKeyParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAPIKey,
+		arg.ID,
+		arg.UserID,
+		arg.KeyHash,
+		arg.Label,
+		arg.CreatedAt,
+		arg.LastUsedAt,
+		arg.DisabledAt,
+	)
+	return err
+}
+
+const upsertCredentialUsage = `-- name: UpsertCredentialUsage :exec
+INSERT INTO credential_usage (
+  credential_id,
+  window_start,
+  tokens,
+  runs
+)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(credential_id, window_start) DO UPDATE SET
+  tokens = credential_usage.tokens + excluded.tokens,
+  runs = credential_usage.runs + excluded.runs
+`
+
+type UpsertCredentialUsageParams struct {
+	CredentialID string `json:"credential_id"`
+	WindowStart  int64  `json:"window_start"`
+	Tokens       int64  `json:"tokens"`
+	Runs         int64  `json:"runs"`
+}
+
+func (q *Queries) UpsertCredentialUsage(ctx context.Context, arg UpsertCredentialUsageParams) error {
+	_, err := q.db.ExecContext(ctx, upsertCredentialUsage,
+		arg.CredentialID,
+		arg.WindowStart,
+		arg.Tokens,
+		arg.Runs,
+	)
+	return err
 }
 
 const upsertRunCancel = `-- name: UpsertRunCancel :exec
@@ -1478,6 +2554,40 @@ func (q *Queries) UpsertTaskAgentSession(ctx context.Context, arg UpsertTaskAgen
 		arg.SessionKey,
 		arg.SessionRoot,
 		arg.LastRunID,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertUser = `-- name: UpsertUser :exec
+INSERT INTO users (
+  id,
+  external_login,
+  role,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  external_login = excluded.external_login,
+  role = excluded.role,
+  updated_at = excluded.updated_at
+`
+
+type UpsertUserParams struct {
+	ID            string `json:"id"`
+	ExternalLogin string `json:"external_login"`
+	Role          string `json:"role"`
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
+}
+
+func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) error {
+	_, err := q.db.ExecContext(ctx, upsertUser,
+		arg.ID,
+		arg.ExternalLogin,
+		arg.Role,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)

@@ -77,6 +77,22 @@ Backend notes:
 - Goose resumes a named Goose session with a task-scoped mounted session directory.
 - Codex resumes by reusing a task-scoped `CODEX_HOME` and the last discovered backend session id.
 
+## Credential Leasing
+
+For Codex runs, Rascal can use a leased stored credential instead of relying
+only on the static server auth file.
+
+Operational notes:
+
+- Credential leases are granted per run and renewed while the run is active.
+- If lease renewal fails, Rascal requests cancellation of the run.
+- Shared credentials can be constrained with `max_active_leases`; personal
+  credentials are only available to their owner.
+- Stored credential payloads are encrypted at rest in SQLite using
+  `RASCAL_CREDENTIAL_ENCRYPTION_KEY`.
+- If no stored credential is available, Rascal can fall back to
+  `RASCAL_CODEX_AUTH_PATH` when that file exists.
+
 ## Troubleshooting Checklist
 
 1. Run `doctor` first.
