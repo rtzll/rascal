@@ -149,7 +149,9 @@ func TestAddIssueReaction(t *testing.T) {
 		client := newGitHubMockClient(t,
 			githubRoute(http.MethodPost, "/repos/owner/repo/issues/42/reactions", func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusForbidden)
-				_, _ = io.WriteString(w, `{"message":"forbidden"}`)
+				if _, err := io.WriteString(w, `{"message":"forbidden"}`); err != nil {
+					t.Fatalf("write response: %v", err)
+				}
 			}),
 		)
 		err := client.AddIssueReaction(context.Background(), "owner/repo", 42, ReactionRocket)
@@ -324,7 +326,9 @@ func TestUpsertWebhookDefaultEventsIncludeReviewComment(t *testing.T) {
 			}](t, r)
 			receivedEvents = append(receivedEvents, payload.Events...)
 			w.WriteHeader(http.StatusCreated)
-			_, _ = io.WriteString(w, `{"id":1}`)
+			if _, err := io.WriteString(w, `{"id":1}`); err != nil {
+				t.Fatalf("write response: %v", err)
+			}
 		}),
 	)
 

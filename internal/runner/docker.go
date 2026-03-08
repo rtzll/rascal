@@ -38,7 +38,7 @@ const (
 	containerContextJSONPath = "/rascal-meta/context.json"
 )
 
-func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (ExecutionHandle, error) {
+func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
 	backend := agent.NormalizeBackend(string(spec.AgentBackend))
 	image := strings.TrimSpace(spec.RunnerImage)
 	if image == "" {
@@ -89,10 +89,14 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (Execution
 		return ExecutionHandle{}, fmt.Errorf("open runner log: %w", err)
 	}
 	defer func() {
-		_ = logFile.Close()
+		if closeErr := logFile.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close runner log: %w", closeErr)
+		}
 	}()
 
-	_, _ = fmt.Fprintf(logFile, "[%s] starting docker runner image=%s backend=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), image, backend, spec.RunID)
+	if _, err := fmt.Fprintf(logFile, "[%s] starting docker runner image=%s backend=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), image, backend, spec.RunID); err != nil {
+		return ExecutionHandle{}, fmt.Errorf("write runner log header: %w", err)
+	}
 
 	codexHome := containerCodexStateDir
 	goosePathRoot := containerGooseStateDir
@@ -172,7 +176,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (Execution
 	}
 	args = append(args, image)
 
-	_, _ = fmt.Fprintf(logFile, "[%s] agent session backend=%s mode=%s resume=%t key=%s session_id=%s path_root=%s\n",
+	if _, err := fmt.Fprintf(logFile, "[%s] agent session backend=%s mode=%s resume=%t key=%s session_id=%s path_root=%s\n",
 		time.Now().UTC().Format(time.RFC3339),
 		backend,
 		agent.NormalizeSessionMode(string(sessionMode)),
@@ -180,7 +184,9 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (Execution
 		sessionKey,
 		backendSessionID,
 		firstNonEmptySessionPath(sessionMountTarget, goosePathRoot),
-	)
+	); err != nil {
+		return ExecutionHandle{}, fmt.Errorf("write runner session log: %w", err)
+	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stderr = logFile
@@ -196,7 +202,9 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (Execution
 	if containerID == "" {
 		return ExecutionHandle{}, fmt.Errorf("docker run -d returned empty container id")
 	}
-	_, _ = fmt.Fprintf(logFile, "[%s] detached container started name=%s id=%s\n", time.Now().UTC().Format(time.RFC3339), containerName, containerID)
+	if _, err := fmt.Fprintf(logFile, "[%s] detached container started name=%s id=%s\n", time.Now().UTC().Format(time.RFC3339), containerName, containerID); err != nil {
+		return ExecutionHandle{}, fmt.Errorf("write runner start log: %w", err)
+	}
 	return ExecutionHandle{
 		Backend: "docker",
 		ID:      containerID,

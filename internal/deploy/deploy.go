@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,7 +97,9 @@ func Execute(cfg Config) error {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
 	defer func() {
-		_ = os.RemoveAll(tmpDir)
+		if removeErr := os.RemoveAll(tmpDir); removeErr != nil {
+			log.Printf("remove temp deploy dir %s: %v", tmpDir, removeErr)
+		}
 	}()
 
 	binaryPath := filepath.Join(tmpDir, "rascald")
@@ -320,11 +323,15 @@ fi
 	}
 
 	if err := runRemoteScript(cfg, "set -eu\nsystemctl enable caddy --now\nsystemctl reload caddy || systemctl restart caddy\n"); err != nil {
-		_ = rollback(cfg, activeSlot, inactiveSlot, activePort)
+		if rollbackErr := rollback(cfg, activeSlot, inactiveSlot, activePort); rollbackErr != nil {
+			log.Printf("rollback after caddy reload failure: %v", rollbackErr)
+		}
 		return fmt.Errorf("failed to reload caddy with new upstream: %w", err)
 	}
 	if err := verifyProxyReadiness(cfg); err != nil {
-		_ = rollback(cfg, activeSlot, inactiveSlot, activePort)
+		if rollbackErr := rollback(cfg, activeSlot, inactiveSlot, activePort); rollbackErr != nil {
+			log.Printf("rollback after proxy readiness failure: %v", rollbackErr)
+		}
 		return err
 	}
 

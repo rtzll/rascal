@@ -118,7 +118,11 @@ func newQueriesForTest(t *testing.T) (*sql.DB, *Queries) {
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close db: %v", err)
+		}
+	})
 
 	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		t.Fatalf("set WAL mode: %v", err)

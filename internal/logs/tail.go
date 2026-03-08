@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-func Tail(path string, maxLines int) ([]string, error) {
+func Tail(path string, maxLines int) (lines []string, err error) {
 	if maxLines <= 0 {
 		maxLines = 100
 	}
@@ -16,14 +16,16 @@ func Tail(path string, maxLines int) ([]string, error) {
 		return nil, fmt.Errorf("open log file: %w", err)
 	}
 	defer func() {
-		_ = f.Close()
+		if closeErr := f.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close log file: %w", closeErr)
+		}
 	}()
 
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
-	lines := make([]string, 0, maxLines)
+	lines = make([]string, 0, maxLines)
 	for scanner.Scan() {
 		if len(lines) < maxLines {
 			lines = append(lines, scanner.Text())

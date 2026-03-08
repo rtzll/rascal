@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -37,14 +38,18 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 	}
 
 	status.RascalService = check("if systemctl is-active --quiet 'rascal@blue' || systemctl is-active --quiet 'rascal@green'; then echo ok; fi")
-	activeSlot, _ := runLocalCapture("ssh", sshArgs(cfg, strings.Join([]string{
+	activeSlot, err := runLocalCapture("ssh", sshArgs(cfg, strings.Join([]string{
 		"set -eu",
 		"slot=''",
 		"if [ -f /etc/rascal/active_slot ]; then slot=$(tr -d '[:space:]' </etc/rascal/active_slot); fi",
 		"case \"$slot\" in blue|green) echo \"$slot\" ;;",
 		"*) if systemctl is-active --quiet 'rascal@blue'; then echo blue; elif systemctl is-active --quiet 'rascal@green'; then echo green; fi ;; esac",
 	}, "\n"))...)
-	status.ActiveSlot = strings.TrimSpace(activeSlot)
+	if err != nil {
+		log.Printf("resolve active slot over SSH failed: %v", err)
+	} else {
+		status.ActiveSlot = strings.TrimSpace(activeSlot)
+	}
 	status.DockerInstalled = check("command -v docker >/dev/null 2>&1 && echo ok")
 	status.SQLiteInstalled = check("command -v sqlite3 >/dev/null 2>&1 && echo ok")
 	status.CaddyInstalled = check("command -v caddy >/dev/null 2>&1 && echo ok")
@@ -98,7 +103,9 @@ func checkServerHealth(baseURL string) (bool, string) {
 			}
 			continue
 		}
-		_ = resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("close remote doctor response body: %v", err)
+		}
 		if resp.StatusCode >= 300 {
 			if path == "/healthz" {
 				return false, fmt.Sprintf("status %d", resp.StatusCode)

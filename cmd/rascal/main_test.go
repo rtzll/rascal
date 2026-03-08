@@ -503,7 +503,9 @@ func TestPSUsesDefaultLimitQuery(t *testing.T) {
 		gotLimit = r.URL.Query().Get("limit")
 		gotAll = r.URL.Query().Get("all")
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{}})
+		if err := json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{}}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 
@@ -548,7 +550,9 @@ func TestPSAllUsesAllQuery(t *testing.T) {
 		gotLimit = r.URL.Query().Get("limit")
 		gotAll = r.URL.Query().Get("all")
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{}})
+		if err := json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{}}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 
@@ -655,12 +659,14 @@ func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
 			t.Fatalf("decode payload: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"run": map[string]any{
 				"id":     "run_issue",
 				"status": "queued",
 			},
-		})
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 
@@ -715,9 +721,11 @@ func TestRunIssueSendsExplicitDebugOverride(t *testing.T) {
 			t.Fatalf("decode payload: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"run": map[string]any{"id": "run_issue", "status": "queued"},
-		})
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 
@@ -755,7 +763,7 @@ func TestRetryOmitsDebugByDefault(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"run": map[string]any{
 					"id":          "run_old",
 					"task_id":     "task_1",
@@ -764,7 +772,9 @@ func TestRetryOmitsDebugByDefault(t *testing.T) {
 					"base_branch": "main",
 					"status":      string(state.StatusCanceled),
 				},
-			})
+			}); err != nil {
+				t.Fatalf("encode response: %v", err)
+			}
 			return
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/tasks":
 			body, err := io.ReadAll(r.Body)
@@ -775,9 +785,11 @@ func TestRetryOmitsDebugByDefault(t *testing.T) {
 				t.Fatalf("decode retry payload: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"run": map[string]any{"id": "run_retry", "status": "queued"},
-			})
+			}); err != nil {
+				t.Fatalf("encode response: %v", err)
+			}
 			return
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -819,7 +831,7 @@ func TestRetrySendsExplicitDebugOverride(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"run": map[string]any{
 					"id":          "run_old",
 					"task_id":     "task_1",
@@ -828,7 +840,9 @@ func TestRetrySendsExplicitDebugOverride(t *testing.T) {
 					"base_branch": "main",
 					"status":      string(state.StatusCanceled),
 				},
-			})
+			}); err != nil {
+				t.Fatalf("encode response: %v", err)
+			}
 			return
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/tasks":
 			body, err := io.ReadAll(r.Body)
@@ -839,9 +853,11 @@ func TestRetrySendsExplicitDebugOverride(t *testing.T) {
 				t.Fatalf("decode retry payload: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"run": map[string]any{"id": "run_retry", "status": "queued"},
-			})
+			}); err != nil {
+				t.Fatalf("encode response: %v", err)
+			}
 			return
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -883,7 +899,7 @@ func TestRetryCreatesRunWithRetryTrigger(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"run": map[string]any{
 					"id":          "run_old",
 					"task_id":     "owner/repo#123",
@@ -892,7 +908,9 @@ func TestRetryCreatesRunWithRetryTrigger(t *testing.T) {
 					"base_branch": "main",
 					"status":      "failed",
 				},
-			})
+			}); err != nil {
+				t.Fatalf("encode response: %v", err)
+			}
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/tasks":
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
@@ -902,12 +920,14 @@ func TestRetryCreatesRunWithRetryTrigger(t *testing.T) {
 				t.Fatalf("decode retry payload: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"run": map[string]any{
 					"id":     "run_new",
 					"status": "queued",
 				},
-			})
+			}); err != nil {
+				t.Fatalf("encode response: %v", err)
+			}
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -1144,10 +1164,14 @@ func TestNoColorRequestedUnset(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if had {
-			_ = os.Setenv("NO_COLOR", old)
+			if err := os.Setenv("NO_COLOR", old); err != nil {
+				t.Errorf("restore NO_COLOR: %v", err)
+			}
 			return
 		}
-		_ = os.Unsetenv("NO_COLOR")
+		if err := os.Unsetenv("NO_COLOR"); err != nil {
+			t.Errorf("unset NO_COLOR: %v", err)
+		}
 	})
 	if noColorRequested(false) {
 		t.Fatal("expected color/styling enabled when NO_COLOR is unset and flag is false")
@@ -1448,7 +1472,11 @@ func TestLoadGlobalEnvDefaultDotRascalEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Errorf("restore wd: %v", err)
+		}
+	})
 	if err := os.Chdir(tmp); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
@@ -1575,7 +1603,9 @@ func newFollowLogsTestApp(t *testing.T, responses []map[string]any) (*app, func(
 			idx++
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(current)
+		if err := json.NewEncoder(w).Encode(current); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
 	}))
 
 	a := &app{
@@ -1604,15 +1634,25 @@ func newFollowLogsTestApp(t *testing.T, responses []map[string]any) (*app, func(
 
 func captureStdout(fn func() error) (string, error) {
 	old := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
 	os.Stdout = w
 
-	err := fn()
-	_ = w.Close()
+	err = fn()
+	if closeErr := w.Close(); err == nil && closeErr != nil {
+		err = closeErr
+	}
 	os.Stdout = old
 
-	data, _ := io.ReadAll(r)
-	_ = r.Close()
+	data, readErr := io.ReadAll(r)
+	if readErr != nil && err == nil {
+		err = readErr
+	}
+	if closeErr := r.Close(); err == nil && closeErr != nil {
+		err = closeErr
+	}
 	return string(data), err
 }
 
@@ -1692,13 +1732,19 @@ func clearEnvKeys(t *testing.T, keys ...string) {
 	for _, key := range keys {
 		key := key
 		val, had := os.LookupEnv(key)
-		_ = os.Unsetenv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
 		t.Cleanup(func() {
 			if had {
-				_ = os.Setenv(key, val)
+				if err := os.Setenv(key, val); err != nil {
+					t.Errorf("restore %s: %v", key, err)
+				}
 				return
 			}
-			_ = os.Unsetenv(key)
+			if err := os.Unsetenv(key); err != nil {
+				t.Errorf("unset %s: %v", key, err)
+			}
 		})
 	}
 }

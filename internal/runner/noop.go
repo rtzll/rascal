@@ -12,7 +12,7 @@ import (
 // NoopLauncher is a safe default for local development.
 type NoopLauncher struct{}
 
-func (NoopLauncher) StartDetached(_ context.Context, spec Spec) (ExecutionHandle, error) {
+func (NoopLauncher) StartDetached(_ context.Context, spec Spec) (handle ExecutionHandle, err error) {
 	if err := os.MkdirAll(spec.RunDir, 0o755); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("create run dir: %w", err)
 	}
@@ -22,13 +22,18 @@ func (NoopLauncher) StartDetached(_ context.Context, spec Spec) (ExecutionHandle
 	if err != nil {
 		return ExecutionHandle{}, fmt.Errorf("open log file: %w", err)
 	}
+	defer func() {
+		if closeErr := f.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close log file: %w", closeErr)
+		}
+	}()
 	if _, err := f.WriteString(line); err != nil {
-		_ = f.Close()
 		return ExecutionHandle{}, fmt.Errorf("write log file: %w", err)
 	}
-	_ = f.Close()
 
-	_ = os.WriteFile(filepath.Join(spec.RunDir, "goose.ndjson"), []byte(`{"event":"noop","run_id":"`+spec.RunID+`"}`+"\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(spec.RunDir, "goose.ndjson"), []byte(`{"event":"noop","run_id":"`+spec.RunID+`"}`+"\n"), 0o644); err != nil {
+		return ExecutionHandle{}, fmt.Errorf("write goose log: %w", err)
+	}
 	meta := Meta{
 		RunID:      spec.RunID,
 		TaskID:     spec.TaskID,

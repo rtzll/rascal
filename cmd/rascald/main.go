@@ -193,8 +193,8 @@ func (s *server) recoverQueuedCancels() {
 			continue
 		}
 		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
-			_ = s.store.ClearRunCancel(run.ID)
+			s.setRunStatusBestEffort(run.ID, state.StatusCanceled, reason)
+			s.clearRunCancelBestEffort(run.ID)
 		}
 	}
 }
@@ -208,8 +208,8 @@ func (s *server) recoverRunningRuns() {
 			continue
 		}
 		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
-			_ = s.store.ClearRunCancel(run.ID)
+			s.setRunStatusBestEffort(run.ID, state.StatusCanceled, reason)
+			s.clearRunCancelBestEffort(run.ID)
 			continue
 		}
 
@@ -218,7 +218,7 @@ func (s *server) recoverRunningRuns() {
 			if lease.LeaseExpiresAt.After(now) {
 				continue
 			}
-			_ = s.store.DeleteRunLease(run.ID)
+			s.deleteRunLeaseBestEffort(run.ID)
 			if err := s.requeueRun(run.ID); err != nil {
 				log.Printf("recover run %s after expired lease: %v", run.ID, err)
 			}
@@ -279,8 +279,8 @@ func (s *server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 
 func (s *server) failRunForMissingExecution(run state.Run, reason string) {
 	updated := s.setRunStatusWithFallback(run, state.StatusFailed, reason)
-	_ = s.store.DeleteRunExecution(run.ID)
-	_ = s.store.DeleteRunLease(run.ID)
+	s.deleteRunExecutionBestEffort(run.ID)
+	s.deleteRunLeaseBestEffort(run.ID)
 	s.finishRun(updated)
 }
 
@@ -530,7 +530,7 @@ func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	eventType := ghapi.EventType(r.Header)
 	if err := s.processWebhookEvent(r.Context(), eventType, payload); err != nil {
 		if deliveryClaim.ID != "" {
-			_ = s.store.ReleaseDeliveryClaim(deliveryClaim)
+			s.releaseDeliveryClaimBestEffort(deliveryClaim)
 		}
 		http.Error(w, "webhook processing failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -895,7 +895,7 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 		return
 	}
 	if run.Status == state.StatusSucceeded || run.Status == state.StatusFailed || run.Status == state.StatusCanceled {
-		_ = s.store.ClearRunCancel(runID)
+		s.clearRunCancelBestEffort(runID)
 		writeJSON(w, http.StatusOK, map[string]any{"run": run, "canceled": false, "reason": "run already completed"})
 		return
 	}
@@ -910,7 +910,7 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 			http.Error(w, "failed to cancel run", http.StatusInternalServerError)
 			return
 		}
-		_ = s.store.ClearRunCancel(runID)
+		s.clearRunCancelBestEffort(runID)
 		if !s.isDraining() {
 			s.scheduleRuns(run.TaskID)
 		}
@@ -982,7 +982,9 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format"))) {
 	case "", "text":
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = io.WriteString(w, logsText)
+		if _, err := io.WriteString(w, logsText); err != nil {
+			log.Printf("write logs response failed: %v", err)
+		}
 	case "json":
 		writeJSON(w, http.StatusOK, map[string]any{
 			"logs":       logsText,
@@ -1090,18 +1092,18 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	}
 
 	if err := s.writeRunFiles(run); err != nil {
-		_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, err.Error())
+		s.setRunStatusBestEffort(run.ID, state.StatusFailed, err.Error())
 		return state.Run{}, fmt.Errorf("prepare run files: %w", err)
 	}
 	if err := s.writeRunResponseTarget(run, req.ResponseTarget); err != nil {
-		_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, err.Error())
+		s.setRunStatusBestEffort(run.ID, state.StatusFailed, err.Error())
 		return state.Run{}, fmt.Errorf("prepare run response target: %w", err)
 	}
 	s.scheduleRuns(run.TaskID)
 	return run, nil
 }
 
-func (s *server) writeRunFiles(run state.Run) error {
+func (s *server) writeRunFiles(run state.Run) (err error) {
 	if err := os.MkdirAll(filepath.Join(run.RunDir, "codex"), 0o755); err != nil {
 		return err
 	}
@@ -1143,7 +1145,9 @@ func (s *server) writeRunFiles(run state.Run) error {
 		return err
 	}
 	defer func() {
-		_ = f.Close()
+		if closeErr := f.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
 	}()
 	_, err = f.WriteString(logLine)
 	return err
@@ -1329,7 +1333,7 @@ func (s *server) executeRun(runID string) {
 
 		handle, err := s.startDetachedWithRetry(context.Background(), spec)
 		if err != nil {
-			_ = s.store.DeleteRunExecution(run.ID)
+			s.deleteRunExecutionBestEffort(run.ID)
 			updated := s.setRunStatusWithFallback(run, state.StatusFailed, err.Error())
 			s.finishRun(updated)
 			return
@@ -1345,7 +1349,7 @@ func (s *server) executeRun(runID string) {
 		if err != nil {
 			s.stopRunExecutionBestEffort(run.ID, "failed to persist run execution")
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
-			_ = s.launcher.Remove(stopCtx, handle)
+			s.removeRunExecutionBestEffort(stopCtx, handle, run.ID, "cleanup failed persisted execution")
 			stopCancel()
 			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("persist run execution: %v", err))
 			s.finishRun(updated)
@@ -1490,7 +1494,9 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		if observedExitCode != 0 {
 			meta.Error = fmt.Sprintf("docker runner failed with exit code %d", observedExitCode)
 		}
-		_ = runner.WriteMeta(metaPath, meta)
+		if writeErr := runner.WriteMeta(metaPath, meta); writeErr != nil {
+			log.Printf("run %s write fallback meta failed: %v", run.ID, writeErr)
+		}
 	}
 	if meta.ExitCode == 0 && observedExitCode != 0 {
 		meta.ExitCode = observedExitCode
@@ -1561,7 +1567,7 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionMinusOne)
 	}
 	if updated.PRNumber > 0 {
-		_ = s.store.SetTaskPR(updated.TaskID, updated.Repo, updated.PRNumber)
+		s.setTaskPRBestEffort(updated.TaskID, updated.Repo, updated.PRNumber)
 	}
 	if updated.Status == state.StatusSucceeded || updated.Status == state.StatusReview {
 		s.postRunCompletionCommentBestEffort(updated)
@@ -1678,14 +1684,75 @@ func (s *server) setRunStatusWithFallback(run state.Run, status state.RunStatus,
 	return run
 }
 
+func (s *server) setRunStatusBestEffort(runID string, status state.RunStatus, errText string) {
+	if _, err := s.store.SetRunStatus(runID, status, errText); err != nil {
+		log.Printf("run %s set status %q failed: %v", runID, status, err)
+	}
+}
+
+func (s *server) clearRunCancelBestEffort(runID string) {
+	if err := s.store.ClearRunCancel(runID); err != nil {
+		log.Printf("run %s clear cancel request failed: %v", runID, err)
+	}
+}
+
+func (s *server) deleteRunLeaseBestEffort(runID string) {
+	if err := s.store.DeleteRunLease(runID); err != nil {
+		log.Printf("run %s delete run lease failed: %v", runID, err)
+	}
+}
+
+func (s *server) deleteRunExecutionBestEffort(runID string) {
+	if err := s.store.DeleteRunExecution(runID); err != nil {
+		log.Printf("run %s delete run execution failed: %v", runID, err)
+	}
+}
+
+func (s *server) releaseDeliveryClaimBestEffort(claim state.DeliveryClaim) {
+	if err := s.store.ReleaseDeliveryClaim(claim); err != nil {
+		log.Printf("release delivery claim %s failed: %v", claim.ID, err)
+	}
+}
+
+func (s *server) setTaskPRBestEffort(taskID, repo string, prNumber int) {
+	if err := s.store.SetTaskPR(taskID, repo, prNumber); err != nil {
+		log.Printf("task %s set PR #%d failed: %v", taskID, prNumber, err)
+	}
+}
+
+func (s *server) cancelQueuedRunsBestEffort(taskID, reason string) {
+	if err := s.store.CancelQueuedRuns(taskID, reason); err != nil {
+		log.Printf("task %s cancel queued runs failed: %v", taskID, err)
+	}
+}
+
+func (s *server) updateRunBestEffort(runID string, fn func(*state.Run) error) {
+	if _, err := s.store.UpdateRun(runID, fn); err != nil {
+		log.Printf("run %s update failed: %v", runID, err)
+	}
+}
+
+func (s *server) requestRunCancelBestEffort(runID, reason, source string) {
+	if err := s.store.RequestRunCancel(runID, reason, source); err != nil {
+		log.Printf("run %s request cancel failed: %v", runID, err)
+	}
+}
+
+func (s *server) removeRunExecutionBestEffort(ctx context.Context, handle runner.ExecutionHandle, runID, note string) {
+	err := s.launcher.Remove(ctx, handle)
+	if err != nil && !errors.Is(err, runner.ErrExecutionNotFound) && !errors.Is(err, context.Canceled) {
+		log.Printf("run %s remove execution failed (%s): %v", runID, note, err)
+	}
+}
+
 func (s *server) finishRun(run state.Run) {
 	if runStatusIsDone(run.Status) {
-		_ = s.store.ClearRunCancel(run.ID)
+		s.clearRunCancelBestEffort(run.ID)
 	}
 	taskCompleted := s.store.IsTaskCompleted(run.TaskID)
 
 	if taskCompleted {
-		_ = s.store.CancelQueuedRuns(run.TaskID, "task completed; canceled pending runs")
+		s.cancelQueuedRunsBestEffort(run.TaskID, "task completed; canceled pending runs")
 	}
 
 	if !s.isDraining() {
@@ -1720,17 +1787,17 @@ func (s *server) scheduleRuns(preferredTaskID string) {
 		}
 
 		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, reason)
-			_ = s.store.ClearRunCancel(run.ID)
+			s.setRunStatusBestEffort(run.ID, state.StatusCanceled, reason)
+			s.clearRunCancelBestEffort(run.ID)
 			continue
 		}
 
 		if s.isDraining() {
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusCanceled, "orchestrator shutting down")
+			s.setRunStatusBestEffort(run.ID, state.StatusCanceled, "orchestrator shutting down")
 			return
 		}
 		if err := s.store.UpsertRunLease(run.ID, s.instanceID, runLeaseTTL); err != nil {
-			_, _ = s.store.SetRunStatus(run.ID, state.StatusFailed, fmt.Sprintf("claim run lease: %v", err))
+			s.setRunStatusBestEffort(run.ID, state.StatusFailed, fmt.Sprintf("claim run lease: %v", err))
 			continue
 		}
 
@@ -1748,7 +1815,7 @@ func (s *server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {
 		if run.Repo != repo || run.PRNumber != prNumber {
 			continue
 		}
-		_, _ = s.store.UpdateRun(run.ID, func(r *state.Run) error {
+		s.updateRunBestEffort(run.ID, func(r *state.Run) error {
 			now := time.Now().UTC()
 			if merged {
 				r.PRStatus = state.PRStatusMerged
@@ -1783,7 +1850,7 @@ func (s *server) reconcileReopenedPRRuns(repo string, prNumber int) {
 		if run.Repo != repo || run.PRNumber != prNumber {
 			continue
 		}
-		_, _ = s.store.UpdateRun(run.ID, func(r *state.Run) error {
+		s.updateRunBestEffort(run.ID, func(r *state.Run) error {
 			if r.PRStatus == state.PRStatusMerged {
 				return nil
 			}
@@ -1867,7 +1934,9 @@ func (s *server) isBotActor(login string) bool {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("write JSON response failed: %v", err)
+	}
 }
 
 func logRequests(next http.Handler) http.Handler {
@@ -2116,7 +2185,7 @@ func (s *server) cancelActiveRuns(reason string) {
 		reason = "canceled"
 	}
 	for _, run := range s.store.ListRunningRuns() {
-		_ = s.store.RequestRunCancel(run.ID, reason, "shutdown")
+		s.requestRunCancelBestEffort(run.ID, reason, "shutdown")
 		s.stopRunExecutionBestEffort(run.ID, "shutdown cancellation")
 	}
 }
@@ -2299,15 +2368,21 @@ func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
 	removeTemp := true
 	defer func() {
 		if removeTemp {
-			_ = os.Remove(tempPath)
+			if err := os.Remove(tempPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				log.Printf("remove temp file %s: %v", tempPath, err)
+			}
 		}
 	}()
 	if _, err := tempFile.Write(data); err != nil {
-		_ = tempFile.Close()
+		if closeErr := tempFile.Close(); closeErr != nil {
+			return fmt.Errorf("write temp file: %w (close temp file: %v)", err, closeErr)
+		}
 		return err
 	}
 	if err := tempFile.Chmod(mode); err != nil {
-		_ = tempFile.Close()
+		if closeErr := tempFile.Close(); closeErr != nil {
+			return fmt.Errorf("chmod temp file: %w (close temp file: %v)", err, closeErr)
+		}
 		return err
 	}
 	if err := tempFile.Close(); err != nil {
@@ -2507,7 +2582,9 @@ func copyFile(src, dst string, mode os.FileMode) (err error) {
 		return err
 	}
 	defer func() {
-		_ = in.Close()
+		if closeErr := in.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
 	}()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)

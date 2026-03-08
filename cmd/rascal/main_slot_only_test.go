@@ -40,7 +40,9 @@ func TestAPIDoOverSSHUsesSlotPortsWithoutLegacySingleUnitChecks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("doOverSSH: %v", err)
 	}
-	_ = resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		t.Fatalf("close body: %v", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status code = %d, want 200", resp.StatusCode)
 	}

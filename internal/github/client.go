@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -77,8 +78,7 @@ func (c *APIClient) GetIssue(ctx context.Context, repo string, issueNumber int) 
 	defer closeResponseBody(resp)
 
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return IssueData{}, fmt.Errorf("github get issue failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return IssueData{}, fmt.Errorf("github get issue failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 
 	var out struct {
@@ -119,8 +119,7 @@ func (c *APIClient) EnsureLabel(ctx context.Context, repo, name, color, descript
 		return nil
 	}
 	if resp.StatusCode != http.StatusNotFound {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("github get label failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("github get label failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 
 	payload := map[string]string{
@@ -135,8 +134,7 @@ func (c *APIClient) EnsureLabel(ctx context.Context, repo, name, color, descript
 	}
 	defer closeResponseBody(createResp)
 	if createResp.StatusCode >= 300 {
-		body, _ := io.ReadAll(createResp.Body)
-		return fmt.Errorf("github create label failed (%d): %s", createResp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("github create label failed (%d): %s", createResp.StatusCode, readResponseBody(createResp.Body))
 	}
 	return nil
 }
@@ -158,8 +156,7 @@ func (c *APIClient) LabelExists(ctx context.Context, repo, name string) (bool, e
 	case http.StatusNotFound:
 		return false, nil
 	default:
-		body, _ := io.ReadAll(resp.Body)
-		return false, fmt.Errorf("github get label failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return false, fmt.Errorf("github get label failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 }
 
@@ -183,8 +180,7 @@ func (c *APIClient) AddIssueReaction(ctx context.Context, repo string, issueNumb
 	}
 	defer closeResponseBody(resp)
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("github add issue reaction failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("github add issue reaction failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 	return nil
 }
@@ -209,8 +205,7 @@ func (c *APIClient) RemoveIssueReactions(ctx context.Context, repo string, issue
 	}
 	defer closeResponseBody(resp)
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("github list issue reactions failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("github list issue reactions failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 
 	var reactions []issueReaction
@@ -226,8 +221,14 @@ func (c *APIClient) RemoveIssueReactions(ctx context.Context, repo string, issue
 		if err != nil {
 			return err
 		}
-		body, _ := io.ReadAll(deleteResp.Body)
-		_ = deleteResp.Body.Close()
+		body, readErr := io.ReadAll(deleteResp.Body)
+		closeErr := deleteResp.Body.Close()
+		if readErr != nil {
+			return fmt.Errorf("read github delete issue reaction response: %w", readErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close github delete issue reaction response: %w", closeErr)
+		}
 		if deleteResp.StatusCode >= 300 {
 			return fmt.Errorf("github delete issue reaction failed (%d): %s", deleteResp.StatusCode, strings.TrimSpace(string(body)))
 		}
@@ -254,8 +255,7 @@ func (c *APIClient) AddIssueCommentReaction(ctx context.Context, repo string, co
 	}
 	defer closeResponseBody(resp)
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("github add issue comment reaction failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("github add issue comment reaction failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 	return nil
 }
@@ -280,8 +280,7 @@ func (c *APIClient) CreateIssueComment(ctx context.Context, repo string, issueNu
 	}
 	defer closeResponseBody(resp)
 	if resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("github create issue comment failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+		return fmt.Errorf("github create issue comment failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 	return nil
 }
@@ -308,8 +307,7 @@ func (c *APIClient) AddPullRequestReviewReaction(ctx context.Context, repo strin
 	}
 	defer closeResponseBody(resp)
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("github add pull request review reaction failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("github add pull request review reaction failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 	return nil
 }
@@ -333,8 +331,7 @@ func (c *APIClient) AddPullRequestReviewCommentReaction(ctx context.Context, rep
 	}
 	defer closeResponseBody(resp)
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("github add pull request review comment reaction failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("github add pull request review comment reaction failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 	return nil
 }
@@ -356,8 +353,7 @@ func (c *APIClient) viewerLogin(ctx context.Context) (string, error) {
 	}
 	defer closeResponseBody(resp)
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("github get viewer failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", fmt.Errorf("github get viewer failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 	var out struct {
 		Login string `json:"login"`
@@ -388,8 +384,7 @@ func (c *APIClient) UpsertWebhook(ctx context.Context, repo, webhookURL, secret 
 	}
 	defer closeResponseBody(listResp)
 	if listResp.StatusCode >= 300 {
-		body, _ := io.ReadAll(listResp.Body)
-		return fmt.Errorf("github list hooks failed (%d): %s", listResp.StatusCode, describeWebhookAuthFailure(listResp.StatusCode, body))
+		return fmt.Errorf("github list hooks failed (%d): %s", listResp.StatusCode, describeWebhookAuthFailure(listResp.StatusCode, []byte(readResponseBody(listResp.Body))))
 	}
 
 	var hooks []struct {
@@ -423,8 +418,7 @@ func (c *APIClient) UpsertWebhook(ctx context.Context, repo, webhookURL, secret 
 		}
 		defer closeResponseBody(updateResp)
 		if updateResp.StatusCode >= 300 {
-			body, _ := io.ReadAll(updateResp.Body)
-			return fmt.Errorf("github update hook failed (%d): %s", updateResp.StatusCode, strings.TrimSpace(string(body)))
+			return fmt.Errorf("github update hook failed (%d): %s", updateResp.StatusCode, readResponseBody(updateResp.Body))
 		}
 		return nil
 	}
@@ -435,8 +429,7 @@ func (c *APIClient) UpsertWebhook(ctx context.Context, repo, webhookURL, secret 
 	}
 	defer closeResponseBody(createResp)
 	if createResp.StatusCode >= 300 {
-		body, _ := io.ReadAll(createResp.Body)
-		return fmt.Errorf("github create hook failed (%d): %s", createResp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("github create hook failed (%d): %s", createResp.StatusCode, readResponseBody(createResp.Body))
 	}
 	return nil
 }
@@ -475,8 +468,7 @@ func (c *APIClient) DeleteWebhookByURL(ctx context.Context, repo, webhookURL str
 	}
 	defer closeResponseBody(resp)
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return false, fmt.Errorf("github delete hook failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return false, fmt.Errorf("github delete hook failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 	return true, nil
 }
@@ -493,8 +485,7 @@ func (c *APIClient) listWebhooks(ctx context.Context, repo string) ([]WebhookDat
 	}
 	defer closeResponseBody(listResp)
 	if listResp.StatusCode >= 300 {
-		body, _ := io.ReadAll(listResp.Body)
-		return nil, fmt.Errorf("github list hooks failed (%d): %s", listResp.StatusCode, describeWebhookAuthFailure(listResp.StatusCode, body))
+		return nil, fmt.Errorf("github list hooks failed (%d): %s", listResp.StatusCode, describeWebhookAuthFailure(listResp.StatusCode, []byte(readResponseBody(listResp.Body))))
 	}
 	var hooks []struct {
 		ID     int      `json:"id"`
@@ -572,5 +563,15 @@ func closeResponseBody(resp *http.Response) {
 	if resp == nil || resp.Body == nil {
 		return
 	}
-	_ = resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		log.Printf("close github response body: %v", err)
+	}
+}
+
+func readResponseBody(body io.Reader) string {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return fmt.Sprintf("failed to read response body: %v", err)
+	}
+	return strings.TrimSpace(string(data))
 }

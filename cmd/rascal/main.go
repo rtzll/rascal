@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -421,6 +422,7 @@ func (a *app) newInitCmd() *cobra.Command {
 		Short: "Initialize local Rascal CLI config",
 		Long:  "Create or update local Rascal config at ~/.rascal/config.toml (or --config path).",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			var err error
 			serverURL = firstNonEmpty(strings.TrimSpace(serverURL), a.cfg.ServerURL)
 			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), a.cfg.APIToken)
 			defaultRepo = firstNonEmpty(strings.TrimSpace(defaultRepo), a.cfg.DefaultRepo)
@@ -439,15 +441,33 @@ func (a *app) newInitCmd() *cobra.Command {
 
 			if !nonInteractive && a.isTTY() {
 				reader := bufio.NewReader(os.Stdin)
-				serverURL = promptString(reader, "Server URL", serverURL)
-				apiToken = promptString(reader, "API Token", apiToken)
-				defaultRepo = promptString(reader, "Default Repo (optional)", defaultRepo)
-				host = promptString(reader, "Host (optional)", host)
-				domain = promptString(reader, "Domain (optional)", domain)
-				transport = promptString(reader, "Transport (auto|http|ssh)", transport)
-				sshHost = promptString(reader, "SSH Host (optional)", sshHost)
-				sshUser = promptString(reader, "SSH User (optional)", sshUser)
-				sshKey = promptString(reader, "SSH Key (optional)", sshKey)
+				if serverURL, err = promptString(reader, "Server URL", serverURL); err != nil {
+					return err
+				}
+				if apiToken, err = promptString(reader, "API Token", apiToken); err != nil {
+					return err
+				}
+				if defaultRepo, err = promptString(reader, "Default Repo (optional)", defaultRepo); err != nil {
+					return err
+				}
+				if host, err = promptString(reader, "Host (optional)", host); err != nil {
+					return err
+				}
+				if domain, err = promptString(reader, "Domain (optional)", domain); err != nil {
+					return err
+				}
+				if transport, err = promptString(reader, "Transport (auto|http|ssh)", transport); err != nil {
+					return err
+				}
+				if sshHost, err = promptString(reader, "SSH Host (optional)", sshHost); err != nil {
+					return err
+				}
+				if sshUser, err = promptString(reader, "SSH User (optional)", sshUser); err != nil {
+					return err
+				}
+				if sshKey, err = promptString(reader, "SSH Key (optional)", sshKey); err != nil {
+					return err
+				}
 			}
 
 			if strings.TrimSpace(serverURL) == "" {
@@ -911,9 +931,7 @@ rascal run --issue OWNER/REPO#123
 				if err != nil {
 					return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 				}
-				defer func() {
-					_ = resp.Body.Close()
-				}()
+				defer closeWithLog("close issue task response body", resp.Body)
 				if resp.StatusCode >= 300 {
 					return decodeServerError(resp)
 				}
@@ -948,9 +966,7 @@ rascal run --issue OWNER/REPO#123
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
 			}
-			defer func() {
-				_ = resp.Body.Close()
-			}()
+			defer closeWithLog("close task creation response body", resp.Body)
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
 			}
@@ -1049,9 +1065,13 @@ func (a *app) newPSCmd() *cobra.Command {
 					return err
 				}
 				if a.ansiEnabled() {
-					_, _ = fmt.Fprint(os.Stdout, "\033[H\033[2J")
+					if _, err := fmt.Fprint(os.Stdout, "\033[H\033[2J"); err != nil {
+						return err
+					}
 				}
-				_ = render(runs)
+				if err := render(runs); err != nil {
+					return err
+				}
 				select {
 				case <-sigCtx.Done():
 					return nil
@@ -1111,10 +1131,22 @@ rascal logs run run_abc123 --follow --interval 4s
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runFollow, _ := cmd.Flags().GetBool("follow")
-			runInterval, _ := cmd.Flags().GetDuration("interval")
-			runSince, _ := cmd.Flags().GetDuration("since")
-			runLines, _ := cmd.Flags().GetInt("lines")
+			runFollow, err := cmd.Flags().GetBool("follow")
+			if err != nil {
+				return err
+			}
+			runInterval, err := cmd.Flags().GetDuration("interval")
+			if err != nil {
+				return err
+			}
+			runSince, err := cmd.Flags().GetDuration("since")
+			if err != nil {
+				return err
+			}
+			runLines, err := cmd.Flags().GetInt("lines")
+			if err != nil {
+				return err
+			}
 			return a.streamRunLogs(args[0], runFollow, runInterval, runSince, runLines)
 		},
 	}
@@ -1131,14 +1163,32 @@ rascal logs run run_abc123 --follow --interval 4s
 rascal logs rascald
 rascal logs rascald --follow
 rascal logs rascald --host rascal-server
-`),
+		`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			host, _ := cmd.Flags().GetString("host")
-			sshUser, _ := cmd.Flags().GetString("ssh-user")
-			sshKey, _ := cmd.Flags().GetString("ssh-key")
-			sshPort, _ := cmd.Flags().GetInt("ssh-port")
-			serviceFollow, _ := cmd.Flags().GetBool("follow")
-			serviceLines, _ := cmd.Flags().GetInt("lines")
+			host, err := cmd.Flags().GetString("host")
+			if err != nil {
+				return err
+			}
+			sshUser, err := cmd.Flags().GetString("ssh-user")
+			if err != nil {
+				return err
+			}
+			sshKey, err := cmd.Flags().GetString("ssh-key")
+			if err != nil {
+				return err
+			}
+			sshPort, err := cmd.Flags().GetInt("ssh-port")
+			if err != nil {
+				return err
+			}
+			serviceFollow, err := cmd.Flags().GetBool("follow")
+			if err != nil {
+				return err
+			}
+			serviceLines, err := cmd.Flags().GetInt("lines")
+			if err != nil {
+				return err
+			}
 			return a.streamRascaldServiceLogs(host, sshUser, sshKey, sshPort, serviceFollow, serviceLines)
 		},
 	}
@@ -1150,14 +1200,32 @@ rascal logs rascald --host rascal-server
 		Example: strings.TrimSpace(`
 rascal logs caddy
 rascal logs caddy --follow
-`),
+		`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			host, _ := cmd.Flags().GetString("host")
-			sshUser, _ := cmd.Flags().GetString("ssh-user")
-			sshKey, _ := cmd.Flags().GetString("ssh-key")
-			sshPort, _ := cmd.Flags().GetInt("ssh-port")
-			serviceFollow, _ := cmd.Flags().GetBool("follow")
-			serviceLines, _ := cmd.Flags().GetInt("lines")
+			host, err := cmd.Flags().GetString("host")
+			if err != nil {
+				return err
+			}
+			sshUser, err := cmd.Flags().GetString("ssh-user")
+			if err != nil {
+				return err
+			}
+			sshKey, err := cmd.Flags().GetString("ssh-key")
+			if err != nil {
+				return err
+			}
+			sshPort, err := cmd.Flags().GetInt("ssh-port")
+			if err != nil {
+				return err
+			}
+			serviceFollow, err := cmd.Flags().GetBool("follow")
+			if err != nil {
+				return err
+			}
+			serviceLines, err := cmd.Flags().GetInt("lines")
+			if err != nil {
+				return err
+			}
 			return a.streamSystemdUnitLogs("caddy", host, sshUser, sshKey, sshPort, serviceFollow, serviceLines)
 		},
 	}
@@ -1170,14 +1238,32 @@ rascal logs caddy --follow
 		Example: strings.TrimSpace(`
 rascal logs caddy-access
 rascal logs caddy-access --follow
-`),
+		`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			host, _ := cmd.Flags().GetString("host")
-			sshUser, _ := cmd.Flags().GetString("ssh-user")
-			sshKey, _ := cmd.Flags().GetString("ssh-key")
-			sshPort, _ := cmd.Flags().GetInt("ssh-port")
-			serviceFollow, _ := cmd.Flags().GetBool("follow")
-			serviceLines, _ := cmd.Flags().GetInt("lines")
+			host, err := cmd.Flags().GetString("host")
+			if err != nil {
+				return err
+			}
+			sshUser, err := cmd.Flags().GetString("ssh-user")
+			if err != nil {
+				return err
+			}
+			sshKey, err := cmd.Flags().GetString("ssh-key")
+			if err != nil {
+				return err
+			}
+			sshPort, err := cmd.Flags().GetInt("ssh-port")
+			if err != nil {
+				return err
+			}
+			serviceFollow, err := cmd.Flags().GetBool("follow")
+			if err != nil {
+				return err
+			}
+			serviceLines, err := cmd.Flags().GetInt("lines")
+			if err != nil {
+				return err
+			}
 			return a.streamRemoteFileLogs("/var/log/caddy/rascal-access.log", host, sshUser, sshKey, sshPort, serviceFollow, serviceLines)
 		},
 	}
@@ -1218,9 +1304,7 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 			return nil, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 		}
 		if resp.StatusCode >= 300 {
-			defer func() {
-				_ = resp.Body.Close()
-			}()
+			defer closeWithLog("close retry response body", resp.Body)
 			return nil, decodeServerError(resp)
 		}
 		return resp, nil
@@ -1232,9 +1316,7 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 		if err != nil {
 			return "", err
 		}
-		defer func() {
-			_ = resp.Body.Close()
-		}()
+		defer closeWithLog("close cancel response body", resp.Body)
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return "", err
@@ -1268,9 +1350,7 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 		if err != nil {
 			return followResponse{}, err
 		}
-		defer func() {
-			_ = resp.Body.Close()
-		}()
+		defer closeWithLog("close follow logs response body", resp.Body)
 		var out followResponse
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return followResponse{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
@@ -1291,10 +1371,14 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 		if strings.HasPrefix(body, last) {
 			diff := strings.TrimPrefix(body, last)
 			if diff != "" {
-				_, _ = io.WriteString(os.Stdout, diff)
+				if _, err := io.WriteString(os.Stdout, diff); err != nil {
+					return err
+				}
 			}
 		} else if body != last {
-			_, _ = io.WriteString(os.Stdout, body)
+			if _, err := io.WriteString(os.Stdout, body); err != nil {
+				return err
+			}
 		}
 		last = body
 		if payload.Done {
@@ -1655,9 +1739,7 @@ rascal retry run_abc123 --debug=false
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 			}
-			defer func() {
-				_ = resp.Body.Close()
-			}()
+			defer closeWithLog("close retry response body", resp.Body)
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
 			}
@@ -1695,9 +1777,7 @@ rascal cancel run_abc123
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 			}
-			defer func() {
-				_ = resp.Body.Close()
-			}()
+			defer closeWithLog("close cancel response body", resp.Body)
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
 			}
@@ -2224,7 +2304,9 @@ func newCompletionCmd(root *cobra.Command) *cobra.Command {
 			if err := os.WriteFile(target, data.Bytes(), 0o644); err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "installed completion: %s\n", target)
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "installed completion: %s\n", target); err != nil {
+				return err
+			}
 			return nil
 		},
 	})
@@ -2263,9 +2345,7 @@ func (a *app) fetchRuns(limit int, all bool) ([]state.Run, error) {
 	if err != nil {
 		return nil, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer closeWithLog("close list runs response body", resp.Body)
 	if resp.StatusCode >= 300 {
 		return nil, decodeServerError(resp)
 	}
@@ -2283,9 +2363,7 @@ func (a *app) fetchRun(runID string) (state.Run, error) {
 	if err != nil {
 		return state.Run{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer closeWithLog("close get run response body", resp.Body)
 	if resp.StatusCode >= 300 {
 		return state.Run{}, decodeServerError(resp)
 	}
@@ -2360,9 +2438,7 @@ func (a *app) fetchTask(taskID string) (state.Task, error) {
 	if err != nil {
 		return state.Task{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer closeWithLog("close get task response body", resp.Body)
 	if resp.StatusCode >= 300 {
 		return state.Task{}, decodeServerError(resp)
 	}
@@ -2376,8 +2452,13 @@ func (a *app) fetchTask(taskID string) (state.Task, error) {
 }
 
 func decodeServerError(resp *http.Response) error {
-	body, _ := io.ReadAll(resp.Body)
-	msg := strings.TrimSpace(string(body))
+	body, err := io.ReadAll(resp.Body)
+	msg := ""
+	if err != nil {
+		msg = fmt.Sprintf("read server error response failed: %v", err)
+	} else {
+		msg = strings.TrimSpace(string(body))
+	}
 	if msg == "" {
 		msg = http.StatusText(resp.StatusCode)
 	}
@@ -2460,8 +2541,8 @@ func saveClientConfigMap(path string, settings map[string]any) error {
 	return nil
 }
 
-func loadEnvFile(path string) (map[string]string, error) {
-	out := map[string]string{}
+func loadEnvFile(path string) (out map[string]string, err error) {
+	out = map[string]string{}
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return out, nil
@@ -2475,7 +2556,9 @@ func loadEnvFile(path string) (map[string]string, error) {
 		return nil, err
 	}
 	defer func() {
-		_ = f.Close()
+		if closeErr := f.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close env file: %w", closeErr)
+		}
 	}()
 
 	scanner := bufio.NewScanner(f)
@@ -2509,6 +2592,15 @@ func loadEnvFile(path string) (map[string]string, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func closeWithLog(name string, closer io.Closer) {
+	if closer == nil {
+		return
+	}
+	if err := closer.Close(); err != nil {
+		log.Printf("%s: %v", name, err)
+	}
 }
 
 func (a *app) loadGlobalEnv() error {
@@ -2574,18 +2666,25 @@ func noColorRequested(flagValue bool) bool {
 	return set
 }
 
-func promptString(r *bufio.Reader, label, def string) string {
+func promptString(r *bufio.Reader, label, def string) (string, error) {
 	if strings.TrimSpace(def) != "" {
-		fmt.Printf("%s [%s]: ", label, def)
+		if _, err := fmt.Printf("%s [%s]: ", label, def); err != nil {
+			return "", err
+		}
 	} else {
-		fmt.Printf("%s: ", label)
+		if _, err := fmt.Printf("%s: ", label); err != nil {
+			return "", err
+		}
 	}
-	line, _ := r.ReadString('\n')
+	line, err := r.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
 	line = strings.TrimSpace(line)
 	if line == "" {
-		return def
+		return def, nil
 	}
-	return line
+	return line, nil
 }
 
 func filterLogsSince(input string, since time.Time) string {
@@ -3141,18 +3240,28 @@ func exitErr(err error) {
 		if ce.Code != 0 {
 			code = ce.Code
 		}
-		fmt.Fprintln(os.Stderr, "error:", ce.Error())
+		if _, printErr := fmt.Fprintln(os.Stderr, "error:", ce.Error()); printErr != nil {
+			os.Exit(code)
+		}
 		if strings.TrimSpace(ce.Hint) != "" {
-			fmt.Fprintln(os.Stderr, "hint:", ce.Hint)
+			if _, printErr := fmt.Fprintln(os.Stderr, "hint:", ce.Hint); printErr != nil {
+				os.Exit(code)
+			}
 		}
 		if ce.Cause != nil {
-			fmt.Fprintln(os.Stderr, "cause:", ce.Cause)
+			if _, printErr := fmt.Fprintln(os.Stderr, "cause:", ce.Cause); printErr != nil {
+				os.Exit(code)
+			}
 		}
 		if ce.RequestID != "" {
-			fmt.Fprintln(os.Stderr, "request_id:", ce.RequestID)
+			if _, printErr := fmt.Fprintln(os.Stderr, "request_id:", ce.RequestID); printErr != nil {
+				os.Exit(code)
+			}
 		}
 		os.Exit(code)
 	}
-	fmt.Fprintln(os.Stderr, "error:", err)
+	if _, printErr := fmt.Fprintln(os.Stderr, "error:", err); printErr != nil {
+		os.Exit(code)
+	}
 	os.Exit(code)
 }

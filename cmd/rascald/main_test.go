@@ -185,7 +185,9 @@ func (f *fakeLauncher) Inspect(_ context.Context, handle runner.ExecutionHandle)
 		return runner.ExecutionState{Running: true}, nil
 	}
 	if !execRec.finalized {
-		_ = writeFakeMeta(execRec.spec, execRec.result)
+		if err := writeFakeMeta(execRec.spec, execRec.result); err != nil {
+			return runner.ExecutionState{}, err
+		}
 		execRec.finalized = true
 	}
 	exitCode := execRec.result.ExitCode
@@ -271,7 +273,9 @@ func (l *stubbornLauncher) Inspect(_ context.Context, _ runner.ExecutionHandle) 
 			res.Error = "canceled"
 		}
 	}
-	_ = writeFakeMeta(spec, res)
+	if err := writeFakeMeta(spec, res); err != nil {
+		return runner.ExecutionState{}, err
+	}
 	exitCode := res.ExitCode
 	return runner.ExecutionState{Running: false, ExitCode: &exitCode}, nil
 }

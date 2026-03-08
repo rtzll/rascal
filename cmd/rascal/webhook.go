@@ -150,9 +150,7 @@ func (a *app) newWebhookTestCmd() *cobra.Command {
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "webhook request failed", Cause: err}
 			}
-			defer func() {
-				_ = resp.Body.Close()
-			}()
+			defer closeWithLog("close webhook test response body", resp.Body)
 
 			body, err := io.ReadAll(io.LimitReader(resp.Body, webhookTestResponseBodyReadLimit))
 			if err != nil {

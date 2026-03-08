@@ -242,11 +242,15 @@ func runWithExecutor(ex commandExecutor) error {
 	}
 
 	if _, statErr := os.Stat(filepath.Join(cfg.RepoDir, "Makefile")); statErr == nil {
-		_ = runStage("verify", func() error {
+		if err := runStage("verify", func() error {
 			log.Printf("[%s] running lightweight verify: make -n test", nowUTC())
-			_, _ = runCommand(ex, cfg.RepoDir, nil, "make", "-n", "test")
+			if _, err := runCommand(ex, cfg.RepoDir, nil, "make", "-n", "test"); err != nil {
+				return err
+			}
 			return nil
-		})
+		}); err != nil {
+			log.Printf("[%s] lightweight verify warning: %v", nowUTC(), err)
+		}
 	}
 
 	commitTitle := fmt.Sprintf("chore(rascal): %s", taskSubject(cfg.Task, cfg.TaskID))
@@ -622,13 +626,17 @@ func checkoutRepo(ex commandExecutor, cfg config) error {
 		}
 	}
 
-	_, _ = runCommand(ex, cfg.RepoDir, nil, "git", "fetch", "origin", cfg.BaseBranch, cfg.HeadBranch)
+	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "fetch", "origin", cfg.BaseBranch, cfg.HeadBranch); err != nil {
+		log.Printf("[%s] git fetch warning: %v", nowUTC(), err)
+	}
 	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "checkout", cfg.BaseBranch); err != nil {
 		if _, createErr := runCommand(ex, cfg.RepoDir, nil, "git", "checkout", "-b", cfg.BaseBranch, "origin/"+cfg.BaseBranch); createErr != nil {
 			return createErr
 		}
 	}
-	_, _ = runCommand(ex, cfg.RepoDir, nil, "git", "pull", "--ff-only", "origin", cfg.BaseBranch)
+	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "pull", "--ff-only", "origin", cfg.BaseBranch); err != nil {
+		log.Printf("[%s] git pull warning: %v", nowUTC(), err)
+	}
 
 	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-parse", "--verify", cfg.HeadBranch); err == nil {
 		_, err = runCommand(ex, cfg.RepoDir, nil, "git", "checkout", cfg.HeadBranch)
@@ -686,12 +694,16 @@ func runGoose(ex commandExecutor, cfg config) (string, string, error) {
 			}
 			fallbackArgs := gooseRunArgs(cfg, false)
 			if retryErr := runGooseOnce(ex, cfg, fallbackArgs); retryErr != nil {
-				ensureGooseLogHasError(cfg.GooseLogPath)
+				if writeErr := ensureGooseLogHasError(cfg.GooseLogPath); writeErr != nil {
+					log.Printf("[%s] goose fallback log write warning: %v", nowUTC(), writeErr)
+				}
 				return "", sessionID, fmt.Errorf("goose run failed after session fallback: %w", retryErr)
 			}
 			log.Printf("[%s] goose session fallback succeeded; started fresh session name=%s", nowUTC(), sessionID)
 		} else {
-			ensureGooseLogHasError(cfg.GooseLogPath)
+			if writeErr := ensureGooseLogHasError(cfg.GooseLogPath); writeErr != nil {
+				log.Printf("[%s] goose log write warning: %v", nowUTC(), writeErr)
+			}
 			return "", sessionID, fmt.Errorf("goose run failed: %w", err)
 		}
 	}
@@ -722,13 +734,15 @@ func gooseRunArgs(cfg config, resume bool) []string {
 	return args
 }
 
-func runGooseOnce(ex commandExecutor, cfg config, args []string) error {
+func runGooseOnce(ex commandExecutor, cfg config, args []string) (err error) {
 	logFile, err := os.OpenFile(cfg.GooseLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open goose log: %w", err)
 	}
 	defer func() {
-		_ = logFile.Close()
+		if closeErr := logFile.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close goose log: %w", closeErr)
+		}
 	}()
 
 	env := []string{}
@@ -741,7 +755,7 @@ func runGooseOnce(ex commandExecutor, cfg config, args []string) error {
 	return nil
 }
 
-func runCodex(ex commandExecutor, cfg config) (string, string, error) {
+func runCodex(ex commandExecutor, cfg config) (output string, sessionID string, err error) {
 	if err := ensureCodexHome(cfg); err != nil {
 		return "", "", err
 	}
@@ -767,7 +781,9 @@ func runCodex(ex commandExecutor, cfg config) (string, string, error) {
 		return "", "", fmt.Errorf("open codex log: %w", err)
 	}
 	defer func() {
-		_ = logFile.Close()
+		if closeErr := logFile.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close codex log: %w", closeErr)
+		}
 	}()
 
 	if err := ex.RunWithInput(cfg.RepoDir, nil, strings.NewReader(string(instructions)), logFile, logFile, "codex", args...); err != nil {
@@ -778,12 +794,12 @@ func runCodex(ex commandExecutor, cfg config) (string, string, error) {
 		return "", sessionID, fmt.Errorf("codex run failed: %w", err)
 	}
 
-	sessionID, err := discoverLatestCodexSessionID(cfg.CodexHome)
+	sessionID, err = discoverLatestCodexSessionID(cfg.CodexHome)
 	if err != nil {
 		return "", "", fmt.Errorf("discover codex session: %w", err)
 	}
 
-	output, err := loadAgentOutput(cfg.AgentOutputPath, cfg.GooseLogPath, "codex")
+	output, err = loadAgentOutput(cfg.AgentOutputPath, cfg.GooseLogPath, "codex")
 	if err != nil {
 		return "", sessionID, err
 	}
@@ -906,13 +922,15 @@ func listCodexSessionFiles(root string) ([]string, error) {
 	return paths, nil
 }
 
-func parseCodexSessionID(path string) (string, error) {
+func parseCodexSessionID(path string) (sessionID string, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("open codex session file: %w", err)
 	}
 	defer func() {
-		_ = file.Close()
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close codex session file: %w", closeErr)
+		}
 	}()
 
 	scanner := bufio.NewScanner(file)
@@ -945,7 +963,9 @@ func copyFile(src, dst string, mode os.FileMode) (err error) {
 		return err
 	}
 	defer func() {
-		_ = in.Close()
+		if closeErr := in.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
 	}()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
@@ -981,10 +1001,13 @@ func gooseSessionExists(ex commandExecutor, cfg config, name string) (bool, erro
 	return false, nil
 }
 
-func ensureGooseLogHasError(path string) {
+func ensureGooseLogHasError(path string) error {
 	if stat, err := os.Stat(path); err == nil && stat.Size() == 0 {
-		_ = os.WriteFile(path, []byte(`{"event":"error","message":"goose run failed"}`+"\n"), 0o644)
+		if err := os.WriteFile(path, []byte(`{"event":"error","message":"goose run failed"}`+"\n"), 0o644); err != nil {
+			return fmt.Errorf("write goose fallback error log: %w", err)
+		}
 	}
+	return nil
 }
 
 func resetGooseSessionRoot(path string) error {

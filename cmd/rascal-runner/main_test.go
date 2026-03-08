@@ -285,7 +285,9 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 				t.Fatalf("unexpected command: %s", name)
 			}
 			gotArgs = append([]string(nil), args...)
-			_, _ = io.WriteString(stdout, `{"event":"message"}`+"\n")
+			if _, err := io.WriteString(stdout, `{"event":"message"}`+"\n"); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
@@ -332,7 +334,9 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 				t.Fatalf("unexpected command: %s", name)
 			}
 			gotArgs = append([]string(nil), args...)
-			_, _ = io.WriteString(stdout, `{"event":"message"}`+"\n")
+			if _, err := io.WriteString(stdout, `{"event":"message"}`+"\n"); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
@@ -381,7 +385,9 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 				t.Fatalf("unexpected command: %s", name)
 			}
 			gotArgs = append([]string(nil), args...)
-			_, _ = io.WriteString(stdout, `{"event":"message"}`+"\n")
+			if _, err := io.WriteString(stdout, `{"event":"message"}`+"\n"); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
@@ -448,7 +454,9 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 			if len(calls) == 1 {
 				return errors.New("resume failed: session state missing")
 			}
-			_, _ = io.WriteString(stdout, `{"event":"message"}`+"\n")
+			if _, err := io.WriteString(stdout, `{"event":"message"}`+"\n"); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
@@ -585,7 +593,9 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 				t.Fatalf("unexpected command: %s", name)
 			}
 			gotArgs = append([]string(nil), args...)
-			_, _ = io.WriteString(stdout, `{"event":"message"}`+"\n")
+			if _, err := io.WriteString(stdout, `{"event":"message"}`+"\n"); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
@@ -644,7 +654,9 @@ func TestRunCodexFreshSession(t *testing.T) {
 			if err := os.WriteFile(sessionPath, []byte(`{"type":"session_meta","payload":{"id":"session-123"}}`+"\n"), 0o644); err != nil {
 				t.Fatalf("write codex session: %v", err)
 			}
-			_, _ = io.WriteString(stdout, `{"type":"message"}`+"\n")
+			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
@@ -718,7 +730,9 @@ func TestRunCodexResumeSession(t *testing.T) {
 			if err := os.WriteFile(sessionPath, []byte(`{"type":"session_meta","payload":{"id":"session-abc"}}`+"\n"), 0o644); err != nil {
 				t.Fatalf("write codex session: %v", err)
 			}
-			_, _ = io.WriteString(stdout, `{"type":"message"}`+"\n")
+			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
@@ -997,7 +1011,9 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 		},
 		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, _ ...string) error {
 			if name == "goose" {
-				_, _ = io.WriteString(stdout, `{"event":"message","usage":{"total_tokens":7}}`+"\n")
+				if _, err := io.WriteString(stdout, `{"event":"message","usage":{"total_tokens":7}}`+"\n"); err != nil {
+					return err
+				}
 			}
 			return nil
 		},

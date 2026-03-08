@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,31 +52,32 @@ func New(path string, maxRuns int) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+	closeDBWithError := func(step string, cause error) (*Store, error) {
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, fmt.Errorf("%s: %w (close sqlite: %v)", step, cause, closeErr)
+		}
+		return nil, fmt.Errorf("%s: %w", step, cause)
+	}
 	// Use a single shared SQLite connection so pragmas apply consistently and
 	// writes don't contend across pooled connections in tests/CI.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("enable sqlite WAL mode: %w", err)
+		return closeDBWithError("enable sqlite WAL mode", err)
 	}
 	if _, err := db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("set sqlite busy_timeout: %w", err)
+		return closeDBWithError("set sqlite busy_timeout", err)
 	}
 	if _, err := db.Exec("PRAGMA foreign_keys=ON;"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("enable sqlite foreign_keys: %w", err)
+		return closeDBWithError("enable sqlite foreign_keys", err)
 	}
 
 	if err := goose.SetDialect("sqlite3"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("configure goose sqlite dialect: %w", err)
+		return closeDBWithError("configure goose sqlite dialect", err)
 	}
 	goose.SetBaseFS(migrationsFS)
 	if err := goose.Up(db, "migrations"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("run migrations: %w", err)
+		return closeDBWithError("run migrations", err)
 	}
 
 	s := &Store{
@@ -307,7 +309,9 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		return Run{}, err
 	}
 	defer func() {
-		_ = tx.Rollback()
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			log.Printf("rollback create run transaction: %v", rollbackErr)
+		}
 	}()
 	qtx := s.q.WithTx(tx)
 
@@ -430,7 +434,9 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 		return Run{}, err
 	}
 	defer func() {
-		_ = tx.Rollback()
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			log.Printf("rollback update run transaction: %v", rollbackErr)
+		}
 	}()
 	qtx := s.q.WithTx(tx)
 

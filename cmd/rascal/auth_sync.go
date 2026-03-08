@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 )
@@ -65,7 +67,9 @@ func syncRemoteAuth(cfg syncRemoteAuthConfig) error {
 			return fmt.Errorf("create temp auth file: %w", err)
 		}
 		defer func() {
-			_ = os.Remove(tmpFile.Name())
+			if removeErr := os.Remove(tmpFile.Name()); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				log.Printf("remove temp auth file %s: %v", tmpFile.Name(), removeErr)
+			}
 		}()
 
 		content := fmt.Sprintf(
@@ -75,7 +79,9 @@ func syncRemoteAuth(cfg syncRemoteAuthConfig) error {
 			cfg.WebhookSecret,
 		)
 		if _, err := tmpFile.WriteString(content); err != nil {
-			_ = tmpFile.Close()
+			if closeErr := tmpFile.Close(); closeErr != nil {
+				return fmt.Errorf("write temp auth file: %w (close temp auth file: %v)", err, closeErr)
+			}
 			return fmt.Errorf("write temp auth file: %w", err)
 		}
 		if err := tmpFile.Close(); err != nil {

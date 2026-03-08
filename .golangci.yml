@@ -8,3 +8,11 @@ issues:
 
 linters:
   default: standard
+  enable:
+    - bodyclose
+    - sqlclosecheck
+
+  settings:
+    errcheck:
+      check-blank: true
+      check-type-assertions: true
