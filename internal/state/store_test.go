@@ -230,6 +230,37 @@ func TestStoreAllowsRecoveryTransitionRunningToQueued(t *testing.T) {
 	}
 }
 
+func TestStoreAddRunAppliesStateDefaults(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-defaults", Repo: "owner/repo"}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	run, err := store.AddRun(CreateRunInput{
+		ID:     "run_defaults",
+		TaskID: "task-defaults",
+		Repo:   "owner/repo",
+		Task:   "defaults",
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if run.BaseBranch != DefaultRunBaseBranch {
+		t.Fatalf("base branch = %q, want %q", run.BaseBranch, DefaultRunBaseBranch)
+	}
+	if run.Trigger != DefaultRunTrigger {
+		t.Fatalf("trigger = %q, want %q", run.Trigger, DefaultRunTrigger)
+	}
+	if run.Debug != DefaultRunDebug {
+		t.Fatalf("debug = %t, want %t", run.Debug, DefaultRunDebug)
+	}
+}
+
 func TestStoreRejectsInvalidRunStatusTransition(t *testing.T) {
 	t.Parallel()
 

@@ -1443,10 +1443,6 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 			req.PRStatus = state.PRStatusNone
 		}
 	}
-	debugEnabled := true
-	if req.Debug != nil {
-		debugEnabled = *req.Debug
-	}
 
 	runID, err := state.NewRunID()
 	if err != nil {
@@ -1465,12 +1461,8 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	}
 
 	lastRun, hasLastRun := s.store.LastRunForTask(req.TaskID)
-	if req.BaseBranch == "" {
-		if hasLastRun && lastRun.BaseBranch != "" {
-			req.BaseBranch = lastRun.BaseBranch
-		} else {
-			req.BaseBranch = "main"
-		}
+	if req.BaseBranch == "" && hasLastRun && lastRun.BaseBranch != "" {
+		req.BaseBranch = lastRun.BaseBranch
 	}
 	if req.HeadBranch == "" {
 		if hasLastRun && (req.Trigger == "pr_comment" || req.Trigger == "pr_review") && lastRun.HeadBranch != "" {
@@ -1510,7 +1502,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		PRNumber:     req.PRNumber,
 		PRStatus:     req.PRStatus,
 		Context:      req.Context,
-		Debug:        boolPtr(debugEnabled),
+		Debug:        req.Debug,
 	})
 	if err != nil {
 		return state.Run{}, fmt.Errorf("persist run: %w", err)

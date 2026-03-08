@@ -196,6 +196,34 @@ type CreateRunInput struct {
 	Context      string
 }
 
+const (
+	DefaultRunBaseBranch = "main"
+	DefaultRunTrigger    = "cli"
+	DefaultRunDebug      = true
+)
+
+func (in CreateRunInput) WithStateDefaults() CreateRunInput {
+	in.ID = strings.TrimSpace(in.ID)
+	in.TaskID = strings.TrimSpace(in.TaskID)
+	in.Repo = NormalizeRepo(in.Repo)
+	in.BaseBranch = strings.TrimSpace(in.BaseBranch)
+	in.Trigger = strings.TrimSpace(in.Trigger)
+	if in.BaseBranch == "" {
+		in.BaseBranch = DefaultRunBaseBranch
+	}
+	if in.Trigger == "" {
+		in.Trigger = DefaultRunTrigger
+	}
+	return in
+}
+
+func (in CreateRunInput) DebugOrDefault() bool {
+	if in.Debug == nil {
+		return DefaultRunDebug
+	}
+	return *in.Debug
+}
+
 type UpsertTaskInput struct {
 	ID           string
 	Repo         string

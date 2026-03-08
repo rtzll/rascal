@@ -291,27 +291,14 @@ func (s *Store) IsTaskCompleted(taskID string) bool {
 }
 
 func (s *Store) AddRun(in CreateRunInput) (Run, error) {
-	in.ID = strings.TrimSpace(in.ID)
-	in.TaskID = strings.TrimSpace(in.TaskID)
-	in.Repo = NormalizeRepo(in.Repo)
+	in = in.WithStateDefaults()
 	in.AgentBackend = agent.NormalizeBackend(string(in.AgentBackend))
 	if in.ID == "" || in.TaskID == "" || in.Repo == "" {
 		return Run{}, fmt.Errorf("id, task_id and repo are required")
 	}
 
 	now := time.Now().UTC()
-	baseBranch := strings.TrimSpace(in.BaseBranch)
-	if baseBranch == "" {
-		baseBranch = "main"
-	}
-	trigger := strings.TrimSpace(in.Trigger)
-	if trigger == "" {
-		trigger = "cli"
-	}
-	debugEnabled := true
-	if in.Debug != nil {
-		debugEnabled = *in.Debug
-	}
+	debugEnabled := in.DebugOrDefault()
 	prStatus := normalizePRStatus(in.PRStatus)
 	if prStatus == PRStatusNone && in.PRNumber > 0 {
 		prStatus = PRStatusOpen
@@ -355,9 +342,9 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		Repo:         in.Repo,
 		Task:         in.Task,
 		AgentBackend: in.AgentBackend.String(),
-		BaseBranch:   baseBranch,
+		BaseBranch:   in.BaseBranch,
 		HeadBranch:   in.HeadBranch,
-		Trigger:      trigger,
+		Trigger:      in.Trigger,
 		Debug:        debugEnabled,
 		Status:       string(StatusQueued),
 		RunDir:       in.RunDir,
