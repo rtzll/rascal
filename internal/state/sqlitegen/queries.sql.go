@@ -753,6 +753,36 @@ func (q *Queries) GetActiveCredentialLeaseByRunID(ctx context.Context, runID str
 	return i, err
 }
 
+const getActiveSchedulerPause = `-- name: GetActiveSchedulerPause :one
+SELECT
+  scope,
+  reason,
+  paused_until,
+  created_at,
+  updated_at
+FROM scheduler_pauses
+WHERE scope = ?
+  AND paused_until > ?
+`
+
+type GetActiveSchedulerPauseParams struct {
+	Scope       string `json:"scope"`
+	PausedUntil int64  `json:"paused_until"`
+}
+
+func (q *Queries) GetActiveSchedulerPause(ctx context.Context, arg GetActiveSchedulerPauseParams) (SchedulerPause, error) {
+	row := q.db.QueryRowContext(ctx, getActiveSchedulerPause, arg.Scope, arg.PausedUntil)
+	var i SchedulerPause
+	err := row.Scan(
+		&i.Scope,
+		&i.Reason,
+		&i.PausedUntil,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCodexCredential = `-- name: GetCodexCredential :one
 SELECT
   id,
@@ -2597,6 +2627,66 @@ func (q *Queries) UpsertRunTokenUsage(ctx context.Context, arg UpsertRunTokenUsa
 		&i.ReasoningOutputTokens,
 		&i.RawUsageJson,
 		&i.CapturedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertSchedulerPause = `-- name: UpsertSchedulerPause :one
+INSERT INTO scheduler_pauses (
+  scope,
+  reason,
+  paused_until,
+  created_at,
+  updated_at
+)
+VALUES (
+  ?1,
+  ?2,
+  ?3,
+  ?4,
+  ?5
+)
+ON CONFLICT(scope) DO UPDATE SET
+  paused_until = CASE
+    WHEN scheduler_pauses.paused_until > excluded.paused_until THEN scheduler_pauses.paused_until
+    ELSE excluded.paused_until
+  END,
+  reason = CASE
+    WHEN scheduler_pauses.paused_until > excluded.paused_until THEN scheduler_pauses.reason
+    ELSE excluded.reason
+  END,
+  updated_at = excluded.updated_at
+RETURNING
+  scope,
+  reason,
+  paused_until,
+  created_at,
+  updated_at
+`
+
+type UpsertSchedulerPauseParams struct {
+	Scope       string `json:"scope"`
+	Reason      string `json:"reason"`
+	PausedUntil int64  `json:"paused_until"`
+	CreatedAt   int64  `json:"created_at"`
+	UpdatedAt   int64  `json:"updated_at"`
+}
+
+func (q *Queries) UpsertSchedulerPause(ctx context.Context, arg UpsertSchedulerPauseParams) (SchedulerPause, error) {
+	row := q.db.QueryRowContext(ctx, upsertSchedulerPause,
+		arg.Scope,
+		arg.Reason,
+		arg.PausedUntil,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i SchedulerPause
+	err := row.Scan(
+		&i.Scope,
+		&i.Reason,
+		&i.PausedUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

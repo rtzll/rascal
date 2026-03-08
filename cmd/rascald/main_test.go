@@ -2104,7 +2104,7 @@ func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *tes
 	}
 }
 
-func TestExecuteRunPostsFailureCommentForGooseUsageLimit(t *testing.T) {
+func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 	launcher := &fakeLauncher{
 		res: fakeRunResult{
 			ExitCode: 1,
@@ -2141,42 +2141,50 @@ func TestExecuteRunPostsFailureCommentForGooseUsageLimit(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write response target: %v", err)
 	}
-	gooseLog := `{"type":"message","message":{"id":null,"role":"assistant","created":1772899608,"content":[{"type":"text","text":"Ran into this error: Request failed: Codex CLI error: You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 10th, 2026 6:31 AM..\n\nPlease retry if you think this is a transient or recoverable error."}],"metadata":{"userVisible":true,"agentVisible":true}}}`
+	gooseLog := `{"type":"message","message":{"id":null,"role":"assistant","created":1772899608,"content":[{"type":"text","text":"Ran into this error: Request failed: Codex CLI error: You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 10th, 2099 6:31 AM..\n\nPlease retry if you think this is a transient or recoverable error."}],"metadata":{"userVisible":true,"agentVisible":true}}}`
 	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(gooseLog+"\n"), 0o644); err != nil {
 		t.Fatalf("write goose log: %v", err)
 	}
 
 	s.executeRun(run.ID)
 
-	comments := fakeGH.postedComments()
-	if len(comments) != 1 {
-		t.Fatalf("expected one posted comment, got %d", len(comments))
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
 	}
-	comment := comments[0]
-	if comment.repo != "owner/repo" || comment.issueNumber != 53 {
-		t.Fatalf("unexpected comment target: %+v", comment)
+	if updated.Status != state.StatusQueued {
+		t.Fatalf("expected queued status after usage limit, got %s", updated.Status)
 	}
-	if !strings.Contains(comment.body, runFailureCommentBodyMarker) {
-		t.Fatalf("expected failure marker in comment body, got body:\n%s", comment.body)
+	if updated.StartedAt != nil {
+		t.Fatalf("expected started_at cleared on requeue")
 	}
-	if !strings.Contains(comment.body, "@alice Rascal run `run_comment_usage_limit` failed because Goose hit the Codex usage limit.") {
-		t.Fatalf("expected usage-limit headline, got body:\n%s", comment.body)
+	if updated.CompletedAt != nil {
+		t.Fatalf("expected completed_at cleared on requeue")
 	}
-	if !strings.Contains(comment.body, "The provider said to try again at Mar 10th, 2026 6:31 AM.") {
-		t.Fatalf("expected retry timestamp, got body:\n%s", comment.body)
+	if len(fakeGH.postedComments()) != 0 {
+		t.Fatalf("expected no failure comment while run is paused for retry")
 	}
-	if !strings.Contains(comment.body, "Run error:\ngoose run failed: exit status 1") {
-		t.Fatalf("expected run error details, got body:\n%s", comment.body)
+	if calls := launcher.Calls(); calls != 1 {
+		t.Fatalf("expected run not to restart before pause expiry, got launcher calls=%d", calls)
 	}
-	if !strings.Contains(comment.body, "Goose log:\n"+gooseLog) {
-		t.Fatalf("expected goose log details, got body:\n%s", comment.body)
+	if _, err := os.Stat(runFailureCommentMarkerPath(run.RunDir)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no failure marker, got err=%v", err)
 	}
-	if _, err := os.Stat(runFailureCommentMarkerPath(run.RunDir)); err != nil {
-		t.Fatalf("expected failure marker after successful post: %v", err)
+	if pauseUntil, reason, ok, err := s.store.ActiveSchedulerPause(workerPauseScope, time.Now().UTC()); err != nil {
+		t.Fatalf("load scheduler pause: %v", err)
+	} else if !ok {
+		t.Fatal("expected active scheduler pause after usage limit")
+	} else {
+		if !pauseUntil.After(time.Now().UTC()) {
+			t.Fatalf("expected future pause deadline, got %s", pauseUntil)
+		}
+		if !strings.Contains(reason, "usage limit") {
+			t.Fatalf("expected usage-limit pause reason, got %q", reason)
+		}
 	}
 }
 
-func TestExecuteRunPostsFailureCommentForIssueTriggeredRun(t *testing.T) {
+func TestExecuteRunRequeuesIssueTriggeredRunForUsageLimit(t *testing.T) {
 	launcher := &fakeLauncher{
 		res: fakeRunResult{
 			ExitCode: 1,
@@ -2204,26 +2212,92 @@ func TestExecuteRunPostsFailureCommentForIssueTriggeredRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	gooseLog := `{"type":"message","message":{"content":[{"type":"text","text":"Request failed: Codex CLI error: You've hit your usage limit. Try again at Mar 10th, 2026 6:31 AM."}]}}`
+	gooseLog := `{"type":"message","message":{"content":[{"type":"text","text":"Request failed: Codex CLI error: You've hit your usage limit. Try again at Mar 10th, 2099 6:31 AM."}]}}`
 	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(gooseLog+"\n"), 0o644); err != nil {
 		t.Fatalf("write goose log: %v", err)
 	}
 
 	s.executeRun(run.ID)
 
-	comments := fakeGH.postedComments()
-	if len(comments) != 1 {
-		t.Fatalf("expected one posted comment, got %d", len(comments))
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
 	}
-	comment := comments[0]
-	if comment.repo != "owner/repo" || comment.issueNumber != 16 {
-		t.Fatalf("unexpected comment target: %+v", comment)
+	if updated.Status != state.StatusQueued {
+		t.Fatalf("expected queued status after usage limit, got %s", updated.Status)
 	}
-	if !strings.Contains(comment.body, "Rascal run `run_issue_usage_limit` failed because Goose hit the Codex usage limit.") {
-		t.Fatalf("expected usage-limit headline, got body:\n%s", comment.body)
+	if len(fakeGH.postedComments()) != 0 {
+		t.Fatalf("expected no failure comment while run is paused for retry")
 	}
-	if !strings.Contains(comment.body, "The provider said to try again at Mar 10th, 2026 6:31 AM.") {
-		t.Fatalf("expected retry timestamp, got body:\n%s", comment.body)
+	if calls := launcher.Calls(); calls != 1 {
+		t.Fatalf("expected run not to restart before pause expiry, got launcher calls=%d", calls)
+	}
+}
+
+func TestScheduleRunsResumesAfterPauseDeadline(t *testing.T) {
+	launcher := &fakeLauncher{}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	pauseUntil := time.Now().UTC().Add(150 * time.Millisecond)
+	if _, err := s.store.PauseScheduler(workerPauseScope, "test pause", pauseUntil); err != nil {
+		t.Fatalf("pause scheduler: %v", err)
+	}
+
+	if _, err := s.createAndQueueRun(runRequest{
+		TaskID: "owner/repo#resume",
+		Repo:   "owner/repo",
+		Task:   "resume after pause",
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if calls := launcher.Calls(); calls != 0 {
+		t.Fatalf("expected scheduler to stay paused before deadline, got calls=%d", calls)
+	}
+
+	waitFor(t, 2*time.Second, func() bool { return launcher.Calls() == 1 }, "scheduler resume after pause deadline")
+}
+
+func TestParseUsageLimitRetryAtSupportsAbsoluteTimestampWithZone(t *testing.T) {
+	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
+	corpus := "Request failed: You've hit your usage limit. Try again at Mar 10th, 2026 6:31 AM UTC."
+
+	retryAt, reason := parseUsageLimitRetryAt(corpus, now)
+
+	expected := time.Date(2026, time.March, 10, 6, 31, 0, 0, time.UTC)
+	if !retryAt.Equal(expected) {
+		t.Fatalf("retryAt = %s, want %s", retryAt, expected)
+	}
+	if !strings.Contains(reason, "Mar 10, 2026 6:31 AM UTC") {
+		t.Fatalf("unexpected reason %q", reason)
+	}
+}
+
+func TestParseUsageLimitRetryAtSupportsRFC3339(t *testing.T) {
+	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
+	corpus := "You've hit your usage limit. Try again at 2026-03-10T06:31:00Z."
+
+	retryAt, _ := parseUsageLimitRetryAt(corpus, now)
+
+	expected := time.Date(2026, time.March, 10, 6, 31, 0, 0, time.UTC)
+	if !retryAt.Equal(expected) {
+		t.Fatalf("retryAt = %s, want %s", retryAt, expected)
+	}
+}
+
+func TestParseUsageLimitRetryAtSupportsRelativeDelay(t *testing.T) {
+	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
+	corpus := "You've hit your usage limit. Please try again in 2 hours 15 minutes."
+
+	retryAt, reason := parseUsageLimitRetryAt(corpus, now)
+
+	expected := now.Add(2*time.Hour + 15*time.Minute)
+	if !retryAt.Equal(expected) {
+		t.Fatalf("retryAt = %s, want %s", retryAt, expected)
+	}
+	if !strings.Contains(reason, "2 hours 15 minutes") {
+		t.Fatalf("unexpected reason %q", reason)
 	}
 }
 

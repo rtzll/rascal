@@ -171,6 +171,16 @@ CREATE TABLE run_cancels (
   requested_at INTEGER NOT NULL
 );
 
+CREATE TABLE scheduler_pauses (
+  scope TEXT PRIMARY KEY,
+  reason TEXT NOT NULL DEFAULT '',
+  paused_until INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_scheduler_pauses_until ON scheduler_pauses (paused_until ASC);
+
 CREATE TABLE deliveries (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL DEFAULT 'processing',

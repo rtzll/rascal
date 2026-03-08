@@ -131,6 +131,14 @@ type RunTokenUsage struct {
 	UpdatedAt             int64         `json:"updated_at"`
 }
 
+type SchedulerPause struct {
+	Scope       string `json:"scope"`
+	Reason      string `json:"reason"`
+	PausedUntil int64  `json:"paused_until"`
+	CreatedAt   int64  `json:"created_at"`
+	UpdatedAt   int64  `json:"updated_at"`
+}
+
 type Task struct {
 	ID              string `json:"id"`
 	Repo            string `json:"repo"`

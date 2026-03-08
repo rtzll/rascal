@@ -454,6 +454,49 @@ WHERE run_id = ?;
 DELETE FROM run_cancels
 WHERE run_id = ?;
 
+-- name: UpsertSchedulerPause :one
+INSERT INTO scheduler_pauses (
+  scope,
+  reason,
+  paused_until,
+  created_at,
+  updated_at
+)
+VALUES (
+  sqlc.arg(scope),
+  sqlc.arg(reason),
+  sqlc.arg(paused_until),
+  sqlc.arg(created_at),
+  sqlc.arg(updated_at)
+)
+ON CONFLICT(scope) DO UPDATE SET
+  paused_until = CASE
+    WHEN scheduler_pauses.paused_until > excluded.paused_until THEN scheduler_pauses.paused_until
+    ELSE excluded.paused_until
+  END,
+  reason = CASE
+    WHEN scheduler_pauses.paused_until > excluded.paused_until THEN scheduler_pauses.reason
+    ELSE excluded.reason
+  END,
+  updated_at = excluded.updated_at
+RETURNING
+  scope,
+  reason,
+  paused_until,
+  created_at,
+  updated_at;
+
+-- name: GetActiveSchedulerPause :one
+SELECT
+  scope,
+  reason,
+  paused_until,
+  created_at,
+  updated_at
+FROM scheduler_pauses
+WHERE scope = ?
+  AND paused_until > ?;
+
 -- name: DeliverySeen :one
 SELECT EXISTS(SELECT 1 FROM deliveries WHERE id = ?);
 

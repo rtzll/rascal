@@ -863,6 +863,51 @@ func (s *Store) ClearRunCancel(runID string) error {
 	return nil
 }
 
+func (s *Store) PauseScheduler(scope, reason string, until time.Time) (time.Time, error) {
+	scope = strings.TrimSpace(scope)
+	reason = strings.TrimSpace(reason)
+	if scope == "" {
+		return time.Time{}, fmt.Errorf("pause scope is required")
+	}
+	if until.IsZero() {
+		return time.Time{}, fmt.Errorf("pause deadline is required")
+	}
+	until = until.UTC()
+	now := time.Now().UTC()
+	row, err := s.q.UpsertSchedulerPause(context.Background(), sqlitegen.UpsertSchedulerPauseParams{
+		Scope:       scope,
+		Reason:      reason,
+		PausedUntil: until.UnixNano(),
+		CreatedAt:   now.UnixNano(),
+		UpdatedAt:   now.UnixNano(),
+	})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("pause scheduler for scope %q: %w", scope, err)
+	}
+	return time.Unix(0, row.PausedUntil).UTC(), nil
+}
+
+func (s *Store) ActiveSchedulerPause(scope string, now time.Time) (time.Time, string, bool, error) {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return time.Time{}, "", false, fmt.Errorf("pause scope is required")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	row, err := s.q.GetActiveSchedulerPause(context.Background(), sqlitegen.GetActiveSchedulerPauseParams{
+		Scope:       scope,
+		PausedUntil: now.UTC().UnixNano(),
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return time.Time{}, "", false, nil
+		}
+		return time.Time{}, "", false, fmt.Errorf("get active scheduler pause for scope %q: %w", scope, err)
+	}
+	return time.Unix(0, row.PausedUntil).UTC(), strings.TrimSpace(row.Reason), true, nil
+}
+
 func (s *Store) ActiveRunForTask(taskID string) (Run, bool) {
 	row, err := s.q.ActiveRunForTask(context.Background(), strings.TrimSpace(taskID))
 	if err != nil {

@@ -48,9 +48,15 @@ const runCompletionCommentBodyMarker = "<!-- rascal:completion-comment -->"
 const agentLogFile = "agent.ndjson"
 const legacyAgentLogFile = "goose.ndjson"
 const runFailureCommentBodyMarker = "<!-- rascal:failure-comment -->"
+const workerPauseScope = "workers"
+const defaultUsageLimitPause = 15 * time.Minute
+const minimumUsageLimitPause = 1 * time.Minute
 
 var usageLimitPattern = regexp.MustCompile(`(?i)(?:you['’]?ve hit your usage limit|hit your usage limit|usage limit)`)
 var retryAtPattern = regexp.MustCompile(`(?i)try again at ([^\r\n.]+)`)
+var retryInPattern = regexp.MustCompile(`(?i)try again in ([^\r\n.]+)`)
+var ordinalDayPattern = regexp.MustCompile(`\b(\d{1,2})(st|nd|rd|th)\b`)
+var durationComponentPattern = regexp.MustCompile(`(?i)(\d+)\s*(d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?)`)
 
 type githubClient interface {
 	GetIssue(ctx context.Context, repo string, issueNumber int) (ghapi.IssueData, error)
@@ -76,6 +82,8 @@ type server struct {
 	maxConcurrent int
 	draining      bool
 	instanceID    string
+	resumeTimer   *time.Timer
+	resumeAt      time.Time
 }
 
 type runRequest struct {
@@ -1994,6 +2002,26 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		}
 	}
 
+	if retryAt, reason, ok := detectUsageLimitPause(run, meta.Error); ok {
+		effectiveRetryAt := s.pauseWorkersUntil(retryAt, fmt.Sprintf("run %s hit provider usage limit: %s", run.ID, reason))
+		if err := s.requeueRun(run.ID); err != nil {
+			log.Printf("run %s usage-limit requeue failed: %v", run.ID, err)
+		} else {
+			log.Printf("run %s requeued after usage limit; scheduling resumes at %s", run.ID, effectiveRetryAt.Format(time.RFC3339))
+			s.cleanupDetachedExecution(runID, execRec)
+			if updated, ok := s.store.GetRun(run.ID); ok {
+				s.finishRun(updated)
+				return
+			}
+			run.Status = state.StatusQueued
+			run.Error = ""
+			run.StartedAt = nil
+			run.CompletedAt = nil
+			s.finishRun(run)
+			return
+		}
+	}
+
 	status := state.StatusSucceeded
 	prStatus := state.PRStatusNone
 	errText := ""
@@ -2274,10 +2302,21 @@ func (s *server) scheduleRuns(preferredTaskID string) {
 	}
 	preferredTaskID = strings.TrimSpace(preferredTaskID)
 
+	if pauseUntil, pauseReason, paused := s.activeWorkerPause(); paused {
+		s.ensureResumeTimer(pauseUntil)
+		log.Printf("run scheduling paused until %s: %s", pauseUntil.Format(time.RFC3339), pauseReason)
+		return
+	}
+
 	s.scheduleMu.Lock()
 	defer s.scheduleMu.Unlock()
 
 	for {
+		if pauseUntil, pauseReason, paused := s.activeWorkerPause(); paused {
+			s.ensureResumeTimer(pauseUntil)
+			log.Printf("run scheduling paused until %s: %s", pauseUntil.Format(time.RFC3339), pauseReason)
+			return
+		}
 		atCapacity := s.activeRunCount() >= s.concurrencyLimit()
 		draining := s.isDraining()
 		if draining || atCapacity {
@@ -2664,6 +2703,11 @@ func (s *server) beginDrain() {
 		return
 	}
 	s.draining = true
+	if s.resumeTimer != nil {
+		s.resumeTimer.Stop()
+		s.resumeTimer = nil
+		s.resumeAt = time.Time{}
+	}
 	s.mu.Unlock()
 }
 
@@ -3263,6 +3307,189 @@ func buildRunFailureDetails(runError, agentOutput, agentLogLabel string) string 
 	return strings.Join(parts, "\n\n")
 }
 
+func detectUsageLimitPause(run state.Run, errText string) (time.Time, string, bool) {
+	corpusParts := make([]string, 0, 2)
+	if reason := strings.TrimSpace(errText); reason != "" {
+		corpusParts = append(corpusParts, reason)
+	}
+	if output, loadErr := loadRunAgentOutput(run.RunDir); loadErr == nil && strings.TrimSpace(output) != "" {
+		corpusParts = append(corpusParts, output)
+	} else if loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
+		log.Printf("run %s read agent output for usage-limit detection failed: %v", run.ID, loadErr)
+	}
+
+	corpus := strings.Join(corpusParts, "\n")
+	if !usageLimitPattern.MatchString(corpus) {
+		return time.Time{}, "", false
+	}
+
+	retryAt, reason := parseUsageLimitRetryAt(corpus, time.Now().UTC())
+	if retryAt.IsZero() {
+		retryAt = time.Now().UTC().Add(defaultUsageLimitPause)
+		if reason == "" {
+			reason = fmt.Sprintf("usage limit without retry timestamp; applying default pause of %s", defaultUsageLimitPause)
+		}
+	}
+	return retryAt, reason, true
+}
+
+func loadRunAgentOutput(runDir string) (string, error) {
+	agentPath, err := resolveRunAgentLogPath(runDir)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(agentPath)
+	if err != nil {
+		return "", fmt.Errorf("read agent log %s: %w", agentPath, err)
+	}
+	return string(data), nil
+}
+
+func parseUsageLimitRetryAt(corpus string, now time.Time) (time.Time, string) {
+	matches := retryAtPattern.FindStringSubmatch(corpus)
+	if len(matches) == 2 {
+		raw := sanitizeRetryHint(matches[1])
+		if raw != "" {
+			if retryAt, ok := parseAbsoluteRetryTime(raw, now); ok {
+				return retryAt, fmt.Sprintf("provider requested retry at %s", raw)
+			}
+		}
+	}
+
+	matches = retryInPattern.FindStringSubmatch(corpus)
+	if len(matches) == 2 {
+		raw := sanitizeRetryHint(matches[1])
+		if raw != "" {
+			if delay, ok := parseRetryDelay(raw); ok {
+				if now.IsZero() {
+					now = time.Now().UTC()
+				}
+				return now.Add(delay), fmt.Sprintf("provider requested retry in %s", raw)
+			}
+		}
+	}
+
+	return time.Time{}, ""
+}
+
+func sanitizeRetryHint(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.Trim(raw, " .,:;)")
+	raw = strings.TrimPrefix(raw, "(")
+	raw = strings.Join(strings.Fields(raw), " ")
+	return ordinalDayPattern.ReplaceAllString(raw, "$1")
+}
+
+func parseAbsoluteRetryTime(raw string, now time.Time) (time.Time, bool) {
+	if raw == "" {
+		return time.Time{}, false
+	}
+
+	if retryAt, err := time.Parse(time.RFC3339, raw); err == nil {
+		return normalizeFutureRetryTime(retryAt, raw, now)
+	}
+	if retryAt, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return normalizeFutureRetryTime(retryAt, raw, now)
+	}
+
+	layouts := []string{
+		"Jan 2, 2006 3:04 PM",
+		"January 2, 2006 3:04 PM",
+		"Jan 2 2006 3:04 PM",
+		"January 2 2006 3:04 PM",
+		"Jan 2, 2006 15:04",
+		"January 2, 2006 15:04",
+		"Jan 2 2006 15:04",
+		"January 2 2006 15:04",
+	}
+	for _, loc := range []*time.Location{time.Local, time.UTC} {
+		for _, layout := range layouts {
+			retryAt, err := time.ParseInLocation(layout, raw, loc)
+			if err != nil {
+				continue
+			}
+			return normalizeFutureRetryTime(retryAt, raw, now)
+		}
+	}
+
+	zonedLayouts := []string{
+		"Jan 2, 2006 3:04 PM MST",
+		"January 2, 2006 3:04 PM MST",
+		"Jan 2 2006 3:04 PM MST",
+		"January 2 2006 3:04 PM MST",
+		"Jan 2, 2006 15:04 MST",
+		"January 2, 2006 15:04 MST",
+		"Jan 2 2006 15:04 MST",
+		"January 2 2006 15:04 MST",
+		"Jan 2, 2006 3:04 PM -0700",
+		"January 2, 2006 3:04 PM -0700",
+		"Jan 2 2006 3:04 PM -0700",
+		"January 2 2006 3:04 PM -0700",
+		"Jan 2, 2006 15:04 -0700",
+		"January 2, 2006 15:04 -0700",
+		"Jan 2 2006 15:04 -0700",
+		"January 2 2006 15:04 -0700",
+	}
+	for _, layout := range zonedLayouts {
+		retryAt, err := time.Parse(layout, raw)
+		if err != nil {
+			continue
+		}
+		return normalizeFutureRetryTime(retryAt, raw, now)
+	}
+
+	return time.Time{}, false
+}
+
+func normalizeFutureRetryTime(retryAt time.Time, raw string, now time.Time) (time.Time, bool) {
+	if retryAt.IsZero() {
+		return time.Time{}, false
+	}
+	retryAt = retryAt.UTC()
+	if !now.IsZero() && !retryAt.After(now) {
+		return now.Add(minimumUsageLimitPause), true
+	}
+	return retryAt, true
+}
+
+func parseRetryDelay(raw string) (time.Duration, bool) {
+	if raw == "" {
+		return 0, false
+	}
+	if d, err := time.ParseDuration(strings.ReplaceAll(strings.ToLower(raw), " ", "")); err == nil && d > 0 {
+		return d, true
+	}
+
+	matches := durationComponentPattern.FindAllStringSubmatch(raw, -1)
+	if len(matches) == 0 {
+		return 0, false
+	}
+
+	var total time.Duration
+	for _, match := range matches {
+		value, err := strconv.Atoi(match[1])
+		if err != nil {
+			return 0, false
+		}
+		switch unit := strings.ToLower(match[2]); {
+		case strings.HasPrefix(unit, "d"):
+			total += time.Duration(value) * 24 * time.Hour
+		case strings.HasPrefix(unit, "h"):
+			total += time.Duration(value) * time.Hour
+		case strings.HasPrefix(unit, "m"):
+			total += time.Duration(value) * time.Minute
+		case strings.HasPrefix(unit, "s"):
+			total += time.Duration(value) * time.Second
+		default:
+			return 0, false
+		}
+	}
+	if total <= 0 {
+		return 0, false
+	}
+	return total, true
+}
+
 func isRascalAutomationComment(body string) bool {
 	trimmed := strings.TrimSpace(body)
 	if trimmed == "" {
@@ -3293,6 +3520,69 @@ func (s *server) requeueRun(runID string) error {
 		return fmt.Errorf("requeue run %q: %w", runID, err)
 	}
 	return nil
+}
+
+func (s *server) activeWorkerPause() (time.Time, string, bool) {
+	pauseUntil, reason, ok, err := s.store.ActiveSchedulerPause(workerPauseScope, time.Now().UTC())
+	if err != nil {
+		log.Printf("load active worker pause failed: %v", err)
+		return time.Time{}, "", false
+	}
+	return pauseUntil, reason, ok
+}
+
+func (s *server) pauseWorkersUntil(until time.Time, reason string) time.Time {
+	if until.IsZero() {
+		until = time.Now().UTC().Add(defaultUsageLimitPause)
+	}
+	effective, err := s.store.PauseScheduler(workerPauseScope, reason, until)
+	if err != nil {
+		log.Printf("persist worker pause until %s failed: %v", until.Format(time.RFC3339), err)
+		effective = until.UTC()
+	}
+	s.ensureResumeTimer(effective)
+	return effective
+}
+
+func (s *server) ensureResumeTimer(until time.Time) {
+	if until.IsZero() {
+		return
+	}
+	until = until.UTC()
+	delay := time.Until(until)
+	if delay < 0 {
+		delay = 0
+	}
+
+	s.mu.Lock()
+	if s.draining {
+		s.mu.Unlock()
+		return
+	}
+	if !s.resumeAt.IsZero() && s.resumeAt.Equal(until) {
+		s.mu.Unlock()
+		return
+	}
+	if s.resumeTimer != nil {
+		s.resumeTimer.Stop()
+	}
+	s.resumeAt = until
+	s.resumeTimer = time.AfterFunc(delay, func() {
+		s.mu.Lock()
+		if !s.resumeAt.Equal(until) {
+			s.mu.Unlock()
+			return
+		}
+		s.resumeAt = time.Time{}
+		s.resumeTimer = nil
+		draining := s.draining
+		s.mu.Unlock()
+		if draining {
+			return
+		}
+		s.scheduleRuns("")
+	})
+	s.mu.Unlock()
 }
 
 func (s *server) addIssueReactionBestEffort(repo string, issueNumber int, reaction string) {
