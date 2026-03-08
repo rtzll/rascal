@@ -40,6 +40,8 @@ const runSupervisorTick = 1 * time.Second
 const runResponseTargetFile = "response_target.json"
 const runCompletionCommentMarkerFile = "completion_comment_posted.json"
 const runCompletionCommentBodyMarker = "<!-- rascal:completion-comment -->"
+const agentLogFile = "agent.ndjson"
+const legacyAgentLogFile = "goose.ndjson"
 
 type githubClient interface {
 	GetIssue(ctx context.Context, repo string, issueNumber int) (ghapi.IssueData, error)
@@ -951,15 +953,7 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 			runnerNote = "(runner.log unavailable)"
 		}
 	}
-	gooseLines, err := logs.Tail(filepath.Join(run.RunDir, "goose.ndjson"), lines)
-	gooseNote := ""
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			gooseNote = "(goose.ndjson not found)"
-		} else {
-			gooseNote = "(goose.ndjson unavailable)"
-		}
-	}
+	agentLines, agentNote := tailRunAgentLog(run.RunDir, lines)
 
 	var body strings.Builder
 	_, _ = fmt.Fprintln(&body, "== runner.log ==")
@@ -970,12 +964,12 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 		_, _ = fmt.Fprintln(&body, runnerNote)
 	}
 	_, _ = fmt.Fprintln(&body, `
-== goose.ndjson ==`)
-	for _, line := range gooseLines {
+== agent.ndjson ==`)
+	for _, line := range agentLines {
 		_, _ = fmt.Fprintln(&body, line)
 	}
-	if gooseNote != "" {
-		_, _ = fmt.Fprintln(&body, gooseNote)
+	if agentNote != "" {
+		_, _ = fmt.Fprintln(&body, agentNote)
 	}
 
 	logsText := body.String()
@@ -2302,6 +2296,49 @@ func cleanupStaleGooseSessionDirs(root string, ttlDays int, now time.Time) (int,
 	return cleanupStaleAgentSessionDirs(root, ttlDays, now)
 }
 
+func resolveRunAgentLogPath(runDir string) (string, error) {
+	primary := filepath.Join(strings.TrimSpace(runDir), agentLogFile)
+	if info, err := os.Stat(primary); err == nil {
+		if info.IsDir() {
+			return "", fmt.Errorf("agent log path is a directory: %s", primary)
+		}
+		return primary, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+
+	legacy := filepath.Join(strings.TrimSpace(runDir), legacyAgentLogFile)
+	if info, err := os.Stat(legacy); err == nil {
+		if info.IsDir() {
+			return "", fmt.Errorf("legacy agent log path is a directory: %s", legacy)
+		}
+		return legacy, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+
+	return primary, os.ErrNotExist
+}
+
+func tailRunAgentLog(runDir string, lines int) ([]string, string) {
+	path, err := resolveRunAgentLogPath(runDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, "(" + agentLogFile + " not found)"
+		}
+		return nil, "(" + agentLogFile + " unavailable)"
+	}
+
+	agentLines, err := logs.Tail(path, lines)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, "(" + agentLogFile + " not found)"
+		}
+		return nil, "(" + agentLogFile + " unavailable)"
+	}
+	return agentLines, ""
+}
+
 func loadRunResponseTarget(runDir string) (runResponseTarget, bool, error) {
 	path := filepath.Join(strings.TrimSpace(runDir), runResponseTargetFile)
 	data, err := os.ReadFile(path)
@@ -2450,14 +2487,18 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 }
 
 func buildRunCompletionComment(run state.Run, target runResponseTarget, repo string) (string, error) {
-	goosePath := filepath.Join(run.RunDir, "goose.ndjson")
-	gooseOutput := "(no goose output captured)"
-	if data, err := os.ReadFile(goosePath); err == nil {
-		if strings.TrimSpace(string(data)) != "" {
-			gooseOutput = string(data)
+	agentOutput := "(no agent output captured)"
+	agentPath, err := resolveRunAgentLogPath(run.RunDir)
+	if err == nil {
+		if data, readErr := os.ReadFile(agentPath); readErr == nil {
+			if strings.TrimSpace(string(data)) != "" {
+				agentOutput = string(data)
+			}
+		} else if !os.IsNotExist(readErr) {
+			return "", fmt.Errorf("read agent log: %w", readErr)
 		}
 	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("read goose log: %w", err)
+		return "", fmt.Errorf("resolve agent log: %w", err)
 	}
 
 	commitMessageData, err := os.ReadFile(filepath.Join(run.RunDir, "commit_message.txt"))
@@ -2470,7 +2511,7 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 		RequestedBy:     target.RequestedBy,
 		HeadSHA:         run.HeadSHA,
 		IssueNumber:     run.IssueNumber,
-		GooseOutput:     gooseOutput,
+		GooseOutput:     agentOutput,
 		CommitMessage:   commitMessageData,
 		DurationSeconds: runsummary.RunDurationSeconds(run.CreatedAt, run.StartedAt, run.CompletedAt),
 	})

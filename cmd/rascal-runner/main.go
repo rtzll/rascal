@@ -25,7 +25,7 @@ const (
 	defaultMetaDir          = "/rascal-meta"
 	defaultWorkRoot         = "/work"
 	defaultRepoDirName      = "repo"
-	defaultGooseLogFile     = "goose.ndjson"
+	defaultAgentLogFile     = "agent.ndjson"
 	defaultMetaFile         = "meta.json"
 	defaultInstructionsFile = "instructions.md"
 	defaultCommitMsgFile    = "commit_message.txt"
@@ -470,7 +470,7 @@ func loadConfig() (config, error) {
 		MetaDir:            metaDir,
 		WorkRoot:           workRoot,
 		RepoDir:            repoDir,
-		GooseLogPath:       filepath.Join(metaDir, defaultGooseLogFile),
+		GooseLogPath:       filepath.Join(metaDir, defaultAgentLogFile),
 		MetaPath:           filepath.Join(metaDir, defaultMetaFile),
 		InstructionsPath:   filepath.Join(metaDir, defaultInstructionsFile),
 		CommitMsgPath:      filepath.Join(metaDir, defaultCommitMsgFile),

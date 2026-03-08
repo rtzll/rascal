@@ -270,7 +270,7 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 	cfg := config{
 		RepoDir:          root,
 		InstructionsPath: filepath.Join(root, "instructions.md"),
-		GooseLogPath:     filepath.Join(root, "goose.ndjson"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
 		GooseSessionMode: runner.GooseSessionModeOff,
 	}
@@ -309,7 +309,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 	cfg := config{
 		RepoDir:            root,
 		InstructionsPath:   filepath.Join(root, "instructions.md"),
-		GooseLogPath:       filepath.Join(root, "goose.ndjson"),
+		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
 		GooseDebug:         false,
 		GooseSessionMode:   runner.GooseSessionModePROnly,
 		GooseSessionResume: true,
@@ -360,7 +360,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 	cfg := config{
 		RepoDir:            root,
 		InstructionsPath:   filepath.Join(root, "instructions.md"),
-		GooseLogPath:       filepath.Join(root, "goose.ndjson"),
+		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
 		GooseDebug:         false,
 		GooseSessionMode:   runner.GooseSessionModePROnly,
 		GooseSessionResume: true,
@@ -410,7 +410,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 	cfg := config{
 		RepoDir:            root,
 		InstructionsPath:   filepath.Join(root, "instructions.md"),
-		GooseLogPath:       filepath.Join(root, "goose.ndjson"),
+		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
 		GooseDebug:         false,
 		GooseSessionMode:   runner.GooseSessionModePROnly,
 		GooseSessionResume: true,
@@ -516,7 +516,7 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 	cfg := config{
 		RepoDir:            root,
 		InstructionsPath:   filepath.Join(root, "instructions.md"),
-		GooseLogPath:       filepath.Join(root, "goose.ndjson"),
+		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
 		GooseDebug:         false,
 		GooseSessionMode:   runner.GooseSessionModePROnly,
 		GooseSessionResume: true,
@@ -553,7 +553,7 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 
 func TestIsSessionResumeFailureDetectsMissingNamedSession(t *testing.T) {
 	root := t.TempDir()
-	logPath := filepath.Join(root, "goose.ndjson")
+	logPath := filepath.Join(root, "agent.ndjson")
 	if err := os.WriteFile(logPath, []byte("Error: No session found with name 'rascal-owner-repo-task-abc123'\n"), 0o644); err != nil {
 		t.Fatalf("write goose log: %v", err)
 	}
@@ -568,7 +568,7 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 	cfg := config{
 		RepoDir:            root,
 		InstructionsPath:   filepath.Join(root, "instructions.md"),
-		GooseLogPath:       filepath.Join(root, "goose.ndjson"),
+		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
 		GooseDebug:         false,
 		GooseSessionMode:   runner.GooseSessionModePROnly,
 		GooseSessionResume: true,
@@ -916,7 +916,7 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 		t.Fatalf("read pr_body.md: %v", err)
 	}
 	prBody := string(prBodyData)
-	if !strings.Contains(prBody, "<details><summary>Goose Details</summary>") {
+	if !strings.Contains(prBody, "<details><summary>Agent Details</summary>") {
 		t.Fatalf("expected goose details block in pr body:\n%s", prBody)
 	}
 	if !strings.Contains(prBody, "Rascal run `run_fake` completed in ") || !strings.Contains(prBody, "· 321 tokens") {

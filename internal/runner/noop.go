@@ -31,8 +31,8 @@ func (NoopLauncher) StartDetached(_ context.Context, spec Spec) (handle Executio
 		return ExecutionHandle{}, fmt.Errorf("write log file: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(spec.RunDir, "goose.ndjson"), []byte(`{"event":"noop","run_id":"`+spec.RunID+`"}`+"\n"), 0o644); err != nil {
-		return ExecutionHandle{}, fmt.Errorf("write goose log: %w", err)
+	if err := os.WriteFile(filepath.Join(spec.RunDir, "agent.ndjson"), []byte(`{"event":"noop","run_id":"`+spec.RunID+`"}`+"\n"), 0o644); err != nil {
+		return ExecutionHandle{}, fmt.Errorf("write agent log: %w", err)
 	}
 	meta := Meta{
 		RunID:      spec.RunID,

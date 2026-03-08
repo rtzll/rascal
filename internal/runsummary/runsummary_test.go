@@ -95,7 +95,7 @@ func TestFormatTokenCount(t *testing.T) {
 }
 
 func TestBuildPRBody(t *testing.T) {
-	t.Run("includes goose details and token summary when tokens are present", func(t *testing.T) {
+	t.Run("includes agent details and token summary when tokens are present", func(t *testing.T) {
 		body := BuildPRBody(
 			"run_1",
 			"- updated code",
@@ -103,8 +103,8 @@ func TestBuildPRBody(t *testing.T) {
 			"1m 2s",
 			"",
 		)
-		if !strings.Contains(body, "<details><summary>Goose Details</summary>") {
-			t.Fatalf("missing goose details section:\n%s", body)
+		if !strings.Contains(body, "<details><summary>Agent Details</summary>") {
+			t.Fatalf("missing agent details section:\n%s", body)
 		}
 		if !strings.Contains(body, "Rascal run `run_1` completed in 1m 2s · 123K tokens") {
 			t.Fatalf("missing token summary:\n%s", body)

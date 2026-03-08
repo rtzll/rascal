@@ -1938,7 +1938,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(run.RunDir, "commit_message.txt"), []byte("fix(rascal): address feedback\n\n- updated handlers\n- added tests\n"), 0o644); err != nil {
 		t.Fatalf("write commit message: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(`{"event":"x","usage":{"total_tokens":123000}}`+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(run.RunDir, "agent.ndjson"), []byte(`{"event":"x","usage":{"total_tokens":123000}}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write goose log: %v", err)
 	}
 
@@ -1964,8 +1964,8 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	if !strings.Contains(comment.body, "- updated handlers") {
 		t.Fatalf("expected commit body bullets in comment, got:\n%s", comment.body)
 	}
-	if !strings.Contains(comment.body, "<details><summary>Goose Details</summary>") {
-		t.Fatalf("expected goose details section, got:\n%s", comment.body)
+	if !strings.Contains(comment.body, "<details><summary>Agent Details</summary>") {
+		t.Fatalf("expected agent details section, got:\n%s", comment.body)
 	}
 	if !strings.Contains(comment.body, "Rascal run `run_comment_completion` completed in ") || !strings.Contains(comment.body, "123K tokens") {
 		t.Fatalf("expected runtime and token summary, got:\n%s", comment.body)
@@ -2010,7 +2010,7 @@ func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *tes
 	}); err != nil {
 		t.Fatalf("write response target: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(`{"type":"message","message":{"content":[{"type":"text","text":"Request failed"}]}}`+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(run.RunDir, "agent.ndjson"), []byte(`{"type":"message","message":{"content":[{"type":"text","text":"Request failed"}]}}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write goose log: %v", err)
 	}
 
@@ -3022,7 +3022,7 @@ func TestHandleRunLogsRespectsLines(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(run.RunDir, "runner.log"), []byte(runnerLog.String()), 0o644); err != nil {
 		t.Fatalf("write runner log: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(gooseLog.String()), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(run.RunDir, "agent.ndjson"), []byte(gooseLog.String()), 0o644); err != nil {
 		t.Fatalf("write goose log: %v", err)
 	}
 
@@ -3062,7 +3062,7 @@ func TestHandleRunLogsJSONIncludesStatusAndDone(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(run.RunDir, "runner.log"), []byte("runner-1\nrunner-2\n"), 0o644); err != nil {
 		t.Fatalf("write runner log: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte("goose-1\ngoose-2\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(run.RunDir, "agent.ndjson"), []byte("goose-1\ngoose-2\n"), 0o644); err != nil {
 		t.Fatalf("write goose log: %v", err)
 	}
 
@@ -3097,7 +3097,7 @@ func TestHandleRunLogsJSONIncludesStatusAndDone(t *testing.T) {
 	}
 }
 
-func TestHandleRunLogsMissingGooseFileStillReturnsRunnerLogs(t *testing.T) {
+func TestHandleRunLogsMissingAgentFileStillReturnsRunnerLogs(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -3106,7 +3106,7 @@ func TestHandleRunLogsMissingGooseFileStillReturnsRunnerLogs(t *testing.T) {
 		ID:         "run_logs_missing_goose",
 		TaskID:     "task_logs_missing_goose",
 		Repo:       "owner/repo",
-		Task:       "show logs without goose output",
+		Task:       "show logs without agent output",
 		BaseBranch: "main",
 		RunDir:     runDir,
 	})
@@ -3129,11 +3129,54 @@ func TestHandleRunLogsMissingGooseFileStillReturnsRunnerLogs(t *testing.T) {
 	if !strings.Contains(body, "runner-2") {
 		t.Fatalf("expected runner logs in response, got:\n%s", body)
 	}
-	if !strings.Contains(body, "== goose.ndjson ==") {
-		t.Fatalf("expected goose section header in response, got:\n%s", body)
+	if !strings.Contains(body, "== agent.ndjson ==") {
+		t.Fatalf("expected agent section header in response, got:\n%s", body)
 	}
-	if !strings.Contains(body, "(goose.ndjson not found)") {
-		t.Fatalf("expected missing goose note, got:\n%s", body)
+	if !strings.Contains(body, "(agent.ndjson not found)") {
+		t.Fatalf("expected missing agent note, got:\n%s", body)
+	}
+}
+
+func TestHandleRunLogsFallsBackToLegacyGooseLogFile(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	runDir := t.TempDir()
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_logs_legacy_goose",
+		TaskID:     "task_logs_legacy_goose",
+		Repo:       "owner/repo",
+		Task:       "show logs from legacy file",
+		BaseBranch: "main",
+		RunDir:     runDir,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(run.RunDir, "runner.log"), []byte("runner-1\n"), 0o644); err != nil {
+		t.Fatalf("write runner log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte("legacy-1\nlegacy-2\n"), 0o644); err != nil {
+		t.Fatalf("write legacy goose log: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/logs?lines=5", nil)
+	rec := httptest.NewRecorder()
+	s.handleRunSubresources(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "== agent.ndjson ==") {
+		t.Fatalf("expected agent section header in response, got:\n%s", body)
+	}
+	if !strings.Contains(body, "legacy-2") {
+		t.Fatalf("expected legacy goose log contents, got:\n%s", body)
+	}
+	if strings.Contains(body, "(agent.ndjson not found)") {
+		t.Fatalf("did not expect missing agent note when legacy file exists, got:\n%s", body)
 	}
 }
 
@@ -3156,7 +3199,7 @@ func TestHandleRunLogsRejectsInvalidFormat(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(run.RunDir, "runner.log"), []byte("runner-1\n"), 0o644); err != nil {
 		t.Fatalf("write runner log: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte("goose-1\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(run.RunDir, "agent.ndjson"), []byte("goose-1\n"), 0o644); err != nil {
 		t.Fatalf("write goose log: %v", err)
 	}
 

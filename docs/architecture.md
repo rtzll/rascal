@@ -105,7 +105,7 @@ Each run directory stores metadata and artifacts such as:
 - `context.json`
 - `instructions.md`
 - `runner.log`
-- `goose.ndjson` (canonical agent stream log path for both backends)
+- `agent.ndjson` (canonical agent stream log path for both backends)
 - `agent_output.txt` (structured/fallback agent output, especially for Codex)
 - `commit_message.txt`
 - `pr_body.md`
