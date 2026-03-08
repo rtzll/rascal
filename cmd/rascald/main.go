@@ -2011,6 +2011,10 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		status = state.StatusCanceled
 		errText = reason
 	}
+	tokenUsage, hasTokenUsage, tokenUsageErr := loadRunTokenUsage(run)
+	if tokenUsageErr != nil {
+		log.Printf("run %s parse token usage failed: %v", run.ID, tokenUsageErr)
+	}
 
 	now := time.Now().UTC()
 	updated, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
@@ -2030,6 +2034,11 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	if err != nil {
 		log.Printf("failed to persist detached run result for %s: %v", run.ID, err)
 		updated = s.setRunStatusWithFallback(run, state.StatusFailed, err.Error())
+	}
+	if hasTokenUsage {
+		if _, err := s.store.UpsertRunTokenUsage(tokenUsage); err != nil {
+			log.Printf("run %s persist token usage failed: %v", updated.ID, err)
+		}
 	}
 
 	switch updated.Status {
@@ -3015,7 +3024,12 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 		return
 	}
 
-	body, err := buildRunCompletionComment(run, target, repo)
+	var totalTokens *int64
+	if usage, ok := s.store.GetRunTokenUsage(run.ID); ok && usage.TotalTokens > 0 {
+		totalTokens = &usage.TotalTokens
+	}
+
+	body, err := buildRunCompletionComment(run, target, repo, totalTokens)
 	if err != nil {
 		log.Printf("failed to build completion comment for %s: %v", run.ID, err)
 		return
@@ -3089,7 +3103,7 @@ func resolveRunCommentTarget(run state.Run, target runResponseTarget) (string, i
 	return repo, issueNumber
 }
 
-func buildRunCompletionComment(run state.Run, target runResponseTarget, repo string) (string, error) {
+func buildRunCompletionComment(run state.Run, target runResponseTarget, repo string, totalTokens *int64) (string, error) {
 	agentOutput := "(no agent output captured)"
 	agentPath, err := resolveRunAgentLogPath(run.RunDir)
 	if err == nil {
@@ -3117,11 +3131,44 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 		GooseOutput:     agentOutput,
 		CommitMessage:   commitMessageData,
 		DurationSeconds: runsummary.RunDurationSeconds(run.CreatedAt, run.StartedAt, run.CompletedAt),
+		TotalTokens:     totalTokens,
 	})
 	if err != nil {
 		return "", fmt.Errorf("build run completion comment: %w", err)
 	}
 	return runCompletionCommentBodyMarker + "\n\n" + body, nil
+}
+
+func loadRunTokenUsage(run state.Run) (state.RunTokenUsage, bool, error) {
+	agentPath, err := resolveRunAgentLogPath(run.RunDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return state.RunTokenUsage{}, false, nil
+		}
+		return state.RunTokenUsage{}, false, fmt.Errorf("resolve agent log: %w", err)
+	}
+	data, err := os.ReadFile(agentPath)
+	if err != nil {
+		return state.RunTokenUsage{}, false, fmt.Errorf("read agent log: %w", err)
+	}
+	usage, ok := runsummary.ExtractTokenUsage(string(data))
+	if !ok {
+		return state.RunTokenUsage{}, false, nil
+	}
+
+	return state.RunTokenUsage{
+		RunID:                 run.ID,
+		Backend:               run.AgentBackend.String(),
+		Provider:              usage.Provider,
+		Model:                 usage.Model,
+		TotalTokens:           usage.TotalTokens,
+		InputTokens:           usage.InputTokens,
+		OutputTokens:          usage.OutputTokens,
+		CachedInputTokens:     usage.CachedInputTokens,
+		ReasoningOutputTokens: usage.ReasoningOutputTokens,
+		RawUsageJSON:          usage.RawUsageJSON,
+		CapturedAt:            time.Now().UTC(),
+	}, true, nil
 }
 
 func buildRunFailureComment(run state.Run, target runResponseTarget) (string, error) {

@@ -172,6 +172,67 @@ func TestStoreRejectsInvalidRunStatusTransition(t *testing.T) {
 	}
 }
 
+func TestStoreUpsertRunTokenUsage(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-usage", Repo: "owner/repo"}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := store.AddRun(CreateRunInput{
+		ID:         "run_usage",
+		TaskID:     "task-usage",
+		Repo:       "owner/repo",
+		Task:       "usage",
+		BaseBranch: "main",
+		RunDir:     "/tmp/run_usage",
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+
+	inputTokens := int64(120)
+	outputTokens := int64(30)
+	cachedInputTokens := int64(40)
+	reasoningOutputTokens := int64(10)
+	usage, err := store.UpsertRunTokenUsage(RunTokenUsage{
+		RunID:                 run.ID,
+		Backend:               "goose",
+		Provider:              "openai",
+		Model:                 "gpt-5-codex",
+		TotalTokens:           150,
+		InputTokens:           &inputTokens,
+		OutputTokens:          &outputTokens,
+		CachedInputTokens:     &cachedInputTokens,
+		ReasoningOutputTokens: &reasoningOutputTokens,
+		RawUsageJSON:          `{"total_tokens":150}`,
+		CapturedAt:            time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("upsert run token usage: %v", err)
+	}
+	if usage.TotalTokens != 150 {
+		t.Fatalf("total_tokens = %d, want 150", usage.TotalTokens)
+	}
+
+	got, ok := store.GetRunTokenUsage(run.ID)
+	if !ok {
+		t.Fatalf("expected run token usage for %s", run.ID)
+	}
+	if got.Model != "gpt-5-codex" {
+		t.Fatalf("model = %q, want gpt-5-codex", got.Model)
+	}
+	if got.InputTokens == nil || *got.InputTokens != 120 {
+		t.Fatalf("input_tokens = %v, want 120", got.InputTokens)
+	}
+	if got.CachedInputTokens == nil || *got.CachedInputTokens != 40 {
+		t.Fatalf("cached_input_tokens = %v, want 40", got.CachedInputTokens)
+	}
+}
+
 func TestStoreSeenDelivery(t *testing.T) {
 	t.Parallel()
 

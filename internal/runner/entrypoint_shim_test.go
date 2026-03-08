@@ -37,4 +37,3 @@ func TestEntrypointIsThinShim(t *testing.T) {
 		}
 	}
 }
-

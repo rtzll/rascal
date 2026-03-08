@@ -766,6 +766,51 @@ func (s *Store) DeleteRunExecution(runID string) error {
 	return nil
 }
 
+func (s *Store) UpsertRunTokenUsage(usage RunTokenUsage) (RunTokenUsage, error) {
+	usage.RunID = strings.TrimSpace(usage.RunID)
+	usage.Backend = strings.TrimSpace(usage.Backend)
+	usage.Provider = strings.TrimSpace(usage.Provider)
+	usage.Model = strings.TrimSpace(usage.Model)
+	usage.RawUsageJSON = strings.TrimSpace(usage.RawUsageJSON)
+	if usage.RunID == "" {
+		return RunTokenUsage{}, fmt.Errorf("run id is required")
+	}
+	now := time.Now().UTC()
+	if usage.CapturedAt.IsZero() {
+		usage.CapturedAt = now
+	}
+	row, err := s.q.UpsertRunTokenUsage(context.Background(), sqlitegen.UpsertRunTokenUsageParams{
+		RunID:                 usage.RunID,
+		Backend:               usage.Backend,
+		Provider:              usage.Provider,
+		Model:                 usage.Model,
+		TotalTokens:           usage.TotalTokens,
+		InputTokens:           toNullInt64Value(usage.InputTokens),
+		OutputTokens:          toNullInt64Value(usage.OutputTokens),
+		CachedInputTokens:     toNullInt64Value(usage.CachedInputTokens),
+		ReasoningOutputTokens: toNullInt64Value(usage.ReasoningOutputTokens),
+		RawUsageJson:          usage.RawUsageJSON,
+		CapturedAt:            usage.CapturedAt.UTC().UnixNano(),
+		CreatedAt:             now.UnixNano(),
+		UpdatedAt:             now.UnixNano(),
+	})
+	if err != nil {
+		return RunTokenUsage{}, fmt.Errorf("upsert run token usage for run %q: %w", usage.RunID, err)
+	}
+	return fromDBRunTokenUsage(row), nil
+}
+
+func (s *Store) GetRunTokenUsage(runID string) (RunTokenUsage, bool) {
+	row, err := s.q.GetRunTokenUsage(context.Background(), strings.TrimSpace(runID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RunTokenUsage{}, false
+		}
+		return RunTokenUsage{}, false
+	}
+	return fromDBRunTokenUsage(row), true
+}
+
 func (s *Store) RequestRunCancel(runID, reason, source string) error {
 	runID = strings.TrimSpace(runID)
 	reason = strings.TrimSpace(reason)
@@ -1125,6 +1170,24 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 	}
 }
 
+func fromDBRunTokenUsage(row sqlitegen.RunTokenUsage) RunTokenUsage {
+	return RunTokenUsage{
+		RunID:                 row.RunID,
+		Backend:               row.Backend,
+		Provider:              row.Provider,
+		Model:                 row.Model,
+		TotalTokens:           row.TotalTokens,
+		InputTokens:           fromNullInt64Value(row.InputTokens),
+		OutputTokens:          fromNullInt64Value(row.OutputTokens),
+		CachedInputTokens:     fromNullInt64Value(row.CachedInputTokens),
+		ReasoningOutputTokens: fromNullInt64Value(row.ReasoningOutputTokens),
+		RawUsageJSON:          row.RawUsageJson,
+		CapturedAt:            time.Unix(0, row.CapturedAt).UTC(),
+		CreatedAt:             time.Unix(0, row.CreatedAt).UTC(),
+		UpdatedAt:             time.Unix(0, row.UpdatedAt).UTC(),
+	}
+}
+
 func normalizePRStatus(in PRStatus) PRStatus {
 	switch in {
 	case PRStatusOpen, PRStatusMerged, PRStatusClosedUnmerged:
@@ -1139,6 +1202,21 @@ func toNullInt64(t *time.Time) sql.NullInt64 {
 		return sql.NullInt64{}
 	}
 	return sql.NullInt64{Int64: t.UTC().UnixNano(), Valid: true}
+}
+
+func toNullInt64Value(v *int64) sql.NullInt64 {
+	if v == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: *v, Valid: true}
+}
+
+func fromNullInt64Value(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	out := v.Int64
+	return &out
 }
 
 func fallbackUnixNano(t time.Time, fallback time.Time) int64 {

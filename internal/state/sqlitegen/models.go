@@ -115,6 +115,22 @@ type RunLease struct {
 	LeaseExpiresAt int64  `json:"lease_expires_at"`
 }
 
+type RunTokenUsage struct {
+	RunID                 string        `json:"run_id"`
+	Backend               string        `json:"backend"`
+	Provider              string        `json:"provider"`
+	Model                 string        `json:"model"`
+	TotalTokens           int64         `json:"total_tokens"`
+	InputTokens           sql.NullInt64 `json:"input_tokens"`
+	OutputTokens          sql.NullInt64 `json:"output_tokens"`
+	CachedInputTokens     sql.NullInt64 `json:"cached_input_tokens"`
+	ReasoningOutputTokens sql.NullInt64 `json:"reasoning_output_tokens"`
+	RawUsageJson          string        `json:"raw_usage_json"`
+	CapturedAt            int64         `json:"captured_at"`
+	CreatedAt             int64         `json:"created_at"`
+	UpdatedAt             int64         `json:"updated_at"`
+}
+
 type Task struct {
 	ID              string `json:"id"`
 	Repo            string `json:"repo"`

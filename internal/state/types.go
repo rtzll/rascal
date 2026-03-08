@@ -151,6 +151,22 @@ type RunExecution struct {
 	LastObservedAt time.Time `json:"last_observed_at"`
 }
 
+type RunTokenUsage struct {
+	RunID                 string    `json:"run_id"`
+	Backend               string    `json:"backend"`
+	Provider              string    `json:"provider,omitempty"`
+	Model                 string    `json:"model,omitempty"`
+	TotalTokens           int64     `json:"total_tokens"`
+	InputTokens           *int64    `json:"input_tokens,omitempty"`
+	OutputTokens          *int64    `json:"output_tokens,omitempty"`
+	CachedInputTokens     *int64    `json:"cached_input_tokens,omitempty"`
+	ReasoningOutputTokens *int64    `json:"reasoning_output_tokens,omitempty"`
+	RawUsageJSON          string    `json:"raw_usage_json,omitempty"`
+	CapturedAt            time.Time `json:"captured_at"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
 type RunCancelRequest struct {
 	RunID       string    `json:"run_id"`
 	Reason      string    `json:"reason"`

@@ -5,13 +5,10 @@ import (
 	"bytes"
 	"fmt"
 	"html"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
-
-var totalTokensPattern = regexp.MustCompile(`"total_tokens"[[:space:]]*:[[:space:]]*([0-9]+)`)
 
 const agentDetailsSummary = "Agent Details"
 
@@ -24,6 +21,7 @@ type CompletionCommentInput struct {
 	GooseOutput     string
 	CommitMessage   []byte
 	DurationSeconds int64
+	TotalTokens     *int64
 }
 
 // ParseCommitBody extracts the optional commit body from commit_message.txt
@@ -53,23 +51,6 @@ func ParseCommitBody(data []byte) (string, error) {
 		body = strings.TrimPrefix(body, "\n")
 	}
 	return body, nil
-}
-
-// ExtractTotalTokens returns the last total_tokens value found in agent output.
-func ExtractTotalTokens(gooseOutput string) (int64, bool) {
-	matches := totalTokensPattern.FindAllStringSubmatch(gooseOutput, -1)
-	if len(matches) == 0 {
-		return 0, false
-	}
-	last := matches[len(matches)-1]
-	if len(last) < 2 {
-		return 0, false
-	}
-	n, err := strconv.ParseInt(last[1], 10, 64)
-	if err != nil || n < 0 {
-		return 0, false
-	}
-	return n, true
 }
 
 func FormatDuration(totalSeconds int64) string {
@@ -113,7 +94,7 @@ func renderAgentDetailsSection(gooseOutput string) string {
 
 func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection string) string {
 	gooseSection := renderAgentDetailsSection(gooseOutput)
-	if totalTokens, ok := ExtractTotalTokens(gooseOutput); ok {
+	if usage, ok := ExtractTokenUsage(gooseOutput); ok {
 		body := ""
 		if strings.TrimSpace(commitBody) != "" {
 			body = commitBody + "\n\n"
@@ -122,7 +103,7 @@ func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection stri
 			"Rascal run `%s` completed in %s · %s tokens",
 			runID,
 			runDuration,
-			formatTokenCount(totalTokens),
+			formatTokenCount(usage.TotalTokens),
 		)
 		return body
 	}
@@ -146,6 +127,19 @@ func BuildCompletionComment(in CompletionCommentInput) (string, error) {
 	}
 	runDuration := FormatDuration(in.DurationSeconds)
 	commentBody := BuildPRBody(in.RunID, commitBody, in.GooseOutput, runDuration, closesSection)
+	if in.TotalTokens != nil && *in.TotalTokens > 0 {
+		body := ""
+		if strings.TrimSpace(commitBody) != "" {
+			body = commitBody + "\n\n"
+		}
+		body += renderAgentDetailsSection(in.GooseOutput) + closesSection + "\n\n---\n\n" + fmt.Sprintf(
+			"Rascal run `%s` completed in %s · %s tokens",
+			in.RunID,
+			runDuration,
+			formatTokenCount(*in.TotalTokens),
+		)
+		commentBody = body
+	}
 
 	requestedBy := strings.TrimSpace(in.RequestedBy)
 	if requestedBy == "" {

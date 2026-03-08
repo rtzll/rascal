@@ -54,6 +54,50 @@ func TestExtractTotalTokens(t *testing.T) {
 	}
 }
 
+func TestExtractTokenUsage(t *testing.T) {
+	t.Run("extracts codex-style token breakdown", func(t *testing.T) {
+		usage, ok := ExtractTokenUsage(`{"type":"turn.completed","model":"gpt-5-codex","usage":{"input_tokens":120,"input_tokens_details":{"cached_tokens":40},"output_tokens":30,"output_tokens_details":{"reasoning_tokens":10},"total_tokens":150}}`)
+		if !ok {
+			t.Fatal("expected structured token usage")
+		}
+		if usage.Model != "gpt-5-codex" {
+			t.Fatalf("model = %q, want gpt-5-codex", usage.Model)
+		}
+		if usage.TotalTokens != 150 {
+			t.Fatalf("total_tokens = %d, want 150", usage.TotalTokens)
+		}
+		if usage.InputTokens == nil || *usage.InputTokens != 120 {
+			t.Fatalf("input_tokens = %v, want 120", usage.InputTokens)
+		}
+		if usage.OutputTokens == nil || *usage.OutputTokens != 30 {
+			t.Fatalf("output_tokens = %v, want 30", usage.OutputTokens)
+		}
+		if usage.CachedInputTokens == nil || *usage.CachedInputTokens != 40 {
+			t.Fatalf("cached_input_tokens = %v, want 40", usage.CachedInputTokens)
+		}
+		if usage.ReasoningOutputTokens == nil || *usage.ReasoningOutputTokens != 10 {
+			t.Fatalf("reasoning_output_tokens = %v, want 10", usage.ReasoningOutputTokens)
+		}
+		if !strings.Contains(usage.RawUsageJSON, `"input_tokens":120`) {
+			t.Fatalf("expected raw usage json, got %q", usage.RawUsageJSON)
+		}
+	})
+
+	t.Run("prefers final complete event totals", func(t *testing.T) {
+		usage, ok := ExtractTokenUsage(`{"type":"message","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}
+{"type":"complete","total_tokens":42}`)
+		if !ok {
+			t.Fatal("expected token usage from complete event")
+		}
+		if usage.TotalTokens != 42 {
+			t.Fatalf("total_tokens = %d, want 42", usage.TotalTokens)
+		}
+		if usage.InputTokens != nil || usage.OutputTokens != nil {
+			t.Fatalf("expected final complete event to avoid stale breakdown, got input=%v output=%v", usage.InputTokens, usage.OutputTokens)
+		}
+	})
+}
+
 func TestFormatDuration(t *testing.T) {
 	cases := []struct {
 		seconds int64
@@ -203,6 +247,23 @@ func TestBuildCompletionComment(t *testing.T) {
 		}
 		if !strings.Contains(body, "Rascal run took 8s") {
 			t.Fatalf("expected duration summary:\n%s", body)
+		}
+	})
+
+	t.Run("uses explicit total tokens when provided", func(t *testing.T) {
+		totalTokens := int64(42000)
+		body, err := BuildCompletionComment(CompletionCommentInput{
+			RunID:           "run_3",
+			GooseOutput:     `{"event":"x"}`,
+			CommitMessage:   []byte("feat(rascal): update"),
+			DurationSeconds: 8,
+			TotalTokens:     &totalTokens,
+		})
+		if err != nil {
+			t.Fatalf("BuildCompletionComment returned error: %v", err)
+		}
+		if !strings.Contains(body, "Rascal run `run_3` completed in 8s · 42K tokens") {
+			t.Fatalf("expected explicit token summary:\n%s", body)
 		}
 	})
 }

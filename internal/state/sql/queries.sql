@@ -375,6 +375,68 @@ WHERE run_id = ?;
 DELETE FROM run_executions
 WHERE run_id = ?;
 
+-- name: UpsertRunTokenUsage :one
+INSERT INTO run_token_usage (
+  run_id,
+  backend,
+  provider,
+  model,
+  total_tokens,
+  input_tokens,
+  output_tokens,
+  cached_input_tokens,
+  reasoning_output_tokens,
+  raw_usage_json,
+  captured_at,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET
+  backend = excluded.backend,
+  provider = excluded.provider,
+  model = excluded.model,
+  total_tokens = excluded.total_tokens,
+  input_tokens = excluded.input_tokens,
+  output_tokens = excluded.output_tokens,
+  cached_input_tokens = excluded.cached_input_tokens,
+  reasoning_output_tokens = excluded.reasoning_output_tokens,
+  raw_usage_json = excluded.raw_usage_json,
+  captured_at = excluded.captured_at,
+  updated_at = excluded.updated_at
+RETURNING
+  run_id,
+  backend,
+  provider,
+  model,
+  total_tokens,
+  input_tokens,
+  output_tokens,
+  cached_input_tokens,
+  reasoning_output_tokens,
+  raw_usage_json,
+  captured_at,
+  created_at,
+  updated_at;
+
+-- name: GetRunTokenUsage :one
+SELECT
+  run_id,
+  backend,
+  provider,
+  model,
+  total_tokens,
+  input_tokens,
+  output_tokens,
+  cached_input_tokens,
+  reasoning_output_tokens,
+  raw_usage_json,
+  captured_at,
+  created_at,
+  updated_at
+FROM run_token_usage
+WHERE run_id = ?;
+
 -- name: UpsertRunCancel :exec
 INSERT INTO run_cancels (run_id, reason, source, requested_at)
 VALUES (?, ?, ?, ?)

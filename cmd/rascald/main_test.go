@@ -1973,6 +1973,72 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	if !strings.Contains(comment.body, "Rascal run `run_comment_completion` completed in ") || !strings.Contains(comment.body, "123K tokens") {
 		t.Fatalf("expected runtime and token summary, got:\n%s", comment.body)
 	}
+	usage, ok := s.store.GetRunTokenUsage(run.ID)
+	if !ok {
+		t.Fatalf("expected persisted token usage for %s", run.ID)
+	}
+	if usage.TotalTokens != 123000 {
+		t.Fatalf("total_tokens = %d, want 123000", usage.TotalTokens)
+	}
+}
+
+func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
+	launcher := &fakeLauncher{
+		res: fakeRunResult{
+			HeadSHA: "0123456789abcdef0123456789abcdef01234567",
+		},
+	}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_token_usage",
+		TaskID:     "owner/repo#88",
+		Repo:       "owner/repo",
+		Task:       "Capture token usage",
+		BaseBranch: "main",
+		HeadBranch: "rascal/pr-88",
+		Trigger:    "issue_label",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	logBody := `{"type":"turn.completed","model":"gpt-5-codex","usage":{"input_tokens":120,"input_tokens_details":{"cached_tokens":40},"output_tokens":30,"output_tokens_details":{"reasoning_tokens":10},"total_tokens":150}}`
+	if err := os.WriteFile(filepath.Join(run.RunDir, "agent.ndjson"), []byte(logBody+"\n"), 0o644); err != nil {
+		t.Fatalf("write agent log: %v", err)
+	}
+
+	s.executeRun(run.ID)
+
+	usage, ok := s.store.GetRunTokenUsage(run.ID)
+	if !ok {
+		t.Fatalf("expected run token usage for %s", run.ID)
+	}
+	if usage.Backend != "goose" {
+		t.Fatalf("backend = %q, want goose", usage.Backend)
+	}
+	if usage.Model != "gpt-5-codex" {
+		t.Fatalf("model = %q, want gpt-5-codex", usage.Model)
+	}
+	if usage.TotalTokens != 150 {
+		t.Fatalf("total_tokens = %d, want 150", usage.TotalTokens)
+	}
+	if usage.InputTokens == nil || *usage.InputTokens != 120 {
+		t.Fatalf("input_tokens = %v, want 120", usage.InputTokens)
+	}
+	if usage.OutputTokens == nil || *usage.OutputTokens != 30 {
+		t.Fatalf("output_tokens = %v, want 30", usage.OutputTokens)
+	}
+	if usage.CachedInputTokens == nil || *usage.CachedInputTokens != 40 {
+		t.Fatalf("cached_input_tokens = %v, want 40", usage.CachedInputTokens)
+	}
+	if usage.ReasoningOutputTokens == nil || *usage.ReasoningOutputTokens != 10 {
+		t.Fatalf("reasoning_output_tokens = %v, want 10", usage.ReasoningOutputTokens)
+	}
+	if !strings.Contains(usage.RawUsageJSON, `"reasoning_tokens":10`) {
+		t.Fatalf("expected raw usage json, got %q", usage.RawUsageJSON)
+	}
 }
 
 func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *testing.T) {

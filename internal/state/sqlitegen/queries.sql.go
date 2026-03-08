@@ -952,6 +952,46 @@ func (q *Queries) GetRunLease(ctx context.Context, runID string) (RunLease, erro
 	return i, err
 }
 
+const getRunTokenUsage = `-- name: GetRunTokenUsage :one
+SELECT
+  run_id,
+  backend,
+  provider,
+  model,
+  total_tokens,
+  input_tokens,
+  output_tokens,
+  cached_input_tokens,
+  reasoning_output_tokens,
+  raw_usage_json,
+  captured_at,
+  created_at,
+  updated_at
+FROM run_token_usage
+WHERE run_id = ?
+`
+
+func (q *Queries) GetRunTokenUsage(ctx context.Context, runID string) (RunTokenUsage, error) {
+	row := q.db.QueryRowContext(ctx, getRunTokenUsage, runID)
+	var i RunTokenUsage
+	err := row.Scan(
+		&i.RunID,
+		&i.Backend,
+		&i.Provider,
+		&i.Model,
+		&i.TotalTokens,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CachedInputTokens,
+		&i.ReasoningOutputTokens,
+		&i.RawUsageJson,
+		&i.CapturedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getTask = `-- name: GetTask :one
 SELECT
   tasks.id,
@@ -2465,6 +2505,102 @@ func (q *Queries) UpsertRunLease(ctx context.Context, arg UpsertRunLeaseParams) 
 		arg.LeaseExpiresAt,
 	)
 	return err
+}
+
+const upsertRunTokenUsage = `-- name: UpsertRunTokenUsage :one
+INSERT INTO run_token_usage (
+  run_id,
+  backend,
+  provider,
+  model,
+  total_tokens,
+  input_tokens,
+  output_tokens,
+  cached_input_tokens,
+  reasoning_output_tokens,
+  raw_usage_json,
+  captured_at,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET
+  backend = excluded.backend,
+  provider = excluded.provider,
+  model = excluded.model,
+  total_tokens = excluded.total_tokens,
+  input_tokens = excluded.input_tokens,
+  output_tokens = excluded.output_tokens,
+  cached_input_tokens = excluded.cached_input_tokens,
+  reasoning_output_tokens = excluded.reasoning_output_tokens,
+  raw_usage_json = excluded.raw_usage_json,
+  captured_at = excluded.captured_at,
+  updated_at = excluded.updated_at
+RETURNING
+  run_id,
+  backend,
+  provider,
+  model,
+  total_tokens,
+  input_tokens,
+  output_tokens,
+  cached_input_tokens,
+  reasoning_output_tokens,
+  raw_usage_json,
+  captured_at,
+  created_at,
+  updated_at
+`
+
+type UpsertRunTokenUsageParams struct {
+	RunID                 string        `json:"run_id"`
+	Backend               string        `json:"backend"`
+	Provider              string        `json:"provider"`
+	Model                 string        `json:"model"`
+	TotalTokens           int64         `json:"total_tokens"`
+	InputTokens           sql.NullInt64 `json:"input_tokens"`
+	OutputTokens          sql.NullInt64 `json:"output_tokens"`
+	CachedInputTokens     sql.NullInt64 `json:"cached_input_tokens"`
+	ReasoningOutputTokens sql.NullInt64 `json:"reasoning_output_tokens"`
+	RawUsageJson          string        `json:"raw_usage_json"`
+	CapturedAt            int64         `json:"captured_at"`
+	CreatedAt             int64         `json:"created_at"`
+	UpdatedAt             int64         `json:"updated_at"`
+}
+
+func (q *Queries) UpsertRunTokenUsage(ctx context.Context, arg UpsertRunTokenUsageParams) (RunTokenUsage, error) {
+	row := q.db.QueryRowContext(ctx, upsertRunTokenUsage,
+		arg.RunID,
+		arg.Backend,
+		arg.Provider,
+		arg.Model,
+		arg.TotalTokens,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.CachedInputTokens,
+		arg.ReasoningOutputTokens,
+		arg.RawUsageJson,
+		arg.CapturedAt,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i RunTokenUsage
+	err := row.Scan(
+		&i.RunID,
+		&i.Backend,
+		&i.Provider,
+		&i.Model,
+		&i.TotalTokens,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CachedInputTokens,
+		&i.ReasoningOutputTokens,
+		&i.RawUsageJson,
+		&i.CapturedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertTask = `-- name: UpsertTask :exec
