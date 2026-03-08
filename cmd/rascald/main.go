@@ -92,6 +92,7 @@ type server struct {
 	retryBackoff       func(attempt int) time.Duration
 	stopSupervisors    bool
 	beforeSupervise    func(runID string)
+	afterRunCleanup    func(runID string)
 }
 
 type runRequest struct {
@@ -1889,6 +1890,9 @@ func (s *server) superviseDetachedRunLoop(runID string, execRec state.RunExecuti
 		s.mu.Unlock()
 		if err := s.store.DeleteRunLeaseForOwner(runID, s.instanceID); err != nil {
 			log.Printf("failed to delete run lease for %s: %v", runID, err)
+		}
+		if s.afterRunCleanup != nil {
+			s.afterRunCleanup(runID)
 		}
 		if credentialLeaseID != "" {
 			if err := s.broker.Release(context.Background(), credentialLeaseID); err != nil {

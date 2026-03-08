@@ -3165,6 +3165,7 @@ func TestHandleCancelRunActiveUsesUserReason(t *testing.T) {
 func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
 	t.Parallel()
 	done := make(chan struct{})
+	cleanupDone := make(chan struct{})
 	launcher := &stubbornLauncher{
 		wait: done,
 		res: fakeRunResult{
@@ -3179,11 +3180,17 @@ func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
+	s.afterRunCleanup = func(runID string) {
+		if runID == run.ID {
+			select {
+			case <-cleanupDone:
+			default:
+				close(cleanupDone)
+			}
+		}
+	}
 
-	waitFor(t, time.Second, func() bool {
-		current, ok := s.store.GetRun(run.ID)
-		return ok && current.Status == state.StatusRunning
-	}, "run enters running status")
+	_ = waitForRunExecution(t, s, run.ID)
 
 	rec := httptest.NewRecorder()
 	s.handleCancelRun(rec, run.ID)
@@ -3205,8 +3212,13 @@ func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
 		t.Fatalf("expected final canceled status, got %s", current.Status)
 	}
 	waitFor(t, 5*time.Second, func() bool {
-		return s.activeRunCount() == 0
-	}, "server idle after canceled run")
+		select {
+		case <-cleanupDone:
+			return true
+		default:
+			return false
+		}
+	}, "run cleanup after canceled run")
 }
 
 func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
