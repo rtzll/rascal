@@ -286,7 +286,7 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 			}
 			gotArgs = append([]string(nil), args...)
 			if _, err := io.WriteString(stdout, `{"event":"message"}`+"\n"); err != nil {
-				return err
+				return fmt.Errorf("write fake goose output: %w", err)
 			}
 			return nil
 		},
@@ -335,7 +335,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 			}
 			gotArgs = append([]string(nil), args...)
 			if _, err := io.WriteString(stdout, `{"event":"message"}`+"\n"); err != nil {
-				return err
+				return fmt.Errorf("write fake goose output: %w", err)
 			}
 			return nil
 		},
@@ -386,7 +386,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 			}
 			gotArgs = append([]string(nil), args...)
 			if _, err := io.WriteString(stdout, `{"event":"message"}`+"\n"); err != nil {
-				return err
+				return fmt.Errorf("write fake goose output: %w", err)
 			}
 			return nil
 		},
@@ -455,7 +455,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 				return errors.New("resume failed: session state missing")
 			}
 			if _, err := io.WriteString(stdout, `{"event":"message"}`+"\n"); err != nil {
-				return err
+				return fmt.Errorf("write fake goose output: %w", err)
 			}
 			return nil
 		},
@@ -594,7 +594,7 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 			}
 			gotArgs = append([]string(nil), args...)
 			if _, err := io.WriteString(stdout, `{"event":"message"}`+"\n"); err != nil {
-				return err
+				return fmt.Errorf("write fake goose output: %w", err)
 			}
 			return nil
 		},
@@ -655,7 +655,7 @@ func TestRunCodexFreshSession(t *testing.T) {
 				t.Fatalf("write codex session: %v", err)
 			}
 			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
-				return err
+				return fmt.Errorf("write fake codex output: %w", err)
 			}
 			return nil
 		},
@@ -731,7 +731,7 @@ func TestRunCodexResumeSession(t *testing.T) {
 				t.Fatalf("write codex session: %v", err)
 			}
 			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
-				return err
+				return fmt.Errorf("write fake codex output: %w", err)
 			}
 			return nil
 		},
@@ -1012,7 +1012,7 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, _ ...string) error {
 			if name == "goose" {
 				if _, err := io.WriteString(stdout, `{"event":"message","usage":{"total_tokens":7}}`+"\n"); err != nil {
-					return err
+					return fmt.Errorf("write fake goose output: %w", err)
 				}
 			}
 			return nil

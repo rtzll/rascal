@@ -102,7 +102,10 @@ type osExecutor struct{}
 
 func (osExecutor) LookPath(name string) error {
 	_, err := exec.LookPath(name)
-	return err
+	if err != nil {
+		return fmt.Errorf("look up %s: %w", name, err)
+	}
+	return nil
 }
 
 func (osExecutor) CombinedOutput(dir string, extraEnv []string, name string, args ...string) (string, error) {
@@ -135,7 +138,10 @@ func (osExecutor) RunWithInput(dir string, extraEnv []string, stdin io.Reader, s
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return nil
 }
 
 func main() {
@@ -154,7 +160,7 @@ func run() error {
 func runWithExecutor(ex commandExecutor) error {
 	cfg, err := loadConfig()
 	if err != nil {
-		return err
+		return fmt.Errorf("load config: %w", err)
 	}
 	started := time.Now().UTC()
 
@@ -216,7 +222,10 @@ func runWithExecutor(ex commandExecutor) error {
 	if err := runStage("resolve_identity", func() error {
 		var err error
 		authorName, authorEmail, err = resolveGitIdentity(ex)
-		return err
+		if err != nil {
+			return fmt.Errorf("resolve git identity: %w", err)
+		}
+		return nil
 	}); err != nil {
 		return fail(err)
 	}
@@ -245,7 +254,7 @@ func runWithExecutor(ex commandExecutor) error {
 		if err := runStage("verify", func() error {
 			log.Printf("[%s] running lightweight verify: make -n test", nowUTC())
 			if _, err := runCommand(ex, cfg.RepoDir, nil, "make", "-n", "test"); err != nil {
-				return err
+				return fmt.Errorf("preview make test target: %w", err)
 			}
 			return nil
 		}); err != nil {
@@ -257,7 +266,7 @@ func runWithExecutor(ex commandExecutor) error {
 	commitBody := ""
 	if err := runStage("prepare_commit", func() error {
 		if title, body, msgErr := loadAgentCommitMessage(cfg.CommitMsgPath); msgErr != nil {
-			return msgErr
+			return fmt.Errorf("load agent commit message: %w", msgErr)
 		} else {
 			commitBody = body
 			if title != "" {
@@ -271,11 +280,11 @@ func runWithExecutor(ex commandExecutor) error {
 
 		statusOut, err := runCommand(ex, cfg.RepoDir, nil, "git", "status", "--porcelain")
 		if err != nil {
-			return err
+			return fmt.Errorf("git status --porcelain: %w", err)
 		}
 		if strings.TrimSpace(statusOut) != "" {
 			if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "add", "-A"); err != nil {
-				return err
+				return fmt.Errorf("git add -A: %w", err)
 			}
 			finalBody := strings.TrimSpace(commitBody)
 			if finalBody != "" {
@@ -290,7 +299,7 @@ func runWithExecutor(ex commandExecutor) error {
 				"GIT_COMMITTER_EMAIL=" + authorEmail,
 			}
 			if _, err := runCommand(ex, cfg.RepoDir, commitEnv, "git", "commit", "-m", commitTitle, "-m", finalBody); err != nil {
-				return err
+				return fmt.Errorf("git commit: %w", err)
 			}
 		}
 		return nil
@@ -313,7 +322,10 @@ func runWithExecutor(ex commandExecutor) error {
 	if err := runStage("load_pr", func() error {
 		var err error
 		view, found, err = loadPRView(ex, cfg)
-		return err
+		if err != nil {
+			return fmt.Errorf("load pull request view: %w", err)
+		}
+		return nil
 	}); err != nil {
 		return fail(err)
 	}
@@ -365,7 +377,7 @@ func runWithExecutor(ex commandExecutor) error {
 	if err := runStage("finalize_meta", func() error {
 		headSHA, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-parse", "HEAD")
 		if err != nil {
-			return err
+			return fmt.Errorf("git rev-parse HEAD: %w", err)
 		}
 		meta.HeadSHA = strings.TrimSpace(headSHA)
 		meta.PRNumber = view.Number
@@ -617,12 +629,12 @@ func checkoutRepo(ex commandExecutor, cfg config) error {
 	if _, err := os.Stat(filepath.Join(cfg.RepoDir, ".git")); err == nil {
 		log.Printf("[%s] repo already present, refreshing", nowUTC())
 		if _, err := runCommand(ex, "", nil, "git", "-C", cfg.RepoDir, "fetch", "--all", "--prune"); err != nil {
-			return err
+			return fmt.Errorf("refresh existing checkout: %w", err)
 		}
 	} else {
 		log.Printf("[%s] cloning %s", nowUTC(), cfg.Repo)
 		if _, err := runCommand(ex, "", nil, "git", "clone", repoURL, cfg.RepoDir); err != nil {
-			return err
+			return fmt.Errorf("clone repository: %w", err)
 		}
 	}
 
@@ -631,7 +643,7 @@ func checkoutRepo(ex commandExecutor, cfg config) error {
 	}
 	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "checkout", cfg.BaseBranch); err != nil {
 		if _, createErr := runCommand(ex, cfg.RepoDir, nil, "git", "checkout", "-b", cfg.BaseBranch, "origin/"+cfg.BaseBranch); createErr != nil {
-			return createErr
+			return fmt.Errorf("checkout base branch %s: %w", cfg.BaseBranch, createErr)
 		}
 	}
 	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "pull", "--ff-only", "origin", cfg.BaseBranch); err != nil {
@@ -640,14 +652,23 @@ func checkoutRepo(ex commandExecutor, cfg config) error {
 
 	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-parse", "--verify", cfg.HeadBranch); err == nil {
 		_, err = runCommand(ex, cfg.RepoDir, nil, "git", "checkout", cfg.HeadBranch)
-		return err
+		if err != nil {
+			return fmt.Errorf("checkout head branch %s: %w", cfg.HeadBranch, err)
+		}
+		return nil
 	}
 	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "ls-remote", "--exit-code", "--heads", "origin", cfg.HeadBranch); err == nil {
 		_, err = runCommand(ex, cfg.RepoDir, nil, "git", "checkout", "-b", cfg.HeadBranch, "origin/"+cfg.HeadBranch)
-		return err
+		if err != nil {
+			return fmt.Errorf("checkout remote head branch %s: %w", cfg.HeadBranch, err)
+		}
+		return nil
 	}
 	_, err := runCommand(ex, cfg.RepoDir, nil, "git", "checkout", "-b", cfg.HeadBranch)
-	return err
+	if err != nil {
+		return fmt.Errorf("create head branch %s: %w", cfg.HeadBranch, err)
+	}
+	return nil
 }
 
 func runAgent(ex commandExecutor, cfg config) (string, string, error) {
@@ -750,14 +771,14 @@ func runGooseOnce(ex commandExecutor, cfg config, args []string) (err error) {
 		env = append(env, "GOOSE_CODEX_DEBUG=1")
 	}
 	if err := ex.Run(cfg.RepoDir, env, logFile, logFile, "goose", args...); err != nil {
-		return err
+		return fmt.Errorf("run goose command: %w", err)
 	}
 	return nil
 }
 
 func runCodex(ex commandExecutor, cfg config) (output string, sessionID string, err error) {
 	if err := ensureCodexHome(cfg); err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("ensure codex home: %w", err)
 	}
 
 	instructions, err := os.ReadFile(cfg.InstructionsPath)
@@ -865,7 +886,7 @@ func loadAgentOutput(outputPath, fallbackLogPath, backend string) (string, error
 func discoverLatestCodexSessionID(codexHome string) (string, error) {
 	sessionFiles, err := listCodexSessionFiles(filepath.Join(strings.TrimSpace(codexHome), defaultCodexSessionDir))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("list codex session files: %w", err)
 	}
 	for _, sessionFile := range sessionFiles {
 		sessionID, err := parseCodexSessionID(sessionFile)
@@ -897,7 +918,7 @@ func listCodexSessionFiles(root string) ([]string, error) {
 	var sessionFiles []sessionFile
 	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return fmt.Errorf("walk codex sessions: %w", err)
 		}
 		if info.IsDir() || filepath.Ext(path) != ".jsonl" {
 			return nil
@@ -960,26 +981,26 @@ func samePath(left, right string) bool {
 func copyFile(src, dst string, mode os.FileMode) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("open source file %s: %w", src, err)
 	}
 	defer func() {
 		if closeErr := in.Close(); err == nil && closeErr != nil {
-			err = closeErr
+			err = fmt.Errorf("close source file %s: %w", src, closeErr)
 		}
 	}()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
-		return err
+		return fmt.Errorf("open destination file %s: %w", dst, err)
 	}
 	defer func() {
 		if closeErr := out.Close(); err == nil && closeErr != nil {
-			err = closeErr
+			err = fmt.Errorf("close destination file %s: %w", dst, closeErr)
 		}
 	}()
 
 	if _, err = io.Copy(out, in); err != nil {
-		return err
+		return fmt.Errorf("copy %s to %s: %w", src, dst, err)
 	}
 	return nil
 }
@@ -987,7 +1008,7 @@ func copyFile(src, dst string, mode os.FileMode) (err error) {
 func gooseSessionExists(ex commandExecutor, cfg config, name string) (bool, error) {
 	out, err := runCommand(ex, cfg.RepoDir, nil, "goose", "session", "list", "--format", "json")
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("list goose sessions: %w", err)
 	}
 	var sessions []gooseSessionInfo
 	if err := json.Unmarshal([]byte(out), &sessions); err != nil {
@@ -1129,7 +1150,11 @@ func runStage(name string, fn func() error) error {
 }
 
 func runCommand(ex commandExecutor, dir string, extraEnv []string, name string, args ...string) (string, error) {
-	return ex.CombinedOutput(dir, extraEnv, name, args...)
+	out, err := ex.CombinedOutput(dir, extraEnv, name, args...)
+	if err != nil {
+		return out, fmt.Errorf("run %s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return out, nil
 }
 
 func taskSubject(task, fallback string) string {

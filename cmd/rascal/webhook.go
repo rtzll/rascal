@@ -310,9 +310,13 @@ func resolveWebhookTestInput(in webhookTestInput, cfg config.ClientConfig) (webh
 func buildWebhookTestPayload(event, repo string) ([]byte, error) {
 	payload, err := buildWebhookTestEvent(event, repo)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build webhook test event: %w", err)
 	}
-	return json.MarshalIndent(payload, "", "  ")
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal webhook test payload: %w", err)
+	}
+	return data, nil
 }
 
 func buildWebhookTestEvent(event, repo string) (any, error) {
