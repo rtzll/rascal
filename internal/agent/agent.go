@@ -53,7 +53,7 @@ func SessionEnabled(mode SessionMode, trigger string) bool {
 		return true
 	case SessionModePROnly:
 		switch strings.TrimSpace(trigger) {
-		case "pr_comment", "pr_review", "pr_review_comment", "retry", "issue_edited":
+		case "pr_comment", "pr_review", "pr_review_comment", "pr_review_thread", "retry", "issue_edited":
 			return true
 		default:
 			return false

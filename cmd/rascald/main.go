@@ -1232,6 +1232,53 @@ Inline comment location: %s`, contextText, location)
 			return nil
 		}
 		return err
+	case "pull_request_review_thread":
+		var ev ghapi.PullRequestReviewThreadEvent
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return fmt.Errorf("decode pull_request_review_thread event: %w", err)
+		}
+		switch ev.Action {
+		case "unresolved":
+			if s.isBotActor(ev.Sender.Login) {
+				return nil
+			}
+			task, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
+			if !ok {
+				return nil
+			}
+			_, err := s.createAndQueueRun(runRequest{
+				TaskID:      task.ID,
+				Repo:        ev.Repository.FullName,
+				Task:        fmt.Sprintf("Address PR #%d unresolved review thread", ev.PullRequest.Number),
+				Trigger:     "pr_review_thread",
+				IssueNumber: task.IssueNumber,
+				PRNumber:    ev.PullRequest.Number,
+				PRStatus:    state.PRStatusOpen,
+				Context:     reviewThreadContext(ev.Thread),
+				BaseBranch:  s.defaultBaseBranchForTask(task.ID),
+				HeadBranch:  s.defaultHeadBranchForTask(task.ID),
+				Debug:       boolPtr(true),
+				ResponseTarget: &runResponseTarget{
+					Repo:        ev.Repository.FullName,
+					IssueNumber: ev.PullRequest.Number,
+					RequestedBy: strings.TrimSpace(ev.Sender.Login),
+					Trigger:     "pr_review_thread",
+				},
+			})
+			if errors.Is(err, errTaskCompleted) {
+				return nil
+			}
+			return err
+		case "resolved":
+			task, ok := s.taskForPR(ev.Repository.FullName, ev.PullRequest.Number)
+			if !ok {
+				return nil
+			}
+			s.cancelQueuedPRTriggerRuns(task.ID, ev.Repository.FullName, ev.PullRequest.Number, "pr_review_thread", "review thread resolved")
+			return nil
+		default:
+			return nil
+		}
 	case "pull_request":
 		var ev ghapi.PullRequestEvent
 		if err := json.Unmarshal(payload, &ev); err != nil {
@@ -2528,6 +2575,42 @@ func reviewCommentBodyChanged(ev ghapi.PullRequestReviewCommentEvent) bool {
 	return newBody != oldBody
 }
 
+func reviewThreadContext(thread ghapi.ReviewThread) string {
+	for i := len(thread.Comments) - 1; i >= 0; i-- {
+		body := strings.TrimSpace(thread.Comments[i].Body)
+		if body == "" {
+			continue
+		}
+		if location := formatReviewCommentLocation(thread.Path, thread.StartLine, thread.Line); location != "" {
+			return fmt.Sprintf("%s\n\nThread location: %s", body, location)
+		}
+		return body
+	}
+	if location := formatReviewCommentLocation(thread.Path, thread.StartLine, thread.Line); location != "" {
+		return fmt.Sprintf("review thread marked unresolved at %s", location)
+	}
+	return "review thread marked unresolved"
+}
+
+func (s *server) cancelQueuedPRTriggerRuns(taskID, repo string, prNumber int, trigger, reason string) {
+	taskID = strings.TrimSpace(taskID)
+	repo = strings.TrimSpace(repo)
+	trigger = strings.TrimSpace(trigger)
+	reason = strings.TrimSpace(reason)
+	if taskID == "" || repo == "" || prNumber <= 0 || trigger == "" {
+		return
+	}
+	if reason == "" {
+		reason = "canceled"
+	}
+	for _, run := range s.store.ListRuns(10000) {
+		if run.TaskID != taskID || run.Repo != repo || run.PRNumber != prNumber || run.Trigger != trigger || run.Status != state.StatusQueued {
+			continue
+		}
+		s.setRunStatusBestEffort(run.ID, state.StatusCanceled, reason)
+	}
+}
+
 func (s *server) isBotActor(login string) bool {
 	login = strings.TrimSpace(strings.ToLower(login))
 	if login == "" {
@@ -2882,7 +2965,7 @@ func (s *server) pendingRunCancelReason(runID string) (string, bool) {
 
 func isCommentTriggeredRun(trigger string) bool {
 	switch strings.TrimSpace(trigger) {
-	case "pr_comment", "pr_review", "pr_review_comment":
+	case "pr_comment", "pr_review", "pr_review_comment", "pr_review_thread":
 		return true
 	default:
 		return false

@@ -99,6 +99,22 @@ type ReviewCommentChanges struct {
 	Body *IssueCommentBodyChange `json:"body"`
 }
 
+type ReviewThread struct {
+	ID        int64           `json:"id"`
+	Path      string          `json:"path"`
+	Line      *int            `json:"line"`
+	StartLine *int            `json:"start_line"`
+	Comments  []ReviewComment `json:"comments"`
+}
+
+type PullRequestReviewThreadEvent struct {
+	Action      string       `json:"action"`
+	Thread      ReviewThread `json:"thread"`
+	PullRequest PullRequest  `json:"pull_request"`
+	Repository  Repository   `json:"repository"`
+	Sender      User         `json:"sender"`
+}
+
 type PullRequestEvent struct {
 	Action      string      `json:"action"`
 	PullRequest PullRequest `json:"pull_request"`

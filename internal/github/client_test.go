@@ -336,7 +336,7 @@ func TestUpsertWebhookDefaultEventsIncludeReviewComment(t *testing.T) {
 		t.Fatalf("UpsertWebhook returned error: %v", err)
 	}
 
-	want := []string{"issues", "issue_comment", "pull_request_review", "pull_request_review_comment", "pull_request"}
+	want := []string{"issues", "issue_comment", "pull_request_review", "pull_request_review_comment", "pull_request_review_thread", "pull_request"}
 	for _, ev := range want {
 		found := false
 		for _, got := range receivedEvents {

@@ -374,7 +374,7 @@ func (c *APIClient) UpsertWebhook(ctx context.Context, repo, webhookURL, secret 
 		return err
 	}
 	if len(events) == 0 {
-		events = []string{"issues", "issue_comment", "pull_request_review", "pull_request_review_comment", "pull_request"}
+		events = []string{"issues", "issue_comment", "pull_request_review", "pull_request_review_comment", "pull_request_review_thread", "pull_request"}
 	}
 
 	listPath := fmt.Sprintf("/repos/%s/%s/hooks", owner, repoName)
