@@ -9,14 +9,12 @@ func TestNormalizeGooseSessionMode(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
-		"":         GooseSessionModeOff,
-		"off":      GooseSessionModeOff,
-		"pr-only":  GooseSessionModePROnly,
-		"PR-ONLY":  GooseSessionModePROnly,
-		"all":      GooseSessionModeAll,
-		"unknown":  GooseSessionModeOff,
-		"  all  ":  GooseSessionModeAll,
-		" pr-only": GooseSessionModePROnly,
+		"":        GooseSessionModeOff,
+		"off":     GooseSessionModeOff,
+		"OFF":     GooseSessionModeOff,
+		"all":     GooseSessionModeAll,
+		"unknown": GooseSessionModeOff,
+		"  all  ": GooseSessionModeAll,
 	}
 	for in, want := range tests {
 		if got := NormalizeGooseSessionMode(in); got != want {
@@ -34,13 +32,8 @@ func TestGooseSessionEnabled(t *testing.T) {
 	if !GooseSessionEnabled(GooseSessionModeAll, "issue_label") {
 		t.Fatal("all mode should enable sessions for all triggers")
 	}
-	for _, trigger := range []string{"pr_comment", "pr_review", "pr_review_comment", "retry", "issue_edited"} {
-		if !GooseSessionEnabled(GooseSessionModePROnly, trigger) {
-			t.Fatalf("pr-only mode should enable trigger %q", trigger)
-		}
-	}
-	if GooseSessionEnabled(GooseSessionModePROnly, "issue_label") {
-		t.Fatal("pr-only mode should not enable issue_label")
+	if GooseSessionEnabled(GooseSessionModeOff, "issue_label") {
+		t.Fatal("off mode should disable sessions for all triggers")
 	}
 }
 

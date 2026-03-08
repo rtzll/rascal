@@ -31,15 +31,14 @@ func (b Backend) String() string {
 type SessionMode string
 
 const (
-	SessionModeOff    SessionMode = "off"
-	SessionModePROnly SessionMode = "pr-only"
-	SessionModeAll    SessionMode = "all"
+	SessionModeOff SessionMode = "off"
+	SessionModeAll SessionMode = "all"
 )
 
 func NormalizeSessionMode(raw string) SessionMode {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case string(SessionModePROnly):
-		return SessionModePROnly
+	case string(SessionModeOff):
+		return SessionModeOff
 	case string(SessionModeAll):
 		return SessionModeAll
 	default:
@@ -48,19 +47,7 @@ func NormalizeSessionMode(raw string) SessionMode {
 }
 
 func SessionEnabled(mode SessionMode, trigger string) bool {
-	switch NormalizeSessionMode(string(mode)) {
-	case SessionModeAll:
-		return true
-	case SessionModePROnly:
-		switch strings.TrimSpace(trigger) {
-		case "pr_comment", "pr_review", "pr_review_comment", "retry", "issue_edited":
-			return true
-		default:
-			return false
-		}
-	default:
-		return false
-	}
+	return NormalizeSessionMode(string(mode)) == SessionModeAll
 }
 
 func SessionTaskKey(repo, taskID string) string {

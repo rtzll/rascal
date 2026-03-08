@@ -308,23 +308,13 @@ func loadAgentBackend() agent.Backend {
 }
 
 func loadAgentSessionMode() agent.SessionMode {
-	if raw, ok := os.LookupEnv("RASCAL_GOOSE_SESSION_MODE"); ok {
-		mode := agent.NormalizeSessionMode(raw)
-		if mode == "" || mode == agent.SessionModeOff {
+	for _, key := range []string{"RASCAL_GOOSE_SESSION_MODE", "RASCAL_AGENT_SESSION_MODE"} {
+		if raw, ok := os.LookupEnv(key); ok {
 			if strings.TrimSpace(raw) == "" {
 				return agent.SessionModeAll
 			}
+			return agent.NormalizeSessionMode(raw)
 		}
-		return mode
-	}
-	if raw, ok := os.LookupEnv("RASCAL_AGENT_SESSION_MODE"); ok {
-		mode := agent.NormalizeSessionMode(raw)
-		if mode == "" || mode == agent.SessionModeOff {
-			if strings.TrimSpace(raw) == "" {
-				return agent.SessionModeAll
-			}
-		}
-		return mode
 	}
 	return agent.SessionModeAll
 }

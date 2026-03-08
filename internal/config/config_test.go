@@ -149,13 +149,13 @@ func TestLoadServerConfigDefaultsAgentBackendToCodex(t *testing.T) {
 
 func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "goose-root")
-	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "PR-ONLY")
+	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "OFF")
 	t.Setenv("RASCAL_GOOSE_SESSION_ROOT", root)
 	t.Setenv("RASCAL_GOOSE_SESSION_TTL_DAYS", "0")
 
 	cfg := LoadServerConfig()
-	if cfg.GooseSessionMode != "pr-only" {
-		t.Fatalf("GooseSessionMode = %q, want pr-only", cfg.GooseSessionMode)
+	if cfg.GooseSessionMode != "off" {
+		t.Fatalf("GooseSessionMode = %q, want off", cfg.GooseSessionMode)
 	}
 	if cfg.GooseSessionRoot != root {
 		t.Fatalf("GooseSessionRoot = %q, want %q", cfg.GooseSessionRoot, root)

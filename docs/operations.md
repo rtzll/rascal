@@ -83,19 +83,11 @@ for the same task/PR, without any background process.
 
 Server env controls:
 
-- `RASCAL_AGENT_SESSION_MODE=off|pr-only|all` (default: `all`)
+- `RASCAL_AGENT_SESSION_MODE=off|all` (default: `all`)
 - `RASCAL_AGENT_SESSION_ROOT` (default: `${RASCAL_DATA_DIR}/agent-sessions`)
 - `RASCAL_AGENT_SESSION_TTL_DAYS` (default: `14`, set `0` to disable cleanup)
 
 Older Goose-specific env names are still accepted as compatibility aliases.
-
-`pr-only` resumes for iterative PR triggers:
-
-- `pr_comment`
-- `pr_review`
-- `pr_review_comment`
-- `retry`
-- `issue_edited` (same task)
 
 To reset a task session manually, delete its directory under
 `${RASCAL_AGENT_SESSION_ROOT}`.

@@ -7,9 +7,8 @@ import (
 )
 
 const (
-	GooseSessionModeOff    = string(agent.SessionModeOff)
-	GooseSessionModePROnly = string(agent.SessionModePROnly)
-	GooseSessionModeAll    = string(agent.SessionModeAll)
+	GooseSessionModeOff = string(agent.SessionModeOff)
+	GooseSessionModeAll = string(agent.SessionModeAll)
 )
 
 func NormalizeGooseSessionMode(mode string) string {

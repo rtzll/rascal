@@ -212,7 +212,7 @@ exit 0
 		Trigger:             "pr_comment",
 		Debug:               true,
 		RunDir:              runDir,
-		GooseSessionMode:    GooseSessionModePROnly,
+		GooseSessionMode:    GooseSessionModeAll,
 		GooseSessionResume:  true,
 		GooseSessionTaskDir: sessionDir,
 		GooseSessionTaskKey: "owner-repo-1-abc123",
@@ -230,7 +230,7 @@ exit 0
 	if !strings.Contains(call, "-e GOOSE_PATH_ROOT=/rascal-goose-session") {
 		t.Fatalf("expected persistent goose path root env, got:\n%s", call)
 	}
-	if !strings.Contains(call, "-e RASCAL_GOOSE_SESSION_MODE=pr-only") {
+	if !strings.Contains(call, "-e RASCAL_GOOSE_SESSION_MODE=all") {
 		t.Fatalf("expected session mode env, got:\n%s", call)
 	}
 	if !strings.Contains(call, "-e RASCAL_GOOSE_SESSION_RESUME=true") {
@@ -291,7 +291,7 @@ exit 0
 		Trigger:          "issue_label",
 		Debug:            false,
 		RunDir:           runDir,
-		GooseSessionMode: GooseSessionModePROnly,
+		GooseSessionMode: GooseSessionModeAll,
 	})
 	if err != nil {
 		t.Fatalf("launcher start: %v", err)
@@ -346,7 +346,7 @@ exit 0
 		Debug:        true,
 		RunDir:       runDir,
 		AgentSession: SessionSpec{
-			Mode:             agent.SessionModePROnly,
+			Mode:             agent.SessionModeAll,
 			Resume:           true,
 			TaskDir:          sessionDir,
 			TaskKey:          "owner-repo-1-abc123",

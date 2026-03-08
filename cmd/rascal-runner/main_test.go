@@ -238,7 +238,7 @@ func TestLoadConfigRespectsGooseSessionEnv(t *testing.T) {
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
-	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "pr-only")
+	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "all")
 	t.Setenv("RASCAL_GOOSE_SESSION_RESUME", "true")
 	t.Setenv("RASCAL_GOOSE_SESSION_KEY", "owner-repo-3-abc123")
 	t.Setenv("RASCAL_GOOSE_SESSION_NAME", "rascal-owner-repo-3-abc123")
@@ -248,8 +248,8 @@ func TestLoadConfigRespectsGooseSessionEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig returned error: %v", err)
 	}
-	if cfg.GooseSessionMode != runner.GooseSessionModePROnly {
-		t.Fatalf("GooseSessionMode = %q, want %q", cfg.GooseSessionMode, runner.GooseSessionModePROnly)
+	if cfg.GooseSessionMode != runner.GooseSessionModeAll {
+		t.Fatalf("GooseSessionMode = %q, want %q", cfg.GooseSessionMode, runner.GooseSessionModeAll)
 	}
 	if !cfg.GooseSessionResume {
 		t.Fatal("GooseSessionResume should be true")
@@ -311,7 +311,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 		InstructionsPath:   filepath.Join(root, "instructions.md"),
 		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
 		GooseDebug:         false,
-		GooseSessionMode:   runner.GooseSessionModePROnly,
+		GooseSessionMode:   runner.GooseSessionModeAll,
 		GooseSessionResume: true,
 		GooseSessionName:   "rascal-owner-repo-task-abc123",
 		GooseSessionKey:    "owner-repo-task-abc123",
@@ -362,7 +362,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 		InstructionsPath:   filepath.Join(root, "instructions.md"),
 		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
 		GooseDebug:         false,
-		GooseSessionMode:   runner.GooseSessionModePROnly,
+		GooseSessionMode:   runner.GooseSessionModeAll,
 		GooseSessionResume: true,
 		GooseSessionName:   "rascal-owner-repo-task-missing",
 		GooseSessionKey:    "owner-repo-task-missing",
@@ -412,7 +412,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 		InstructionsPath:   filepath.Join(root, "instructions.md"),
 		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
 		GooseDebug:         false,
-		GooseSessionMode:   runner.GooseSessionModePROnly,
+		GooseSessionMode:   runner.GooseSessionModeAll,
 		GooseSessionResume: true,
 		GooseSessionName:   "rascal-owner-repo-task-abc123",
 		GooseSessionKey:    "owner-repo-task-abc123",
@@ -518,7 +518,7 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 		InstructionsPath:   filepath.Join(root, "instructions.md"),
 		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
 		GooseDebug:         false,
-		GooseSessionMode:   runner.GooseSessionModePROnly,
+		GooseSessionMode:   runner.GooseSessionModeAll,
 		GooseSessionResume: true,
 		GooseSessionName:   "rascal-owner-repo-task-abc123",
 		GooseSessionKey:    "owner-repo-task-abc123",
@@ -570,7 +570,7 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 		InstructionsPath:   filepath.Join(root, "instructions.md"),
 		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
 		GooseDebug:         false,
-		GooseSessionMode:   runner.GooseSessionModePROnly,
+		GooseSessionMode:   runner.GooseSessionModeAll,
 		GooseSessionResume: true,
 		GooseSessionName:   "rascal-owner-repo-task-abc123",
 		GooseSessionKey:    "owner-repo-task-abc123",

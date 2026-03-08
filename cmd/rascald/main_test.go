@@ -2035,7 +2035,7 @@ func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
 	}
 }
 
-func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
+func TestExecuteRunSetsGooseSessionSpecForAllMode(t *testing.T) {
 	t.Parallel()
 	launcher := &fakeLauncher{}
 	s := newTestServer(t, launcher)
@@ -2043,7 +2043,7 @@ func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 
 	s.cfg.AgentBackend = agent.BackendGoose
 	sessionRoot := filepath.Join(t.TempDir(), "goose-sessions")
-	s.cfg.GooseSessionMode = "pr-only"
+	s.cfg.GooseSessionMode = "all"
 	s.cfg.GooseSessionRoot = sessionRoot
 	s.cfg.GooseSessionTTLDays = 0
 
@@ -2067,7 +2067,7 @@ func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 	}
 	spec := launcher.specs[0]
 	if !spec.GooseSessionResume {
-		t.Fatal("expected GooseSessionResume=true for pr-only comment trigger")
+		t.Fatal("expected GooseSessionResume=true for all mode")
 	}
 	if spec.GooseSessionTaskKey == "" {
 		t.Fatal("expected GooseSessionTaskKey to be populated")
@@ -2080,14 +2080,14 @@ func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 	}
 }
 
-func TestExecuteRunDisablesGooseSessionSpecForNonPROnlyTrigger(t *testing.T) {
+func TestExecuteRunDisablesGooseSessionSpecForOffMode(t *testing.T) {
 	t.Parallel()
 	launcher := &fakeLauncher{}
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
 	s.cfg.AgentBackend = agent.BackendGoose
-	s.cfg.GooseSessionMode = "pr-only"
+	s.cfg.GooseSessionMode = "off"
 	s.cfg.GooseSessionRoot = filepath.Join(t.TempDir(), "goose-sessions")
 	s.cfg.GooseSessionTTLDays = 0
 
@@ -2111,7 +2111,7 @@ func TestExecuteRunDisablesGooseSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	}
 	spec := launcher.specs[0]
 	if spec.GooseSessionResume {
-		t.Fatal("expected GooseSessionResume=false for non PR-only trigger")
+		t.Fatal("expected GooseSessionResume=false for off mode")
 	}
 	if spec.GooseSessionTaskDir != "" || spec.GooseSessionTaskKey != "" || spec.GooseSessionName != "" {
 		t.Fatalf("expected empty goose session fields when resume disabled, got dir=%q key=%q name=%q", spec.GooseSessionTaskDir, spec.GooseSessionTaskKey, spec.GooseSessionName)

@@ -98,7 +98,7 @@ These are the main layers in the Go codebase.
 
 2. Agent abstraction
 
-- `internal/agent` defines backend normalization (`goose`, `codex`) and session policy (`off`, `pr-only`, `all`).
+- `internal/agent` defines backend normalization (`goose`, `codex`) and session policy (`off`, `all`).
 - This keeps backend/session decisions out of the higher-level orchestrator flow.
 
 3. Execution abstraction
@@ -237,8 +237,8 @@ Each run directory stores metadata and artifacts such as:
 
 ## Session Behavior
 
-- Session policy is configured at the orchestrator via `off`, `pr-only`, or `all`.
-- `pr-only` currently resumes for `pr_comment`, `pr_review`, `pr_review_comment`, `retry`, and `issue_edited`.
+- Session policy is configured at the orchestrator via `off` or `all`.
+- `all` enables session resume for every trigger.
 - Goose resumes by named Goose session plus mounted session storage.
 - Codex resumes by reusing a task-scoped `CODEX_HOME` and the discovered backend session id.
 - If a task switches backend between runs, Rascal starts a fresh session for the new backend and replaces the stored task session record.
@@ -301,7 +301,7 @@ Common optional:
 - `RASCAL_META_DIR` (default: `/rascal-meta`)
 - `RASCAL_WORK_ROOT` (default: `/work`)
 - `RASCAL_REPO_DIR` (default: `${RASCAL_WORK_ROOT}/repo`)
-- `RASCAL_AGENT_SESSION_MODE` (`off`, `pr-only`, `all`; orchestrator default: `all`)
+- `RASCAL_AGENT_SESSION_MODE` (`off` or `all`; orchestrator default: `all`)
 - `RASCAL_AGENT_SESSION_RESUME` (set by orchestrator per run)
 - `RASCAL_AGENT_SESSION_KEY` (stable task-scoped key when resume is enabled)
 - `RASCAL_AGENT_SESSION_ID` (backend session id when known)
