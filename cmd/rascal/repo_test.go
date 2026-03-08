@@ -16,6 +16,7 @@ func TestMissingRequiredWebhookEvents(t *testing.T) {
 		events := []string{
 			"pull_request_review",
 			"pull_request_review_comment",
+			"pull_request_review_thread",
 			"issue_comment",
 			"issues",
 			"pull_request",
@@ -31,6 +32,7 @@ func TestMissingRequiredWebhookEvents(t *testing.T) {
 			"ISSUE_COMMENT",
 			"pull_request_review",
 			"pull_request_review_comment",
+			"pull_request_review_thread",
 			"pull_request",
 			"pull_request",
 		}
@@ -41,7 +43,7 @@ func TestMissingRequiredWebhookEvents(t *testing.T) {
 
 	t.Run("returns missing events in required order", func(t *testing.T) {
 		events := []string{"issues", "issue_comment", "pull_request"}
-		want := []string{"pull_request_review", "pull_request_review_comment"}
+		want := []string{"pull_request_review", "pull_request_review_comment", "pull_request_review_thread"}
 		got := missingRequiredWebhookEvents(events)
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("missing = %v, want %v", got, want)

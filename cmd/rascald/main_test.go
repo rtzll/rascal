@@ -1573,6 +1573,142 @@ func TestHandleWebhookPullRequestReviewCommentIgnoresUnmanagedPR(t *testing.T) {
 	}
 }
 
+func TestHandleWebhookPullRequestReviewThreadUnresolvedQueuesRun(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	const (
+		repo     = "owner/repo"
+		taskID   = "owner/repo#14"
+		issueNum = 46
+		prNum    = 14
+		baseRef  = "main"
+		headRef  = "rascal/pr-14"
+	)
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	seedRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "seed_review_thread",
+		TaskID:     taskID,
+		Repo:       repo,
+		Task:       "seed",
+		BaseBranch: baseRef,
+		HeadBranch: headRef,
+		Trigger:    "seed",
+		RunDir:     filepath.Join(t.TempDir(), "seed_review_thread"),
+		PRNumber:   prNum,
+	})
+	if err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	markRunSucceeded(t, s, seedRun.ID)
+
+	payload := []byte(`{"action":"unresolved","thread":{"id":12,"path":"cmd/rascald/main.go","line":777,"start_line":775,"comments":[{"id":1,"body":"Please split this logic","user":{"login":"eve"}}]},"pull_request":{"number":14},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	req := webhookRequest(t, payload, "pull_request_review_thread", "delivery-review-thread-unresolved", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var got state.Run
+	waitFor(t, time.Second, func() bool {
+		runs := s.store.ListRuns(20)
+		for _, run := range runs {
+			if run.Trigger == "pr_review_thread" {
+				got = run
+				return true
+			}
+		}
+		return false
+	}, "pr_review_thread run created")
+
+	if got.TaskID != taskID {
+		t.Fatalf("task id = %q, want %q", got.TaskID, taskID)
+	}
+	if got.PRNumber != prNum {
+		t.Fatalf("pr number = %d, want %d", got.PRNumber, prNum)
+	}
+	if got.IssueNumber != issueNum {
+		t.Fatalf("issue number = %d, want %d", got.IssueNumber, issueNum)
+	}
+	if got.BaseBranch != baseRef {
+		t.Fatalf("base branch = %q, want %q", got.BaseBranch, baseRef)
+	}
+	if got.HeadBranch != headRef {
+		t.Fatalf("head branch = %q, want %q", got.HeadBranch, headRef)
+	}
+	wantContext := "Please split this logic\n\nThread location: cmd/rascald/main.go:775-777"
+	if got.Context != wantContext {
+		t.Fatalf("context = %q, want %q", got.Context, wantContext)
+	}
+}
+
+func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	const (
+		repo   = "owner/repo"
+		taskID = "owner/repo#15"
+		prNum  = 15
+	)
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: 47, PRNumber: prNum}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	threadRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:       "queued_review_thread",
+		TaskID:   taskID,
+		Repo:     repo,
+		Task:     "Address unresolved review thread",
+		Trigger:  "pr_review_thread",
+		RunDir:   filepath.Join(t.TempDir(), "queued_review_thread"),
+		PRNumber: prNum,
+	})
+	if err != nil {
+		t.Fatalf("seed thread run: %v", err)
+	}
+	otherRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:       "queued_pr_comment",
+		TaskID:   taskID,
+		Repo:     repo,
+		Task:     "Address PR feedback",
+		Trigger:  "pr_comment",
+		RunDir:   filepath.Join(t.TempDir(), "queued_pr_comment"),
+		PRNumber: prNum,
+	})
+	if err != nil {
+		t.Fatalf("seed comment run: %v", err)
+	}
+
+	payload := []byte(`{"action":"resolved","thread":{"id":13,"path":"cmd/rascald/main.go","line":800},"pull_request":{"number":15},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	req := webhookRequest(t, payload, "pull_request_review_thread", "delivery-review-thread-resolved", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	updatedThreadRun, ok := s.store.GetRun(threadRun.ID)
+	if !ok {
+		t.Fatalf("missing run %s", threadRun.ID)
+	}
+	if updatedThreadRun.Status != state.StatusCanceled {
+		t.Fatalf("thread run status = %s, want %s", updatedThreadRun.Status, state.StatusCanceled)
+	}
+
+	updatedOtherRun, ok := s.store.GetRun(otherRun.ID)
+	if !ok {
+		t.Fatalf("missing run %s", otherRun.ID)
+	}
+	if updatedOtherRun.Status != state.StatusQueued {
+		t.Fatalf("non-thread run status = %s, want %s", updatedOtherRun.Status, state.StatusQueued)
+	}
+}
+
 func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})

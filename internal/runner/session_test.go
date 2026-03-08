@@ -34,7 +34,7 @@ func TestGooseSessionEnabled(t *testing.T) {
 	if !GooseSessionEnabled(GooseSessionModeAll, "issue_label") {
 		t.Fatal("all mode should enable sessions for all triggers")
 	}
-	for _, trigger := range []string{"pr_comment", "pr_review", "pr_review_comment", "retry", "issue_edited"} {
+	for _, trigger := range []string{"pr_comment", "pr_review", "pr_review_comment", "pr_review_thread", "retry", "issue_edited"} {
 		if !GooseSessionEnabled(GooseSessionModePROnly, trigger) {
 			t.Fatalf("pr-only mode should enable trigger %q", trigger)
 		}
