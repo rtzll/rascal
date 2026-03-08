@@ -801,7 +801,7 @@ func TestPSAllCannotBeCombinedWithLimit(t *testing.T) {
 }
 
 func TestParsePSStatusFilter(t *testing.T) {
-	got, err := parsePSStatusFilter(" Running,awaiting_feedback,FAILED,canceled ")
+	got, err := parsePSStatusFilter(" Running,review,FAILED,canceled ")
 	if err != nil {
 		t.Fatalf("parsePSStatusFilter unexpected error: %v", err)
 	}
@@ -828,7 +828,7 @@ func TestParsePSStatusFilterInvalidValue(t *testing.T) {
 	if !strings.Contains(err.Error(), `invalid --status value "not_real"`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "allowed values: queued, running, awaiting_feedback, succeeded, failed, canceled") {
+	if !strings.Contains(err.Error(), "allowed values: queued, running, review, succeeded, failed, canceled") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -885,7 +885,7 @@ func TestPSStatusFilterRendersOnlyMatchingRuns(t *testing.T) {
 	cmd := a.newPSCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"--status", "running,AWAITING_FEEDBACK"})
+	cmd.SetArgs([]string{"--status", "running,REVIEW"})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
 		t.Fatalf("ps --status execute: %v", err)
@@ -897,7 +897,7 @@ func TestPSStatusFilterRendersOnlyMatchingRuns(t *testing.T) {
 		t.Fatalf("expected running run to remain, got:\n%s", stdout)
 	}
 	if !strings.Contains(stdout, "run_review") {
-		t.Fatalf("expected awaiting_feedback alias to include review run, got:\n%s", stdout)
+		t.Fatalf("expected review filter to include review run, got:\n%s", stdout)
 	}
 }
 
@@ -922,19 +922,24 @@ func TestPSStatusFilterInvalidValueReturnsInputError(t *testing.T) {
 
 func TestPSStatusAndPRLabels(t *testing.T) {
 	run := state.Run{Status: state.StatusReview, PRNumber: 77}
-	if got := psStatusLabel(run); got != "review" {
-		t.Fatalf("psStatusLabel review = %q, want review", got)
+	if got := string(run.Status); got != "review" {
+		t.Fatalf("run status = %q, want review", got)
 	}
-	if got := psPRLabel(run); got != "#77 open" {
-		t.Fatalf("psPRLabel review = %q, want #77 open", got)
+	if got := psPRLabel(run); got != "#77" {
+		t.Fatalf("psPRLabel review without pr_status = %q, want #77", got)
 	}
 
-	run = state.Run{Status: state.StatusSucceeded, PRNumber: 77}
+	run = state.Run{Status: state.StatusReview, PRNumber: 77, PRStatus: state.PRStatusOpen}
+	if got := psPRLabel(run); got != "#77 open" {
+		t.Fatalf("psPRLabel open = %q, want #77 open", got)
+	}
+
+	run = state.Run{Status: state.StatusSucceeded, PRNumber: 77, PRStatus: state.PRStatusMerged}
 	if got := psPRLabel(run); got != "#77 merged" {
 		t.Fatalf("psPRLabel succeeded = %q, want #77 merged", got)
 	}
 
-	run = state.Run{Status: state.StatusCanceled, PRNumber: 77}
+	run = state.Run{Status: state.StatusCanceled, PRNumber: 77, PRStatus: state.PRStatusClosedUnmerged}
 	if got := psPRLabel(run); got != "#77 closed" {
 		t.Fatalf("psPRLabel canceled = %q, want #77 closed", got)
 	}
@@ -945,8 +950,13 @@ func TestPSStatusAndPRLabels(t *testing.T) {
 	}
 
 	run = state.Run{Status: state.StatusQueued, PRURL: "https://example.com/pr/77"}
+	if got := psPRLabel(run); got != "link" {
+		t.Fatalf("psPRLabel pr_url-only = %q, want link", got)
+	}
+
+	run = state.Run{Status: state.StatusQueued, PRURL: "https://example.com/pr/77", PRStatus: state.PRStatusOpen}
 	if got := psPRLabel(run); got != "open" {
-		t.Fatalf("psPRLabel pr_url-only = %q, want open", got)
+		t.Fatalf("psPRLabel pr_url-only open = %q, want open", got)
 	}
 }
 

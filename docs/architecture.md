@@ -190,7 +190,7 @@ background worker.
 Key persisted entities:
 
 - `runs`: user-visible execution records and final outcome.
-- `tasks`: long-lived task identity across retries and follow-up feedback.
+- `tasks`: long-lived task identity across retries and follow-up feedback; API responses include a derived `pending_input` flag (computed from queued runs, not stored as a task column).
 - `run_leases`: supervision ownership and heartbeat expiry.
 - `run_executions`: detached execution handle metadata for adoption and cleanup.
 - `run_cancels`: persisted cancel intent.

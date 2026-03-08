@@ -333,6 +333,55 @@ func TestStoreUpsertRunTokenUsage(t *testing.T) {
 	}
 }
 
+func TestStoreUpdateRunDoesNotInferPRStatusFromRunStatus(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-pr-status", Repo: "owner/repo"}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := store.AddRun(CreateRunInput{
+		ID:         "run_pr_status",
+		TaskID:     "task-pr-status",
+		Repo:       "owner/repo",
+		Task:       "pr status behavior",
+		BaseBranch: "main",
+		RunDir:     "/tmp/run_pr_status",
+		PRNumber:   42,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if run.PRStatus != PRStatusOpen {
+		t.Fatalf("initial pr status = %s, want open", run.PRStatus)
+	}
+
+	if _, err := store.SetRunStatus(run.ID, StatusRunning, ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	if _, err := store.UpdateRun(run.ID, func(r *Run) error {
+		r.Status = StatusReview
+		r.PRStatus = PRStatusNone
+		return nil
+	}); err != nil {
+		t.Fatalf("set review with explicit none pr status: %v", err)
+	}
+
+	if _, err := store.SetRunStatus(run.ID, StatusCanceled, "canceled"); err != nil {
+		t.Fatalf("set canceled: %v", err)
+	}
+	got, ok := store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("run %s not found", run.ID)
+	}
+	if got.PRStatus != PRStatusNone {
+		t.Fatalf("pr status = %s, want none", got.PRStatus)
+	}
+}
+
 func TestStoreSeenDelivery(t *testing.T) {
 	t.Parallel()
 

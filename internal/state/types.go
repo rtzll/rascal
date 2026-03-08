@@ -50,12 +50,8 @@ var runStatusTransitions = map[RunStatus]map[RunStatus]struct{}{
 	},
 }
 
-func CanonicalRunStatus(status RunStatus) RunStatus {
-	return status
-}
-
 func IsFinalRunStatus(status RunStatus) bool {
-	switch CanonicalRunStatus(status) {
+	switch status {
 	case StatusReview, StatusSucceeded, StatusFailed, StatusCanceled:
 		return true
 	default:
@@ -64,8 +60,6 @@ func IsFinalRunStatus(status RunStatus) bool {
 }
 
 func ValidateRunStatusTransition(from, to RunStatus) error {
-	from = CanonicalRunStatus(from)
-	to = CanonicalRunStatus(to)
 	next, ok := runStatusTransitions[from]
 	if !ok {
 		return fmt.Errorf("invalid current run status %q", from)
@@ -130,8 +124,9 @@ type Task struct {
 	IssueNumber  int           `json:"issue_number,omitempty"`
 	PRNumber     int           `json:"pr_number,omitempty"`
 	Status       TaskStatus    `json:"status"`
-	PendingInput bool          `json:"pending_input"`
-	LastRunID    string        `json:"last_run_id,omitempty"`
+	// PendingInput is derived at read time from whether the task has queued runs.
+	PendingInput bool   `json:"pending_input"`
+	LastRunID    string `json:"last_run_id,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
