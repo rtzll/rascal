@@ -14,7 +14,7 @@ Rascal deploy uploads/builds these artifacts on the server:
 - `/etc/rascal/rascal.env` (shared runtime env)
 - `/etc/rascal/rascal-blue.env` and `/etc/rascal/rascal-green.env` (slot env)
 - `/etc/caddy/Caddyfile` + `/etc/caddy/rascal-upstream.caddy` (proxy target)
-- Docker image `rascal-runner:latest`
+- Docker images `rascal-runner-goose:latest` and `rascal-runner-codex:latest`
 
 It also writes:
 
@@ -30,12 +30,13 @@ It also writes:
   - `rascal@blue` gets `RASCAL_SLOT=blue`
   - `rascal@green` gets `RASCAL_SLOT=green`
 
-Default deployed env also includes Goose session persistence knobs (enabled by
+Default deployed env also includes agent session persistence knobs (enabled by
 default):
 
-- `RASCAL_GOOSE_SESSION_MODE=all`
-- `RASCAL_GOOSE_SESSION_ROOT=/var/lib/rascal/goose-sessions`
-- `RASCAL_GOOSE_SESSION_TTL_DAYS=14`
+- `RASCAL_AGENT_SESSION_MODE=all`
+- `RASCAL_AGENT_SESSION_ROOT=/var/lib/rascal/agent-sessions`
+- `RASCAL_AGENT_SESSION_TTL_DAYS=14`
+- `RASCAL_AGENT_BACKEND` selects which runner image is used by default
 
 ## Blue/Green Sequence
 
@@ -45,7 +46,7 @@ Given active slot `A` and inactive slot `B`, deploy does:
 2. Build `rascal-runner` for Linux and upload artifacts.
 3. Ensure base packages (`docker`, `caddy`, `curl`, `sqlite3`) exist.
 4. Install uploaded `rascal-runner` into `/opt/rascal/runner/rascal-runner`.
-5. Build/update runner image on host.
+5. Build/update runner images on host.
 6. Install/update systemd unit and env files.
 7. Start/restart slot `B`.
 8. Wait for slot `B` readiness (`/readyz` on `B` port).
@@ -73,7 +74,7 @@ This allows fast cutover while the next slot adopts supervision.
 
 - Container entrypoint script is intentionally minimal (`runner/entrypoint.sh`).
 - It only executes `/usr/local/bin/rascal-runner`.
-- Task workflow behavior (git/goose/PR/meta handling) is implemented in Go in `cmd/rascal-runner`.
+- Task workflow behavior (git/agent/PR/meta handling) is implemented in Go in `cmd/rascal-runner`.
 
 ## Overlap Safety (Both Slots Alive Briefly)
 
