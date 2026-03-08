@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"html"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,6 +12,8 @@ import (
 )
 
 var totalTokensPattern = regexp.MustCompile(`"total_tokens"[[:space:]]*:[[:space:]]*([0-9]+)`)
+
+const agentDetailsSummary = "Agent Details"
 
 type CompletionCommentInput struct {
 	RunID           string
@@ -100,10 +103,17 @@ func formatTokenCount(totalTokens int64) string {
 	return strconv.FormatInt(totalTokens, 10)
 }
 
+func renderAgentDetailsSection(gooseOutput string) string {
+	return fmt.Sprintf(
+		"<details><summary>%s</summary>\n\n<pre><code>%s</code></pre>\n\n</details>",
+		agentDetailsSummary,
+		html.EscapeString(gooseOutput),
+	)
+}
+
 func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection string) string {
-	gooseSection := "<details><summary>Run Details</summary>\n\n```\n" + gooseOutput + "\n```\n\n</details>"
+	gooseSection := renderAgentDetailsSection(gooseOutput)
 	if totalTokens, ok := ExtractTotalTokens(gooseOutput); ok {
-		gooseSection = "<details><summary>Agent Details</summary>\n\n```\n" + gooseOutput + "\n```\n\n</details>"
 		body := ""
 		if strings.TrimSpace(commitBody) != "" {
 			body = commitBody + "\n\n"
