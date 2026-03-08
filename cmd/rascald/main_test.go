@@ -614,6 +614,9 @@ func waitForRunExecution(t *testing.T, s *server, runID string) state.RunExecuti
 		if !ok {
 			return false
 		}
+		if strings.TrimSpace(rec.Status) != "running" {
+			return false
+		}
 		execRec = rec
 		return true
 	}, "run execution persisted")
@@ -2822,6 +2825,9 @@ func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
 	if current.Status != state.StatusCanceled {
 		t.Fatalf("expected final canceled status, got %s", current.Status)
 	}
+	waitFor(t, 5*time.Second, func() bool {
+		return s.activeRunCount() == 0
+	}, "server idle after canceled run")
 }
 
 func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
