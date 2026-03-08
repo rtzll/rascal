@@ -885,7 +885,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 func (a *app) newDeployCmd() *cobra.Command {
 	cmd := a.newDeployExistingCmd("deploy", "Deploy rascald to an existing host")
 	cmd.Long = "Deploy or redeploy rascald to an existing Linux host over SSH without running provisioning or webhook setup."
-cmd.Example = strings.TrimSpace(`
+	cmd.Example = strings.TrimSpace(`
 rascal deploy --host "$SERVER_IP"
 rascal deploy --host "$SERVER_IP" --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 rascal deploy --host "$SERVER_IP" --codex-auth ~/.codex/auth.json
@@ -1023,16 +1023,17 @@ func (a *app) newPSCmd() *cobra.Command {
 			render := func(runs []state.Run) error {
 				return a.emit(map[string]any{"runs": runs}, func() error {
 					tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-					if _, err := fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tPR\tCREATED (UTC)"); err != nil {
+					if _, err := fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tISSUE\tPR\tCREATED (UTC)"); err != nil {
 						return fmt.Errorf("write runs table header: %w", err)
 					}
 					for _, run := range runs {
 						if _, err := fmt.Fprintf(
 							tw,
-							"%s\t%s\t%s\t%s\t%s\n",
+							"%s\t%s\t%s\t%s\t%s\t%s\n",
 							run.ID,
 							psStatusLabel(run),
 							run.Repo,
+							psIssueLabel(run),
 							psPRLabel(run),
 							psCreatedLabel(run.CreatedAt),
 						); err != nil {
@@ -2412,6 +2413,13 @@ func psPRLabel(run state.Run) string {
 	default:
 		return fmt.Sprintf("#%d", run.PRNumber)
 	}
+}
+
+func psIssueLabel(run state.Run) string {
+	if run.IssueNumber <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("#%d", run.IssueNumber)
 }
 
 func psCreatedLabel(createdAt time.Time) string {

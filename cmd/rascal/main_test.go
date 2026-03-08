@@ -733,6 +733,84 @@ func TestPSCreatedLabelFormatsUTC(t *testing.T) {
 	}
 }
 
+func TestPSIssueLabel(t *testing.T) {
+	if got := psIssueLabel(state.Run{IssueNumber: 119}); got != "#119" {
+		t.Fatalf("psIssueLabel issue = %q, want #119", got)
+	}
+	if got := psIssueLabel(state.Run{}); got != "" {
+		t.Fatalf("psIssueLabel empty = %q, want empty", got)
+	}
+}
+
+func TestPSRendersIssueColumn(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/v1/runs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{
+			{
+				"id":           "run_issue",
+				"status":       "failed",
+				"repo":         "owner/repo",
+				"issue_number": 119,
+				"created_at":   "2026-03-08T13:56:00Z",
+			},
+			{
+				"id":         "run_no_issue",
+				"status":     "running",
+				"repo":       "owner/repo",
+				"created_at": "2026-03-08T13:57:00Z",
+			},
+		}}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "table",
+	}
+
+	cmd := a.newPSCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("ps execute: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected header plus two rows, got:\n%s", stdout)
+	}
+	if got := strings.Fields(lines[0]); strings.Join(got, " ") != "RUN ID STATUS REPO ISSUE PR CREATED (UTC)" {
+		t.Fatalf("unexpected header fields: %q", got)
+	}
+	if got := strings.Fields(lines[1]); strings.Join(got, " ") != "run_issue failed owner/repo #119 - 2026-03-08 13:56" {
+		t.Fatalf("unexpected issue-backed row fields: %q", got)
+	}
+	if !strings.Contains(lines[2], "run_no_issue") || !strings.Contains(lines[2], "owner/repo") || !strings.Contains(lines[2], "2026-03-08 13:57") {
+		t.Fatalf("expected non-issue row content, got:\n%s", lines[2])
+	}
+	if strings.Contains(lines[2], "#") {
+		t.Fatalf("expected blank issue column for non-issue run, got:\n%s", lines[2])
+	}
+}
+
 func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
 	var payload map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

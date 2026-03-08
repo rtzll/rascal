@@ -1645,12 +1645,14 @@ func (s *server) executeRun(runID string) {
 	}
 	if reason, ok := s.pendingRunCancelReason(runID); ok {
 		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, reason)
+		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
 	}
 
 	if s.store.IsTaskCompleted(run.TaskID) {
 		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, "task is already completed")
+		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
 	}
@@ -1659,6 +1661,7 @@ func (s *server) executeRun(runID string) {
 		claimedRun, claimed, err := s.store.ClaimRunStart(runID)
 		if err != nil {
 			updated := s.setRunStatusWithFallback(run, state.StatusFailed, err.Error())
+			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
 		}
@@ -1679,6 +1682,7 @@ func (s *server) executeRun(runID string) {
 
 	if err := s.store.UpsertRunLease(run.ID, s.instanceID, runLeaseTTL); err != nil {
 		updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("claim run lease: %v", err))
+		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
 	}
@@ -1696,6 +1700,7 @@ func (s *server) executeRun(runID string) {
 	credentialLeaseID, err := s.prepareRunCredentialAuth(run.ID, run.RunDir, requesterID)
 	if err != nil {
 		updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("acquire credential lease: %v", err))
+		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
 	}
@@ -1703,6 +1708,7 @@ func (s *server) executeRun(runID string) {
 
 	if reason, ok := s.pendingRunCancelReason(runID); ok {
 		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, reason)
+		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
 	}
@@ -1731,6 +1737,7 @@ func (s *server) executeRun(runID string) {
 		}
 		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {
 			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("create agent session dir: %v", err))
+			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
 		}
@@ -1743,6 +1750,7 @@ func (s *server) executeRun(runID string) {
 			LastRunID:        run.ID,
 		}); err != nil {
 			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("persist agent session: %v", err))
+			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
 		}
@@ -1791,6 +1799,7 @@ func (s *server) executeRun(runID string) {
 			ExitCode:      0,
 		}); err != nil {
 			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("persist run execution: %v", err))
+			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
 		}
@@ -1799,6 +1808,7 @@ func (s *server) executeRun(runID string) {
 		if err != nil {
 			s.deleteRunExecutionBestEffort(run.ID)
 			updated := s.setRunStatusWithFallback(run, state.StatusFailed, err.Error())
+			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
 		}
@@ -1816,6 +1826,7 @@ func (s *server) executeRun(runID string) {
 			s.removeRunExecutionBestEffort(stopCtx, handle, run.ID, "cleanup failed persisted execution")
 			stopCancel()
 			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("persist run execution: %v", err))
+			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
 		}
@@ -2085,16 +2096,7 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		}
 	}
 
-	switch updated.Status {
-	case state.StatusSucceeded:
-		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionRocket)
-	case state.StatusReview:
-		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionHooray)
-	case state.StatusFailed:
-		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionConfused)
-	case state.StatusCanceled:
-		s.addIssueReactionBestEffort(updated.Repo, updated.IssueNumber, ghapi.ReactionMinusOne)
-	}
+	s.notifyRunTerminalGitHubBestEffort(updated)
 	if updated.PRNumber > 0 {
 		s.setTaskPRBestEffort(updated.TaskID, updated.Repo, updated.PRNumber)
 	}
@@ -2109,13 +2111,6 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 			}
 		}
 	}
-	switch updated.Status {
-	case state.StatusSucceeded, state.StatusReview:
-		s.postRunCompletionCommentBestEffort(updated)
-	case state.StatusFailed:
-		s.postRunFailureCommentBestEffort(updated)
-	}
-
 	s.cleanupDetachedExecution(runID, execRec)
 	s.finishRun(updated)
 }
@@ -3165,6 +3160,22 @@ func (s *server) postRunFailureCommentBestEffort(run state.Run) {
 	}
 	if err := writeRunFailureCommentMarker(run, repo, issueNumber); err != nil {
 		log.Printf("failed to persist failure comment marker for run %s: %v", run.ID, err)
+	}
+}
+
+func (s *server) notifyRunTerminalGitHubBestEffort(run state.Run) {
+	switch run.Status {
+	case state.StatusSucceeded:
+		s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionRocket)
+		s.postRunCompletionCommentBestEffort(run)
+	case state.StatusReview:
+		s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionHooray)
+		s.postRunCompletionCommentBestEffort(run)
+	case state.StatusFailed:
+		s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionConfused)
+		s.postRunFailureCommentBestEffort(run)
+	case state.StatusCanceled:
+		s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionMinusOne)
 	}
 }
 
