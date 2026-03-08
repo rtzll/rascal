@@ -122,8 +122,8 @@ func TestBuildPRBody(t *testing.T) {
 			"8s",
 			"\n\nCloses #12",
 		)
-		if !strings.Contains(body, "<details><summary>Run Details</summary>") {
-			t.Fatalf("missing run details section:\n%s", body)
+		if !strings.Contains(body, "<details><summary>Agent Details</summary>") {
+			t.Fatalf("missing agent details section:\n%s", body)
 		}
 		if strings.Contains(body, "consumed") {
 			t.Fatalf("unexpected token summary:\n%s", body)
@@ -133,6 +133,31 @@ func TestBuildPRBody(t *testing.T) {
 		}
 		if !strings.Contains(body, "Closes #12") {
 			t.Fatalf("missing closes section:\n%s", body)
+		}
+	})
+
+	t.Run("escapes nested fences and html-like content inside details", func(t *testing.T) {
+		body := BuildPRBody(
+			"run_3",
+			"",
+			"issue body\n```go\nfmt.Println(\"hi\")\n```\n<details>raw</details>\n{\"usage\":{\"total_tokens\":321}}",
+			"9s",
+			"",
+		)
+		if !strings.Contains(body, "<details><summary>Agent Details</summary>") {
+			t.Fatalf("missing agent details section:\n%s", body)
+		}
+		if !strings.Contains(body, "<pre><code>") {
+			t.Fatalf("expected html code wrapper:\n%s", body)
+		}
+		if !strings.Contains(body, "&lt;details&gt;raw&lt;/details&gt;") {
+			t.Fatalf("expected html-like content to be escaped:\n%s", body)
+		}
+		if strings.Contains(body, "<summary>Agent Details</summary>\n\n```") {
+			t.Fatalf("expected markdown fence wrapper to be removed:\n%s", body)
+		}
+		if strings.Count(body, "</details>") != 1 {
+			t.Fatalf("expected a single outer details close tag:\n%s", body)
 		}
 	})
 }
