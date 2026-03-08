@@ -464,7 +464,6 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 	if err := fn(&r); err != nil {
 		return Run{}, fmt.Errorf("apply run update for %q: %w", id, err)
 	}
-	r.Status = CanonicalRunStatus(r.Status)
 	if err := ValidateRunStatusTransition(prevStatus, r.Status); err != nil {
 		return Run{}, fmt.Errorf("validate run status transition for %q: %w", id, err)
 	}
@@ -1111,7 +1110,7 @@ func fromDBRunParts(id, taskID, repo, task, agentBackend, baseBranch, headBranch
 		HeadBranch:   headBranch,
 		Trigger:      trigger,
 		Debug:        debug,
-		Status:       CanonicalRunStatus(RunStatus(status)),
+		Status:       RunStatus(status),
 		RunDir:       runDir,
 		IssueNumber:  int(issueNumber),
 		PRNumber:     int(prNumber),
@@ -1188,16 +1187,6 @@ func fromDBTaskAgentSession(s sqlitegen.TaskAgentSession) TaskAgentSession {
 
 func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 	prStatus := normalizePRStatus(r.PRStatus)
-	if prStatus == PRStatusNone && r.PRNumber > 0 {
-		switch r.Status {
-		case StatusSucceeded:
-			prStatus = PRStatusMerged
-		case StatusCanceled:
-			prStatus = PRStatusClosedUnmerged
-		default:
-			prStatus = PRStatusOpen
-		}
-	}
 	return sqlitegen.UpdateRunParams{
 		TaskID:       r.TaskID,
 		Repo:         r.Repo,
@@ -1207,7 +1196,7 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 		HeadBranch:   r.HeadBranch,
 		Trigger:      r.Trigger,
 		Debug:        r.Debug,
-		Status:       string(CanonicalRunStatus(r.Status)),
+		Status:       string(r.Status),
 		RunDir:       r.RunDir,
 		IssueNumber:  int64(r.IssueNumber),
 		PrNumber:     int64(r.PRNumber),

@@ -1035,7 +1035,7 @@ func (a *app) newPSCmd() *cobra.Command {
 							tw,
 							"%s\t%s\t%s\t%s\t%s\t%s\n",
 							run.ID,
-							psStatusLabel(run),
+							string(run.Status),
 							run.Repo,
 							psIssueLabel(run),
 							psPRLabel(run),
@@ -2389,16 +2389,7 @@ func (a *app) fetchRun(runID string) (state.Run, error) {
 	return out.Run, nil
 }
 
-func psStatusLabel(run state.Run) string {
-	switch run.Status {
-	case state.StatusReview:
-		return "review"
-	default:
-		return string(run.Status)
-	}
-}
-
-const allowedPSStatusValues = "queued, running, awaiting_feedback, succeeded, failed, canceled"
+const allowedPSStatusValues = "queued, running, review, succeeded, failed, canceled"
 
 func parsePSStatusFilter(raw string) (map[state.RunStatus]struct{}, error) {
 	raw = strings.TrimSpace(raw)
@@ -2413,7 +2404,7 @@ func parsePSStatusFilter(raw string) (map[state.RunStatus]struct{}, error) {
 			out[state.StatusQueued] = struct{}{}
 		case "running":
 			out[state.StatusRunning] = struct{}{}
-		case "awaiting_feedback":
+		case "review":
 			out[state.StatusReview] = struct{}{}
 		case "succeeded":
 			out[state.StatusSucceeded] = struct{}{}
@@ -2434,15 +2425,14 @@ func filterRunsByStatus(runs []state.Run, statuses map[state.RunStatus]struct{})
 	}
 	filtered := make([]state.Run, 0, len(runs))
 	for _, run := range runs {
-		if _, ok := statuses[state.CanonicalRunStatus(run.Status)]; ok {
+		if _, ok := statuses[run.Status]; ok {
 			filtered = append(filtered, run)
 		}
 	}
 	return filtered
 }
-
 func psPRLabel(run state.Run) string {
-	prStatus := effectivePRStatus(run)
+	prStatus := normalizedPRStatus(run.PRStatus)
 	if run.PRNumber <= 0 {
 		if strings.TrimSpace(run.PRURL) == "" {
 			return "-"
@@ -2475,23 +2465,12 @@ func psCreatedLabel(createdAt time.Time) string {
 	return createdAt.UTC().Format("2006-01-02 15:04")
 }
 
-func effectivePRStatus(run state.Run) state.PRStatus {
-	switch run.PRStatus {
+func normalizedPRStatus(status state.PRStatus) state.PRStatus {
+	switch status {
 	case state.PRStatusOpen, state.PRStatusMerged, state.PRStatusClosedUnmerged:
-		return run.PRStatus
-	}
-	if run.PRNumber <= 0 && strings.TrimSpace(run.PRURL) == "" {
-		return state.PRStatusNone
-	}
-	switch run.Status {
-	case state.StatusReview:
-		return state.PRStatusOpen
-	case state.StatusSucceeded:
-		return state.PRStatusMerged
-	case state.StatusCanceled:
-		return state.PRStatusClosedUnmerged
+		return status
 	default:
-		return state.PRStatusOpen
+		return state.PRStatusNone
 	}
 }
 
