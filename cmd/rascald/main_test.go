@@ -826,6 +826,7 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 		t.Fatalf("create queued run: %v", err)
 	}
 	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to be active")
+	_ = waitForRunExecution(t, s, runningRun.ID)
 
 	payload := []byte(`{"action":"edited","issue":{"number":7,"title":"New Title","body":"New Body","labels":[{"name":"rascal"}]},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
 	req := webhookRequest(t, payload, "issues", "delivery-edited", "")
@@ -3147,7 +3148,7 @@ func TestHandleCancelRunActiveUsesUserReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "run start")
+	_ = waitForRunExecution(t, s, run.ID)
 
 	rec := httptest.NewRecorder()
 	s.handleCancelRun(rec, run.ID)
@@ -3232,7 +3233,7 @@ func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "run start")
+	_ = waitForRunExecution(t, s, run.ID)
 
 	s.cancelActiveRuns("orchestrator shutdown drain timeout")
 	close(waitCh)
@@ -3295,7 +3296,7 @@ func TestPersistedRunCancelStopsActiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "run start")
+	_ = waitForRunExecution(t, s, run.ID)
 
 	if err := s.store.RequestRunCancel(run.ID, "cancel from store", "user"); err != nil {
 		t.Fatalf("request run cancel: %v", err)
@@ -4235,7 +4236,7 @@ func TestBeginDrainLeavesQueuedRunsForNextSlot(t *testing.T) {
 		waitForServerIdle(t, s)
 	}()
 
-	_, err := s.createAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Task: "first"})
+	first, err := s.createAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Task: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
@@ -4244,6 +4245,7 @@ func TestBeginDrainLeavesQueuedRunsForNextSlot(t *testing.T) {
 		t.Fatalf("create queued run: %v", err)
 	}
 	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to be active")
+	_ = waitForRunExecution(t, s, first.ID)
 
 	s.beginDrain()
 
