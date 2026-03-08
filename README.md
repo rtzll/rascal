@@ -71,6 +71,7 @@ RASCAL_GITHUB_TOKEN=...
 - Setup and token details: [docs/setup.md](docs/setup.md)
 - Config and precedence: [docs/config.md](docs/config.md)
 - Command guide: [docs/commands.md](docs/commands.md)
+- Glossary of core terms: [docs/glossary.md](docs/glossary.md)
 - Webhooks and Cloudflare notes: [docs/webhooks.md](docs/webhooks.md)
 - Operations and troubleshooting: [docs/operations.md](docs/operations.md)
 - Operator runbook (failure modes + exact commands): [docs/runbook.md](docs/runbook.md)

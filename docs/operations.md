@@ -55,6 +55,27 @@ Operationally this means:
 - Blue/green is no longer required to keep active runs alive during deploy.
 - After deploy, restart, or slot rotation, the active slot should recover and adopt detached run supervision.
 
+## Troubleshooting by Layer
+
+| Symptom | Likely layer | First checks |
+| --- | --- | --- |
+| `rascal` command cannot reach server | Control plane / transport | `./bin/rascal config view`, `./bin/rascal doctor --host YOUR_SERVER_IP` |
+| Webhook arrives but no run is created | Control plane / webhook path | `curl -fsS https://YOUR_DOMAIN/healthz`, `./bin/rascal logs caddy-access --host YOUR_SERVER_IP --follow`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
+| Run is stuck in `queued` | Control plane / scheduler | `./bin/rascal ps`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
+| Run is `running` but appears idle | Execution plane / backend | `./bin/rascal logs <run_id> --follow`, inspect detached containers on host |
+| Cancel does not take effect | Execution plane / supervision adoption | `./bin/rascal cancel <run_id>`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
+| Auth failures in Codex runs | Credential layer | inspect run logs, verify stored credential status or fallback auth file |
+| Deploy succeeds locally but service is unhealthy | Deployment / blue-green cutover | check active slot, slot readiness, Caddy logs, and rollback readiness |
+
+## First-Response Commands
+
+```bash
+./bin/rascal doctor --host YOUR_SERVER_IP
+./bin/rascal ps
+./bin/rascal config view
+./bin/rascal logs rascald --host YOUR_SERVER_IP --lines 200
+```
+
 ## Agent Session Resume
 
 Rascal can persist agent session state on disk and resume it across later runs
@@ -104,9 +125,27 @@ Operational notes:
 - If no stored credential is available, Rascal can fall back to
   `RASCAL_CODEX_AUTH_PATH` when that file exists.
 
+## Safe Manual Interventions
+
+- Restart or inspect the inactive slot during blue/green troubleshooting.
+- Inspect detached containers with `docker ps` or `docker inspect`.
+- Roll traffic back to a known-good slot by restoring Caddy upstream and `active_slot`.
+- Retry or cancel runs through Rascal commands.
+- Remove stale task session directories when intentionally resetting backend session resume.
+
+## Unsafe Manual Interventions
+
+- Removing active `rascal-*` containers unless you intend to fail the run.
+- Editing SQLite state directly on disk.
+- Forcing both blue and green slots to process live webhook traffic at once.
+- Deleting run directories before finalization completes.
+- Manually changing task backend assumptions for an existing task.
+
 ## Troubleshooting Checklist
 
 1. Run `doctor` first.
 2. Confirm server URL and API token in `config view`.
 3. Follow logs for run-level errors.
 4. Verify webhook health/signature if GitHub triggers fail.
+5. Identify the failing layer: control plane, execution plane, backend, credentials, or deployment.
+6. Prefer reversible interventions before deleting containers or artifacts.
