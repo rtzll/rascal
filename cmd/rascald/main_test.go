@@ -3382,6 +3382,44 @@ func TestCancelRunWorksAfterAdoptionByDifferentInstance(t *testing.T) {
 	}, "adopted run canceled")
 }
 
+func TestStopRunSupervisorsCatchesInFlightSupervisorRegistration(t *testing.T) {
+	t.Parallel()
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	dataDir := t.TempDir()
+	statePath := filepath.Join(dataDir, "state.db")
+
+	s := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
+	reachedBeforeSupervise := make(chan struct{})
+	releaseBeforeSupervise := make(chan struct{})
+	s.beforeSupervise = func(_ string) {
+		close(reachedBeforeSupervise)
+		<-releaseBeforeSupervise
+	}
+
+	run, err := s.createAndQueueRun(runRequest{TaskID: "task_stop_supervisor_race", Repo: "owner/repo", Task: "stop supervisor race"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_ = waitForRunExecution(t, s, run.ID)
+	waitFor(t, time.Second, func() bool {
+		select {
+		case <-reachedBeforeSupervise:
+			return true
+		default:
+			return false
+		}
+	}, "reach pre-supervisor hook")
+
+	s.beginDrain()
+	s.stopRunSupervisors()
+	close(releaseBeforeSupervise)
+
+	if err := s.waitForNoActiveRuns(500 * time.Millisecond); err != nil {
+		t.Fatalf("wait for idle after stop supervisors: %v", err)
+	}
+}
+
 func TestLateCancelDoesNotOverwriteSuccessfulCompletion(t *testing.T) {
 	t.Parallel()
 	waitCh := make(chan struct{})

@@ -87,6 +87,8 @@ type server struct {
 
 	supervisorInterval time.Duration
 	retryBackoff       func(attempt int) time.Duration
+	stopSupervisors    bool
+	beforeSupervise    func(runID string)
 }
 
 type runRequest struct {
@@ -1819,12 +1821,20 @@ func (s *server) executeRun(runID string) {
 		}
 	}
 
+	if s.beforeSupervise != nil {
+		s.beforeSupervise(run.ID)
+	}
 	s.superviseDetachedRunLoop(run.ID, execRec, credentialLeaseID)
 }
 
 func (s *server) superviseDetachedRunLoop(runID string, execRec state.RunExecution, credentialLeaseID string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
+	if s.stopSupervisors {
+		s.mu.Unlock()
+		cancel()
+		return
+	}
 	if _, exists := s.runCancels[runID]; exists {
 		s.mu.Unlock()
 		cancel()
@@ -2193,6 +2203,7 @@ func (s *server) startDetachedWithRetry(ctx context.Context, spec runner.Spec) (
 
 func (s *server) stopRunSupervisors() {
 	s.mu.Lock()
+	s.stopSupervisors = true
 	cancels := make([]context.CancelFunc, 0, len(s.runCancels))
 	for _, cancel := range s.runCancels {
 		cancels = append(cancels, cancel)
