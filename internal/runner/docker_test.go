@@ -202,6 +202,7 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
+		AgentBackend:        agent.BackendGoose,
 		RunID:               "run_1",
 		TaskID:              "owner/repo#1",
 		Repo:                "owner/repo",
@@ -280,6 +281,7 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
+		AgentBackend:     agent.BackendGoose,
 		RunID:            "run_2",
 		TaskID:           "owner/repo#2",
 		Repo:             "owner/repo",
