@@ -3,6 +3,32 @@
 Rascal has three runtime parts and a small set of internal abstractions that
 keep orchestration, execution, and persistence separate.
 
+## Core Model
+
+The easiest way to read Rascal is to separate control-plane responsibilities
+from execution-plane responsibilities.
+
+- Control plane: `rascal` and `rascald`
+- Execution plane: detached runner containers launched via the Docker launcher
+- Agent backends: `goose` and `codex`
+- Packaging: separate runner images for Goose and Codex
+
+In simple terms:
+
+- A Task is the long-lived unit of work.
+- A Run is one attempt to advance that task.
+- A Task has exactly one `AgentBackend` for its lifetime.
+- A Task may have one backend-specific `AgentSession`.
+- A Run uses the task's backend and may resume the task's session.
+- A detached container is execution state for a run, not the run itself.
+
+This split is important during deploys and restarts:
+
+- Blue/green is control-plane topology for `rascald`.
+- Active work keeps running in detached containers in the execution plane.
+- After cutover or restart, the active slot recovers and adopts detached run
+  supervision.
+
 ## Runtime Components
 
 1. `rascal` (CLI)
