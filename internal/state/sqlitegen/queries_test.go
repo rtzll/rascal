@@ -13,7 +13,7 @@ const schemaDDL = `
 CREATE TABLE tasks (
   id TEXT PRIMARY KEY,
   repo TEXT NOT NULL,
-  agent_backend TEXT NOT NULL DEFAULT 'goose',
+  agent_backend TEXT NOT NULL DEFAULT 'codex',
   issue_number INTEGER NOT NULL DEFAULT 0,
   pr_number INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'open',
@@ -30,7 +30,7 @@ CREATE TABLE runs (
   task_id TEXT NOT NULL,
   repo TEXT NOT NULL,
   task TEXT NOT NULL,
-  agent_backend TEXT NOT NULL DEFAULT 'goose',
+  agent_backend TEXT NOT NULL DEFAULT 'codex',
   base_branch TEXT NOT NULL,
   head_branch TEXT NOT NULL,
   trigger TEXT NOT NULL,

@@ -289,7 +289,7 @@ Required:
 Common optional:
 
 - `RASCAL_TASK`
-- `RASCAL_AGENT_BACKEND` (`goose` or `codex`; default normalization falls back to `goose`)
+- `RASCAL_AGENT_BACKEND` (`goose` or `codex`; default normalization falls back to `codex`)
 - `RASCAL_BASE_BRANCH` (default: `main`)
 - `RASCAL_HEAD_BRANCH` (default: `rascal/<run_id>`)
 - `RASCAL_ISSUE_NUMBER` (default: `0`)

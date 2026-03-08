@@ -9,7 +9,7 @@ rascal deploy --host "$SERVER_IP" --upload-env --github-runtime-token "$RASCAL_G
 rascal deploy --host "$SERVER_IP" --codex-auth ~/.codex/auth.json
 
 Flags:
-      --agent-backend string          agent backend to use on the server (goose or codex) (default "goose")
+      --agent-backend string          agent backend to use on the server (goose or codex) (default "codex")
       --api-token string              orchestrator API token
       --codex-auth string             local Codex auth.json path to seed as a stored shared credential
       --domain string                 public domain for TLS/Caddy

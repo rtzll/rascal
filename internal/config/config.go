@@ -304,7 +304,7 @@ func envDurationOrDefault(key string, fallback time.Duration) time.Duration {
 }
 
 func loadAgentBackend() agent.Backend {
-	return agent.NormalizeBackend(envOrDefault("RASCAL_AGENT_BACKEND", "goose"))
+	return agent.NormalizeBackend(envOrDefault("RASCAL_AGENT_BACKEND", "codex"))
 }
 
 func loadAgentSessionMode() agent.SessionMode {

@@ -217,6 +217,9 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := deployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner-goose:latest" {
 		t.Fatalf("deploy default runner-image = %q, want rascal-runner-goose:latest", got)
 	}
+	if got := deployCmd.Flags().Lookup("agent-backend").DefValue; got != "codex" {
+		t.Fatalf("deploy default agent-backend = %q, want codex", got)
+	}
 	if got := deployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
 		t.Fatalf("deploy default upload-env = %q, want false", got)
 	}
@@ -241,6 +244,9 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	}
 	if got := infraDeployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner-goose:latest" {
 		t.Fatalf("infra deploy-existing default runner-image = %q, want rascal-runner-goose:latest", got)
+	}
+	if got := infraDeployCmd.Flags().Lookup("agent-backend").DefValue; got != "codex" {
+		t.Fatalf("infra deploy-existing default agent-backend = %q, want codex", got)
 	}
 	if got := infraDeployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
 		t.Fatalf("infra deploy-existing default upload-env = %q, want false", got)

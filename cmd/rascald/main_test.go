@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/config"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/runner"
@@ -1931,6 +1932,7 @@ func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
+	s.cfg.AgentBackend = agent.BackendGoose
 	sessionRoot := filepath.Join(t.TempDir(), "goose-sessions")
 	s.cfg.GooseSessionMode = "pr-only"
 	s.cfg.GooseSessionRoot = sessionRoot
@@ -1975,6 +1977,7 @@ func TestExecuteRunDisablesGooseSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
+	s.cfg.AgentBackend = agent.BackendGoose
 	s.cfg.GooseSessionMode = "pr-only"
 	s.cfg.GooseSessionRoot = filepath.Join(t.TempDir(), "goose-sessions")
 	s.cfg.GooseSessionTTLDays = 0
@@ -2157,8 +2160,8 @@ func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected run token usage for %s", run.ID)
 	}
-	if usage.Backend != "goose" {
-		t.Fatalf("backend = %q, want goose", usage.Backend)
+	if usage.Backend != "codex" {
+		t.Fatalf("backend = %q, want codex", usage.Backend)
 	}
 	if usage.Model != "gpt-5-codex" {
 		t.Fatalf("model = %q, want gpt-5-codex", usage.Model)

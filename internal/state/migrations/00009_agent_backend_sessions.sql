@@ -1,7 +1,7 @@
 -- +goose Up
-ALTER TABLE tasks ADD COLUMN agent_backend TEXT NOT NULL DEFAULT 'goose';
+ALTER TABLE tasks ADD COLUMN agent_backend TEXT NOT NULL DEFAULT 'codex';
 
-ALTER TABLE runs ADD COLUMN agent_backend TEXT NOT NULL DEFAULT 'goose';
+ALTER TABLE runs ADD COLUMN agent_backend TEXT NOT NULL DEFAULT 'codex';
 
 CREATE TABLE task_agent_sessions (
   task_id TEXT PRIMARY KEY,

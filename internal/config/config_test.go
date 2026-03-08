@@ -135,6 +135,18 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadServerConfigDefaultsAgentBackendToCodex(t *testing.T) {
+	t.Setenv("RASCAL_AGENT_BACKEND", "")
+
+	cfg := LoadServerConfig()
+	if cfg.AgentBackend != "codex" {
+		t.Fatalf("AgentBackend = %q, want codex", cfg.AgentBackend)
+	}
+	if cfg.RunnerImage != "rascal-runner-codex:latest" {
+		t.Fatalf("RunnerImage = %q, want rascal-runner-codex:latest", cfg.RunnerImage)
+	}
+}
+
 func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "goose-root")
 	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "PR-ONLY")

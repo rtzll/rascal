@@ -17,8 +17,10 @@ func NormalizeBackend(raw string) Backend {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case string(BackendCodex):
 		return BackendCodex
-	default:
+	case string(BackendGoose):
 		return BackendGoose
+	default:
+		return BackendCodex
 	}
 }
 
