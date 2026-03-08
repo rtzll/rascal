@@ -268,6 +268,68 @@ func TestBuildCompletionComment(t *testing.T) {
 	})
 }
 
+func TestBuildStartComment(t *testing.T) {
+	t.Run("keeps top line concise and moves settings into details", func(t *testing.T) {
+		queueDelay := int64(18)
+		body := BuildStartComment(StartCommentInput{
+			RunID:             "run_abc123",
+			RequestedBy:       "alice",
+			Trigger:           "issue_label",
+			Backend:           "codex",
+			BaseBranch:        "main",
+			HeadBranch:        "rascal/fix-flaky-test-abc123",
+			SessionMode:       "all",
+			SessionResume:     true,
+			Debug:             true,
+			Task:              "Fix flaky scheduler retry path",
+			Context:           "Triggered by label 'rascal' on issue #123",
+			QueueDelaySeconds: &queueDelay,
+		})
+		if !strings.HasPrefix(body, "Rascal started run `run_abc123` for this issue.") {
+			t.Fatalf("expected concise top line, got:\n%s", body)
+		}
+		if !strings.Contains(body, "<details><summary>Run Settings</summary>") {
+			t.Fatalf("expected run settings details block, got:\n%s", body)
+		}
+		if !strings.Contains(body, "- Requested by: `alice`") {
+			t.Fatalf("expected requester in details, got:\n%s", body)
+		}
+		if !strings.Contains(body, "- Queue delay: `18s`") {
+			t.Fatalf("expected queue delay in details, got:\n%s", body)
+		}
+		if strings.Count(body, "run_abc123") != 1 {
+			t.Fatalf("expected run id only in top line, got:\n%s", body)
+		}
+	})
+
+	t.Run("uses PR feedback wording and compacts long task context", func(t *testing.T) {
+		body := BuildStartComment(StartCommentInput{
+			RunID:         "run_pr_feedback",
+			Trigger:       "pr_review_comment",
+			Backend:       "codex",
+			BaseBranch:    "main",
+			HeadBranch:    "rascal/pr-77",
+			SessionMode:   "pr-only",
+			SessionResume: false,
+			Debug:         true,
+			Task:          "Address review feedback\n\nwith extra whitespace",
+			Context:       strings.Repeat("context ", 80),
+		})
+		if !strings.HasPrefix(body, "Rascal started run `run_pr_feedback` to address new PR feedback.") {
+			t.Fatalf("expected PR feedback headline, got:\n%s", body)
+		}
+		if strings.Contains(body, "\n- Task: Address review feedback\n\nwith extra whitespace") {
+			t.Fatalf("expected task text to be compacted, got:\n%s", body)
+		}
+		if !strings.Contains(body, "- Resume: `false`") {
+			t.Fatalf("expected resume setting, got:\n%s", body)
+		}
+		if !strings.Contains(body, "...") {
+			t.Fatalf("expected long context to be truncated, got:\n%s", body)
+		}
+	})
+}
+
 func TestRunDurationSeconds(t *testing.T) {
 	now := time.Now().UTC()
 	created := now.Add(-10 * time.Minute)

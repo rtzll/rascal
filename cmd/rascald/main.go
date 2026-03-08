@@ -42,8 +42,10 @@ var errServerDraining = errors.New("orchestrator is draining")
 const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
 const runResponseTargetFile = "response_target.json"
+const runStartCommentMarkerFile = "start_comment_posted.json"
 const runCompletionCommentMarkerFile = "completion_comment_posted.json"
 const runFailureCommentMarkerFile = "failure_comment_posted.json"
+const runStartCommentBodyMarker = "<!-- rascal:start-comment -->"
 const runCompletionCommentBodyMarker = "<!-- rascal:completion-comment -->"
 const agentLogFile = "agent.ndjson"
 const legacyAgentLogFile = "goose.ndjson"
@@ -591,6 +593,10 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 	taskID := fmt.Sprintf("%s#%d", req.Repo, req.IssueNumber)
 	taskText := fmt.Sprintf("Work on issue #%d in %s", req.IssueNumber, req.Repo)
 	ctxText := ""
+	requestedBy := requesterUserID(r.Context())
+	if requestedBy == "system" {
+		requestedBy = ""
+	}
 	if strings.TrimSpace(s.cfg.GitHubToken) != "" {
 		issue, err := s.gh.GetIssue(r.Context(), req.Repo, req.IssueNumber)
 		if err != nil {
@@ -610,6 +616,12 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		Context:         ctxText,
 		Debug:           req.Debug,
 		CreatedByUserID: requesterUserID(r.Context()),
+		ResponseTarget: &runResponseTarget{
+			Repo:        req.Repo,
+			IssueNumber: req.IssueNumber,
+			RequestedBy: requestedBy,
+			Trigger:     "issue_api",
+		},
 	})
 	if err != nil {
 		if errors.Is(err, errTaskCompleted) {
@@ -972,6 +984,12 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				IssueNumber: ev.Issue.Number,
 				Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number),
 				Debug:       boolPtr(true),
+				ResponseTarget: &runResponseTarget{
+					Repo:        ev.Repository.FullName,
+					IssueNumber: ev.Issue.Number,
+					RequestedBy: strings.TrimSpace(ev.Sender.Login),
+					Trigger:     "issue_label",
+				},
 			})
 			if errors.Is(err, errTaskCompleted) {
 				return nil
@@ -999,6 +1017,12 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				IssueNumber: ev.Issue.Number,
 				Context:     fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number),
 				Debug:       boolPtr(true),
+				ResponseTarget: &runResponseTarget{
+					Repo:        ev.Repository.FullName,
+					IssueNumber: ev.Issue.Number,
+					RequestedBy: strings.TrimSpace(ev.Sender.Login),
+					Trigger:     "issue_edited",
+				},
 			})
 			if errors.Is(err, errTaskCompleted) {
 				return nil
@@ -1048,6 +1072,12 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				PRStatus:    state.PRStatusNone,
 				Context:     fmt.Sprintf("Triggered by issue reopen on issue #%d", ev.Issue.Number),
 				Debug:       boolPtr(true),
+				ResponseTarget: &runResponseTarget{
+					Repo:        ev.Repository.FullName,
+					IssueNumber: ev.Issue.Number,
+					RequestedBy: strings.TrimSpace(ev.Sender.Login),
+					Trigger:     "issue_reopened",
+				},
 			})
 			if errors.Is(err, errTaskCompleted) {
 				return nil
@@ -1836,6 +1866,7 @@ func (s *server) executeRun(runID string) {
 	if s.beforeSupervise != nil {
 		s.beforeSupervise(run.ID)
 	}
+	s.postRunStartCommentBestEffort(run, sessionMode, sessionResume)
 	s.superviseDetachedRunLoop(run.ID, execRec, credentialLeaseID)
 }
 
@@ -2973,6 +3004,10 @@ func runCommentMarkerPath(runDir, markerFile string) string {
 	return filepath.Join(strings.TrimSpace(runDir), markerFile)
 }
 
+func runStartCommentMarkerPath(runDir string) string {
+	return runCommentMarkerPath(runDir, runStartCommentMarkerFile)
+}
+
 func runCompletionCommentMarkerPath(runDir string) string {
 	return runCommentMarkerPath(runDir, runCompletionCommentMarkerFile)
 }
@@ -2994,6 +3029,10 @@ func runCommentMarkerExists(runDir, markerFile, markerKind string) (bool, error)
 		return false, fmt.Errorf("%s marker path is a directory: %s", markerKind, path)
 	}
 	return true, nil
+}
+
+func runStartCommentMarkerExists(runDir string) (bool, error) {
+	return runCommentMarkerExists(runDir, runStartCommentMarkerFile, "start comment")
 }
 
 func runCompletionCommentMarkerExists(runDir string) (bool, error) {
@@ -3020,6 +3059,10 @@ func writeRunCommentMarker(run state.Run, repo string, issueNumber int, markerFi
 		return fmt.Errorf("write %s marker: %w", markerKind, err)
 	}
 	return nil
+}
+
+func writeRunStartCommentMarker(run state.Run, repo string, issueNumber int) error {
+	return writeRunCommentMarker(run, repo, issueNumber, runStartCommentMarkerFile, "start comment")
 }
 
 func writeRunCompletionCommentMarker(run state.Run, repo string, issueNumber int) error {
@@ -3065,6 +3108,56 @@ func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
 	}
 	removeTemp = false
 	return nil
+}
+
+func requesterForRun(run state.Run, target runResponseTarget, requesterUserID string) string {
+	requestedBy := strings.TrimSpace(target.RequestedBy)
+	if requestedBy != "" {
+		return requestedBy
+	}
+	requesterUserID = strings.TrimSpace(requesterUserID)
+	if requesterUserID == "" || requesterUserID == "system" {
+		return ""
+	}
+	return requesterUserID
+}
+
+func (s *server) postRunStartCommentBestEffort(run state.Run, sessionMode agent.SessionMode, sessionResume bool) {
+	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+		return
+	}
+
+	target, ok, err := loadRunResponseTarget(run.RunDir)
+	if err != nil {
+		log.Printf("failed to load run response target for %s: %v", run.ID, err)
+	}
+	if !ok {
+		target = runResponseTarget{}
+	}
+	if markerExists, err := runStartCommentMarkerExists(run.RunDir); err != nil {
+		log.Printf("failed to check start comment marker for run %s: %v", run.ID, err)
+		return
+	} else if markerExists {
+		return
+	}
+
+	repo, issueNumber := resolveRunCommentTarget(run, target)
+	if repo == "" || issueNumber <= 0 {
+		return
+	}
+
+	runCredentialInfo, _ := s.store.GetRunCredentialInfo(run.ID)
+	body := buildRunStartComment(run, target, requesterForRun(run, target, runCredentialInfo.CreatedByUserID), sessionMode, sessionResume)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := s.gh.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
+		log.Printf("failed to post start comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
+		return
+	}
+	if err := writeRunStartCommentMarker(run, repo, issueNumber); err != nil {
+		log.Printf("failed to persist start comment marker for run %s: %v", run.ID, err)
+	}
 }
 
 func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
@@ -3197,6 +3290,42 @@ func resolveRunCommentTarget(run state.Run, target runResponseTarget) (string, i
 		}
 	}
 	return repo, issueNumber
+}
+
+func buildRunStartComment(run state.Run, target runResponseTarget, requestedBy string, sessionMode agent.SessionMode, sessionResume bool) string {
+	var queueDelaySeconds *int64
+	if run.StartedAt != nil {
+		delay := int64(run.StartedAt.UTC().Sub(run.CreatedAt.UTC()).Seconds())
+		if delay < 0 {
+			delay = 0
+		}
+		queueDelaySeconds = &delay
+	}
+
+	body := runsummary.BuildStartComment(runsummary.StartCommentInput{
+		RunID:             run.ID,
+		RequestedBy:       requestedBy,
+		Trigger:           firstNonEmpty(strings.TrimSpace(target.Trigger), run.Trigger),
+		Backend:           run.AgentBackend.String(),
+		BaseBranch:        run.BaseBranch,
+		HeadBranch:        run.HeadBranch,
+		SessionMode:       string(sessionMode),
+		SessionResume:     sessionResume,
+		Debug:             run.Debug,
+		Task:              run.Task,
+		Context:           run.Context,
+		QueueDelaySeconds: queueDelaySeconds,
+	})
+	return runStartCommentBodyMarker + "\n\n" + body
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func buildRunCompletionComment(run state.Run, target runResponseTarget, repo string, totalTokens *int64) (string, error) {
@@ -3552,6 +3681,9 @@ func isRascalAutomationComment(body string) bool {
 		return false
 	}
 	if strings.Contains(trimmed, runCompletionCommentBodyMarker) {
+		return true
+	}
+	if strings.Contains(trimmed, runStartCommentBodyMarker) {
 		return true
 	}
 	if strings.Contains(trimmed, runFailureCommentBodyMarker) {

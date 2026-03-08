@@ -24,6 +24,21 @@ type CompletionCommentInput struct {
 	TotalTokens     *int64
 }
 
+type StartCommentInput struct {
+	RunID             string
+	RequestedBy       string
+	Trigger           string
+	Backend           string
+	BaseBranch        string
+	HeadBranch        string
+	SessionMode       string
+	SessionResume     bool
+	Debug             bool
+	Task              string
+	Context           string
+	QueueDelaySeconds *int64
+}
+
 // ParseCommitBody extracts the optional commit body from commit_message.txt
 // style content where the first non-empty line is the title.
 func ParseCommitBody(data []byte) (string, error) {
@@ -164,6 +179,46 @@ func BuildCompletionComment(in CompletionCommentInput) (string, error) {
 	return fmt.Sprintf("@%s implemented in commit [`%s`](%s).\n\n%s", requestedBy, shaShort, commitURL, commentBody), nil
 }
 
+func BuildStartComment(in StartCommentInput) string {
+	lines := []string{startCommentHeadline(in)}
+
+	details := make([]string, 0, 10)
+	if requestedBy := strings.TrimSpace(in.RequestedBy); requestedBy != "" {
+		details = append(details, fmt.Sprintf("- Requested by: `%s`", requestedBy))
+	}
+	if trigger := strings.TrimSpace(in.Trigger); trigger != "" {
+		details = append(details, fmt.Sprintf("- Trigger: `%s`", trigger))
+	}
+	if backend := strings.TrimSpace(in.Backend); backend != "" {
+		details = append(details, fmt.Sprintf("- Backend: `%s`", backend))
+	}
+	if baseBranch := strings.TrimSpace(in.BaseBranch); baseBranch != "" || strings.TrimSpace(in.HeadBranch) != "" {
+		details = append(details, fmt.Sprintf("- Branches: `%s` -> `%s`", defaultString(baseBranch, "(default)"), defaultString(strings.TrimSpace(in.HeadBranch), "(default)")))
+	}
+	if sessionMode := strings.TrimSpace(in.SessionMode); sessionMode != "" {
+		details = append(details, fmt.Sprintf("- Session mode: `%s`", sessionMode))
+		details = append(details, fmt.Sprintf("- Resume: `%t`", in.SessionResume))
+	}
+	details = append(details, fmt.Sprintf("- Debug: `%t`", in.Debug))
+	if in.QueueDelaySeconds != nil {
+		details = append(details, fmt.Sprintf("- Queue delay: `%s`", FormatDuration(*in.QueueDelaySeconds)))
+	}
+	if task := compactCommentText(in.Task, 280); task != "" {
+		details = append(details, "- Task: "+task)
+	}
+	if contextText := compactCommentText(in.Context, 280); contextText != "" {
+		details = append(details, "- Context: "+contextText)
+	}
+	if len(details) == 0 {
+		return lines[0]
+	}
+
+	lines = append(lines, "<details><summary>Run Settings</summary>", "")
+	lines = append(lines, details...)
+	lines = append(lines, "", "</details>")
+	return strings.Join(lines, "\n\n")
+}
+
 func RunDurationSeconds(created time.Time, started, completed *time.Time) int64 {
 	start := created.UTC()
 	if started != nil {
@@ -177,4 +232,33 @@ func RunDurationSeconds(created time.Time, started, completed *time.Time) int64 
 		return 0
 	}
 	return int64(end.Sub(start).Seconds())
+}
+
+func startCommentHeadline(in StartCommentInput) string {
+	switch strings.TrimSpace(in.Trigger) {
+	case "pr_comment", "pr_review", "pr_review_comment":
+		return fmt.Sprintf("Rascal started run `%s` to address new PR feedback.", strings.TrimSpace(in.RunID))
+	case "issue_label", "issue_edited", "issue_reopened", "issue_api":
+		return fmt.Sprintf("Rascal started run `%s` for this issue.", strings.TrimSpace(in.RunID))
+	default:
+		return fmt.Sprintf("Rascal started run `%s`.", strings.TrimSpace(in.RunID))
+	}
+}
+
+func compactCommentText(value string, maxLen int) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if maxLen <= 0 || len(value) <= maxLen {
+		return value
+	}
+	if maxLen <= 3 {
+		return value[:maxLen]
+	}
+	return strings.TrimSpace(value[:maxLen-3]) + "..."
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }

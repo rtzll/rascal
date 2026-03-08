@@ -426,6 +426,15 @@ func (f *fakeGitHubClient) postedComments() []postedIssueComment {
 	return out
 }
 
+func findPostedComment(comments []postedIssueComment, marker string) (postedIssueComment, bool) {
+	for _, comment := range comments {
+		if strings.Contains(comment.body, marker) {
+			return comment, true
+		}
+	}
+	return postedIssueComment{}, false
+}
+
 func (f *fakeGitHubClient) createCommentCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2096,30 +2105,40 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	s.executeRun(run.ID)
 
 	comments := fakeGH.postedComments()
-	if len(comments) != 1 {
-		t.Fatalf("expected one posted comment, got %d", len(comments))
+	if len(comments) != 2 {
+		t.Fatalf("expected start and completion comments, got %d", len(comments))
 	}
-	comment := comments[0]
-	if comment.repo != "owner/repo" || comment.issueNumber != 77 {
-		t.Fatalf("unexpected comment target: %+v", comment)
+	startComment, ok := findPostedComment(comments, runStartCommentBodyMarker)
+	if !ok {
+		t.Fatalf("expected start comment, got %+v", comments)
 	}
-	if !strings.Contains(comment.body, "@alice implemented in commit [`0123456789ab`]") {
-		t.Fatalf("expected requester mention with short sha, got body:\n%s", comment.body)
+	if startComment.repo != "owner/repo" || startComment.issueNumber != 77 {
+		t.Fatalf("unexpected start comment target: %+v", startComment)
 	}
-	if !strings.Contains(comment.body, "Closes #16") {
-		t.Fatalf("expected original issue reference, got body:\n%s", comment.body)
+	if !strings.Contains(startComment.body, "Rascal started run `run_comment_completion` to address new PR feedback.") {
+		t.Fatalf("expected concise start summary, got:\n%s", startComment.body)
 	}
-	if !strings.Contains(comment.body, runCompletionCommentBodyMarker) {
-		t.Fatalf("expected completion marker in comment body, got body:\n%s", comment.body)
+	if !strings.Contains(startComment.body, "<details><summary>Run Settings</summary>") {
+		t.Fatalf("expected settings details in start comment, got:\n%s", startComment.body)
 	}
-	if !strings.Contains(comment.body, "- updated handlers") {
-		t.Fatalf("expected commit body bullets in comment, got:\n%s", comment.body)
+	completionComment, ok := findPostedComment(comments, runCompletionCommentBodyMarker)
+	if !ok {
+		t.Fatalf("expected completion comment, got %+v", comments)
 	}
-	if !strings.Contains(comment.body, "<details><summary>Agent Details</summary>") {
-		t.Fatalf("expected agent details section, got:\n%s", comment.body)
+	if !strings.Contains(completionComment.body, "@alice implemented in commit [`0123456789ab`]") {
+		t.Fatalf("expected requester mention with short sha, got body:\n%s", completionComment.body)
 	}
-	if !strings.Contains(comment.body, "Rascal run `run_comment_completion` completed in ") || !strings.Contains(comment.body, "123K tokens") {
-		t.Fatalf("expected runtime and token summary, got:\n%s", comment.body)
+	if !strings.Contains(completionComment.body, "Closes #16") {
+		t.Fatalf("expected original issue reference, got body:\n%s", completionComment.body)
+	}
+	if !strings.Contains(completionComment.body, "- updated handlers") {
+		t.Fatalf("expected commit body bullets in comment, got:\n%s", completionComment.body)
+	}
+	if !strings.Contains(completionComment.body, "<details><summary>Agent Details</summary>") {
+		t.Fatalf("expected agent details section, got:\n%s", completionComment.body)
+	}
+	if !strings.Contains(completionComment.body, "Rascal run `run_comment_completion` completed in ") || !strings.Contains(completionComment.body, "123K tokens") {
+		t.Fatalf("expected runtime and token summary, got:\n%s", completionComment.body)
 	}
 	usage, ok := s.store.GetRunTokenUsage(run.ID)
 	if !ok {
@@ -2236,21 +2255,28 @@ func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *tes
 	s.executeRun(run.ID)
 
 	comments := fakeGH.postedComments()
-	if len(comments) != 1 {
-		t.Fatalf("expected one posted comment, got %d", len(comments))
+	if len(comments) != 2 {
+		t.Fatalf("expected start and completion comments, got %d", len(comments))
 	}
-	comment := comments[0]
-	if comment.issueNumber != 52 {
-		t.Fatalf("comment target issue number = %d, want 52", comment.issueNumber)
+	startComment, ok := findPostedComment(comments, runStartCommentBodyMarker)
+	if !ok {
+		t.Fatalf("expected start comment, got %+v", comments)
 	}
-	if strings.Contains(comment.body, "implemented in commit") {
-		t.Fatalf("did not expect commit claim without commit message, got body:\n%s", comment.body)
+	if startComment.issueNumber != 52 {
+		t.Fatalf("start comment target issue number = %d, want 52", startComment.issueNumber)
 	}
-	if !strings.Contains(comment.body, "@alice posted the run details below.") {
-		t.Fatalf("expected neutral requester summary, got body:\n%s", comment.body)
+	completionComment, ok := findPostedComment(comments, runCompletionCommentBodyMarker)
+	if !ok {
+		t.Fatalf("expected completion comment, got %+v", comments)
 	}
-	if !strings.Contains(comment.body, "Closes #16") {
-		t.Fatalf("expected original issue reference, got body:\n%s", comment.body)
+	if strings.Contains(completionComment.body, "implemented in commit") {
+		t.Fatalf("did not expect commit claim without commit message, got body:\n%s", completionComment.body)
+	}
+	if !strings.Contains(completionComment.body, "@alice posted the run details below.") {
+		t.Fatalf("expected neutral requester summary, got body:\n%s", completionComment.body)
+	}
+	if !strings.Contains(completionComment.body, "Closes #16") {
+		t.Fatalf("expected original issue reference, got body:\n%s", completionComment.body)
 	}
 }
 
@@ -2312,8 +2338,12 @@ func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 	if updated.CompletedAt != nil {
 		t.Fatalf("expected completed_at cleared on requeue")
 	}
-	if len(fakeGH.postedComments()) != 0 {
-		t.Fatalf("expected no failure comment while run is paused for retry")
+	comments := fakeGH.postedComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected only the start comment while run is paused for retry, got %d", len(comments))
+	}
+	if _, ok := findPostedComment(comments, runStartCommentBodyMarker); !ok {
+		t.Fatalf("expected start comment while paused for retry, got %+v", comments)
 	}
 	if calls := launcher.Calls(); calls != 1 {
 		t.Fatalf("expected run not to restart before pause expiry, got launcher calls=%d", calls)
@@ -2364,6 +2394,14 @@ func TestExecuteRunRequeuesIssueTriggeredRunForUsageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
+	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 16,
+		RequestedBy: "alice",
+		Trigger:     "issue_label",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
 	gooseLog := `{"type":"message","message":{"content":[{"type":"text","text":"Request failed: Codex CLI error: You've hit your usage limit. Try again at Mar 10th, 2099 6:31 AM."}]}}`
 	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(gooseLog+"\n"), 0o644); err != nil {
 		t.Fatalf("write goose log: %v", err)
@@ -2378,8 +2416,12 @@ func TestExecuteRunRequeuesIssueTriggeredRunForUsageLimit(t *testing.T) {
 	if updated.Status != state.StatusQueued {
 		t.Fatalf("expected queued status after usage limit, got %s", updated.Status)
 	}
-	if len(fakeGH.postedComments()) != 0 {
-		t.Fatalf("expected no failure comment while run is paused for retry")
+	comments := fakeGH.postedComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected only the start comment while run is paused for retry, got %d", len(comments))
+	}
+	if _, ok := findPostedComment(comments, runStartCommentBodyMarker); !ok {
+		t.Fatalf("expected start comment while paused for retry, got %+v", comments)
 	}
 	if calls := launcher.Calls(); calls != 1 {
 		t.Fatalf("expected run not to restart before pause expiry, got launcher calls=%d", calls)
@@ -2570,6 +2612,131 @@ func TestParseUsageLimitRetryAtSupportsRelativeDelay(t *testing.T) {
 	}
 	if !strings.Contains(reason, "2 hours 15 minutes") {
 		t.Fatalf("unexpected reason %q", reason)
+	}
+}
+
+func TestPostRunStartCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_start_comment_dedupe",
+		TaskID:      "owner/repo#87",
+		Repo:        "owner/repo",
+		Task:        "Investigate issue #87",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/issue-87",
+		Trigger:     "issue_label",
+		RunDir:      t.TempDir(),
+		IssueNumber: 87,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	now := time.Now().UTC()
+	run.StartedAt = &now
+	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 87,
+		RequestedBy: "alice",
+		Trigger:     "issue_label",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+
+	s.postRunStartCommentBestEffort(run, agent.SessionModeAll, true)
+	s.postRunStartCommentBestEffort(run, agent.SessionModeAll, true)
+
+	if calls := fakeGH.createCommentCalls(); calls != 1 {
+		t.Fatalf("expected a single github comment call, got %d", calls)
+	}
+	comments := fakeGH.postedComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted start comment, got %d", len(comments))
+	}
+	if !strings.Contains(comments[0].body, runStartCommentBodyMarker) {
+		t.Fatalf("expected start marker in comment body, got:\n%s", comments[0].body)
+	}
+	markerPath := runStartCommentMarkerPath(run.RunDir)
+	markerData, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("read start marker: %v", err)
+	}
+	var marker runCommentMarker
+	if err := json.Unmarshal(markerData, &marker); err != nil {
+		t.Fatalf("decode start marker: %v", err)
+	}
+	if marker.RunID != run.ID {
+		t.Fatalf("marker run_id = %q, want %q", marker.RunID, run.ID)
+	}
+}
+
+func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{
+		createIssueCommentErrSeq: []error{
+			errors.New("transient github failure"),
+			nil,
+		},
+	}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_start_comment_retry",
+		TaskID:      "owner/repo#86",
+		Repo:        "owner/repo",
+		Task:        "Investigate issue #86",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/issue-86",
+		Trigger:     "issue_label",
+		RunDir:      t.TempDir(),
+		IssueNumber: 86,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	now := time.Now().UTC()
+	run.StartedAt = &now
+	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 86,
+		RequestedBy: "alice",
+		Trigger:     "issue_label",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+
+	s.postRunStartCommentBestEffort(run, agent.SessionModeAll, false)
+
+	if calls := fakeGH.createCommentCalls(); calls != 1 {
+		t.Fatalf("expected one github comment call after first attempt, got %d", calls)
+	}
+	if comments := fakeGH.postedComments(); len(comments) != 0 {
+		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
+	}
+	if _, err := os.Stat(runStartCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
+		t.Fatalf("expected start marker to be absent after failed post, stat err=%v", err)
+	}
+
+	s.postRunStartCommentBestEffort(run, agent.SessionModeAll, false)
+
+	if calls := fakeGH.createCommentCalls(); calls != 2 {
+		t.Fatalf("expected second github comment call on retry, got %d", calls)
+	}
+	if comments := fakeGH.postedComments(); len(comments) != 1 {
+		t.Fatalf("expected one posted start comment after retry, got %d", len(comments))
+	}
+	if _, err := os.Stat(runStartCommentMarkerPath(run.RunDir)); err != nil {
+		t.Fatalf("expected start marker after successful retry: %v", err)
 	}
 }
 
