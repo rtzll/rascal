@@ -84,6 +84,9 @@ type server struct {
 	instanceID    string
 	resumeTimer   *time.Timer
 	resumeAt      time.Time
+
+	supervisorInterval time.Duration
+	retryBackoff       func(attempt int) time.Duration
 }
 
 type runRequest struct {
@@ -1847,7 +1850,7 @@ func (s *server) superviseDetachedRunLoop(runID string, execRec state.RunExecuti
 }
 
 func (s *server) superviseRun(ctx context.Context, runID string, execRec state.RunExecution, credentialLeaseID string) {
-	interval := runSupervisorTick
+	interval := s.supervisorTick()
 	if interval <= 0 {
 		interval = time.Second
 	}
@@ -2175,7 +2178,7 @@ func (s *server) startDetachedWithRetry(ctx context.Context, spec runner.Spec) (
 		if attempt == maxAttempts {
 			break
 		}
-		backoff := time.Duration(attempt) * time.Second
+		backoff := s.startRetryBackoff(attempt)
 		log.Printf("run %s attempt %d/%d failed: %v (retrying in %s)", spec.RunID, attempt, maxAttempts, err, backoff)
 		timer := time.NewTimer(backoff)
 		select {
@@ -2681,6 +2684,26 @@ func defaultMaxConcurrent() int {
 		return 1
 	}
 	return n
+}
+
+func (s *server) supervisorTick() time.Duration {
+	if s != nil && s.supervisorInterval > 0 {
+		return s.supervisorInterval
+	}
+	return runSupervisorTick
+}
+
+func (s *server) startRetryBackoff(attempt int) time.Duration {
+	if s != nil && s.retryBackoff != nil {
+		if backoff := s.retryBackoff(attempt); backoff > 0 {
+			return backoff
+		}
+		return time.Millisecond
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	return time.Duration(attempt) * time.Second
 }
 
 func (s *server) concurrencyLimit() int {

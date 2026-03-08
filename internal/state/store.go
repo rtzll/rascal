@@ -38,6 +38,14 @@ type Store struct {
 }
 
 func New(path string, maxRuns int) (*Store, error) {
+	return newStore(path, maxRuns, true)
+}
+
+func NewWithoutMigrate(path string, maxRuns int) (*Store, error) {
+	return newStore(path, maxRuns, false)
+}
+
+func newStore(path string, maxRuns int, runMigrations bool) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("state path is required")
 	}
@@ -72,12 +80,14 @@ func New(path string, maxRuns int) (*Store, error) {
 		return closeDBWithError("enable sqlite foreign_keys", err)
 	}
 
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		return closeDBWithError("configure goose sqlite dialect", err)
-	}
-	goose.SetBaseFS(migrationsFS)
-	if err := goose.Up(db, "migrations"); err != nil {
-		return closeDBWithError("run migrations", err)
+	if runMigrations {
+		if err := goose.SetDialect("sqlite3"); err != nil {
+			return closeDBWithError("configure goose sqlite dialect", err)
+		}
+		goose.SetBaseFS(migrationsFS)
+		if err := goose.Up(db, "migrations"); err != nil {
+			return closeDBWithError("run migrations", err)
+		}
 	}
 
 	s := &Store{
@@ -87,6 +97,16 @@ func New(path string, maxRuns int) (*Store, error) {
 		q:       sqlitegen.New(db),
 	}
 	return s, nil
+}
+
+func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	if err := s.db.Close(); err != nil {
+		return fmt.Errorf("close sqlite: %w", err)
+	}
+	return nil
 }
 
 func NewRunID() (string, error) {

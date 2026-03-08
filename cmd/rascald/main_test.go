@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,6 +23,12 @@ import (
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/state"
+)
+
+var (
+	testStateTemplateOnce sync.Once
+	testStateTemplatePath string
+	testStateTemplateErr  error
 )
 
 type fakeLauncher struct {
@@ -480,24 +487,122 @@ func newTestServerWithPaths(t *testing.T, launcher runner.Launcher, dataDir, sta
 	t.Helper()
 
 	cfg := config.ServerConfig{
-		DataDir:    dataDir,
-		StatePath:  statePath,
-		MaxRuns:    200,
-		RunnerMode: "noop",
+		DataDir:              dataDir,
+		StatePath:            statePath,
+		MaxRuns:              200,
+		RunnerMode:           "noop",
+		CredentialRenewEvery: 20 * time.Millisecond,
 	}
-	store, err := state.New(cfg.StatePath, cfg.MaxRuns)
+	if err := prepareTestStatePath(cfg.StatePath); err != nil {
+		t.Fatalf("prepare test state path: %v", err)
+	}
+	store, err := state.NewWithoutMigrate(cfg.StatePath, cfg.MaxRuns)
 	if err != nil {
 		t.Fatalf("new state store: %v", err)
 	}
 	return &server{
-		cfg:           cfg,
-		store:         store,
-		launcher:      launcher,
-		gh:            ghapi.NewAPIClient(""),
-		runCancels:    make(map[string]context.CancelFunc),
-		maxConcurrent: defaultMaxConcurrent(),
-		instanceID:    strings.TrimSpace(instanceID),
+		cfg:                cfg,
+		store:              store,
+		launcher:           launcher,
+		gh:                 ghapi.NewAPIClient(""),
+		runCancels:         make(map[string]context.CancelFunc),
+		maxConcurrent:      defaultMaxConcurrent(),
+		instanceID:         strings.TrimSpace(instanceID),
+		supervisorInterval: 10 * time.Millisecond,
+		retryBackoff: func(_ int) time.Duration {
+			return 10 * time.Millisecond
+		},
 	}
+}
+
+func prepareTestStatePath(statePath string) error {
+	statePath = strings.TrimSpace(statePath)
+	if statePath == "" {
+		return fmt.Errorf("state path is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		return fmt.Errorf("create state directory: %w", err)
+	}
+	if _, err := os.Stat(statePath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat state path %s: %w", statePath, err)
+	}
+
+	templatePath, err := testStateTemplate()
+	if err != nil {
+		return err
+	}
+	for _, suffix := range []string{"", "-shm", "-wal"} {
+		src := templatePath + suffix
+		dst := statePath + suffix
+		if err := copyFileIfExists(src, dst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func testStateTemplate() (string, error) {
+	testStateTemplateOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "rascal-state-template-*")
+		if err != nil {
+			testStateTemplateErr = fmt.Errorf("create template dir: %w", err)
+			return
+		}
+		path := filepath.Join(dir, "state.db")
+		store, err := state.New(path, 200)
+		if err != nil {
+			testStateTemplateErr = fmt.Errorf("create template state db: %w", err)
+			return
+		}
+		if err := store.Close(); err != nil {
+			testStateTemplateErr = fmt.Errorf("close template state db: %w", err)
+			return
+		}
+		testStateTemplatePath = path
+	})
+	if testStateTemplateErr != nil {
+		return "", testStateTemplateErr
+	}
+	return testStateTemplatePath, nil
+}
+
+func copyFileIfExists(src, dst string) (err error) {
+	info, err := os.Stat(src)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("stat %s: %w", src, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("copy %s: source is directory", src)
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", src, err)
+	}
+	defer func() {
+		if closeErr := in.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close %s: %w", src, closeErr)
+		}
+	}()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode())
+	if err != nil {
+		return fmt.Errorf("create %s: %w", dst, err)
+	}
+	defer func() {
+		if closeErr := out.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close %s: %w", dst, closeErr)
+		}
+	}()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return fmt.Errorf("copy %s to %s: %w", src, dst, err)
+	}
+	return nil
 }
 
 func waitForRunExecution(t *testing.T, s *server, runID string) state.RunExecution {
@@ -535,14 +640,14 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 		if cond() {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatalf("timeout waiting for condition: %s", msg)
 }
 
 func waitForServerIdle(t *testing.T, s *server) {
 	t.Helper()
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, 2*time.Second, func() bool {
 		return s.activeRunCount() == 0
 	}, "server idle")
 }
@@ -568,6 +673,7 @@ func markRunReview(t *testing.T, s *server, runID string) {
 }
 
 func TestHandleWebhookRecordsDeliveryOnlyAfterSuccess(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	deliveryID := "delivery-1"
@@ -608,6 +714,7 @@ func TestHandleWebhookRecordsDeliveryOnlyAfterSuccess(t *testing.T) {
 }
 
 func TestHandleWebhookIgnoresIssueLabeledOnPR(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	payload := []byte(`{"action":"labeled","label":{"name":"rascal"},"issue":{"number":7,"title":"Title","body":"Body","pull_request":{}},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
@@ -624,6 +731,7 @@ func TestHandleWebhookIgnoresIssueLabeledOnPR(t *testing.T) {
 }
 
 func TestHandleWebhookIssueClosedCancelsRunsAndCompletesTask(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -663,6 +771,7 @@ func TestHandleWebhookIssueClosedCancelsRunsAndCompletesTask(t *testing.T) {
 }
 
 func TestHandleWebhookIssueReopenedReenablesTask(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	taskID := "owner/repo#7"
@@ -687,6 +796,7 @@ func TestHandleWebhookIssueReopenedReenablesTask(t *testing.T) {
 }
 
 func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -741,6 +851,7 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 }
 
 func TestHandleWebhookIssueUnlabeledRemovesPastReactions(t *testing.T) {
+	t.Parallel()
 	fakeGH := &fakeGitHubClient{}
 	fakeGH.addIssueReaction("owner/repo", 7, ghapi.ReactionEyes)
 	fakeGH.addIssueReaction("owner/repo", 7, ghapi.ReactionRocket)
@@ -768,6 +879,7 @@ func TestHandleWebhookIssueUnlabeledRemovesPastReactions(t *testing.T) {
 }
 
 func TestHandleListRunsSupportsAllQuery(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	for i := 1; i <= 3; i++ {
 		_, err := s.store.AddRun(state.CreateRunInput{
@@ -815,6 +927,7 @@ func TestHandleListRunsSupportsAllQuery(t *testing.T) {
 }
 
 func TestHandleListRunsAllIgnoresLimitValue(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	for i := 1; i <= 2; i++ {
 		_, err := s.store.AddRun(state.CreateRunInput{
@@ -846,6 +959,7 @@ func TestHandleListRunsAllIgnoresLimitValue(t *testing.T) {
 }
 
 func TestHandleListRunsInvalidAllReturnsBadRequest(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runs?all=notabool", nil)
@@ -857,6 +971,7 @@ func TestHandleListRunsInvalidAllReturnsBadRequest(t *testing.T) {
 }
 
 func TestHandleWebhookInactiveSlotIsSkipped(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -880,6 +995,7 @@ func TestHandleWebhookInactiveSlotIsSkipped(t *testing.T) {
 }
 
 func TestHandleWebhookSignatureValidation(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	s.cfg.GitHubWebhookSecret = "secret"
@@ -901,6 +1017,7 @@ func TestHandleWebhookSignatureValidation(t *testing.T) {
 }
 
 func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -979,6 +1096,7 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 }
 
 func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -1050,6 +1168,7 @@ func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
 }
 
 func TestHandleWebhookIssueCommentEditedSkipsUnchangedBody(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -1069,6 +1188,7 @@ func TestHandleWebhookIssueCommentEditedSkipsUnchangedBody(t *testing.T) {
 }
 
 func TestHandleWebhookIssueCommentIgnoresUnmanagedPR(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	fakeGH := &fakeGitHubClient{}
@@ -1094,6 +1214,7 @@ func TestHandleWebhookIssueCommentIgnoresUnmanagedPR(t *testing.T) {
 }
 
 func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -1165,6 +1286,7 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 }
 
 func TestHandleWebhookPullRequestReviewIgnoresUnmanagedPR(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	fakeGH := &fakeGitHubClient{}
@@ -1190,6 +1312,7 @@ func TestHandleWebhookPullRequestReviewIgnoresUnmanagedPR(t *testing.T) {
 }
 
 func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -1262,6 +1385,7 @@ func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.
 }
 
 func TestHandleWebhookPullRequestReviewCommentEditedBodyChangedQueuesRun(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -1321,6 +1445,7 @@ func TestHandleWebhookPullRequestReviewCommentEditedBodyChangedQueuesRun(t *test
 }
 
 func TestHandleWebhookPullRequestReviewCommentEditedSkipsUnchangedBody(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -1340,6 +1465,7 @@ func TestHandleWebhookPullRequestReviewCommentEditedSkipsUnchangedBody(t *testin
 }
 
 func TestHandleWebhookPullRequestReviewCommentIgnoresUnmanagedPR(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	fakeGH := &fakeGitHubClient{}
@@ -1365,6 +1491,7 @@ func TestHandleWebhookPullRequestReviewCommentIgnoresUnmanagedPR(t *testing.T) {
 }
 
 func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -1404,6 +1531,7 @@ func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 }
 
 func TestHandleWebhookIssueCommentIgnoresBotActor(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -1420,6 +1548,7 @@ func TestHandleWebhookIssueCommentIgnoresBotActor(t *testing.T) {
 }
 
 func TestHandleWebhookIssueCommentIgnoresRascalAutomationComment(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -1436,6 +1565,7 @@ func TestHandleWebhookIssueCommentIgnoresRascalAutomationComment(t *testing.T) {
 }
 
 func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -1480,6 +1610,7 @@ func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
 }
 
 func TestCreateAndQueueRunRespectsGlobalConcurrencyLimit(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -1515,6 +1646,7 @@ func TestCreateAndQueueRunRespectsGlobalConcurrencyLimit(t *testing.T) {
 }
 
 func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -1585,6 +1717,7 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 }
 
 func TestPullRequestClosedIgnoresUnmanagedPR(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	fakeGH := &fakeGitHubClient{}
@@ -1608,6 +1741,7 @@ func TestPullRequestClosedIgnoresUnmanagedPR(t *testing.T) {
 }
 
 func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	fakeGH := &fakeGitHubClient{}
 	s.gh = fakeGH
@@ -1663,6 +1797,7 @@ func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
 }
 
 func TestClosedUnmergedEventDoesNotDowngradeMergedRunState(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	taskID := "owner/repo#321"
 	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 321}); err != nil {
@@ -1711,6 +1846,7 @@ func TestClosedUnmergedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 }
 
 func TestReopenedEventDoesNotDowngradeMergedRunState(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	taskID := "owner/repo#654"
 	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 654}); err != nil {
@@ -1759,6 +1895,7 @@ func TestReopenedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 }
 
 func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{
 		errSeq: []error{
 			errors.New("transient launcher error"),
@@ -1789,6 +1926,7 @@ func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
 }
 
 func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{}
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
@@ -1832,6 +1970,7 @@ func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 }
 
 func TestExecuteRunDisablesGooseSessionSpecForNonPROnlyTrigger(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{}
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
@@ -1868,6 +2007,7 @@ func TestExecuteRunDisablesGooseSessionSpecForNonPROnlyTrigger(t *testing.T) {
 }
 
 func TestCleanupStaleGooseSessionDirs(t *testing.T) {
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "goose-sessions")
 	oldDir := filepath.Join(root, "old")
 	freshDir := filepath.Join(root, "fresh")
@@ -1901,6 +2041,7 @@ func TestCleanupStaleGooseSessionDirs(t *testing.T) {
 }
 
 func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{
 		res: fakeRunResult{
 			PRNumber: 77,
@@ -1983,6 +2124,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 }
 
 func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{
 		res: fakeRunResult{
 			HeadSHA: "0123456789abcdef0123456789abcdef01234567",
@@ -2042,6 +2184,7 @@ func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 }
 
 func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{
 		res: fakeRunResult{
 			PRNumber: 52,
@@ -2105,6 +2248,7 @@ func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *tes
 }
 
 func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{
 		res: fakeRunResult{
 			ExitCode: 1,
@@ -2185,6 +2329,7 @@ func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 }
 
 func TestExecuteRunRequeuesIssueTriggeredRunForUsageLimit(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{
 		res: fakeRunResult{
 			ExitCode: 1,
@@ -2235,6 +2380,7 @@ func TestExecuteRunRequeuesIssueTriggeredRunForUsageLimit(t *testing.T) {
 }
 
 func TestScheduleRunsResumesAfterPauseDeadline(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{}
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
@@ -2260,6 +2406,7 @@ func TestScheduleRunsResumesAfterPauseDeadline(t *testing.T) {
 }
 
 func TestParseUsageLimitRetryAtSupportsAbsoluteTimestampWithZone(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
 	corpus := "Request failed: You've hit your usage limit. Try again at Mar 10th, 2026 6:31 AM UTC."
 
@@ -2275,6 +2422,7 @@ func TestParseUsageLimitRetryAtSupportsAbsoluteTimestampWithZone(t *testing.T) {
 }
 
 func TestParseUsageLimitRetryAtSupportsRFC3339(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
 	corpus := "You've hit your usage limit. Try again at 2026-03-10T06:31:00Z."
 
@@ -2287,6 +2435,7 @@ func TestParseUsageLimitRetryAtSupportsRFC3339(t *testing.T) {
 }
 
 func TestParseUsageLimitRetryAtSupportsRelativeDelay(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
 	corpus := "You've hit your usage limit. Please try again in 2 hours 15 minutes."
 
@@ -2302,6 +2451,7 @@ func TestParseUsageLimitRetryAtSupportsRelativeDelay(t *testing.T) {
 }
 
 func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -2357,6 +2507,7 @@ func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 }
 
 func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -2418,6 +2569,7 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 }
 
 func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -2484,6 +2636,7 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 }
 
 func TestHandleTaskSubresourcesGet(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -2505,6 +2658,7 @@ func TestHandleTaskSubresourcesGet(t *testing.T) {
 }
 
 func TestHandleCreateTaskRespectsProvidedTaskID(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -2534,6 +2688,7 @@ func TestHandleCreateTaskRespectsProvidedTaskID(t *testing.T) {
 }
 
 func TestHandleCreateTaskAcceptsDebugFalse(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -2560,6 +2715,7 @@ func TestHandleCreateTaskAcceptsDebugFalse(t *testing.T) {
 }
 
 func TestHandleCancelRunQueued(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -2596,6 +2752,7 @@ func TestHandleCancelRunQueued(t *testing.T) {
 }
 
 func TestHandleCancelRunActiveUsesUserReason(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -2621,6 +2778,7 @@ func TestHandleCancelRunActiveUsesUserReason(t *testing.T) {
 }
 
 func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
+	t.Parallel()
 	done := make(chan struct{})
 	launcher := &stubbornLauncher{
 		wait: done,
@@ -2664,6 +2822,7 @@ func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
 }
 
 func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -2685,6 +2844,7 @@ func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
 }
 
 func TestExecuteRunHonorsPersistedCancelBeforeStart(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{}
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
@@ -2722,6 +2882,7 @@ func TestExecuteRunHonorsPersistedCancelBeforeStart(t *testing.T) {
 }
 
 func TestPersistedRunCancelStopsActiveRun(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -2754,6 +2915,7 @@ func TestPersistedRunCancelStopsActiveRun(t *testing.T) {
 }
 
 func TestRecoverQueueStateAppliesPersistedCancel(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -2786,6 +2948,7 @@ func TestRecoverQueueStateAppliesPersistedCancel(t *testing.T) {
 }
 
 func TestRecoverRunningRunExpiredLeaseRequeues(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -2826,6 +2989,7 @@ func TestRecoverRunningRunExpiredLeaseRequeues(t *testing.T) {
 }
 
 func TestRecoverRunningRunValidLeaseKeepsRunning(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -2859,6 +3023,7 @@ func TestRecoverRunningRunValidLeaseKeepsRunning(t *testing.T) {
 }
 
 func TestRecoverRunningRunWithoutLeaseOldStartRequeues(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -2896,6 +3061,7 @@ func TestRecoverRunningRunWithoutLeaseOldStartRequeues(t *testing.T) {
 }
 
 func TestExecuteRunPersistsRunExecutionHandle(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -2919,6 +3085,7 @@ func TestExecuteRunPersistsRunExecutionHandle(t *testing.T) {
 }
 
 func TestRecoverRunningRunAdoptsDetachedExecution(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	dataDir := t.TempDir()
@@ -2967,6 +3134,7 @@ func TestRecoverRunningRunAdoptsDetachedExecution(t *testing.T) {
 }
 
 func TestDrainReleaseDoesNotDeleteAdoptedLease(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	dataDir := t.TempDir()
@@ -3007,6 +3175,7 @@ func TestDrainReleaseDoesNotDeleteAdoptedLease(t *testing.T) {
 }
 
 func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{}
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
@@ -3075,6 +3244,7 @@ func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
 }
 
 func TestRecoverRunningRunMissingDetachedExecutionFails(t *testing.T) {
+	t.Parallel()
 	launcher := &fakeLauncher{}
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
@@ -3114,6 +3284,7 @@ func TestRecoverRunningRunMissingDetachedExecutionFails(t *testing.T) {
 }
 
 func TestRecoverRunningRunAdoptsByStableContainerName(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -3169,6 +3340,7 @@ func TestRecoverRunningRunAdoptsByStableContainerName(t *testing.T) {
 }
 
 func TestCancelRunWorksAfterAdoptionByDifferentInstance(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	dataDir := t.TempDir()
@@ -3208,6 +3380,7 @@ func TestCancelRunWorksAfterAdoptionByDifferentInstance(t *testing.T) {
 }
 
 func TestLateCancelDoesNotOverwriteSuccessfulCompletion(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -3234,6 +3407,7 @@ func TestLateCancelDoesNotOverwriteSuccessfulCompletion(t *testing.T) {
 }
 
 func TestRepeatedHandoffPreservesDetachedExecutionHandle(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	dataDir := t.TempDir()
@@ -3295,6 +3469,7 @@ func TestRepeatedHandoffPreservesDetachedExecutionHandle(t *testing.T) {
 }
 
 func TestDrainStopsSupervisionWithoutCancelingDetachedRun(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
@@ -3330,6 +3505,7 @@ func TestDrainStopsSupervisionWithoutCancelingDetachedRun(t *testing.T) {
 }
 
 func TestHandleRunLogsRespectsLines(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -3374,6 +3550,7 @@ func TestHandleRunLogsRespectsLines(t *testing.T) {
 }
 
 func TestHandleRunLogsJSONIncludesStatusAndDone(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -3430,6 +3607,7 @@ func TestHandleRunLogsJSONIncludesStatusAndDone(t *testing.T) {
 }
 
 func TestHandleRunLogsMissingAgentFileStillReturnsRunnerLogs(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -3470,6 +3648,7 @@ func TestHandleRunLogsMissingAgentFileStillReturnsRunnerLogs(t *testing.T) {
 }
 
 func TestHandleRunLogsFallsBackToLegacyGooseLogFile(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -3513,6 +3692,7 @@ func TestHandleRunLogsFallsBackToLegacyGooseLogFile(t *testing.T) {
 }
 
 func TestHandleRunLogsRejectsInvalidFormat(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -3544,6 +3724,7 @@ func TestHandleRunLogsRejectsInvalidFormat(t *testing.T) {
 }
 
 func TestBuildHeadBranchUsesTaskSummaryForAdHocRunTaskID(t *testing.T) {
+	t.Parallel()
 	got := buildHeadBranch(
 		"run_97073bc1e7787f7c",
 		"When running bootstrap with --skip-deploy, preserve host/domain values.\n\nKeep it small.",
@@ -3558,6 +3739,7 @@ func TestBuildHeadBranchUsesTaskSummaryForAdHocRunTaskID(t *testing.T) {
 }
 
 func TestBuildHeadBranchUsesTaskIDForNamedTasks(t *testing.T) {
+	t.Parallel()
 	got := buildHeadBranch("owner/repo#123", "ignored task text", "run_deadbeefcafefeed")
 	if !strings.HasPrefix(got, "rascal/owner/repo-123-") {
 		t.Fatalf("expected task-id-based branch prefix, got %q", got)
@@ -3568,6 +3750,7 @@ func TestBuildHeadBranchUsesTaskIDForNamedTasks(t *testing.T) {
 }
 
 func TestHandleReadyReflectsDrainingState(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -3589,6 +3772,7 @@ func TestHandleReadyReflectsDrainingState(t *testing.T) {
 }
 
 func TestCreateAndQueueRunRejectedWhenDraining(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
@@ -3604,6 +3788,7 @@ func TestCreateAndQueueRunRejectedWhenDraining(t *testing.T) {
 }
 
 func TestBeginDrainLeavesQueuedRunsForNextSlot(t *testing.T) {
+	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
