@@ -52,7 +52,7 @@ func ParseCommitBody(data []byte) (string, error) {
 	return body, nil
 }
 
-// ExtractTotalTokens returns the last total_tokens value found in goose output.
+// ExtractTotalTokens returns the last total_tokens value found in agent output.
 func ExtractTotalTokens(gooseOutput string) (int64, bool) {
 	matches := totalTokensPattern.FindAllStringSubmatch(gooseOutput, -1)
 	if len(matches) == 0 {
@@ -103,7 +103,7 @@ func formatTokenCount(totalTokens int64) string {
 func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection string) string {
 	gooseSection := "<details><summary>Run Details</summary>\n\n```\n" + gooseOutput + "\n```\n\n</details>"
 	if totalTokens, ok := ExtractTotalTokens(gooseOutput); ok {
-		gooseSection = "<details><summary>Goose Details</summary>\n\n```\n" + gooseOutput + "\n```\n\n</details>"
+		gooseSection = "<details><summary>Agent Details</summary>\n\n```\n" + gooseOutput + "\n```\n\n</details>"
 		body := ""
 		if strings.TrimSpace(commitBody) != "" {
 			body = commitBody + "\n\n"

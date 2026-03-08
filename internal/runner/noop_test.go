@@ -40,7 +40,7 @@ func TestNoopLauncherWritesArtifacts(t *testing.T) {
 		t.Fatalf("expected exit code 0, got %+v", state.ExitCode)
 	}
 
-	for _, name := range []string{"runner.log", "goose.ndjson", "meta.json"} {
+	for _, name := range []string{"runner.log", "agent.ndjson", "meta.json"} {
 		if _, err := os.Stat(filepath.Join(runDir, name)); err != nil {
 			t.Fatalf("expected %s: %v", name, err)
 		}

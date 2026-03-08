@@ -27,7 +27,7 @@ runtime prerequisites.
 Log output includes:
 
 - `runner.log`: orchestration, git, push, PR operations
-- `goose.ndjson`: canonical agent-side stream log path for both Goose and Codex runs
+- `agent.ndjson`: canonical agent-side stream log path for both Goose and Codex runs
 - `agent_output.txt`: structured/fallback agent output when the backend writes it
 
 ## Recovery Patterns
