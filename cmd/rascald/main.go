@@ -47,6 +47,7 @@ const runFailureCommentMarkerFile = "failure_comment_posted.json"
 const runCompletionCommentBodyMarker = "<!-- rascal:completion-comment -->"
 const agentLogFile = "agent.ndjson"
 const legacyAgentLogFile = "goose.ndjson"
+const agentOutputFile = "agent_output.txt"
 const runFailureCommentBodyMarker = "<!-- rascal:failure-comment -->"
 const workerPauseScope = "workers"
 const defaultUsageLimitPause = 15 * time.Minute
@@ -2026,23 +2027,26 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		}
 	}
 
-	if retryAt, reason, ok := detectUsageLimitPause(run, meta.Error); ok {
-		effectiveRetryAt := s.pauseWorkersUntil(retryAt, fmt.Sprintf("run %s hit provider usage limit: %s", run.ID, reason))
-		if err := s.requeueRun(run.ID); err != nil {
-			log.Printf("run %s usage-limit requeue failed: %v", run.ID, err)
-		} else {
-			log.Printf("run %s requeued after usage limit; scheduling resumes at %s", run.ID, effectiveRetryAt.Format(time.RFC3339))
-			s.cleanupDetachedExecution(runID, execRec)
-			if updated, ok := s.store.GetRun(run.ID); ok {
-				s.finishRun(updated)
+	runFailed := meta.ExitCode != 0 || strings.TrimSpace(meta.Error) != ""
+	if runFailed {
+		if retryAt, reason, ok := detectUsageLimitPause(run, meta.Error); ok {
+			effectiveRetryAt := s.pauseWorkersUntil(retryAt, fmt.Sprintf("run %s hit provider usage limit: %s", run.ID, reason))
+			if err := s.requeueRun(run.ID); err != nil {
+				log.Printf("run %s usage-limit requeue failed: %v", run.ID, err)
+			} else {
+				log.Printf("run %s requeued after usage limit; scheduling resumes at %s", run.ID, effectiveRetryAt.Format(time.RFC3339))
+				s.cleanupDetachedExecution(runID, execRec)
+				if updated, ok := s.store.GetRun(run.ID); ok {
+					s.finishRun(updated)
+					return
+				}
+				run.Status = state.StatusQueued
+				run.Error = ""
+				run.StartedAt = nil
+				run.CompletedAt = nil
+				s.finishRun(run)
 				return
 			}
-			run.Status = state.StatusQueued
-			run.Error = ""
-			run.StartedAt = nil
-			run.CompletedAt = nil
-			s.finishRun(run)
-			return
 		}
 	}
 
@@ -3379,15 +3383,22 @@ func detectUsageLimitPause(run state.Run, errText string) (time.Time, string, bo
 }
 
 func loadRunAgentOutput(runDir string) (string, error) {
-	agentPath, err := resolveRunAgentLogPath(runDir)
-	if err != nil {
-		return "", err
+	runDir = strings.TrimSpace(runDir)
+	outputPath := filepath.Join(runDir, agentOutputFile)
+	if data, err := os.ReadFile(outputPath); err == nil {
+		return string(data), nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("read agent output %s: %w", outputPath, err)
 	}
-	data, err := os.ReadFile(agentPath)
-	if err != nil {
-		return "", fmt.Errorf("read agent log %s: %w", agentPath, err)
+
+	legacyPath := filepath.Join(runDir, legacyAgentLogFile)
+	if data, err := os.ReadFile(legacyPath); err == nil {
+		return string(data), nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("read legacy agent log %s: %w", legacyPath, err)
 	}
-	return string(data), nil
+
+	return "", os.ErrNotExist
 }
 
 func parseUsageLimitRetryAt(corpus string, now time.Time) (time.Time, string) {
