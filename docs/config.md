@@ -45,7 +45,6 @@ Rascal-owned auth configuration uses these canonical environment variables:
 - `server_url`
 - `api_token`
 - `default_repo`
-- `transport` (`auto`, `http`, `ssh`)
 - `host`
 - `domain`
 - `ssh_host`
@@ -58,7 +57,6 @@ Set values:
 ```bash
 ./bin/rascal config set server_url https://rascal.example.com
 ./bin/rascal config set default_repo OWNER/REPO
-./bin/rascal config set transport ssh
 ```
 
 Tip: use `doctor` to confirm both local and remote resolution.

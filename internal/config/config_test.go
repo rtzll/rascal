@@ -20,7 +20,6 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 		DefaultRepo: "owner/repo",
 		Host:        "203.0.113.10",
 		Domain:      "rascal.example.com",
-		Transport:   "ssh",
 		SSHHost:     "203.0.113.10",
 		SSHUser:     "root",
 		SSHKey:      "~/.ssh/id_ed25519",
@@ -49,9 +48,6 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 	if out.Domain != in.Domain {
 		t.Fatalf("domain mismatch: got %s want %s", out.Domain, in.Domain)
 	}
-	if out.Transport != in.Transport {
-		t.Fatalf("transport mismatch: got %s want %s", out.Transport, in.Transport)
-	}
 	if out.SSHHost != in.SSHHost {
 		t.Fatalf("ssh host mismatch: got %s want %s", out.SSHHost, in.SSHHost)
 	}
@@ -76,7 +72,7 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 
 func TestLoadClientConfigEnvOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte("server_url = \"https://rascal.example.com\"\napi_token = \"from_file\"\ndefault_repo = \"owner/repo\"\nhost = \"203.0.113.10\"\ndomain = \"rascal.example.com\"\ntransport = \"ssh\"\nssh_host = \"203.0.113.10\"\nssh_user = \"root\"\nssh_key = \"~/.ssh/id_ed25519\"\nssh_port = 22\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("server_url = \"https://rascal.example.com\"\napi_token = \"from_file\"\ndefault_repo = \"owner/repo\"\nhost = \"203.0.113.10\"\ndomain = \"rascal.example.com\"\nssh_host = \"203.0.113.10\"\nssh_user = \"root\"\nssh_key = \"~/.ssh/id_ed25519\"\nssh_port = 22\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -97,9 +93,6 @@ func TestLoadClientConfigEnvOverride(t *testing.T) {
 	}
 	if cfg.Domain != "rascal.example.com" {
 		t.Fatalf("expected domain from file, got %s", cfg.Domain)
-	}
-	if cfg.Transport != "ssh" {
-		t.Fatalf("expected transport from file, got %s", cfg.Transport)
 	}
 	if cfg.SSHHost != "203.0.113.10" {
 		t.Fatalf("expected ssh host from file, got %s", cfg.SSHHost)

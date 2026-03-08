@@ -57,31 +57,6 @@ func TestRunRemoteDoctorUsesSlotUnitsOnly(t *testing.T) {
 	}
 }
 
-func TestCheckServerHealthSSHUsesSlotUnitsOnly(t *testing.T) {
-	logDir := setupDoctorRemoteFakes(t)
-
-	ok, errText := checkServerHealthSSH(deployConfig{
-		Host:    "example-host",
-		SSHUser: "root",
-		SSHPort: 22,
-	})
-	if !ok {
-		t.Fatalf("expected remote ssh health check to pass, got err=%q", errText)
-	}
-
-	sshLog, err := os.ReadFile(filepath.Join(logDir, "ssh_calls.log"))
-	if err != nil {
-		t.Fatalf("read ssh log: %v", err)
-	}
-	sshCalls := string(sshLog)
-	if !strings.Contains(sshCalls, "systemctl is-active --quiet 'rascal@green'") {
-		t.Fatalf("expected slot unit fallback in ssh health check, got:\n%s", sshCalls)
-	}
-	if containsLegacySingleUnitRef(sshCalls) {
-		t.Fatalf("unexpected legacy single-unit command in ssh health check:\n%s", sshCalls)
-	}
-}
-
 func setupDoctorRemoteFakes(t *testing.T) string {
 	t.Helper()
 

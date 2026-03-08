@@ -523,13 +523,11 @@ func newCredentialTestApp(srv *httptest.Server) *app {
 		cfg: config.ClientConfig{
 			ServerURL: srv.URL,
 			APIToken:  "test-token",
-			Transport: "http",
 		},
 		client: apiClient{
-			baseURL:   srv.URL,
-			token:     "test-token",
-			http:      srv.Client(),
-			transport: "http",
+			baseURL: srv.URL,
+			token:   "test-token",
+			http:    srv.Client(),
 		},
 		output: "json",
 	}

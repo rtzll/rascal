@@ -416,7 +416,7 @@ var (
 	deployToExistingHostFn          = deployToExistingHost
 	runRemoteDoctorFn               = runRemoteDoctor
 	remoteCaddyDomainConfiguredFn   = remoteCaddyDomainConfigured
-	waitForServerHealthSSHFn        = waitForServerHealthSSH
+	waitForServerHealthFn           = waitForServerHealth
 	seedBootstrapSharedCredentialFn = seedBootstrapSharedCredential
 )
 
@@ -577,22 +577,14 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	}
 
 	if expandedAuthPath != "" {
-		if err := waitForServerHealthSSHFn(deployConfig{
-			Host:       host,
-			SSHUser:    cfg.SSHUser,
-			SSHKeyPath: cfg.SSHKeyPath,
-			SSHPort:    cfg.SSHPort,
-		}, 90*time.Second); err != nil {
+		seedBaseURL := "http://" + host + ":8080"
+		if err := waitForServerHealthFn(seedBaseURL, 90*time.Second); err != nil {
 			return deployExistingResult{}, fmt.Errorf("server health check failed before credential seeding: %w", err)
 		}
 		if _, err := seedBootstrapSharedCredentialFn(apiClient{
-			token:     apiToken,
-			http:      &http.Client{Timeout: 30 * time.Second},
-			transport: "ssh",
-			sshHost:   host,
-			sshUser:   cfg.SSHUser,
-			sshKey:    cfg.SSHKeyPath,
-			sshPort:   cfg.SSHPort,
+			baseURL: seedBaseURL,
+			token:   apiToken,
+			http:    &http.Client{Timeout: 30 * time.Second},
 		}, expandedAuthPath); err != nil {
 			if input.RawErrors {
 				return deployExistingResult{}, fmt.Errorf("seed stored credential: %w", err)

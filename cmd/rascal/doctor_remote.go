@@ -190,45 +190,14 @@ func checkServerHealth(baseURL string) (bool, string) {
 	return false, "server health check failed"
 }
 
-func checkServerHealthSSH(cfg deployConfig) (bool, string) {
-	checkCmd := strings.Join([]string{
-		"set -u",
-		"  if command -v curl >/dev/null 2>&1; then",
-		"    if curl -fsS --max-time 5 http://127.0.0.1:8080/readyz >/dev/null 2>&1 || curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null 2>&1; then",
-		"      echo ok",
-		"      exit 0",
-		"    fi",
-		"  fi",
-		"  if command -v wget >/dev/null 2>&1; then",
-		"    if wget -q -T 5 -O - http://127.0.0.1:8080/readyz >/dev/null 2>&1 || wget -q -T 5 -O - http://127.0.0.1:8080/healthz >/dev/null 2>&1; then",
-		"      echo ok",
-		"      exit 0",
-		"    fi",
-		"  fi",
-		"if systemctl is-active --quiet 'rascal@blue' || systemctl is-active --quiet 'rascal@green'; then",
-		"  echo ok",
-		"  exit 0",
-		"fi",
-		"exit 1",
-	}, "\n")
-	out, err := runLocalCapture("ssh", sshArgs(cfg, checkCmd)...)
-	if err != nil {
-		return false, err.Error()
-	}
-	if strings.TrimSpace(out) != "ok" {
-		return false, "remote health probe did not return ok"
-	}
-	return true, ""
-}
-
-func waitForServerHealthSSH(cfg deployConfig, timeout time.Duration) error {
+func waitForServerHealth(baseURL string, timeout time.Duration) error {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
 	deadline := time.Now().Add(timeout)
 	var lastErr string
 	for time.Now().Before(deadline) {
-		ok, errText := checkServerHealthSSH(cfg)
+		ok, errText := checkServerHealth(baseURL)
 		if ok {
 			return nil
 		}

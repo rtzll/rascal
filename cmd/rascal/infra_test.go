@@ -62,13 +62,13 @@ func TestRunDeployExistingSkipsHealthyHost(t *testing.T) {
 	origRunRemoteDoctor := runRemoteDoctorFn
 	origDeploy := deployToExistingHostFn
 	origCaddy := remoteCaddyDomainConfiguredFn
-	origHealth := waitForServerHealthSSHFn
+	origHealth := waitForServerHealthFn
 	origSeed := seedBootstrapSharedCredentialFn
 	t.Cleanup(func() {
 		runRemoteDoctorFn = origRunRemoteDoctor
 		deployToExistingHostFn = origDeploy
 		remoteCaddyDomainConfiguredFn = origCaddy
-		waitForServerHealthSSHFn = origHealth
+		waitForServerHealthFn = origHealth
 		seedBootstrapSharedCredentialFn = origSeed
 	})
 
@@ -93,7 +93,7 @@ func TestRunDeployExistingSkipsHealthyHost(t *testing.T) {
 		return nil
 	}
 
-	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error { return nil }
+	waitForServerHealthFn = func(baseURL string, timeout time.Duration) error { return nil }
 	seedBootstrapSharedCredentialFn = func(client apiClient, authFilePath string) (credentialRecord, error) {
 		return credentialRecord{}, nil
 	}
@@ -121,11 +121,11 @@ func TestRunDeployExistingSkipsHealthyHost(t *testing.T) {
 
 func TestRunDeployExistingUsesConfiguredHost(t *testing.T) {
 	origDeploy := deployToExistingHostFn
-	origHealth := waitForServerHealthSSHFn
+	origHealth := waitForServerHealthFn
 	origSeed := seedBootstrapSharedCredentialFn
 	t.Cleanup(func() {
 		deployToExistingHostFn = origDeploy
-		waitForServerHealthSSHFn = origHealth
+		waitForServerHealthFn = origHealth
 		seedBootstrapSharedCredentialFn = origSeed
 	})
 
@@ -134,7 +134,7 @@ func TestRunDeployExistingUsesConfiguredHost(t *testing.T) {
 		deployHost = cfg.Host
 		return nil
 	}
-	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error { return nil }
+	waitForServerHealthFn = func(baseURL string, timeout time.Duration) error { return nil }
 	seedBootstrapSharedCredentialFn = func(client apiClient, authFilePath string) (credentialRecord, error) {
 		return credentialRecord{}, nil
 	}
@@ -163,18 +163,18 @@ func TestRunDeployExistingUsesConfiguredHost(t *testing.T) {
 
 func TestRunDeployExistingUsesCanonicalRuntimeTokenEnv(t *testing.T) {
 	origDeploy := deployToExistingHostFn
-	origHealth := waitForServerHealthSSHFn
+	origHealth := waitForServerHealthFn
 	origSeed := seedBootstrapSharedCredentialFn
 	t.Cleanup(func() {
 		deployToExistingHostFn = origDeploy
-		waitForServerHealthSSHFn = origHealth
+		waitForServerHealthFn = origHealth
 		seedBootstrapSharedCredentialFn = origSeed
 	})
 
 	deployToExistingHostFn = func(cfg deployConfig) error {
 		return nil
 	}
-	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error { return nil }
+	waitForServerHealthFn = func(baseURL string, timeout time.Duration) error { return nil }
 	seedBootstrapSharedCredentialFn = func(client apiClient, authFilePath string) (credentialRecord, error) {
 		return credentialRecord{}, nil
 	}
@@ -214,11 +214,11 @@ func TestRunDeployExistingIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
 
 func TestRunDeployExistingSeedsStoredCredentialWhenCodexAuthProvided(t *testing.T) {
 	origDeploy := deployToExistingHostFn
-	origHealth := waitForServerHealthSSHFn
+	origHealth := waitForServerHealthFn
 	origSeed := seedBootstrapSharedCredentialFn
 	t.Cleanup(func() {
 		deployToExistingHostFn = origDeploy
-		waitForServerHealthSSHFn = origHealth
+		waitForServerHealthFn = origHealth
 		seedBootstrapSharedCredentialFn = origSeed
 	})
 
@@ -233,7 +233,7 @@ func TestRunDeployExistingSeedsStoredCredentialWhenCodexAuthProvided(t *testing.
 		return nil
 	}
 	healthCalls := 0
-	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error {
+	waitForServerHealthFn = func(baseURL string, timeout time.Duration) error {
 		healthCalls++
 		return nil
 	}
@@ -267,7 +267,7 @@ func TestRunDeployExistingSeedsStoredCredentialWhenCodexAuthProvided(t *testing.
 	if gotAuthPath != authPath {
 		t.Fatalf("seed auth path = %q, want %q", gotAuthPath, authPath)
 	}
-	if gotClient.transport != "ssh" || gotClient.sshHost != "203.0.113.10" || gotClient.token != "cfg-api-token" {
+	if gotClient.baseURL != "http://203.0.113.10:8080" || gotClient.token != "cfg-api-token" {
 		t.Fatalf("unexpected seed client: %+v", gotClient)
 	}
 }

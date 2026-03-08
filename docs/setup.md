@@ -79,7 +79,7 @@ You can also set a custom env file via `--env-file` or `RASCAL_ENV_FILE`.
 
 You can run Rascal over host IP without a domain.
 
-- CLI-triggered runs work over SSH transport or direct server URL.
+- CLI-triggered runs use the configured Rascal server URL over HTTP(S).
 - GitHub webhooks can also target an IP URL if publicly reachable, but a stable
   domain + TLS is easier to operate.
 

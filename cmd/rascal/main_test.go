@@ -123,11 +123,6 @@ func TestRootFlagsDoNotExposeDeadFlags(t *testing.T) {
 	if f := root.PersistentFlags().Lookup("no-color"); f == nil {
 		t.Fatal("expected no-color flag to exist")
 	}
-	for _, name := range []string{"transport", "client-ssh-host", "client-ssh-user", "client-ssh-key", "client-ssh-port"} {
-		if f := root.PersistentFlags().Lookup(name); f == nil {
-			t.Fatalf("expected %s flag to exist", name)
-		}
-	}
 }
 
 func TestRootHasGitHubAndInfraCommands(t *testing.T) {
@@ -604,13 +599,11 @@ func TestPSUsesDefaultLimitQuery(t *testing.T) {
 		cfg: config.ClientConfig{
 			ServerURL: srv.URL,
 			APIToken:  "test-token",
-			Transport: "http",
 		},
 		client: apiClient{
-			baseURL:   srv.URL,
-			token:     "test-token",
-			http:      srv.Client(),
-			transport: "http",
+			baseURL: srv.URL,
+			token:   "test-token",
+			http:    srv.Client(),
 		},
 		output: "json",
 	}
@@ -651,13 +644,11 @@ func TestPSAllUsesAllQuery(t *testing.T) {
 		cfg: config.ClientConfig{
 			ServerURL: srv.URL,
 			APIToken:  "test-token",
-			Transport: "http",
 		},
 		client: apiClient{
-			baseURL:   srv.URL,
-			token:     "test-token",
-			http:      srv.Client(),
-			transport: "http",
+			baseURL: srv.URL,
+			token:   "test-token",
+			http:    srv.Client(),
 		},
 		output: "json",
 	}
@@ -775,13 +766,11 @@ func TestPSRendersIssueColumn(t *testing.T) {
 		cfg: config.ClientConfig{
 			ServerURL: srv.URL,
 			APIToken:  "test-token",
-			Transport: "http",
 		},
 		client: apiClient{
-			baseURL:   srv.URL,
-			token:     "test-token",
-			http:      srv.Client(),
-			transport: "http",
+			baseURL: srv.URL,
+			token:   "test-token",
+			http:    srv.Client(),
 		},
 		output: "table",
 	}
@@ -843,13 +832,11 @@ func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
 		cfg: config.ClientConfig{
 			ServerURL: srv.URL,
 			APIToken:  "test-token",
-			Transport: "http",
 		},
 		client: apiClient{
-			baseURL:   srv.URL,
-			token:     "test-token",
-			http:      srv.Client(),
-			transport: "http",
+			baseURL: srv.URL,
+			token:   "test-token",
+			http:    srv.Client(),
 		},
 		output: "json",
 	}
@@ -902,13 +889,11 @@ func TestRunIssueSendsExplicitDebugOverride(t *testing.T) {
 		cfg: config.ClientConfig{
 			ServerURL: srv.URL,
 			APIToken:  "test-token",
-			Transport: "http",
 		},
 		client: apiClient{
-			baseURL:   srv.URL,
-			token:     "test-token",
-			http:      srv.Client(),
-			transport: "http",
+			baseURL: srv.URL,
+			token:   "test-token",
+			http:    srv.Client(),
 		},
 		output: "json",
 	}
@@ -970,13 +955,11 @@ func TestRetryOmitsDebugByDefault(t *testing.T) {
 		cfg: config.ClientConfig{
 			ServerURL: srv.URL,
 			APIToken:  "test-token",
-			Transport: "http",
 		},
 		client: apiClient{
-			baseURL:   srv.URL,
-			token:     "test-token",
-			http:      srv.Client(),
-			transport: "http",
+			baseURL: srv.URL,
+			token:   "test-token",
+			http:    srv.Client(),
 		},
 		output: "json",
 	}
@@ -1038,13 +1021,11 @@ func TestRetrySendsExplicitDebugOverride(t *testing.T) {
 		cfg: config.ClientConfig{
 			ServerURL: srv.URL,
 			APIToken:  "test-token",
-			Transport: "http",
 		},
 		client: apiClient{
-			baseURL:   srv.URL,
-			token:     "test-token",
-			http:      srv.Client(),
-			transport: "http",
+			baseURL: srv.URL,
+			token:   "test-token",
+			http:    srv.Client(),
 		},
 		output: "json",
 	}
@@ -1107,13 +1088,11 @@ func TestRetryCreatesRunWithRetryTrigger(t *testing.T) {
 		cfg: config.ClientConfig{
 			ServerURL: srv.URL,
 			APIToken:  "test-token",
-			Transport: "http",
 		},
 		client: apiClient{
-			baseURL:   srv.URL,
-			token:     "test-token",
-			http:      srv.Client(),
-			transport: "http",
+			baseURL: srv.URL,
+			token:   "test-token",
+			http:    srv.Client(),
 		},
 		output: "json",
 	}
@@ -1190,7 +1169,6 @@ func TestConfigUnsetRemovesKeyAndReportsEffectiveValue(t *testing.T) {
 		"RASCAL_DEFAULT_REPO",
 		"RASCAL_HOST",
 		"RASCAL_DOMAIN",
-		"RASCAL_TRANSPORT",
 		"RASCAL_SSH_HOST",
 		"RASCAL_SSH_USER",
 		"RASCAL_SSH_KEY",
@@ -1242,7 +1220,6 @@ func TestConfigUnsetIdempotent(t *testing.T) {
 		"RASCAL_DEFAULT_REPO",
 		"RASCAL_HOST",
 		"RASCAL_DOMAIN",
-		"RASCAL_TRANSPORT",
 		"RASCAL_SSH_HOST",
 		"RASCAL_SSH_USER",
 		"RASCAL_SSH_KEY",
@@ -1537,68 +1514,6 @@ func TestRascaldJournalctlRemoteCmd(t *testing.T) {
 		t.Fatalf("expected default line count when lines<=0, got: %q", defaultLinesCmd)
 	}
 }
-func TestResolveTransport(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name       string
-		configured string
-		serverURL  string
-		sshHost    string
-		want       string
-	}{
-		{
-			name:       "explicit http",
-			configured: "http",
-			serverURL:  "http://127.0.0.1:8080",
-			sshHost:    "203.0.113.10",
-			want:       "http",
-		},
-		{
-			name:       "explicit ssh",
-			configured: "ssh",
-			serverURL:  "https://rascal.example.com",
-			sshHost:    "203.0.113.10",
-			want:       "ssh",
-		},
-		{
-			name:       "auto localhost prefers ssh",
-			configured: "auto",
-			serverURL:  "http://127.0.0.1:8080",
-			sshHost:    "203.0.113.10",
-			want:       "ssh",
-		},
-		{
-			name:       "auto remote 8080 prefers ssh",
-			configured: "auto",
-			serverURL:  "http://203.0.113.10:8080",
-			sshHost:    "203.0.113.10",
-			want:       "ssh",
-		},
-		{
-			name:       "auto https prefers http",
-			configured: "auto",
-			serverURL:  "https://rascal.example.com",
-			sshHost:    "203.0.113.10",
-			want:       "http",
-		},
-		{
-			name:       "auto without ssh host is http",
-			configured: "auto",
-			serverURL:  "http://127.0.0.1:8080",
-			sshHost:    "",
-			want:       "http",
-		},
-	}
-
-	for _, tc := range cases {
-		got := resolveTransport(tc.configured, tc.serverURL, tc.sshHost)
-		if got != tc.want {
-			t.Fatalf("%s: resolveTransport(%q, %q, %q) = %q, want %q", tc.name, tc.configured, tc.serverURL, tc.sshHost, got, tc.want)
-		}
-	}
-}
-
 func TestLoadEnvFile(t *testing.T) {
 	path := t.TempDir() + "/.env"
 	content := `
@@ -1782,15 +1697,13 @@ func newFollowLogsTestApp(t *testing.T, responses []map[string]any) (*app, func(
 		cfg: config.ClientConfig{
 			ServerURL:   srv.URL,
 			APIToken:    "test-token",
-			Transport:   "http",
 			SSHPort:     22,
 			DefaultRepo: "owner/repo",
 		},
 		client: apiClient{
-			baseURL:   srv.URL,
-			token:     "test-token",
-			http:      srv.Client(),
-			transport: "http",
+			baseURL: srv.URL,
+			token:   "test-token",
+			http:    srv.Client(),
 		},
 	}
 

@@ -6,8 +6,7 @@
 ./bin/rascal doctor --host YOUR_SERVER_IP
 ```
 
-`doctor` validates local config, server health, transport choice, and remote
-runtime prerequisites.
+`doctor` validates local config, server health, and remote runtime prerequisites.
 
 ## Run Statuses
 
@@ -59,7 +58,7 @@ Operationally this means:
 
 | Symptom | Likely layer | First checks |
 | --- | --- | --- |
-| `rascal` command cannot reach server | Control plane / transport | `./bin/rascal config view`, `./bin/rascal doctor --host YOUR_SERVER_IP` |
+| `rascal` command cannot reach server | Control plane / API path | `./bin/rascal config view`, `./bin/rascal doctor --host YOUR_SERVER_IP` |
 | Webhook arrives but no run is created | Control plane / webhook path | `curl -fsS https://YOUR_DOMAIN/healthz`, `./bin/rascal logs caddy-access --host YOUR_SERVER_IP --follow`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
 | Run is stuck in `queued` | Control plane / scheduler | `./bin/rascal ps`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
 | Run is `running` but appears idle | Execution plane / backend | `./bin/rascal logs <run_id> --follow`, inspect detached containers on host |

@@ -18,18 +18,13 @@ Flags:
   -h, --help   help for infra
 
 Global Flags:
-      --api-token string         orchestrator API token
-      --client-ssh-host string   SSH target host for API transport=ssh/auto
-      --client-ssh-key string    SSH private key path for API transport=ssh/auto
-      --client-ssh-port int      SSH target port for API transport=ssh/auto
-      --client-ssh-user string   SSH target user for API transport=ssh/auto
-      --config string            config file path (default "$HOME/.rascal/config.toml")
-      --default-repo string      default repository in OWNER/REPO form
-      --env-file string          env file path (fallback: ./.rascal.env if present)
-      --no-color                 disable ANSI color/style output (also set by NO_COLOR)
-      --output string            output format: table|json|toml (default "table")
-  -q, --quiet                    reduce non-essential output
-      --server-url string        orchestrator URL
-      --transport string         API transport: auto|http|ssh
+      --api-token string      orchestrator API token
+      --config string         config file path (default "$HOME/.rascal/config.toml")
+      --default-repo string   default repository in OWNER/REPO form
+      --env-file string       env file path (fallback: ./.rascal.env if present)
+      --no-color              disable ANSI color/style output (also set by NO_COLOR)
+      --output string         output format: table|json|toml (default "table")
+  -q, --quiet                 reduce non-essential output
+      --server-url string     orchestrator URL
 
 Use "rascal infra [command] --help" for more information about a command.
