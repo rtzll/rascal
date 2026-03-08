@@ -579,7 +579,8 @@ Task ID: %s
 Trigger: %s
 
 Follow the repository instructions and implement the requested task.
-Keep changes minimal, run tests, and summarize what changed.
+Keep changes minimal, run `+"`make lint`"+` and `+"`make test`"+` before finishing if those targets exist, and summarize what changed.
+If one of those commands does not exist or cannot run, explain exactly why and run the closest equivalent checks instead.
 `, cfg.TaskID, cfg.Trigger)
 	if err := os.WriteFile(cfg.InstructionsPath, []byte(body), 0o644); err != nil {
 		return fmt.Errorf("write default instructions: %w", err)

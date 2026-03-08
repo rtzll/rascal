@@ -2630,7 +2630,8 @@ Repository: %s
 - Do not ask for interactive input.
 - Do not require MCP tools.
 - Keep changes minimal and scoped to the requested task.
-- Run tests or explain why tests could not run.
+- Run `+"`make lint`"+` and `+"`make test`"+` before finishing if those targets exist.
+- If one of those commands does not exist or cannot run, explain exactly why and run the closest equivalent checks instead.
 - If you make changes, write /rascal-meta/commit_message.txt using a conventional commit title on the first line.
 - Optionally add a commit body after a blank line in /rascal-meta/commit_message.txt.
 `)
