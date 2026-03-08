@@ -2727,6 +2727,7 @@ INSERT INTO tasks (
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   repo = excluded.repo,
+  agent_backend = excluded.agent_backend,
   issue_number = CASE WHEN excluded.issue_number > 0 THEN excluded.issue_number ELSE tasks.issue_number END,
   pr_number = CASE WHEN excluded.pr_number > 0 THEN excluded.pr_number ELSE tasks.pr_number END,
   updated_at = excluded.updated_at

@@ -124,9 +124,6 @@ func (s *Store) UpsertTask(in UpsertTaskInput) (Task, error) {
 	if in.ID == "" || in.Repo == "" {
 		return Task{}, fmt.Errorf("task id and repo are required")
 	}
-	if existing, ok := s.GetTask(in.ID); ok && existing.AgentBackend != in.AgentBackend {
-		return Task{}, fmt.Errorf("task %q already uses agent backend %q", in.ID, existing.AgentBackend)
-	}
 	now := time.Now().UTC().UnixNano()
 	if err := s.q.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
 		ID:           in.ID,
@@ -337,11 +334,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	}()
 	qtx := s.q.WithTx(tx)
 
-	if taskRow, err := qtx.GetTask(context.Background(), in.TaskID); err == nil {
-		if agent.NormalizeBackend(taskRow.AgentBackend) != in.AgentBackend {
-			return Run{}, fmt.Errorf("task %q already uses agent backend %q", in.TaskID, agent.NormalizeBackend(taskRow.AgentBackend))
-		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	if _, err := qtx.GetTask(context.Background(), in.TaskID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Run{}, fmt.Errorf("load task %q before creating run: %w", in.TaskID, err)
 	}
 

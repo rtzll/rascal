@@ -1464,6 +1464,11 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if s.store.IsTaskCompleted(req.TaskID) {
 		return state.Run{}, errTaskCompleted
 	}
+	if existingTask, ok := s.store.GetTask(req.TaskID); ok && existingTask.AgentBackend != s.cfg.AgentBackend {
+		if err := s.store.DeleteTaskAgentSession(req.TaskID); err != nil {
+			return state.Run{}, fmt.Errorf("clear stale task session for backend migration: %w", err)
+		}
+	}
 
 	lastRun, hasLastRun := s.store.LastRunForTask(req.TaskID)
 	if req.BaseBranch == "" {
@@ -1761,7 +1766,11 @@ func (s *server) executeRun(runID string) {
 		sessionTaskKey = agent.SessionTaskKey(run.Repo, run.TaskID)
 		sessionTaskDir = filepath.Join(sessionRoot, sessionTaskKey)
 		if existing, ok := s.store.GetTaskAgentSession(run.TaskID); ok {
-			backendSessionID = strings.TrimSpace(existing.BackendSessionID)
+			if existing.AgentBackend == run.AgentBackend {
+				backendSessionID = strings.TrimSpace(existing.BackendSessionID)
+			} else if err := s.store.DeleteTaskAgentSession(run.TaskID); err != nil {
+				log.Printf("run %s failed to clear stale %s session for task %s: %v", run.ID, existing.AgentBackend, run.TaskID, err)
+			}
 		}
 		if backendSessionID == "" && run.AgentBackend == agent.BackendGoose {
 			backendSessionID = runner.GooseSessionName(run.Repo, run.TaskID)
@@ -2046,12 +2055,18 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	}
 	if strings.TrimSpace(meta.AgentSessionID) != "" {
 		existing, _ := s.store.GetTaskAgentSession(run.TaskID)
+		sessionKey := ""
+		sessionRoot := ""
+		if existing.AgentBackend == run.AgentBackend {
+			sessionKey = existing.SessionKey
+			sessionRoot = existing.SessionRoot
+		}
 		if _, err := s.store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
 			TaskID:           run.TaskID,
 			AgentBackend:     run.AgentBackend,
 			BackendSessionID: strings.TrimSpace(meta.AgentSessionID),
-			SessionKey:       existing.SessionKey,
-			SessionRoot:      existing.SessionRoot,
+			SessionKey:       sessionKey,
+			SessionRoot:      sessionRoot,
 			LastRunID:        run.ID,
 		}); err != nil {
 			log.Printf("run %s failed to persist resolved agent session id %q: %v", run.ID, meta.AgentSessionID, err)

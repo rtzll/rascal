@@ -864,6 +864,69 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 
 }
 
+func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	s.cfg.AgentSessionMode = agent.SessionModeAll
+	defer waitForServerIdle(t, s)
+
+	const taskID = "owner/repo#7"
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{
+		ID:           taskID,
+		Repo:         "owner/repo",
+		AgentBackend: agent.BackendGoose,
+		IssueNumber:  7,
+	}); err != nil {
+		t.Fatalf("upsert legacy task: %v", err)
+	}
+	if _, err := s.store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
+		TaskID:           taskID,
+		AgentBackend:     agent.BackendGoose,
+		BackendSessionID: "legacy-goose-session",
+		SessionKey:       "legacy",
+		SessionRoot:      filepath.Join(t.TempDir(), "legacy-session"),
+		LastRunID:        "run_legacy",
+	}); err != nil {
+		t.Fatalf("upsert legacy task session: %v", err)
+	}
+
+	payload := []byte(`{"action":"labeled","label":{"name":"rascal"},"issue":{"number":7,"title":"Title","body":"Body"},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "issues", "delivery-backend-migrate", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for migrated labeled issue event, got %d", rec.Code)
+	}
+
+	waitFor(t, time.Second, func() bool { return len(s.store.ListRuns(10)) == 1 }, "run queued")
+
+	run := s.store.ListRuns(10)[0]
+	if run.AgentBackend != agent.BackendCodex {
+		t.Fatalf("run backend = %s, want %s", run.AgentBackend, agent.BackendCodex)
+	}
+
+	task, ok := s.store.GetTask(taskID)
+	if !ok {
+		t.Fatalf("missing task %s", taskID)
+	}
+	if task.AgentBackend != agent.BackendCodex {
+		t.Fatalf("task backend = %s, want %s", task.AgentBackend, agent.BackendCodex)
+	}
+
+	var session state.TaskAgentSession
+	waitFor(t, time.Second, func() bool {
+		var ok bool
+		session, ok = s.store.GetTaskAgentSession(taskID)
+		return ok
+	}, "migrated task session")
+	if session.AgentBackend != agent.BackendCodex {
+		t.Fatalf("task session backend = %s, want %s", session.AgentBackend, agent.BackendCodex)
+	}
+	if session.BackendSessionID != "" {
+		t.Fatalf("task session id = %q, want empty after backend migration", session.BackendSessionID)
+	}
+}
+
 func TestHandleWebhookIssueUnlabeledRemovesPastReactions(t *testing.T) {
 	t.Parallel()
 	fakeGH := &fakeGitHubClient{}
