@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-test:
+    name: Verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect non-doc changes
+        if: github.event_name != 'workflow_dispatch'
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            non_docs:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+
+      - name: Skip docs-only change
+        if: github.event_name != 'workflow_dispatch' && steps.changes.outputs.non_docs != 'true'
+        run: echo "Docs-only change; skipping lint and tests."
+
+      - name: Setup Go
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.non_docs == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run linter
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.non_docs == 'true'
+        run: make lint
+
+      - name: Run tests
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.non_docs == 'true'
+        run: make test
+
+      - name: Verify generated files are committed
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.non_docs == 'true'
+        run: git diff --exit-code
