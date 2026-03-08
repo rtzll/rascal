@@ -911,7 +911,9 @@ rascal run --issue OWNER/REPO#123
 				if err != nil {
 					return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 				}
-				defer resp.Body.Close()
+				defer func() {
+					_ = resp.Body.Close()
+				}()
 				if resp.StatusCode >= 300 {
 					return decodeServerError(resp)
 				}
@@ -946,7 +948,9 @@ rascal run --issue OWNER/REPO#123
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
 			}
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
 			}
@@ -1005,9 +1009,11 @@ func (a *app) newPSCmd() *cobra.Command {
 			render := func(runs []state.Run) error {
 				return a.emit(map[string]any{"runs": runs}, func() error {
 					tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-					fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tPR\tCREATED (UTC)")
+					if _, err := fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tPR\tCREATED (UTC)"); err != nil {
+						return err
+					}
 					for _, run := range runs {
-						fmt.Fprintf(
+						if _, err := fmt.Fprintf(
 							tw,
 							"%s\t%s\t%s\t%s\t%s\n",
 							run.ID,
@@ -1015,7 +1021,9 @@ func (a *app) newPSCmd() *cobra.Command {
 							run.Repo,
 							psPRLabel(run),
 							psCreatedLabel(run.CreatedAt),
-						)
+						); err != nil {
+							return err
+						}
 					}
 					return tw.Flush()
 				})
@@ -1210,7 +1218,9 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 			return nil, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 		}
 		if resp.StatusCode >= 300 {
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 			return nil, decodeServerError(resp)
 		}
 		return resp, nil
@@ -1222,7 +1232,9 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 		if err != nil {
 			return "", err
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return "", err
@@ -1256,7 +1268,9 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 		if err != nil {
 			return followResponse{}, err
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 		var out followResponse
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return followResponse{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
@@ -1641,7 +1655,9 @@ rascal retry run_abc123 --debug=false
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 			}
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
 			}
@@ -1679,7 +1695,9 @@ rascal cancel run_abc123
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 			}
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
 			}
@@ -1715,8 +1733,12 @@ rascal task run_abc123
 			}
 			return a.emit(map[string]any{"task": task}, func() error {
 				tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-				fmt.Fprintln(tw, "TASK ID\tSTATUS\tREPO\tPR\tPENDING INPUT\tUPDATED")
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%t\t%s\n", task.ID, task.Status, task.Repo, task.PRNumber, task.PendingInput, task.UpdatedAt.Format(time.RFC3339))
+				if _, err := fmt.Fprintln(tw, "TASK ID\tSTATUS\tREPO\tPR\tPENDING INPUT\tUPDATED"); err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%t\t%s\n", task.ID, task.Status, task.Repo, task.PRNumber, task.PendingInput, task.UpdatedAt.Format(time.RFC3339)); err != nil {
+					return err
+				}
 				return tw.Flush()
 			})
 		},
@@ -2143,7 +2165,7 @@ func newCompletionCmd(root *cobra.Command) *cobra.Command {
 		Use:       "completion [bash|zsh|fish|powershell]",
 		Short:     "Generate shell completion scripts",
 		Long:      "Generate shell completion scripts for Bash, Zsh, Fish, or PowerShell.",
-		Args:      cobra.ExactValidArgs(1),
+		Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch args[0] {
@@ -2163,7 +2185,7 @@ func newCompletionCmd(root *cobra.Command) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:       "install [bash|zsh|fish|powershell]",
 		Short:     "Install completion script to a standard user path",
-		Args:      cobra.ExactValidArgs(1),
+		Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()
@@ -2241,7 +2263,9 @@ func (a *app) fetchRuns(limit int, all bool) ([]state.Run, error) {
 	if err != nil {
 		return nil, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode >= 300 {
 		return nil, decodeServerError(resp)
 	}
@@ -2259,7 +2283,9 @@ func (a *app) fetchRun(runID string) (state.Run, error) {
 	if err != nil {
 		return state.Run{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode >= 300 {
 		return state.Run{}, decodeServerError(resp)
 	}
@@ -2334,7 +2360,9 @@ func (a *app) fetchTask(taskID string) (state.Task, error) {
 	if err != nil {
 		return state.Task{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode >= 300 {
 		return state.Task{}, decodeServerError(resp)
 	}
@@ -2446,7 +2474,9 @@ func loadEnvFile(path string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	scanner := bufio.NewScanner(f)
 	lineNo := 0

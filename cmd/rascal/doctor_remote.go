@@ -110,26 +110,6 @@ func checkServerHealth(baseURL string) (bool, string) {
 	return false, "server health check failed"
 }
 
-func waitForServerHealth(baseURL string, timeout time.Duration) error {
-	if timeout <= 0 {
-		timeout = 60 * time.Second
-	}
-	deadline := time.Now().Add(timeout)
-	var lastErr string
-	for time.Now().Before(deadline) {
-		ok, errText := checkServerHealth(baseURL)
-		if ok {
-			return nil
-		}
-		lastErr = errText
-		time.Sleep(2 * time.Second)
-	}
-	if strings.TrimSpace(lastErr) == "" {
-		lastErr = "timed out waiting for server health check"
-	}
-	return fmt.Errorf("%s", lastErr)
-}
-
 func checkServerHealthSSH(cfg deployConfig) (bool, string) {
 	checkCmd := strings.Join([]string{
 		"set -u",

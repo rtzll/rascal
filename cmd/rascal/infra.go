@@ -658,7 +658,7 @@ func provisionHetznerServer(ctx context.Context, cfg hcloudProvisionConfig) (hcl
 	if location == nil {
 		return hcloudProvisionResult{}, fmt.Errorf("location not found: %s", cfg.Location)
 	}
-	image, _, err := client.Image.GetByName(ctx, cfg.Image)
+	image, _, err := client.Image.GetByNameAndArchitecture(ctx, cfg.Image, serverType.Architecture)
 	if err != nil {
 		return hcloudProvisionResult{}, fmt.Errorf("lookup image %q: %w", cfg.Image, err)
 	}

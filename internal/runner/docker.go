@@ -88,7 +88,9 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (Execution
 	if err != nil {
 		return ExecutionHandle{}, fmt.Errorf("open runner log: %w", err)
 	}
-	defer logFile.Close()
+	defer func() {
+		_ = logFile.Close()
+	}()
 
 	_, _ = fmt.Fprintf(logFile, "[%s] starting docker runner image=%s backend=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), image, backend, spec.RunID)
 

@@ -290,12 +290,3 @@ func loadAgentSessionTTLDays() int {
 	}
 	return envNonNegativeIntOrDefault("RASCAL_GOOSE_SESSION_TTL_DAYS", 14)
 }
-
-func firstNonEmptyEnv(keys ...string) string {
-	for _, key := range keys {
-		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-			return v
-		}
-	}
-	return ""
-}

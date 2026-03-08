@@ -727,7 +727,9 @@ func runGooseOnce(ex commandExecutor, cfg config, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open goose log: %w", err)
 	}
-	defer logFile.Close()
+	defer func() {
+		_ = logFile.Close()
+	}()
 
 	env := []string{}
 	if cfg.GooseDebug {
@@ -764,7 +766,9 @@ func runCodex(ex commandExecutor, cfg config) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("open codex log: %w", err)
 	}
-	defer logFile.Close()
+	defer func() {
+		_ = logFile.Close()
+	}()
 
 	if err := ex.RunWithInput(cfg.RepoDir, nil, strings.NewReader(string(instructions)), logFile, logFile, "codex", args...); err != nil {
 		sessionID, discoverErr := discoverLatestCodexSessionID(cfg.CodexHome)
@@ -907,7 +911,9 @@ func parseCodexSessionID(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open codex session file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	scanner := bufio.NewScanner(file)
 	if !scanner.Scan() {
@@ -933,23 +939,29 @@ func samePath(left, right string) bool {
 	return filepath.Clean(strings.TrimSpace(left)) == filepath.Clean(strings.TrimSpace(right))
 }
 
-func copyFile(src, dst string, mode os.FileMode) error {
+func copyFile(src, dst string, mode os.FileMode) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() {
+		_ = in.Close()
+	}()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() {
+		if closeErr := out.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
-	if _, err := io.Copy(out, in); err != nil {
+	if _, err = io.Copy(out, in); err != nil {
 		return err
 	}
-	return out.Close()
+	return nil
 }
 
 func gooseSessionExists(ex commandExecutor, cfg config, name string) (bool, error) {

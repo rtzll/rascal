@@ -95,7 +95,9 @@ func Execute(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
 
 	binaryPath := filepath.Join(tmpDir, "rascald")
 	if err := buildLinuxRascald(binaryPath, cfg.GOARCH); err != nil {

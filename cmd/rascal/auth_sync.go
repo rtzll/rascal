@@ -64,7 +64,9 @@ func syncRemoteAuth(cfg syncRemoteAuthConfig) error {
 		if err != nil {
 			return fmt.Errorf("create temp auth file: %w", err)
 		}
-		defer os.Remove(tmpFile.Name())
+		defer func() {
+			_ = os.Remove(tmpFile.Name())
+		}()
 
 		content := fmt.Sprintf(
 			"RASCAL_API_TOKEN=%s\nRASCAL_GITHUB_TOKEN=%s\nRASCAL_GITHUB_WEBHOOK_SECRET=%s\n",

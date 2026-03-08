@@ -1142,7 +1142,9 @@ func (s *server) writeRunFiles(run state.Run) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 	_, err = f.WriteString(logLine)
 	return err
 }
@@ -1943,10 +1945,10 @@ Task ID: %s
 Repository: %s
 `, run.ID, run.TaskID, run.Repo)
 	if run.IssueNumber > 0 {
-		b.WriteString(fmt.Sprintf("Issue: #%d\n", run.IssueNumber))
+		_, _ = fmt.Fprintf(&b, "Issue: #%d\n", run.IssueNumber)
 	}
 	if run.PRNumber > 0 {
-		b.WriteString(fmt.Sprintf("Pull Request: #%d\n", run.PRNumber))
+		_, _ = fmt.Fprintf(&b, "Pull Request: #%d\n", run.PRNumber)
 	}
 	b.WriteString(`
 ## Task
@@ -2499,21 +2501,27 @@ func (s *server) addPullRequestReviewCommentReactionBestEffort(repo string, comm
 	}
 }
 
-func copyFile(src, dst string, mode os.FileMode) error {
+func copyFile(src, dst string, mode os.FileMode) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() {
+		_ = in.Close()
+	}()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() {
+		if closeErr := out.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
-	if _, err := io.Copy(out, in); err != nil {
+	if _, err = io.Copy(out, in); err != nil {
 		return err
 	}
-	return out.Close()
+	return nil
 }

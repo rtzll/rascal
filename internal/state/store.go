@@ -306,7 +306,9 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 	qtx := s.q.WithTx(tx)
 
 	if taskRow, err := qtx.GetTask(context.Background(), in.TaskID); err == nil {
@@ -427,7 +429,9 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 	qtx := s.q.WithTx(tx)
 
 	row, err := qtx.GetRun(context.Background(), strings.TrimSpace(id))

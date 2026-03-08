@@ -110,25 +110,6 @@ func (a *app) runRepoEnable(input repoEnableInput) (repoEnableResult, error) {
 	return repoEnableResult{Repo: repo, WebhookURL: webhookURL}, nil
 }
 
-func (a *app) newRepoCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "repo",
-		Short: "Repository webhook/label operations",
-		Long:  "Configure and inspect GitHub repository integrations used by Rascal. Prefer `rascal github ...`; `repo` is kept as a compatibility alias.",
-		Example: strings.TrimSpace(`
-rascal github status OWNER/REPO
-rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$WEBHOOK_SECRET"
-`),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
-		},
-	}
-	cmd.AddCommand(a.newRepoEnableCmd())
-	cmd.AddCommand(a.newRepoDisableCmd())
-	cmd.AddCommand(a.newRepoStatusCmd())
-	return cmd
-}
-
 func (a *app) newRepoEnableCmd() *cobra.Command {
 	var (
 		githubToken            string
