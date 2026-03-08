@@ -876,6 +876,7 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 	t.Setenv("RASCAL_REPO", "owner/repo")
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_TASK", "Address feedback")
+	t.Setenv("RASCAL_AGENT_BACKEND", "goose")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
@@ -924,52 +925,175 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 	}
 }
 
-func TestRunWithExecutorFailsWhenRequiredCommandMissing(t *testing.T) {
+func TestRunWithExecutorUsesCodexBackend(t *testing.T) {
 	metaDir := filepath.Join(t.TempDir(), "meta")
 	workRoot := filepath.Join(t.TempDir(), "work")
-	if err := os.MkdirAll(metaDir, 0o755); err != nil {
-		t.Fatalf("mkdir meta dir: %v", err)
+	repoDir := filepath.Join(workRoot, "repo")
+	codexSessionPath := filepath.Join(metaDir, "codex-home", "sessions", "2026", "03", "session.jsonl")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir repo git dir: %v", err)
 	}
-	if err := os.MkdirAll(workRoot, 0o755); err != nil {
-		t.Fatalf("mkdir work dir: %v", err)
+	if err := os.MkdirAll(filepath.Join(metaDir, "codex"), 0o755); err != nil {
+		t.Fatalf("mkdir codex auth dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(codexSessionPath), 0o755); err != nil {
+		t.Fatalf("mkdir codex session dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(metaDir, "codex", "auth.json"), []byte(`{"token":"test"}`), 0o600); err != nil {
+		t.Fatalf("write codex auth: %v", err)
 	}
 
-	t.Setenv("RASCAL_RUN_ID", "run_missing_cmd")
-	t.Setenv("RASCAL_TASK_ID", "task_missing_cmd")
+	t.Setenv("RASCAL_RUN_ID", "run_codex_executor")
+	t.Setenv("RASCAL_TASK_ID", "task_codex_executor")
 	t.Setenv("RASCAL_REPO", "owner/repo")
 	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_TASK", "Address Codex feedback")
+	t.Setenv("RASCAL_AGENT_BACKEND", "codex")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
+	t.Setenv("RASCAL_REPO_DIR", repoDir)
+	t.Setenv("CODEX_HOME", filepath.Join(metaDir, "codex-home"))
 
+	var ranCodex bool
 	ex := fakeExecutor{
-		lookPathFn: func(name string) error {
-			if name == "goose" {
-				return errors.New("missing")
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			switch {
+			case name == "gh" && len(args) >= 2 && args[0] == "api" && args[1] == "user":
+				return `{"login":"rascalbot"}`, nil
+			case name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "view":
+				return `{"number":88,"url":"https://github.com/owner/repo/pull/88"}`, nil
+			case name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain":
+				return " M changed.txt\n", nil
+			case name == "git" && len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
+				return "0123456789abcdef0123456789abcdef01234567", nil
+			default:
+				return "", nil
+			}
+		},
+		runWithInputFn: func(_ string, _ []string, stdin io.Reader, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "codex" {
+				t.Fatalf("unexpected command: %s", name)
+			}
+			ranCodex = true
+			input, err := io.ReadAll(stdin)
+			if err != nil {
+				t.Fatalf("read codex stdin: %v", err)
+			}
+			if !strings.Contains(string(input), "Rascal Instructions") {
+				t.Fatalf("expected instructions on stdin, got %q", string(input))
+			}
+			if err := os.WriteFile(filepath.Join(metaDir, "agent_output.txt"), []byte("final codex response"), 0o644); err != nil {
+				t.Fatalf("write codex output: %v", err)
+			}
+			if err := os.WriteFile(codexSessionPath, []byte(`{"type":"session_meta","payload":{"id":"session-codex"}}`+"\n"), 0o644); err != nil {
+				t.Fatalf("write codex session: %v", err)
+			}
+			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
+				return fmt.Errorf("write fake codex log: %w", err)
 			}
 			return nil
 		},
 	}
-	err := runWithExecutor(ex)
-	if err == nil || !strings.Contains(err.Error(), "stage validate_commands: required command missing: goose") {
-		t.Fatalf("expected missing goose error, got: %v", err)
+
+	if err := runWithExecutor(ex); err != nil {
+		t.Fatalf("runWithExecutor returned error: %v", err)
+	}
+	if !ranCodex {
+		t.Fatal("expected codex command to run")
 	}
 
-	metaData, readErr := os.ReadFile(filepath.Join(metaDir, "meta.json"))
-	if readErr != nil {
-		t.Fatalf("read meta.json: %v", readErr)
+	metaData, err := os.ReadFile(filepath.Join(metaDir, "meta.json"))
+	if err != nil {
+		t.Fatalf("read meta.json: %v", err)
 	}
 	var meta struct {
-		ExitCode int    `json:"exit_code"`
-		Error    string `json:"error"`
+		ExitCode       int    `json:"exit_code"`
+		PRNumber       int    `json:"pr_number"`
+		PRURL          string `json:"pr_url"`
+		HeadSHA        string `json:"head_sha"`
+		AgentSessionID string `json:"agent_session_id"`
 	}
 	if err := json.Unmarshal(metaData, &meta); err != nil {
-		t.Fatalf("decode meta: %v", err)
+		t.Fatalf("decode meta.json: %v", err)
 	}
-	if meta.ExitCode == 0 {
-		t.Fatalf("expected non-zero exit code in meta, got %d", meta.ExitCode)
+	if meta.ExitCode != 0 {
+		t.Fatalf("expected exit_code=0, got %d", meta.ExitCode)
 	}
-	if !strings.Contains(meta.Error, "stage validate_commands: required command missing: goose") {
-		t.Fatalf("expected missing command in meta error, got %q", meta.Error)
+	if meta.PRNumber != 88 {
+		t.Fatalf("expected pr_number=88, got %d", meta.PRNumber)
+	}
+	if meta.PRURL != "https://github.com/owner/repo/pull/88" {
+		t.Fatalf("unexpected pr_url: %q", meta.PRURL)
+	}
+	if meta.HeadSHA != "0123456789abcdef0123456789abcdef01234567" {
+		t.Fatalf("unexpected head_sha: %q", meta.HeadSHA)
+	}
+	if meta.AgentSessionID != "session-codex" {
+		t.Fatalf("unexpected agent session id: %q", meta.AgentSessionID)
+	}
+}
+
+func TestRunWithExecutorFailsWhenRequiredCommandMissing(t *testing.T) {
+	tests := []struct {
+		name           string
+		backend        string
+		missingCommand string
+	}{
+		{name: "goose", backend: "goose", missingCommand: "goose"},
+		{name: "codex", backend: "codex", missingCommand: "codex"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			metaDir := filepath.Join(t.TempDir(), "meta")
+			workRoot := filepath.Join(t.TempDir(), "work")
+			if err := os.MkdirAll(metaDir, 0o755); err != nil {
+				t.Fatalf("mkdir meta dir: %v", err)
+			}
+			if err := os.MkdirAll(workRoot, 0o755); err != nil {
+				t.Fatalf("mkdir work dir: %v", err)
+			}
+
+			t.Setenv("RASCAL_RUN_ID", "run_missing_cmd_"+tc.name)
+			t.Setenv("RASCAL_TASK_ID", "task_missing_cmd_"+tc.name)
+			t.Setenv("RASCAL_REPO", "owner/repo")
+			t.Setenv("GH_TOKEN", "token")
+			t.Setenv("RASCAL_AGENT_BACKEND", tc.backend)
+			t.Setenv("RASCAL_META_DIR", metaDir)
+			t.Setenv("RASCAL_WORK_ROOT", workRoot)
+
+			ex := fakeExecutor{
+				lookPathFn: func(name string) error {
+					if name == tc.missingCommand {
+						return errors.New("missing")
+					}
+					return nil
+				},
+			}
+			err := runWithExecutor(ex)
+			expected := "stage validate_commands: required command missing: " + tc.missingCommand
+			if err == nil || !strings.Contains(err.Error(), expected) {
+				t.Fatalf("expected %q, got: %v", expected, err)
+			}
+
+			metaData, readErr := os.ReadFile(filepath.Join(metaDir, "meta.json"))
+			if readErr != nil {
+				t.Fatalf("read meta.json: %v", readErr)
+			}
+			var meta struct {
+				ExitCode int    `json:"exit_code"`
+				Error    string `json:"error"`
+			}
+			if err := json.Unmarshal(metaData, &meta); err != nil {
+				t.Fatalf("decode meta: %v", err)
+			}
+			if meta.ExitCode == 0 {
+				t.Fatalf("expected non-zero exit code in meta, got %d", meta.ExitCode)
+			}
+			if !strings.Contains(meta.Error, expected) {
+				t.Fatalf("expected missing command in meta error, got %q", meta.Error)
+			}
+		})
 	}
 }
 
@@ -989,6 +1113,7 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 	t.Setenv("RASCAL_REPO", "owner/repo")
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_TASK", "Address PR feedback")
+	t.Setenv("RASCAL_AGENT_BACKEND", "goose")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
