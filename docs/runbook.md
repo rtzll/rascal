@@ -41,8 +41,8 @@ set -a; source ./.rascal.env; set +a
   --repo "$REPO" \
   --server-url "https://${DOMAIN}" \
   --skip-deploy \
-  --api-token "$API_TOKEN" \
-  --webhook-secret "$WEBHOOK_SECRET" \
+  --api-token "$RASCAL_API_TOKEN" \
+  --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET" \
   --github-admin-token "$GITHUB_ADMIN_TOKEN"
 ```
 
@@ -62,7 +62,7 @@ set -a; source ./.rascal.env; set +a
   --host "$HOST" \
   --domain "$DOMAIN" \
   --codex-auth ~/.codex/auth.json \
-  --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
+  --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 ```
 
 Inspect remote services:

@@ -32,6 +32,14 @@ You can override with:
 - `--env-file <path>`
 - `RASCAL_ENV_FILE=<path>`
 
+## Canonical Auth Env Keys
+
+Rascal-owned auth configuration uses these canonical environment variables:
+
+- `RASCAL_API_TOKEN`
+- `RASCAL_GITHUB_TOKEN`
+- `RASCAL_GITHUB_WEBHOOK_SECRET`
+
 ## Common Keys
 
 - `server_url`

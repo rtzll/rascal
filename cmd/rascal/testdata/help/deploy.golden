@@ -5,7 +5,7 @@ Usage:
 
 Examples:
 rascal deploy --host 203.0.113.10
-rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$GITHUB_RUNTIME_TOKEN" --upload-auth --codex-auth ~/.codex/auth.json
+rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN" --upload-auth --codex-auth ~/.codex/auth.json
 
 Flags:
       --agent-backend string          agent backend to use on the server (goose or codex) (default "goose")

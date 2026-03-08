@@ -12,7 +12,7 @@ func (a *app) newGitHubCmd() *cobra.Command {
 		Short: "GitHub integration setup and status",
 		Long:  "Configure and inspect GitHub repository integrations used by Rascal.",
 		Example: strings.TrimSpace(`
-rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$WEBHOOK_SECRET"
+rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET"
 rascal github status OWNER/REPO --github-token "$GITHUB_TOKEN"
 `),
 		RunE: func(cmd *cobra.Command, _ []string) error {

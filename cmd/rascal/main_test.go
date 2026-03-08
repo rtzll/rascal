@@ -271,10 +271,8 @@ func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
 		"RASCAL_API_TOKEN",
 		"GITHUB_ADMIN_TOKEN",
 		"GITHUB_TOKEN",
-		"GITHUB_RUNTIME_TOKEN",
-		"RASCAL_GITHUB_RUNTIME_TOKEN",
+		"RASCAL_GITHUB_TOKEN",
 		"RASCAL_GITHUB_WEBHOOK_SECRET",
-		"GITHUB_WEBHOOK_SECRET",
 		"HCLOUD_TOKEN",
 	} {
 		t.Setenv(k, "")
@@ -379,6 +377,93 @@ func TestBootstrapPrintPlanReadyForProvisionFlow(t *testing.T) {
 	}
 }
 
+func TestBootstrapPrintPlanUsesCanonicalRuntimeTokenEnv(t *testing.T) {
+	tmp := t.TempDir()
+	authPath := filepath.Join(tmp, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://127.0.0.1:8080",
+		},
+		output:     "json",
+		configPath: filepath.Join(tmp, "config.toml"),
+	}
+	t.Setenv("GITHUB_ADMIN_TOKEN", "admin-token")
+	t.Setenv("RASCAL_GITHUB_TOKEN", "runtime-token")
+
+	cmd := a.newBootstrapCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--print-plan",
+		"--host", "203.0.113.10",
+		"--repo", "owner/repo",
+		"--codex-auth", authPath,
+	})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("bootstrap --print-plan failed: %v", err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
+	}
+	if ready, ok := out["ready"].(bool); !ok || !ready {
+		t.Fatalf("expected ready=true, got %v", out["ready"])
+	}
+	missing := anySliceToStrings(out["missing"])
+	if len(missing) != 0 {
+		t.Fatalf("expected no missing prerequisites, got %v", missing)
+	}
+}
+
+func TestBootstrapPrintPlanIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
+	tmp := t.TempDir()
+	authPath := filepath.Join(tmp, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://127.0.0.1:8080",
+		},
+		output:     "json",
+		configPath: filepath.Join(tmp, "config.toml"),
+	}
+	t.Setenv("GITHUB_ADMIN_TOKEN", "admin-token")
+	t.Setenv("RASCAL_GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_RUNTIME_TOKEN", "legacy-runtime-token")
+
+	cmd := a.newBootstrapCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--print-plan",
+		"--host", "203.0.113.10",
+		"--repo", "owner/repo",
+		"--codex-auth", authPath,
+	})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("bootstrap --print-plan failed: %v", err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
+	}
+	if ready, ok := out["ready"].(bool); !ok || ready {
+		t.Fatalf("expected ready=false, got %v", out["ready"])
+	}
+	missing := anySliceToStrings(out["missing"])
+	if !containsSubstring(missing, "GitHub runtime token is required") {
+		t.Fatalf("missing list should include runtime token requirement, got %v", missing)
+	}
+}
+
 func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
 	a := &app{
 		cfg: config.ClientConfig{
@@ -389,8 +474,7 @@ func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
 	for _, k := range []string{
 		"GITHUB_ADMIN_TOKEN",
 		"GITHUB_TOKEN",
-		"GITHUB_RUNTIME_TOKEN",
-		"RASCAL_GITHUB_RUNTIME_TOKEN",
+		"RASCAL_GITHUB_TOKEN",
 	} {
 		t.Setenv(k, "")
 	}
@@ -1436,7 +1520,7 @@ func TestLoadEnvFile(t *testing.T) {
 # comment
 HCLOUD_TOKEN=test_hcloud_token
 export GITHUB_ADMIN_TOKEN=test_github_admin_token
-GITHUB_RUNTIME_TOKEN="test_github_runtime_token"
+	RASCAL_GITHUB_TOKEN="test_github_runtime_token"
 EMPTY=
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -1452,8 +1536,8 @@ EMPTY=
 	if got["GITHUB_ADMIN_TOKEN"] != "test_github_admin_token" {
 		t.Fatalf("unexpected GITHUB_ADMIN_TOKEN: %q", got["GITHUB_ADMIN_TOKEN"])
 	}
-	if got["GITHUB_RUNTIME_TOKEN"] != "test_github_runtime_token" {
-		t.Fatalf("unexpected GITHUB_RUNTIME_TOKEN: %q", got["GITHUB_RUNTIME_TOKEN"])
+	if got["RASCAL_GITHUB_TOKEN"] != "test_github_runtime_token" {
+		t.Fatalf("unexpected RASCAL_GITHUB_TOKEN: %q", got["RASCAL_GITHUB_TOKEN"])
 	}
 }
 

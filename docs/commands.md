@@ -48,9 +48,9 @@ Issue-driven task:
 
 ```bash
 ./bin/rascal github status OWNER/REPO
-./bin/rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$WEBHOOK_SECRET"
+./bin/rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET"
 ./bin/rascal github disable OWNER/REPO --github-token "$GITHUB_TOKEN"
-./bin/rascal github webhook test --repo OWNER/REPO --webhook-secret "$WEBHOOK_SECRET" --dry-run
+./bin/rascal github webhook test --repo OWNER/REPO --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET" --dry-run
 ```
 
 ## Infra Helpers

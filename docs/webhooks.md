@@ -39,7 +39,7 @@ Synthetic webhook test from CLI:
 ```bash
 ./bin/rascal github webhook test \
   --repo OWNER/REPO \
-  --webhook-secret "$WEBHOOK_SECRET" \
+  --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET" \
   --dry-run
 ```
 
