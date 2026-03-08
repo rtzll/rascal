@@ -34,6 +34,7 @@ jobs:
 
       - name: Run pre-deploy quality gate
         run: |
+          make lint
           make codegen
           git diff --exit-code
           go test ./...

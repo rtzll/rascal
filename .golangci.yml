@@ -1,0 +1,10 @@
+version: "2"
+
+run:
+  relative-path-mode: gomod
+
+issues:
+  generated: lax
+
+linters:
+  default: standard

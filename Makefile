@@ -1,6 +1,10 @@
 .DEFAULT_GOAL := build
 
-.PHONY: test test-fast build build-cli build-daemon run-daemon run-cli fmt codegen
+GOLANGCI_LINT_VERSION ?= v2.11.2
+GOLANGCI_LINT := $(CURDIR)/bin/golangci-lint
+GOLANGCI_LINT_CACHE := $(CURDIR)/tmp/golangci-lint-cache
+
+.PHONY: test test-fast build build-cli build-daemon run-daemon run-cli fmt lint codegen
 
 test: codegen
 	go test ./...
@@ -11,10 +15,18 @@ test-fast:
 fmt:
 	gofmt -w cmd internal
 
+lint: codegen $(GOLANGCI_LINT)
+	mkdir -p "$(GOLANGCI_LINT_CACHE)"
+	GOLANGCI_LINT_CACHE="$(GOLANGCI_LINT_CACHE)" $(GOLANGCI_LINT) run
+
 build: build-cli build-daemon
 
 codegen:
 	CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
+
+$(GOLANGCI_LINT):
+	mkdir -p "$(dir $(GOLANGCI_LINT))"
+	curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b "$(dir $(GOLANGCI_LINT))" "$(GOLANGCI_LINT_VERSION)"
 
 build-cli: codegen
 	go build -o bin/rascal ./cmd/rascal
