@@ -4,6 +4,11 @@ This doc describes how Rascal deploys `rascald` to a single host using
 blue/green slots, what is running where, and what happens during cutover and
 drain.
 
+Detached runner containers now preserve in-flight runs across deploys and
+process restarts. Blue/green remains in place for readiness-checked cutover,
+webhook/API continuity, and rollback safety rather than for keeping active runs
+alive.
+
 ## What Gets Deployed
 
 Rascal deploy uploads/builds these artifacts on the server:
@@ -14,7 +19,8 @@ Rascal deploy uploads/builds these artifacts on the server:
 - `/etc/rascal/rascal.env` (shared runtime env)
 - `/etc/rascal/rascal-blue.env` and `/etc/rascal/rascal-green.env` (slot env)
 - `/etc/caddy/Caddyfile` + `/etc/caddy/rascal-upstream.caddy` (proxy target)
-- Docker images `rascal-runner-goose:latest` and `rascal-runner-codex:latest`
+- Docker images for the configured runner tags (defaults:
+  `rascal-runner-goose:latest` and `rascal-runner-codex:latest`)
 
 It also writes:
 
@@ -44,7 +50,7 @@ Given active slot `A` and inactive slot `B`, deploy does:
 
 1. Build `rascald` for Linux and upload artifacts.
 2. Build `rascal-runner` for Linux and upload artifacts.
-3. Ensure base packages (`docker`, `caddy`, `curl`, `sqlite3`) exist.
+3. Ensure base packages (`docker`, `caddy`, `curl`, `sqlite3`, `ripgrep`) exist.
 4. Install uploaded `rascal-runner` into `/opt/rascal/runner/rascal-runner`.
 5. Build/update runner images on host.
 6. Install/update systemd unit and env files.
@@ -57,6 +63,14 @@ Given active slot `A` and inactive slot `B`, deploy does:
 13. Disable old slot unit; keep new slot unit enabled/active.
 
 Important: deploy success is no longer coupled to waiting for old-slot run completion.
+
+Detached execution means blue/green is no longer required to preserve active
+task execution during deploy. Its remaining value is:
+
+- readiness-checked cutover before traffic moves
+- rollback if proxy activation fails
+- overlap safety while both slots are briefly alive
+- avoiding API/webhook downtime during `rascald` replacement
 
 ## Drain Behavior
 
