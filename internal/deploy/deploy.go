@@ -660,10 +660,6 @@ func serverEnvFile(cfg Config) string {
 		gooseImage = firstNonEmpty(strings.TrimSpace(cfg.RunnerImage), defaults.GooseRunnerImageTag)
 	}
 	codexImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageCodex), defaults.CodexRunnerImageTag)
-	selectedImage := gooseImage
-	if backend == agent.BackendCodex {
-		selectedImage = codexImage
-	}
 
 	return fmt.Sprintf(strings.TrimSpace(`
 RASCAL_LISTEN_ADDR=%s
@@ -674,7 +670,6 @@ RASCAL_GITHUB_TOKEN=%s
 RASCAL_GITHUB_WEBHOOK_SECRET=%s
 RASCAL_RUNNER_MODE=%s
 RASCAL_AGENT_BACKEND=%s
-RASCAL_RUNNER_IMAGE=%s
 RASCAL_RUNNER_IMAGE_GOOSE=%s
 RASCAL_RUNNER_IMAGE_CODEX=%s
 RASCAL_RUNNER_MAX_ATTEMPTS=1
@@ -691,7 +686,6 @@ RASCAL_CODEX_AUTH_PATH=%s
 		cfg.WebhookSecret,
 		cfg.RunnerMode,
 		backend,
-		selectedImage,
 		gooseImage,
 		codexImage,
 		filepath.Join(cfg.ServerDataDir, defaults.AgentSessionDirName),

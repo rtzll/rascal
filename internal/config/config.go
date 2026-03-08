@@ -74,7 +74,7 @@ func LoadServerConfig() ServerConfig {
 		BotLogin:                strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
 		RunnerMode:              envOrDefault("RASCAL_RUNNER_MODE", "noop"),
 		AgentBackend:            loadAgentBackend(),
-		RunnerImageGoose:        envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", envOrDefault("RASCAL_RUNNER_IMAGE", defaults.GooseRunnerImageTag)),
+		RunnerImageGoose:        envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", defaults.GooseRunnerImageTag),
 		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
 		RunnerMaxAttempts:       envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
 		CodexAuthPath:           envOrDefault("RASCAL_CODEX_AUTH_PATH", "/etc/rascal/codex_auth.json"),
@@ -95,6 +95,9 @@ func LoadServerConfig() ServerConfig {
 }
 
 func (c ServerConfig) Ensure() error {
+	if legacyImage := strings.TrimSpace(os.Getenv("RASCAL_RUNNER_IMAGE")); legacyImage != "" && strings.TrimSpace(os.Getenv("RASCAL_RUNNER_IMAGE_GOOSE")) == "" {
+		return fmt.Errorf("RASCAL_RUNNER_IMAGE is no longer accepted without explicit RASCAL_RUNNER_IMAGE_GOOSE")
+	}
 	if c.DataDir == "" {
 		return fmt.Errorf("data directory cannot be empty")
 	}

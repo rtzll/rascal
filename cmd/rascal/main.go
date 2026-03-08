@@ -1556,16 +1556,21 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					}
 				} else {
 					remote = map[string]any{
-						"host":                 remoteStatus.Host,
-						"rascal_service":       remoteStatus.RascalService,
-						"active_slot":          remoteStatus.ActiveSlot,
-						"docker_installed":     remoteStatus.DockerInstalled,
-						"sqlite_installed":     remoteStatus.SQLiteInstalled,
-						"caddy_installed":      remoteStatus.CaddyInstalled,
-						"env_file_present":     remoteStatus.EnvFilePresent,
-						"auth_runtime_synced":  remoteStatus.AuthRuntimeSynced,
-						"codex_auth_present":   remoteStatus.CodexAuthPresent,
-						"runner_image_present": remoteStatus.RunnerImagePresent,
+						"host":                    remoteStatus.Host,
+						"rascal_service":          remoteStatus.RascalService,
+						"active_slot":             remoteStatus.ActiveSlot,
+						"docker_installed":        remoteStatus.DockerInstalled,
+						"sqlite_installed":        remoteStatus.SQLiteInstalled,
+						"caddy_installed":         remoteStatus.CaddyInstalled,
+						"env_file_present":        remoteStatus.EnvFilePresent,
+						"auth_runtime_synced":     remoteStatus.AuthRuntimeSynced,
+						"codex_auth_present":      remoteStatus.CodexAuthPresent,
+						"runner_image_configured": remoteStatus.RunnerImageConfigured,
+						"runner_image_present":    remoteStatus.RunnerImagePresent,
+						"runner_image_goose":      remoteStatus.RunnerImageGoose,
+						"runner_image_codex":      remoteStatus.RunnerImageCodex,
+						"runner_image_goose_id":   remoteStatus.RunnerImageGooseID,
+						"runner_image_codex_id":   remoteStatus.RunnerImageCodexID,
 					}
 				}
 			}
@@ -1639,8 +1644,20 @@ func (a *app) newDoctorCmd() *cobra.Command {
 						if activeSlot == "" || activeSlot == "<nil>" {
 							activeSlot = "unknown"
 						}
-						a.println("remote (%s): rascal=%v slot=%v docker=%v sqlite=%v caddy=%v env=%v auth_synced=%v codex_auth=%v runner_image=%v",
-							remote["host"], remote["rascal_service"], activeSlot, remote["docker_installed"], remote["sqlite_installed"], remote["caddy_installed"], remote["env_file_present"], remote["auth_runtime_synced"], remote["codex_auth_present"], remote["runner_image_present"])
+						a.println("remote (%s): rascal=%v slot=%v docker=%v sqlite=%v caddy=%v env=%v auth_synced=%v codex_auth=%v runner_image_configured=%v runner_image=%v",
+							remote["host"], remote["rascal_service"], activeSlot, remote["docker_installed"], remote["sqlite_installed"], remote["caddy_installed"], remote["env_file_present"], remote["auth_runtime_synced"], remote["codex_auth_present"], remote["runner_image_configured"], remote["runner_image_present"])
+						if gooseImage := strings.TrimSpace(fmt.Sprintf("%v", remote["runner_image_goose"])); gooseImage != "" && gooseImage != "<nil>" {
+							a.println("remote goose runner image: %s", gooseImage)
+						}
+						if gooseImageID := strings.TrimSpace(fmt.Sprintf("%v", remote["runner_image_goose_id"])); gooseImageID != "" && gooseImageID != "<nil>" {
+							a.println("remote goose runner image id: %s", gooseImageID)
+						}
+						if codexImage := strings.TrimSpace(fmt.Sprintf("%v", remote["runner_image_codex"])); codexImage != "" && codexImage != "<nil>" {
+							a.println("remote codex runner image: %s", codexImage)
+						}
+						if codexImageID := strings.TrimSpace(fmt.Sprintf("%v", remote["runner_image_codex_id"])); codexImageID != "" && codexImageID != "<nil>" {
+							a.println("remote codex runner image id: %s", codexImageID)
+						}
 					}
 				}
 				if !cfgExists {
@@ -1657,6 +1674,11 @@ func (a *app) newDoctorCmd() *cobra.Command {
 						targetUser := firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root")
 						targetHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
 						a.println("hint: remote rascal.env changed after service start; restart active slot: `ssh %s@%s 'slot=$(cat /etc/rascal/active_slot 2>/dev/null || echo blue); systemctl restart rascal@$slot'`", targetUser, targetHost)
+					}
+					if configured, ok := remote["runner_image_configured"].(bool); ok && !configured {
+						targetUser := firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root")
+						targetHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
+						a.println("hint: remote rascal.env must set explicit runner images: `ssh %s@%s 'printf \"RASCAL_RUNNER_IMAGE_GOOSE=rascal-runner-goose:latest\\nRASCAL_RUNNER_IMAGE_CODEX=rascal-runner-codex:latest\\n\" >> /etc/rascal/rascal.env'`", targetUser, targetHost)
 					}
 				}
 				return nil

@@ -283,6 +283,13 @@ func TestServerEnvFileEnablesAgentSessionsByDefault(t *testing.T) {
 	}
 }
 
+func TestServerEnvFileOmitsLegacyRunnerImageEnv(t *testing.T) {
+	content := serverEnvFile(testDeployConfig())
+	if strings.Contains(content, "RASCAL_RUNNER_IMAGE=") {
+		t.Fatalf("expected server env file to omit legacy runner image, got:\n%s", content)
+	}
+}
+
 func testDeployConfig() Config {
 	return Config{
 		Host:               "example-host",

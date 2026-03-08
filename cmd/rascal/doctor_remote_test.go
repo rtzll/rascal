@@ -28,6 +28,21 @@ func TestRunRemoteDoctorUsesSlotUnitsOnly(t *testing.T) {
 	if !status.AuthRuntimeSynced {
 		t.Fatal("expected auth runtime sync check to pass")
 	}
+	if !status.RunnerImageConfigured {
+		t.Fatal("expected explicit runner image config check to pass")
+	}
+	if status.RunnerImageGoose != "rascal-runner-goose:latest" {
+		t.Fatalf("runner image goose = %q, want rascal-runner-goose:latest", status.RunnerImageGoose)
+	}
+	if status.RunnerImageCodex != "rascal-runner-codex:latest" {
+		t.Fatalf("runner image codex = %q, want rascal-runner-codex:latest", status.RunnerImageCodex)
+	}
+	if status.RunnerImageGooseID != "sha256:goose123" {
+		t.Fatalf("runner image goose id = %q, want sha256:goose123", status.RunnerImageGooseID)
+	}
+	if status.RunnerImageCodexID != "sha256:codex456" {
+		t.Fatalf("runner image codex id = %q, want sha256:codex456", status.RunnerImageCodexID)
+	}
 
 	sshLog, err := os.ReadFile(filepath.Join(logDir, "ssh_calls.log"))
 	if err != nil {
@@ -82,6 +97,14 @@ printf '%s\n' "$*" >> "$log_dir/ssh_calls.log"
 cmd="${@: -1}"
 if [[ "$cmd" == *"case \"\$slot\" in blue|green) echo \"\$slot\" ;;"* ]]; then
   printf 'blue'
+  exit 0
+fi
+if [[ "$cmd" == *"printf 'goose=%s\\ncodex=%s\\n'"* ]]; then
+  printf 'goose=rascal-runner-goose:latest\ncodex=rascal-runner-codex:latest\n'
+  exit 0
+fi
+if [[ "$cmd" == *"printf 'goose_id=%s\\n'"* ]]; then
+  printf 'goose_id=sha256:goose123\ncodex_id=sha256:codex456\n'
   exit 0
 fi
 if [[ "$cmd" == *"echo ok"* ]]; then
