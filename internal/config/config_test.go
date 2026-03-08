@@ -151,3 +151,19 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 		t.Fatalf("GooseSessionTTLDays = %d, want 0", cfg.GooseSessionTTLDays)
 	}
 }
+
+func TestLoadServerConfigCredentialEncryptionKeyFallback(t *testing.T) {
+	t.Setenv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "")
+	t.Setenv("RASCAL_API_TOKEN", "api-token-fallback")
+
+	cfg := LoadServerConfig()
+	if cfg.CredentialEncryptionKey != "api-token-fallback" {
+		t.Fatalf("CredentialEncryptionKey = %q, want api-token-fallback", cfg.CredentialEncryptionKey)
+	}
+
+	t.Setenv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "explicit-key")
+	cfg = LoadServerConfig()
+	if cfg.CredentialEncryptionKey != "explicit-key" {
+		t.Fatalf("CredentialEncryptionKey = %q, want explicit-key", cfg.CredentialEncryptionKey)
+	}
+}

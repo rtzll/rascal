@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/config"
+	"github.com/rtzll/rascal/internal/credentials"
+	credentialstrategies "github.com/rtzll/rascal/internal/credentials/strategies"
 	"github.com/rtzll/rascal/internal/defaults"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/logs"
@@ -64,6 +67,8 @@ type server struct {
 	store    *state.Store
 	launcher runner.Launcher
 	gh       githubClient
+	broker   credentials.CredentialBroker
+	cipher   credentials.Cipher
 
 	mu            sync.Mutex
 	runCancels    map[string]context.CancelFunc
@@ -74,17 +79,18 @@ type server struct {
 }
 
 type runRequest struct {
-	TaskID      string
-	Repo        string
-	Task        string
-	BaseBranch  string
-	HeadBranch  string
-	Trigger     string
-	IssueNumber int
-	PRNumber    int
-	PRStatus    state.PRStatus
-	Context     string
-	Debug       *bool
+	TaskID          string
+	Repo            string
+	Task            string
+	BaseBranch      string
+	HeadBranch      string
+	Trigger         string
+	IssueNumber     int
+	PRNumber        int
+	PRStatus        state.PRStatus
+	Context         string
+	Debug           *bool
+	CreatedByUserID string
 
 	ResponseTarget *runResponseTarget
 }
@@ -124,7 +130,32 @@ type createIssueTaskRequest struct {
 	Debug       *bool  `json:"debug,omitempty"`
 }
 
+type createCredentialRequest struct {
+	ID              string `json:"id"`
+	OwnerUserID     string `json:"owner_user_id,omitempty"`
+	Scope           string `json:"scope"`
+	AuthBlob        string `json:"auth_blob"`
+	Weight          int    `json:"weight,omitempty"`
+	MaxActiveLeases int    `json:"max_active_leases,omitempty"`
+}
+
+type updateCredentialRequest struct {
+	OwnerUserID     *string `json:"owner_user_id,omitempty"`
+	Scope           *string `json:"scope,omitempty"`
+	AuthBlob        *string `json:"auth_blob,omitempty"`
+	Weight          *int    `json:"weight,omitempty"`
+	MaxActiveLeases *int    `json:"max_active_leases,omitempty"`
+	Status          *string `json:"status,omitempty"`
+}
+
 type requestIDKey struct{}
+type authPrincipalKey struct{}
+
+type authPrincipal struct {
+	UserID        string
+	ExternalLogin string
+	Role          state.UserRole
+}
 
 func main() {
 	cfg := config.LoadServerConfig()
@@ -137,14 +168,28 @@ func main() {
 		log.Fatalf("state: %v", err)
 	}
 
+	allocStrategy, err := credentialstrategies.ByName(cfg.CredentialStrategy)
+	if err != nil {
+		log.Fatalf("credential strategy: %v", err)
+	}
+	cipher, err := credentials.NewAESCipher(cfg.CredentialEncryptionKey)
+	if err != nil {
+		log.Fatalf("credential cipher: %v", err)
+	}
+
 	s := &server{
 		cfg:           cfg,
 		store:         store,
 		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImageForBackend(cfg.AgentBackend), cfg.GitHubToken),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
+		broker:        credentials.NewBroker(store, allocStrategy, cipher, cfg.CredentialLeaseTTL),
+		cipher:        cipher,
 		runCancels:    make(map[string]context.CancelFunc),
 		maxConcurrent: defaultMaxConcurrent(),
 		instanceID:    fmt.Sprintf("%s-%d-%d", strings.TrimSpace(cfg.Slot), os.Getpid(), time.Now().UTC().UnixNano()),
+	}
+	if err := s.bootstrapAuth(); err != nil {
+		log.Fatalf("auth bootstrap: %v", err)
 	}
 	s.recoverQueuedCancels()
 	s.recoverRunningRuns()
@@ -158,6 +203,8 @@ func main() {
 	mux.HandleFunc("/v1/tasks", s.withAuth(s.handleCreateTask))
 	mux.HandleFunc("/v1/tasks/", s.withAuth(s.handleTaskSubresources))
 	mux.HandleFunc("/v1/tasks/issue", s.withAuth(s.handleCreateIssueTask))
+	mux.HandleFunc("/v1/credentials", s.withAuth(s.handleCredentials))
+	mux.HandleFunc("/v1/credentials/", s.withAuth(s.handleCredentialSubresources))
 	mux.HandleFunc("/v1/webhooks/github", s.handleWebhook)
 
 	httpServer := &http.Server{
@@ -265,7 +312,7 @@ func (s *server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 			log.Printf("recover run %s claim run lease failed: %v", run.ID, err)
 			return
 		}
-		go s.superviseDetachedRunLoop(run.ID, execRec)
+		go s.superviseDetachedRunLoop(run.ID, execRec, s.activeCredentialLeaseIDForRun(run.ID))
 		return
 	}
 
@@ -277,7 +324,7 @@ func (s *server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 			log.Printf("recover run %s claim run lease failed: %v", run.ID, err)
 			return
 		}
-		go s.superviseDetachedRunLoop(run.ID, execRec)
+		go s.superviseDetachedRunLoop(run.ID, execRec, s.activeCredentialLeaseIDForRun(run.ID))
 		return
 	}
 
@@ -300,7 +347,14 @@ func (s *server) failRunForMissingExecution(run state.Run, reason string) {
 
 func (s *server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	if !s.cfg.AuthEnabled() {
-		return next
+		return func(w http.ResponseWriter, r *http.Request) {
+			ctx := context.WithValue(r.Context(), authPrincipalKey{}, authPrincipal{
+				UserID:        "anonymous",
+				ExternalLogin: "anonymous",
+				Role:          state.UserRoleAdmin,
+			})
+			next(w, r.WithContext(ctx))
+		}
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -311,12 +365,89 @@ func (s *server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		provided := strings.TrimPrefix(auth, bearer)
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(s.cfg.APIToken)) != 1 {
+		if strings.TrimSpace(provided) == "" {
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
-		next(w, r)
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(strings.TrimSpace(s.cfg.APIToken))) == 1 {
+			ctx := context.WithValue(r.Context(), authPrincipalKey{}, authPrincipal{
+				UserID:        "bootstrap-admin",
+				ExternalLogin: "bootstrap-admin",
+				Role:          state.UserRoleAdmin,
+			})
+			next(w, r.WithContext(ctx))
+			return
+		}
+		keyHash := hashAPIKey(provided)
+		principal, ok, err := s.store.ResolveAPIPrincipalByKeyHash(keyHash)
+		if err != nil {
+			http.Error(w, "auth lookup failed", http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), authPrincipalKey{}, authPrincipal{
+			UserID:        principal.UserID,
+			ExternalLogin: principal.ExternalLogin,
+			Role:          principal.Role,
+		})
+		next(w, r.WithContext(ctx))
 	}
+}
+
+func (s *server) bootstrapAuth() error {
+	if _, err := s.store.UpsertUser(state.UpsertUserInput{
+		ID:            "system",
+		ExternalLogin: "system",
+		Role:          state.UserRoleAdmin,
+	}); err != nil {
+		return err
+	}
+	token := strings.TrimSpace(s.cfg.APIToken)
+	if token == "" {
+		return nil
+	}
+	if _, err := s.store.UpsertUser(state.UpsertUserInput{
+		ID:            "bootstrap-admin",
+		ExternalLogin: "bootstrap-admin",
+		Role:          state.UserRoleAdmin,
+	}); err != nil {
+		return err
+	}
+	return s.store.UpsertAPIKey(state.UpsertAPIKeyInput{
+		ID:      "bootstrap-admin-key",
+		UserID:  "bootstrap-admin",
+		KeyHash: hashAPIKey(token),
+		Label:   "bootstrap",
+	})
+}
+
+func hashAPIKey(token string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(token)))
+	return hex.EncodeToString(sum[:])
+}
+
+func principalFromContext(ctx context.Context) authPrincipal {
+	if v := ctx.Value(authPrincipalKey{}); v != nil {
+		if principal, ok := v.(authPrincipal); ok {
+			return principal
+		}
+	}
+	return authPrincipal{UserID: "system", ExternalLogin: "system", Role: state.UserRoleAdmin}
+}
+
+func requesterUserID(ctx context.Context) string {
+	userID := strings.TrimSpace(principalFromContext(ctx).UserID)
+	if userID == "" {
+		return "system"
+	}
+	return userID
+}
+
+func requesterIsAdmin(ctx context.Context) bool {
+	return principalFromContext(ctx).Role == state.UserRoleAdmin
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -398,12 +529,13 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run, err := s.createAndQueueRun(runRequest{
-		TaskID:     req.TaskID,
-		Repo:       req.Repo,
-		Task:       req.Task,
-		BaseBranch: req.BaseBranch,
-		Trigger:    req.Trigger,
-		Debug:      req.Debug,
+		TaskID:          req.TaskID,
+		Repo:            req.Repo,
+		Task:            req.Task,
+		BaseBranch:      req.BaseBranch,
+		Trigger:         req.Trigger,
+		Debug:           req.Debug,
+		CreatedByUserID: requesterUserID(r.Context()),
 	})
 	if err != nil {
 		if errors.Is(err, errServerDraining) {
@@ -451,13 +583,14 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run, err := s.createAndQueueRun(runRequest{
-		TaskID:      taskID,
-		Repo:        req.Repo,
-		Task:        taskText,
-		Trigger:     "issue_api",
-		IssueNumber: req.IssueNumber,
-		Context:     ctxText,
-		Debug:       req.Debug,
+		TaskID:          taskID,
+		Repo:            req.Repo,
+		Task:            taskText,
+		Trigger:         "issue_api",
+		IssueNumber:     req.IssueNumber,
+		Context:         ctxText,
+		Debug:           req.Debug,
+		CreatedByUserID: requesterUserID(r.Context()),
 	})
 	if err != nil {
 		if errors.Is(err, errTaskCompleted) {
@@ -472,6 +605,223 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"run": run})
+}
+
+func (s *server) handleCredentials(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		var (
+			creds []state.CodexCredential
+			err   error
+		)
+		if requesterIsAdmin(r.Context()) {
+			creds, err = s.store.ListAllCodexCredentials()
+		} else {
+			creds, err = s.store.ListCodexCredentialsByOwner(requesterUserID(r.Context()))
+		}
+		if err != nil {
+			http.Error(w, "failed to list credentials", http.StatusInternalServerError)
+			return
+		}
+		out := make([]map[string]any, 0, len(creds))
+		for _, credential := range creds {
+			if !s.canAccessCredential(r.Context(), credential) {
+				continue
+			}
+			out = append(out, credentialResponse(credential))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"credentials": out})
+	case http.MethodPost:
+		var req createCredentialRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.AuthBlob) == "" {
+			http.Error(w, "auth_blob is required", http.StatusBadRequest)
+			return
+		}
+		scope := strings.ToLower(strings.TrimSpace(req.Scope))
+		ownerUserID := strings.TrimSpace(req.OwnerUserID)
+		if !requesterIsAdmin(r.Context()) {
+			scope = "personal"
+			ownerUserID = requesterUserID(r.Context())
+		}
+		if scope == "" {
+			scope = "personal"
+		}
+		if scope == "shared" {
+			ownerUserID = ""
+		}
+		if scope != "personal" && scope != "shared" {
+			http.Error(w, "invalid scope", http.StatusBadRequest)
+			return
+		}
+		if scope == "personal" && ownerUserID == "" {
+			ownerUserID = requesterUserID(r.Context())
+		}
+		id := strings.TrimSpace(req.ID)
+		if id == "" {
+			var err error
+			id, err = newCredentialID()
+			if err != nil {
+				http.Error(w, "failed to create credential id", http.StatusInternalServerError)
+				return
+			}
+		}
+		encrypted, err := s.cipher.Encrypt([]byte(req.AuthBlob))
+		if err != nil {
+			http.Error(w, "failed to encrypt auth blob", http.StatusInternalServerError)
+			return
+		}
+		credential, err := s.store.CreateCodexCredential(state.CreateCodexCredentialInput{
+			ID:                id,
+			OwnerUserID:       ownerUserID,
+			Scope:             scope,
+			EncryptedAuthBlob: encrypted,
+			Weight:            req.Weight,
+			MaxActiveLeases:   req.MaxActiveLeases,
+			Status:            "active",
+		})
+		if err != nil {
+			http.Error(w, "failed to create credential: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("audit event=credential_created credential_id=%s scope=%s owner_user_id=%s actor_user_id=%s", credential.ID, credential.Scope, credential.OwnerUserID, requesterUserID(r.Context()))
+		writeJSON(w, http.StatusCreated, map[string]any{"credential": credentialResponse(credential)})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *server) handleCredentialSubresources(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/v1/credentials/")
+	path = strings.Trim(path, "/")
+	if path == "" {
+		http.Error(w, "credential id is required", http.StatusBadRequest)
+		return
+	}
+	id, err := url.PathUnescape(path)
+	if err != nil {
+		http.Error(w, "invalid credential id", http.StatusBadRequest)
+		return
+	}
+	credential, ok, err := s.store.GetCodexCredential(id)
+	if err != nil {
+		http.Error(w, "failed to load credential", http.StatusInternalServerError)
+		return
+	}
+	if !ok || !s.canAccessCredential(r.Context(), credential) {
+		http.Error(w, "credential not found", http.StatusNotFound)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"credential": credentialResponse(credential)})
+	case http.MethodDelete:
+		if err := s.store.SetCodexCredentialStatus(credential.ID, "disabled", nil, "disabled by API"); err != nil {
+			http.Error(w, "failed to disable credential", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("audit event=credential_disabled credential_id=%s actor_user_id=%s", credential.ID, requesterUserID(r.Context()))
+		writeJSON(w, http.StatusOK, map[string]any{"disabled": true})
+	case http.MethodPatch:
+		var req updateCredentialRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		updated := state.UpdateCodexCredentialInput{
+			ID:                credential.ID,
+			OwnerUserID:       credential.OwnerUserID,
+			Scope:             credential.Scope,
+			EncryptedAuthBlob: credential.EncryptedAuthBlob,
+			Weight:            credential.Weight,
+			MaxActiveLeases:   credential.MaxActiveLeases,
+			Status:            credential.Status,
+			CooldownUntil:     credential.CooldownUntil,
+			LastError:         credential.LastError,
+		}
+		if req.OwnerUserID != nil {
+			if !requesterIsAdmin(r.Context()) {
+				http.Error(w, "owner changes require admin", http.StatusForbidden)
+				return
+			}
+			updated.OwnerUserID = strings.TrimSpace(*req.OwnerUserID)
+		}
+		if req.Scope != nil {
+			scope := strings.ToLower(strings.TrimSpace(*req.Scope))
+			if !requesterIsAdmin(r.Context()) && scope == "shared" {
+				http.Error(w, "shared scope requires admin", http.StatusForbidden)
+				return
+			}
+			if scope != "personal" && scope != "shared" {
+				http.Error(w, "invalid scope", http.StatusBadRequest)
+				return
+			}
+			updated.Scope = scope
+			if scope == "shared" {
+				updated.OwnerUserID = ""
+			}
+		}
+		if req.AuthBlob != nil {
+			encrypted, err := s.cipher.Encrypt([]byte(strings.TrimSpace(*req.AuthBlob)))
+			if err != nil {
+				http.Error(w, "failed to encrypt auth blob", http.StatusInternalServerError)
+				return
+			}
+			updated.EncryptedAuthBlob = encrypted
+		}
+		if req.Weight != nil {
+			updated.Weight = *req.Weight
+		}
+		if req.MaxActiveLeases != nil {
+			updated.MaxActiveLeases = *req.MaxActiveLeases
+		}
+		if req.Status != nil {
+			updated.Status = strings.ToLower(strings.TrimSpace(*req.Status))
+		}
+		credential, err := s.store.UpdateCodexCredential(updated)
+		if err != nil {
+			http.Error(w, "failed to update credential: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("audit event=credential_updated credential_id=%s actor_user_id=%s", credential.ID, requesterUserID(r.Context()))
+		writeJSON(w, http.StatusOK, map[string]any{"credential": credentialResponse(credential)})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *server) canAccessCredential(ctx context.Context, credential state.CodexCredential) bool {
+	if requesterIsAdmin(ctx) {
+		return true
+	}
+	return credential.Scope == "personal" && credential.OwnerUserID == requesterUserID(ctx)
+}
+
+func credentialResponse(credential state.CodexCredential) map[string]any {
+	return map[string]any{
+		"id":                credential.ID,
+		"owner_user_id":     credential.OwnerUserID,
+		"scope":             credential.Scope,
+		"weight":            credential.Weight,
+		"max_active_leases": credential.MaxActiveLeases,
+		"status":            credential.Status,
+		"cooldown_until":    credential.CooldownUntil,
+		"last_error":        credential.LastError,
+		"created_at":        credential.CreatedAt,
+		"updated_at":        credential.UpdatedAt,
+	}
+}
+
+func newCredentialID() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return "cred_" + hex.EncodeToString(buf), nil
 }
 
 func (s *server) handleTaskSubresources(w http.ResponseWriter, r *http.Request) {
@@ -1016,8 +1366,12 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	req.BaseBranch = strings.TrimSpace(req.BaseBranch)
 	req.HeadBranch = strings.TrimSpace(req.HeadBranch)
 	req.Context = strings.TrimSpace(req.Context)
+	req.CreatedByUserID = strings.TrimSpace(req.CreatedByUserID)
 	if req.Repo == "" || req.Task == "" {
 		return state.Run{}, fmt.Errorf("repo and task are required")
+	}
+	if req.CreatedByUserID == "" {
+		req.CreatedByUserID = "system"
 	}
 	if req.Trigger == "" {
 		req.Trigger = "cli"
@@ -1076,6 +1430,9 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if err != nil {
 		return state.Run{}, fmt.Errorf("upsert task: %w", err)
 	}
+	if err := s.store.SetTaskCreatedByUser(req.TaskID, req.CreatedByUserID); err != nil {
+		return state.Run{}, fmt.Errorf("set task requester: %w", err)
+	}
 
 	run, err := s.store.AddRun(state.CreateRunInput{
 		ID:           runID,
@@ -1096,6 +1453,9 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if err != nil {
 		return state.Run{}, fmt.Errorf("persist run: %w", err)
 	}
+	if err := s.store.SetRunCreatedByUser(run.ID, req.CreatedByUserID); err != nil {
+		return state.Run{}, fmt.Errorf("set run requester: %w", err)
+	}
 
 	if err := s.writeRunFiles(run); err != nil {
 		s.setRunStatusBestEffort(run.ID, state.StatusFailed, err.Error())
@@ -1112,13 +1472,6 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 func (s *server) writeRunFiles(run state.Run) (err error) {
 	if err := os.MkdirAll(filepath.Join(run.RunDir, "codex"), 0o755); err != nil {
 		return err
-	}
-	if strings.TrimSpace(s.cfg.CodexAuthPath) != "" {
-		if _, err := os.Stat(s.cfg.CodexAuthPath); err == nil {
-			if err := copyFile(s.cfg.CodexAuthPath, filepath.Join(run.RunDir, "codex", "auth.json"), 0o600); err != nil {
-				return fmt.Errorf("copy codex auth: %w", err)
-			}
-		}
 	}
 
 	ctxPayload := map[string]any{
@@ -1193,6 +1546,76 @@ func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget
 	return nil
 }
 
+func (s *server) prepareRunCredentialAuth(runID, runDir, requesterUserID string) (string, error) {
+	requesterUserID = strings.TrimSpace(requesterUserID)
+	if requesterUserID == "" {
+		requesterUserID = "system"
+	}
+	authDir := filepath.Join(runDir, "codex")
+	authPath := filepath.Join(authDir, "auth.json")
+	if err := os.MkdirAll(authDir, 0o755); err != nil {
+		return "", fmt.Errorf("create auth dir: %w", err)
+	}
+
+	if s.broker != nil {
+		lease, err := s.broker.Acquire(context.Background(), credentials.AcquireRequest{
+			RunID:  runID,
+			UserID: requesterUserID,
+		})
+		if err == nil {
+			if err := os.WriteFile(authPath, lease.AuthBlob, 0o600); err != nil {
+				if releaseErr := s.broker.Release(context.Background(), lease.ID); releaseErr != nil {
+					log.Printf("release credential lease %s after auth write failure failed: %v", lease.ID, releaseErr)
+				}
+				return "", fmt.Errorf("write broker auth file: %w", err)
+			}
+			log.Printf("audit event=credential_lease_acquired run_id=%s credential_id=%s user_id=%s lease_id=%s strategy=%s", runID, lease.CredentialID, requesterUserID, lease.ID, lease.Strategy)
+			return lease.ID, nil
+		}
+		if !errors.Is(err, credentials.ErrNoCredentialAvailable) {
+			return "", err
+		}
+	}
+
+	fallbackPath := strings.TrimSpace(s.cfg.CodexAuthPath)
+	if fallbackPath == "" {
+		if s.broker != nil {
+			return "", credentials.ErrNoCredentialAvailable
+		}
+		return "", nil
+	}
+	if _, err := os.Stat(fallbackPath); err != nil {
+		if s.broker != nil {
+			return "", credentials.ErrNoCredentialAvailable
+		}
+		return "", nil
+	}
+	if err := copyFile(fallbackPath, authPath, 0o600); err != nil {
+		return "", fmt.Errorf("copy fallback codex auth: %w", err)
+	}
+	return "", nil
+}
+
+func (s *server) cleanupRunCredentialAuth(runDir, credentialLeaseID string) {
+	if strings.TrimSpace(credentialLeaseID) != "" && s.broker != nil {
+		if err := s.broker.Release(context.Background(), credentialLeaseID); err != nil {
+			log.Printf("release credential lease %s failed: %v", credentialLeaseID, err)
+		}
+	}
+	path := filepath.Join(runDir, "codex", "auth.json")
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("remove ephemeral auth file %s failed: %v", path, err)
+	}
+}
+
+func (s *server) activeCredentialLeaseIDForRun(runID string) string {
+	lease, ok, err := s.store.GetActiveCredentialLeaseByRunID(runID)
+	if err != nil || !ok {
+		return ""
+	}
+	return lease.ID
+}
+
 func (s *server) executeRun(runID string) {
 	run, ok := s.store.GetRun(runID)
 	if !ok {
@@ -1242,6 +1665,19 @@ func (s *server) executeRun(runID string) {
 			log.Printf("failed to delete run lease for %s: %v", run.ID, err)
 		}
 	}()
+
+	runCredentialInfo, _ := s.store.GetRunCredentialInfo(run.ID)
+	requesterID := strings.TrimSpace(runCredentialInfo.CreatedByUserID)
+	if requesterID == "" {
+		requesterID = "system"
+	}
+	credentialLeaseID, err := s.prepareRunCredentialAuth(run.ID, run.RunDir, requesterID)
+	if err != nil {
+		updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("acquire credential lease: %v", err))
+		s.finishRun(updated)
+		return
+	}
+	defer s.cleanupRunCredentialAuth(run.RunDir, credentialLeaseID)
 
 	if reason, ok := s.pendingRunCancelReason(runID); ok {
 		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, reason)
@@ -1363,10 +1799,10 @@ func (s *server) executeRun(runID string) {
 		}
 	}
 
-	s.superviseDetachedRunLoop(run.ID, execRec)
+	s.superviseDetachedRunLoop(run.ID, execRec, credentialLeaseID)
 }
 
-func (s *server) superviseDetachedRunLoop(runID string, execRec state.RunExecution) {
+func (s *server) superviseDetachedRunLoop(runID string, execRec state.RunExecution, credentialLeaseID string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
 	if _, exists := s.runCancels[runID]; exists {
@@ -1383,12 +1819,17 @@ func (s *server) superviseDetachedRunLoop(runID string, execRec state.RunExecuti
 		if err := s.store.DeleteRunLeaseForOwner(runID, s.instanceID); err != nil {
 			log.Printf("failed to delete run lease for %s: %v", runID, err)
 		}
+		if credentialLeaseID != "" {
+			if err := s.broker.Release(context.Background(), credentialLeaseID); err != nil {
+				log.Printf("failed to release credential lease for %s: %v", runID, err)
+			}
+		}
 	}()
 
-	s.superviseRun(ctx, runID, execRec)
+	s.superviseRun(ctx, runID, execRec, credentialLeaseID)
 }
 
-func (s *server) superviseRun(ctx context.Context, runID string, execRec state.RunExecution) {
+func (s *server) superviseRun(ctx context.Context, runID string, execRec state.RunExecution, credentialLeaseID string) {
 	interval := runSupervisorTick
 	if interval <= 0 {
 		interval = time.Second
@@ -1400,6 +1841,11 @@ func (s *server) superviseRun(ctx context.Context, runID string, execRec state.R
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	nextRenewAt := time.Now().UTC().Add(renewEvery)
+	credentialRenewEvery := s.cfg.CredentialRenewEvery
+	if credentialRenewEvery <= 0 {
+		credentialRenewEvery = 30 * time.Second
+	}
+	nextCredentialRenewAt := time.Now().UTC().Add(credentialRenewEvery)
 	stopRequested := false
 	handle := runExecutionHandle(execRec)
 	for {
@@ -1421,6 +1867,24 @@ func (s *server) superviseRun(ctx context.Context, runID string, execRec state.R
 					return
 				}
 				nextRenewAt = time.Now().UTC().Add(renewEvery)
+			}
+			if credentialLeaseID != "" && !time.Now().UTC().Before(nextCredentialRenewAt) {
+				if err := s.broker.Renew(ctx, credentialLeaseID); err != nil {
+					log.Printf("run %s credential lease renew failed: %v", runID, err)
+					if cancelErr := s.store.RequestRunCancel(runID, "credential lease lost", "broker"); cancelErr != nil {
+						log.Printf("run %s request cancel after credential lease loss failed: %v", runID, cancelErr)
+					}
+					if !stopRequested {
+						stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
+						stopErr := s.launcher.Stop(stopCtx, handle, 10*time.Second)
+						stopCancel()
+						if stopErr != nil && !errors.Is(stopErr, runner.ErrExecutionNotFound) && !errors.Is(stopErr, context.Canceled) {
+							log.Printf("run %s stop after credential lease loss failed: %v", runID, stopErr)
+						}
+						stopRequested = true
+					}
+				}
+				nextCredentialRenewAt = time.Now().UTC().Add(credentialRenewEvery)
 			}
 
 			now := time.Now().UTC()
@@ -1575,6 +2039,17 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	if updated.PRNumber > 0 {
 		s.setTaskPRBestEffort(updated.TaskID, updated.Repo, updated.PRNumber)
 	}
+	if updated.Status == state.StatusFailed {
+		info, ok := s.store.GetRunCredentialInfo(updated.ID)
+		if ok && strings.TrimSpace(info.CredentialID) != "" && isCredentialAuthFailure(updated.Error) {
+			until := time.Now().UTC().Add(5 * time.Minute)
+			if err := s.store.SetCodexCredentialStatus(info.CredentialID, "cooldown", &until, updated.Error); err != nil {
+				log.Printf("run %s set credential cooldown failed: %v", updated.ID, err)
+			} else {
+				log.Printf("audit event=credential_cooldown run_id=%s credential_id=%s until=%s", updated.ID, info.CredentialID, until.Format(time.RFC3339))
+			}
+		}
+	}
 	switch updated.Status {
 	case state.StatusSucceeded, state.StatusReview:
 		s.postRunCompletionCommentBestEffort(updated)
@@ -1598,6 +2073,12 @@ func (s *server) cleanupDetachedExecution(runID string, execRec state.RunExecuti
 	}
 	if err := s.store.DeleteRunLease(runID); err != nil {
 		log.Printf("run %s clear run lease failed: %v", runID, err)
+	}
+	if run, ok := s.store.GetRun(runID); ok {
+		authPath := filepath.Join(run.RunDir, "codex", "auth.json")
+		if err := os.Remove(authPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("run %s remove auth file failed: %v", runID, err)
+		}
 	}
 }
 
@@ -2115,6 +2596,26 @@ func maxInt(a, b int) int {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func isCredentialAuthFailure(errText string) bool {
+	text := strings.ToLower(strings.TrimSpace(errText))
+	if text == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"unauthorized",
+		"invalid api key",
+		"invalid token",
+		"authentication failed",
+		"forbidden",
+		"permission denied",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultMaxConcurrent() int {

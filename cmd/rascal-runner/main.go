@@ -439,13 +439,13 @@ func loadConfig() (config, error) {
 	}
 
 	agentBackend := agent.NormalizeBackend(os.Getenv("RASCAL_AGENT_BACKEND"))
-	agentSessionMode := agent.NormalizeSessionMode(firstNonEmptyValue(os.Getenv("RASCAL_AGENT_SESSION_MODE"), os.Getenv("RASCAL_GOOSE_SESSION_MODE")))
-	agentSessionResume := parseBoolEnv(firstNonEmptyValue(strings.TrimSpace(os.Getenv("RASCAL_AGENT_SESSION_RESUME")), strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_RESUME"))), false)
+	agentSessionMode := agent.NormalizeSessionMode(firstSetEnvValue("RASCAL_GOOSE_SESSION_MODE", "RASCAL_AGENT_SESSION_MODE"))
+	agentSessionResume := parseBoolEnv(firstSetEnvValue("RASCAL_GOOSE_SESSION_RESUME", "RASCAL_AGENT_SESSION_RESUME"), false)
 	if agentSessionMode == agent.SessionModeOff {
 		agentSessionResume = false
 	}
-	agentSessionKey := firstNonEmptyValue(strings.TrimSpace(os.Getenv("RASCAL_AGENT_SESSION_KEY")), strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_KEY")))
-	backendSessionID := firstNonEmptyValue(strings.TrimSpace(os.Getenv("RASCAL_AGENT_SESSION_ID")), strings.TrimSpace(os.Getenv("RASCAL_GOOSE_SESSION_NAME")))
+	agentSessionKey := firstSetEnvValue("RASCAL_GOOSE_SESSION_KEY", "RASCAL_AGENT_SESSION_KEY")
+	backendSessionID := firstSetEnvValue("RASCAL_GOOSE_SESSION_NAME", "RASCAL_AGENT_SESSION_ID")
 	if agentSessionResume {
 		if agentSessionKey == "" {
 			agentSessionKey = runner.GooseSessionTaskKey(repo, taskID)
@@ -495,6 +495,15 @@ func firstNonEmptyValue(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
 			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func firstSetEnvValue(keys ...string) string {
+	for _, key := range keys {
+		if raw, ok := os.LookupEnv(key); ok {
+			return strings.TrimSpace(raw)
 		}
 	}
 	return ""

@@ -8,6 +8,48 @@ import (
 	"database/sql"
 )
 
+type ApiKey struct {
+	ID         string        `json:"id"`
+	UserID     string        `json:"user_id"`
+	KeyHash    string        `json:"key_hash"`
+	Label      string        `json:"label"`
+	CreatedAt  int64         `json:"created_at"`
+	LastUsedAt int64         `json:"last_used_at"`
+	DisabledAt sql.NullInt64 `json:"disabled_at"`
+}
+
+type CodexCredential struct {
+	ID                string         `json:"id"`
+	OwnerUserID       sql.NullString `json:"owner_user_id"`
+	Scope             string         `json:"scope"`
+	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
+	Weight            int64          `json:"weight"`
+	MaxActiveLeases   int64          `json:"max_active_leases"`
+	Status            string         `json:"status"`
+	CooldownUntil     sql.NullInt64  `json:"cooldown_until"`
+	LastError         string         `json:"last_error"`
+	CreatedAt         int64          `json:"created_at"`
+	UpdatedAt         int64          `json:"updated_at"`
+}
+
+type CredentialLease struct {
+	ID           string        `json:"id"`
+	CredentialID string        `json:"credential_id"`
+	RunID        string        `json:"run_id"`
+	UserID       string        `json:"user_id"`
+	Strategy     string        `json:"strategy"`
+	AcquiredAt   int64         `json:"acquired_at"`
+	ExpiresAt    int64         `json:"expires_at"`
+	ReleasedAt   sql.NullInt64 `json:"released_at"`
+}
+
+type CredentialUsage struct {
+	CredentialID string `json:"credential_id"`
+	WindowStart  int64  `json:"window_start"`
+	Tokens       int64  `json:"tokens"`
+	Runs         int64  `json:"runs"`
+}
+
 type Delivery struct {
 	ID          string        `json:"id"`
 	Status      string        `json:"status"`
@@ -20,29 +62,31 @@ type Delivery struct {
 }
 
 type Run struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentBackend string        `json:"agent_backend"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq             int64         `json:"seq"`
+	ID              string        `json:"id"`
+	TaskID          string        `json:"task_id"`
+	Repo            string        `json:"repo"`
+	Task            string        `json:"task"`
+	AgentBackend    string        `json:"agent_backend"`
+	BaseBranch      string        `json:"base_branch"`
+	HeadBranch      string        `json:"head_branch"`
+	Trigger         string        `json:"trigger"`
+	Debug           bool          `json:"debug"`
+	Status          string        `json:"status"`
+	RunDir          string        `json:"run_dir"`
+	IssueNumber     int64         `json:"issue_number"`
+	PrNumber        int64         `json:"pr_number"`
+	CreatedByUserID string        `json:"created_by_user_id"`
+	CredentialID    string        `json:"credential_id"`
+	PrUrl           string        `json:"pr_url"`
+	PrStatus        string        `json:"pr_status"`
+	HeadSha         string        `json:"head_sha"`
+	Context         string        `json:"context"`
+	Error           string        `json:"error"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	StartedAt       sql.NullInt64 `json:"started_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
 }
 
 type RunCancel struct {
@@ -72,15 +116,16 @@ type RunLease struct {
 }
 
 type Task struct {
-	ID           string `json:"id"`
-	Repo         string `json:"repo"`
-	AgentBackend string `json:"agent_backend"`
-	IssueNumber  int64  `json:"issue_number"`
-	PrNumber     int64  `json:"pr_number"`
-	Status       string `json:"status"`
-	LastRunID    string `json:"last_run_id"`
-	CreatedAt    int64  `json:"created_at"`
-	UpdatedAt    int64  `json:"updated_at"`
+	ID              string `json:"id"`
+	Repo            string `json:"repo"`
+	AgentBackend    string `json:"agent_backend"`
+	IssueNumber     int64  `json:"issue_number"`
+	PrNumber        int64  `json:"pr_number"`
+	CreatedByUserID string `json:"created_by_user_id"`
+	Status          string `json:"status"`
+	LastRunID       string `json:"last_run_id"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
 }
 
 type TaskAgentSession struct {
@@ -92,4 +137,12 @@ type TaskAgentSession struct {
 	LastRunID        string `json:"last_run_id"`
 	CreatedAt        int64  `json:"created_at"`
 	UpdatedAt        int64  `json:"updated_at"`
+}
+
+type User struct {
+	ID            string `json:"id"`
+	ExternalLogin string `json:"external_login"`
+	Role          string `json:"role"`
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
 }

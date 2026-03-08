@@ -971,38 +971,63 @@ func fromDBFindTaskByPRRow(t sqlitegen.FindTaskByPRRow) Task {
 	return fromDBTaskParts(t.ID, t.Repo, t.AgentBackend, t.IssueNumber, t.PrNumber, t.Status, t.PendingInput, t.LastRunID, t.CreatedAt, t.UpdatedAt)
 }
 
-func fromDBRun(r sqlitegen.Run) Run {
+func fromDBRunParts(id, taskID, repo, task, agentBackend, baseBranch, headBranch, trigger string, debug bool, status, runDir string, issueNumber, prNumber int64, prURL, prStatus, headSHA, contextValue, errText string, createdAt, updatedAt int64, startedAt, completedAt sql.NullInt64) Run {
 	out := Run{
-		ID:           r.ID,
-		TaskID:       r.TaskID,
-		Repo:         r.Repo,
-		Task:         r.Task,
-		AgentBackend: agent.NormalizeBackend(r.AgentBackend),
-		BaseBranch:   r.BaseBranch,
-		HeadBranch:   r.HeadBranch,
-		Trigger:      r.Trigger,
-		Debug:        r.Debug,
-		Status:       CanonicalRunStatus(RunStatus(r.Status)),
-		RunDir:       r.RunDir,
-		IssueNumber:  int(r.IssueNumber),
-		PRNumber:     int(r.PrNumber),
-		PRURL:        r.PrUrl,
-		PRStatus:     normalizePRStatus(PRStatus(r.PrStatus)),
-		HeadSHA:      r.HeadSha,
-		Context:      r.Context,
-		Error:        r.Error,
-		CreatedAt:    time.Unix(0, r.CreatedAt).UTC(),
-		UpdatedAt:    time.Unix(0, r.UpdatedAt).UTC(),
+		ID:           id,
+		TaskID:       taskID,
+		Repo:         repo,
+		Task:         task,
+		AgentBackend: agent.NormalizeBackend(agentBackend),
+		BaseBranch:   baseBranch,
+		HeadBranch:   headBranch,
+		Trigger:      trigger,
+		Debug:        debug,
+		Status:       CanonicalRunStatus(RunStatus(status)),
+		RunDir:       runDir,
+		IssueNumber:  int(issueNumber),
+		PRNumber:     int(prNumber),
+		PRURL:        prURL,
+		PRStatus:     normalizePRStatus(PRStatus(prStatus)),
+		HeadSHA:      headSHA,
+		Context:      contextValue,
+		Error:        errText,
+		CreatedAt:    time.Unix(0, createdAt).UTC(),
+		UpdatedAt:    time.Unix(0, updatedAt).UTC(),
 	}
-	if r.StartedAt.Valid {
-		t := time.Unix(0, r.StartedAt.Int64).UTC()
+	if startedAt.Valid {
+		t := time.Unix(0, startedAt.Int64).UTC()
 		out.StartedAt = &t
 	}
-	if r.CompletedAt.Valid {
-		t := time.Unix(0, r.CompletedAt.Int64).UTC()
+	if completedAt.Valid {
+		t := time.Unix(0, completedAt.Int64).UTC()
 		out.CompletedAt = &t
 	}
 	return out
+}
+
+func fromDBRun(row any) Run {
+	switch r := row.(type) {
+	case sqlitegen.Run:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	case sqlitegen.InsertRunRow:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	case sqlitegen.GetRunRow:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	case sqlitegen.ListRunsRow:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	case sqlitegen.ListRunningRunsRow:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	case sqlitegen.LastRunForTaskRow:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	case sqlitegen.ActiveRunForTaskRow:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	case sqlitegen.ClaimNextQueuedRunRow:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	case sqlitegen.ClaimNextQueuedRunForTaskRow:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	default:
+		return Run{}
+	}
 }
 
 func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {

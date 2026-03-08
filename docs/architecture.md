@@ -53,7 +53,7 @@ These are the main layers in the Go codebase.
 4. Persistence abstraction
 
 - `internal/state` owns SQLite-backed persistence and state transitions.
-- It stores runs, tasks, run leases, detached run executions, cancel requests, webhook deliveries, and task agent session records.
+- It stores runs, tasks, run leases, detached run executions, cancel requests, webhook deliveries, task agent session records, and encrypted stored credentials plus credential leases.
 - SQL schema lives in embedded migrations and typed queries are generated under `internal/state/sqlitegen`.
 
 5. Supporting integrations
@@ -96,6 +96,8 @@ Key persisted entities:
 - `run_executions`: detached execution handle metadata for adoption and cleanup.
 - `run_cancels`: persisted cancel intent.
 - `task_agent_sessions`: stable backend session identifiers and mounted session roots.
+- `codex_credentials`: encrypted stored credential payloads and allocation metadata.
+- `credential_leases`: per-run credential assignments and lease expiry state.
 - `deliveries`: webhook dedupe/claim bookkeeping.
 
 ## Run Artifacts
@@ -119,6 +121,24 @@ Each run directory stores metadata and artifacts such as:
 - Goose resumes by named Goose session plus mounted session storage.
 - Codex resumes by reusing a task-scoped `CODEX_HOME` and the discovered backend session id.
 - If a Goose resume attempt fails because the stored session is missing or invalid, the runner falls back to a fresh session.
+
+## Credential Handling
+
+Rascal supports stored Codex credentials in addition to the legacy static
+`/etc/rascal/codex_auth.json` file.
+
+- Stored credentials are encrypted before being persisted in SQLite.
+- Each credential is either `personal` (owned by a user) or `shared`.
+- When a run starts, `rascald` asks the credential broker to lease a credential
+  for that run and records the selected credential id in state.
+- The broker chooses from eligible credentials using the configured allocation
+  strategy and enforces `max_active_leases`.
+- The leased auth blob is written into the run-scoped `codex/auth.json` file
+  and removed during run cleanup.
+- While a run is active, `rascald` renews the credential lease. If renewal is
+  lost, the run is canceled.
+- If no stored credential can be leased, Rascal can fall back to the static
+  `RASCAL_CODEX_AUTH_PATH` auth file when present.
 
 ## Runner Environment Contract
 

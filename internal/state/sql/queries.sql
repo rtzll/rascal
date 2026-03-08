@@ -522,3 +522,318 @@ WHERE task_id = ?;
 -- name: DeleteTaskAgentSession :execrows
 DELETE FROM task_agent_sessions
 WHERE task_id = ?;
+
+-- name: SetTaskCreatedByUser :execrows
+UPDATE tasks
+SET created_by_user_id = ?, updated_at = ?
+WHERE id = ?;
+
+-- name: SetRunCreatedByUser :execrows
+UPDATE runs
+SET created_by_user_id = ?, updated_at = ?
+WHERE id = ?;
+
+-- name: SetRunCredentialID :execrows
+UPDATE runs
+SET credential_id = ?, updated_at = ?
+WHERE id = ?;
+
+-- name: GetRunCredentialInfo :one
+SELECT id, created_by_user_id, credential_id
+FROM runs
+WHERE id = ?;
+
+-- name: UpsertUser :exec
+INSERT INTO users (
+  id,
+  external_login,
+  role,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  external_login = excluded.external_login,
+  role = excluded.role,
+  updated_at = excluded.updated_at;
+
+-- name: GetUserByID :one
+SELECT id, external_login, role, created_at, updated_at
+FROM users
+WHERE id = ?;
+
+-- name: GetUserByExternalLogin :one
+SELECT id, external_login, role, created_at, updated_at
+FROM users
+WHERE external_login = ?;
+
+-- name: UpsertAPIKey :exec
+INSERT INTO api_keys (
+  id,
+  user_id,
+  key_hash,
+  label,
+  created_at,
+  last_used_at,
+  disabled_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(key_hash) DO UPDATE SET
+  user_id = excluded.user_id,
+  label = excluded.label,
+  disabled_at = excluded.disabled_at;
+
+-- name: GetAPIKeyPrincipal :one
+SELECT
+  api_keys.id AS api_key_id,
+  api_keys.user_id,
+  users.external_login,
+  users.role
+FROM api_keys
+JOIN users ON users.id = api_keys.user_id
+WHERE api_keys.key_hash = ?
+  AND api_keys.disabled_at IS NULL;
+
+-- name: TouchAPIKeyLastUsed :execrows
+UPDATE api_keys
+SET last_used_at = ?
+WHERE id = ?;
+
+-- name: CreateCodexCredential :exec
+INSERT INTO codex_credentials (
+  id,
+  owner_user_id,
+  scope,
+  encrypted_auth_blob,
+  weight,
+  max_active_leases,
+  status,
+  cooldown_until,
+  last_error,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: UpdateCodexCredential :execrows
+UPDATE codex_credentials
+SET
+  owner_user_id = ?,
+  scope = ?,
+  encrypted_auth_blob = ?,
+  weight = ?,
+  max_active_leases = ?,
+  status = ?,
+  cooldown_until = ?,
+  last_error = ?,
+  updated_at = ?
+WHERE id = ?;
+
+-- name: SetCodexCredentialStatus :execrows
+UPDATE codex_credentials
+SET
+  status = ?,
+  cooldown_until = ?,
+  last_error = ?,
+  updated_at = ?
+WHERE id = ?;
+
+-- name: GetCodexCredential :one
+SELECT
+  id,
+  owner_user_id,
+  scope,
+  encrypted_auth_blob,
+  weight,
+  max_active_leases,
+  status,
+  cooldown_until,
+  last_error,
+  created_at,
+  updated_at
+FROM codex_credentials
+WHERE id = ?;
+
+-- name: ListCodexCredentialsByOwner :many
+SELECT
+  id,
+  owner_user_id,
+  scope,
+  encrypted_auth_blob,
+  weight,
+  max_active_leases,
+  status,
+  cooldown_until,
+  last_error,
+  created_at,
+  updated_at
+FROM codex_credentials
+WHERE owner_user_id = ?
+ORDER BY created_at DESC;
+
+-- name: ListSharedCodexCredentials :many
+SELECT
+  id,
+  owner_user_id,
+  scope,
+  encrypted_auth_blob,
+  weight,
+  max_active_leases,
+  status,
+  cooldown_until,
+  last_error,
+  created_at,
+  updated_at
+FROM codex_credentials
+WHERE scope = 'shared'
+ORDER BY created_at DESC;
+
+-- name: ListAllCodexCredentials :many
+SELECT
+  id,
+  owner_user_id,
+  scope,
+  encrypted_auth_blob,
+  weight,
+  max_active_leases,
+  status,
+  cooldown_until,
+  last_error,
+  created_at,
+  updated_at
+FROM codex_credentials
+ORDER BY created_at DESC;
+
+-- name: ListCredentialCandidates :many
+SELECT
+  c.id,
+  c.owner_user_id,
+  c.scope,
+  c.weight,
+  c.max_active_leases,
+  c.status,
+  c.cooldown_until,
+  CAST(COALESCE((
+    SELECT COUNT(*)
+    FROM credential_leases AS l
+    WHERE l.credential_id = c.id
+      AND l.released_at IS NULL
+      AND l.expires_at > sqlc.arg(now)
+  ), 0) AS INTEGER) AS active_leases,
+  CAST(COALESCE((
+    SELECT SUM(u.tokens)
+    FROM credential_usage AS u
+    WHERE u.credential_id = c.id
+      AND u.window_start >= sqlc.arg(usage_window_start)
+  ), 0) AS INTEGER) AS usage_tokens,
+  CAST(COALESCE((
+    SELECT SUM(u.runs)
+    FROM credential_usage AS u
+    WHERE u.credential_id = c.id
+      AND u.window_start >= sqlc.arg(usage_window_start)
+  ), 0) AS INTEGER) AS usage_runs,
+  c.last_error,
+  c.created_at,
+  c.updated_at
+FROM codex_credentials AS c
+WHERE c.status = 'active'
+  AND (c.cooldown_until IS NULL OR c.cooldown_until <= sqlc.arg(now))
+  AND (c.scope = 'shared' OR c.owner_user_id = sqlc.arg(requester_user_id))
+ORDER BY c.created_at ASC, c.id ASC;
+
+-- name: TryCreateCredentialLease :execrows
+INSERT INTO credential_leases (
+  id,
+  credential_id,
+  run_id,
+  user_id,
+  strategy,
+  acquired_at,
+  expires_at,
+  released_at
+)
+SELECT
+  sqlc.arg(id),
+  sqlc.arg(credential_id),
+  sqlc.arg(run_id),
+  sqlc.arg(user_id),
+  sqlc.arg(strategy),
+  sqlc.arg(acquired_at),
+  sqlc.arg(expires_at),
+  NULL
+WHERE EXISTS (
+  SELECT 1
+  FROM codex_credentials AS c
+  WHERE c.id = sqlc.arg(credential_id)
+    AND c.status = 'active'
+    AND (c.cooldown_until IS NULL OR c.cooldown_until <= sqlc.arg(now))
+    AND (
+      c.scope = 'shared'
+      OR (c.scope = 'personal' AND c.owner_user_id = sqlc.arg(user_id))
+    )
+    AND (
+      SELECT COUNT(*)
+      FROM credential_leases AS l
+      WHERE l.credential_id = c.id
+        AND l.released_at IS NULL
+        AND l.expires_at > sqlc.arg(now)
+    ) < c.max_active_leases
+)
+AND NOT EXISTS (
+  SELECT 1
+  FROM credential_leases AS existing
+  WHERE existing.run_id = ?3
+    AND existing.released_at IS NULL
+    AND existing.expires_at > ?8
+);
+
+-- name: GetCredentialLease :one
+SELECT id, credential_id, run_id, user_id, strategy, acquired_at, expires_at, released_at
+FROM credential_leases
+WHERE id = ?;
+
+-- name: GetActiveCredentialLeaseByRunID :one
+SELECT id, credential_id, run_id, user_id, strategy, acquired_at, expires_at, released_at
+FROM credential_leases
+WHERE run_id = ?
+  AND released_at IS NULL
+ORDER BY acquired_at DESC
+LIMIT 1;
+
+-- name: RenewCredentialLease :execrows
+UPDATE credential_leases
+SET expires_at = ?
+WHERE id = ?
+  AND released_at IS NULL
+  AND expires_at > ?;
+
+-- name: ReleaseCredentialLease :one
+UPDATE credential_leases
+SET released_at = ?
+WHERE id = ?
+  AND released_at IS NULL
+RETURNING id, credential_id, run_id, user_id, strategy, acquired_at, expires_at, released_at;
+
+-- name: ReleaseCredentialLeaseByRunID :execrows
+UPDATE credential_leases
+SET released_at = ?
+WHERE run_id = ?
+  AND released_at IS NULL;
+
+-- name: ReclaimExpiredCredentialLeases :execrows
+UPDATE credential_leases
+SET released_at = ?
+WHERE released_at IS NULL
+  AND expires_at <= ?;
+
+-- name: UpsertCredentialUsage :exec
+INSERT INTO credential_usage (
+  credential_id,
+  window_start,
+  tokens,
+  runs
+)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(credential_id, window_start) DO UPDATE SET
+  tokens = credential_usage.tokens + excluded.tokens,
+  runs = credential_usage.runs + excluded.runs;

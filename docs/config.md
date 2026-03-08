@@ -58,3 +58,30 @@ Tip: use `doctor` to confirm both local and remote resolution.
 ```bash
 ./bin/rascal doctor --host YOUR_SERVER_IP
 ```
+
+## Server Credential Settings
+
+Rascal supports encrypted stored credentials for Codex runs in addition to the
+legacy static auth file on disk.
+
+- `RASCAL_CREDENTIAL_STRATEGY`
+  Allocation strategy for choosing among eligible credentials.
+  Default: `requester_own_then_shared`
+
+- `RASCAL_CREDENTIAL_LEASE_TTL`
+  How long a credential lease stays valid before it must be renewed.
+  Default: `90s`
+
+- `RASCAL_CREDENTIAL_RENEW_INTERVAL`
+  How often the orchestrator renews an active credential lease.
+  Default: `30s`
+
+- `RASCAL_CREDENTIAL_ENCRYPTION_KEY`
+  Key used to encrypt stored credential auth blobs in SQLite.
+  If unset, Rascal falls back to `RASCAL_API_TOKEN`.
+  Recommended: set a dedicated encryption key instead of reusing the API token.
+
+- `RASCAL_CODEX_AUTH_PATH`
+  Path to the static fallback auth file used when no stored credential can be
+  leased.
+  Default: `/etc/rascal/codex_auth.json`
