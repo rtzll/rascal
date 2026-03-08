@@ -30,7 +30,7 @@ Rascal uses three tokens for production bootstrap.
   - `Webhooks`: Read and write
   - `Issues`: Read and write
 
-3. `GITHUB_RUNTIME_TOKEN`
+3. `RASCAL_GITHUB_TOKEN`
 
 - Stored on server for runner operations.
 - Scope to the target repo.
@@ -51,7 +51,7 @@ Rascal auto-loads `./.rascal.env` for all commands.
 ```bash
 HCLOUD_TOKEN=...
 GITHUB_ADMIN_TOKEN=...
-GITHUB_RUNTIME_TOKEN=...
+RASCAL_GITHUB_TOKEN=...
 ```
 
 You can also set a custom env file via `--env-file` or `RASCAL_ENV_FILE`.

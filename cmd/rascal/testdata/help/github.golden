@@ -5,7 +5,7 @@ Usage:
   rascal github [command]
 
 Examples:
-rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$WEBHOOK_SECRET"
+rascal github setup OWNER/REPO --github-token "$GITHUB_TOKEN" --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET"
 rascal github status OWNER/REPO --github-token "$GITHUB_TOKEN"
 
 Available Commands:

@@ -162,19 +162,15 @@ func (a *app) fetchServerWebhookSecret() (string, error) {
 	}
 	remoteCmd := strings.Join([]string{
 		"set -euo pipefail",
-		`for f in /etc/rascal/rascal.env /etc/rascal/rascal-blue.env /etc/rascal/rascal-green.env; do`,
-		`  [ -f "$f" ] || continue`,
-		`  line=$(grep -m1 -E '^(RASCAL_GITHUB_WEBHOOK_SECRET|GITHUB_WEBHOOK_SECRET)=' "$f" || true)`,
-		`  if [ -n "$line" ]; then`,
-		`    val="${line#*=}"`,
-		`    val="${val%\"}"`,
-		`    val="${val#\"}"`,
-		`    printf '%s' "$val"`,
-		`    exit 0`,
-		`  fi`,
-		`done`,
-		`echo "webhook secret not found in /etc/rascal/*.env" >&2`,
-		`exit 1`,
+		`line=$(grep -m1 -E '^RASCAL_GITHUB_WEBHOOK_SECRET=' /etc/rascal/rascal.env || true)`,
+		`if [ -z "$line" ]; then`,
+		`  echo "webhook secret not found in /etc/rascal/rascal.env" >&2`,
+		`  exit 1`,
+		`fi`,
+		`val="${line#*=}"`,
+		`val="${val%\"}"`,
+		`val="${val#\"}"`,
+		`printf '%s' "$val"`,
 	}, "\n")
 
 	out, err := runLocalCapture("ssh", sshArgs(cfg, remoteCmd)...)

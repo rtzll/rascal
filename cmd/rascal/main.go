@@ -553,8 +553,8 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			serverURL = strings.TrimSpace(serverURL)
 			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")))
 			githubAdminToken = firstNonEmpty(strings.TrimSpace(githubAdminToken), strings.TrimSpace(os.Getenv("GITHUB_ADMIN_TOKEN")), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
-			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
-			webhookSecret = firstNonEmpty(strings.TrimSpace(webhookSecret), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")), strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")))
+			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")))
+			webhookSecret = firstNonEmpty(strings.TrimSpace(webhookSecret), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")))
 			host = firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.Host))
 			sshUser = strings.TrimSpace(sshUser)
 			sshKey = strings.TrimSpace(sshKey)
@@ -581,7 +581,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				missing = append(missing, "GitHub admin token is required for webhook setup (--github-admin-token or GITHUB_ADMIN_TOKEN)")
 			}
 			if shouldDeploy && githubRuntimeToken == "" {
-				missing = append(missing, "GitHub runtime token is required for deployment (--github-runtime-token or GITHUB_RUNTIME_TOKEN)")
+				missing = append(missing, "GitHub runtime token is required for deployment (--github-runtime-token or RASCAL_GITHUB_TOKEN)")
 			}
 			if err := validateDistinctGitHubTokens(githubAdminToken, githubRuntimeToken, !skipWebhook && shouldDeploy); err != nil {
 				missing = append(missing, err.Error())
@@ -896,7 +896,7 @@ func (a *app) newDeployCmd() *cobra.Command {
 	cmd.Long = "Deploy or redeploy rascald to an existing Linux host over SSH without running provisioning or webhook setup."
 	cmd.Example = strings.TrimSpace(`
 rascal deploy --host 203.0.113.10
-rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$GITHUB_RUNTIME_TOKEN" --upload-auth --codex-auth ~/.codex/auth.json
+rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN" --upload-auth --codex-auth ~/.codex/auth.json
 `)
 	return cmd
 }
@@ -2106,7 +2106,7 @@ rascal auth sync --host 203.0.113.10
 				}
 			}
 			if strings.TrimSpace(host) != "" {
-				githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
+				githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")))
 				if githubRuntimeToken == "" {
 					return &cliError{Code: exitInput, Message: "--github-runtime-token is required when --host is set"}
 				}
@@ -2193,9 +2193,9 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 				if apiToken == "" {
 					return &cliError{Code: exitInput, Message: "missing API token", Hint: "pass --api-token or set local config"}
 				}
-				githubRuntimeToken = firstNonEmpty(githubRuntimeToken, strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
+				githubRuntimeToken = firstNonEmpty(githubRuntimeToken, strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")))
 				if githubRuntimeToken == "" {
-					return &cliError{Code: exitInput, Message: "missing GitHub runtime token", Hint: "pass --github-runtime-token or set GITHUB_RUNTIME_TOKEN"}
+					return &cliError{Code: exitInput, Message: "missing GitHub runtime token", Hint: "pass --github-runtime-token or set RASCAL_GITHUB_TOKEN"}
 				}
 				if webhookSecret == "" {
 					return &cliError{Code: exitInput, Message: "missing webhook secret", Hint: "pass --webhook-secret"}
@@ -2242,7 +2242,7 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path")
 	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH target port")
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token (defaults to current config)")
-	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token (or GITHUB_RUNTIME_TOKEN)")
+	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token (or RASCAL_GITHUB_TOKEN)")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to upload to /etc/rascal/codex_auth.json")
 	cmd.Flags().BoolVar(&restartSvc, "restart-service", true, "restart active rascal slot after updating env")

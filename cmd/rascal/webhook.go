@@ -292,7 +292,7 @@ func resolveWebhookTestInput(in webhookTestInput, cfg config.ClientConfig) (webh
 	if out.Event == "" {
 		out.Event = webhookTestDefaultEvent
 	}
-	out.WebhookSecret = firstNonEmpty(strings.TrimSpace(in.WebhookSecret), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")), strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")))
+	out.WebhookSecret = firstNonEmpty(strings.TrimSpace(in.WebhookSecret), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")))
 
 	if out.ServerURL == "" {
 		return out, &cliError{Code: exitInput, Message: "missing server url", Hint: "pass --server-url or set RASCAL_SERVER_URL"}

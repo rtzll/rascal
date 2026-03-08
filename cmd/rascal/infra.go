@@ -94,7 +94,7 @@ func (a *app) newInfraCmd() *cobra.Command {
 		Short: "Infrastructure operations (provisioning/deploy)",
 		Long:  "Provision and deploy Rascal infrastructure resources.",
 		Example: strings.TrimSpace(`
-rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$GITHUB_RUNTIME_TOKEN"
+rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 rascal infra provision-hetzner --token "$HCLOUD_TOKEN"
 rascal infra deploy-existing --host 203.0.113.10 --ssh-key ~/.ssh/id_ed25519
 `),
@@ -209,8 +209,8 @@ func (a *app) newInfraUpCmd() *cobra.Command {
 		Short: "Provision (optional) and deploy rascald",
 		Long:  "One-shot infrastructure flow: optionally provision a Hetzner host, then deploy rascald over SSH.",
 		Example: strings.TrimSpace(`
-rascal infra up --host 203.0.113.10 --github-runtime-token "$GITHUB_RUNTIME_TOKEN" --codex-auth ~/.codex/auth.json
-rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$GITHUB_RUNTIME_TOKEN" --codex-auth ~/.codex/auth.json
+rascal infra up --host 203.0.113.10 --github-runtime-token "$RASCAL_GITHUB_TOKEN" --codex-auth ~/.codex/auth.json
+rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$RASCAL_GITHUB_TOKEN" --codex-auth ~/.codex/auth.json
 `),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			host = strings.TrimSpace(host)
@@ -472,7 +472,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 			}
 			apiToken = created
 		}
-		githubRuntimeToken = firstNonEmpty(githubRuntimeToken, strings.TrimSpace(os.Getenv("GITHUB_RUNTIME_TOKEN")), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_RUNTIME_TOKEN")))
+		githubRuntimeToken = firstNonEmpty(githubRuntimeToken, strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")))
 		if githubRuntimeToken == "" {
 			return deployExistingResult{}, &cliError{Code: exitInput, Message: "--github-runtime-token is required when --upload-env is used"}
 		}

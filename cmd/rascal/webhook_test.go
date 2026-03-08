@@ -10,7 +10,43 @@ import (
 
 func TestResolveWebhookTestInputMissingSecret(t *testing.T) {
 	t.Setenv("RASCAL_GITHUB_WEBHOOK_SECRET", "")
-	t.Setenv("GITHUB_WEBHOOK_SECRET", "")
+
+	_, err := resolveWebhookTestInput(webhookTestInput{
+		ServerURL: "http://localhost:8080",
+		Repo:      "owner/repo",
+		Event:     "issues",
+	}, config.ClientConfig{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	ce, ok := err.(*cliError)
+	if !ok {
+		t.Fatalf("expected cliError, got %T", err)
+	}
+	if ce.Message != "missing webhook secret" {
+		t.Fatalf("unexpected message: %q", ce.Message)
+	}
+}
+
+func TestResolveWebhookTestInputUsesCanonicalWebhookSecretEnv(t *testing.T) {
+	t.Setenv("RASCAL_GITHUB_WEBHOOK_SECRET", "env-secret")
+
+	got, err := resolveWebhookTestInput(webhookTestInput{
+		ServerURL: "http://localhost:8080",
+		Repo:      "owner/repo",
+		Event:     "issues",
+	}, config.ClientConfig{})
+	if err != nil {
+		t.Fatalf("resolveWebhookTestInput failed: %v", err)
+	}
+	if got.WebhookSecret != "env-secret" {
+		t.Fatalf("webhook secret = %q, want env-secret", got.WebhookSecret)
+	}
+}
+
+func TestResolveWebhookTestInputIgnoresLegacyWebhookSecretEnv(t *testing.T) {
+	t.Setenv("RASCAL_GITHUB_WEBHOOK_SECRET", "")
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "legacy-secret")
 
 	_, err := resolveWebhookTestInput(webhookTestInput{
 		ServerURL: "http://localhost:8080",

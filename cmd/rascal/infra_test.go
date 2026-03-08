@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rtzll/rascal/internal/config"
@@ -140,5 +141,50 @@ func TestRunDeployExistingUsesConfiguredHost(t *testing.T) {
 	}
 	if result.Host != "203.0.113.10" {
 		t.Fatalf("result host = %q, want config host", result.Host)
+	}
+}
+
+func TestRunDeployExistingUsesCanonicalRuntimeTokenEnv(t *testing.T) {
+	origDeploy := deployToExistingHostFn
+	t.Cleanup(func() {
+		deployToExistingHostFn = origDeploy
+	})
+
+	deployToExistingHostFn = func(cfg deployConfig) error {
+		return nil
+	}
+
+	t.Setenv("RASCAL_GITHUB_TOKEN", "runtime-token")
+
+	a := &app{}
+	_, err := a.runDeployExisting(deployExistingInput{
+		Host:           "203.0.113.10",
+		SSHPort:        22,
+		GOARCH:         "amd64",
+		SkipAuthUpload: true,
+		RawErrors:      true,
+	})
+	if err != nil {
+		t.Fatalf("runDeployExisting failed: %v", err)
+	}
+}
+
+func TestRunDeployExistingIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
+	t.Setenv("RASCAL_GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_RUNTIME_TOKEN", "legacy-runtime-token")
+
+	a := &app{}
+	_, err := a.runDeployExisting(deployExistingInput{
+		Host:           "203.0.113.10",
+		SSHPort:        22,
+		GOARCH:         "amd64",
+		SkipAuthUpload: true,
+		RawErrors:      true,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "--github-runtime-token is required when --upload-env is used") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
