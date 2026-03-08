@@ -7,7 +7,7 @@ Usage:
 Examples:
 rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 rascal infra provision-hetzner --token "$HCLOUD_TOKEN"
-rascal infra deploy-existing --host 203.0.113.10 --ssh-key ~/.ssh/id_ed25519
+rascal infra deploy-existing --host "$SERVER_IP" --ssh-key ~/.ssh/id_ed25519
 
 Available Commands:
   deploy-existing   Deploy rascald to an existing Linux host over SSH

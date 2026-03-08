@@ -5,7 +5,7 @@ This is the fastest path for common production issues.
 Set variables once:
 
 ```bash
-HOST=203.0.113.10
+HOST=your-server-host
 DOMAIN=rascal.example.com
 REPO=OWNER/REPO
 ```

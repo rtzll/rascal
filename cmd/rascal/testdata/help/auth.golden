@@ -6,7 +6,7 @@ Usage:
 
 Examples:
 rascal auth rotate --write-config
-rascal auth sync --host 203.0.113.10
+rascal auth sync --host "$SERVER_IP"
 
 Available Commands:
   credentials Manage stored Codex credentials on rascald

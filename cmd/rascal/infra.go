@@ -97,7 +97,7 @@ func (a *app) newInfraCmd() *cobra.Command {
 		Example: strings.TrimSpace(`
 rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 rascal infra provision-hetzner --token "$HCLOUD_TOKEN"
-rascal infra deploy-existing --host 203.0.113.10 --ssh-key ~/.ssh/id_ed25519
+rascal infra deploy-existing --host "$SERVER_IP" --ssh-key ~/.ssh/id_ed25519
 `),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
@@ -209,7 +209,7 @@ func (a *app) newInfraUpCmd() *cobra.Command {
 		Short: "Provision (optional) and deploy rascald",
 		Long:  "One-shot infrastructure flow: optionally provision a Hetzner host, then deploy rascald over SSH.",
 		Example: strings.TrimSpace(`
-rascal infra up --host 203.0.113.10 --github-runtime-token "$RASCAL_GITHUB_TOKEN"
+rascal infra up --host "$SERVER_IP" --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$RASCAL_GITHUB_TOKEN" --codex-auth ~/.codex/auth.json
 `),
 		RunE: func(_ *cobra.Command, _ []string) error {

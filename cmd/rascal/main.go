@@ -885,10 +885,10 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 func (a *app) newDeployCmd() *cobra.Command {
 	cmd := a.newDeployExistingCmd("deploy", "Deploy rascald to an existing host")
 	cmd.Long = "Deploy or redeploy rascald to an existing Linux host over SSH without running provisioning or webhook setup."
-	cmd.Example = strings.TrimSpace(`
-rascal deploy --host 203.0.113.10
-rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN"
-rascal deploy --host 203.0.113.10 --codex-auth ~/.codex/auth.json
+cmd.Example = strings.TrimSpace(`
+rascal deploy --host "$SERVER_IP"
+rascal deploy --host "$SERVER_IP" --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN"
+rascal deploy --host "$SERVER_IP" --codex-auth ~/.codex/auth.json
 `)
 	return cmd
 }
@@ -1498,7 +1498,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 		Example: strings.TrimSpace(`
   rascal doctor
   rascal doctor --fix
-  rascal doctor --host 203.0.113.10
+  rascal doctor --host "$SERVER_IP"
 `),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			_, statErr := os.Stat(a.configPath)
@@ -2090,7 +2090,7 @@ func (a *app) newAuthCmd() *cobra.Command {
 		Long:  "Manage local and remote authentication secrets used by rascald and the CLI.",
 		Example: strings.TrimSpace(`
 rascal auth rotate --write-config
-rascal auth sync --host 203.0.113.10
+rascal auth sync --host "$SERVER_IP"
 `),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()

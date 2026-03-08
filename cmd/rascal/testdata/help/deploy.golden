@@ -4,9 +4,9 @@ Usage:
   rascal deploy [flags]
 
 Examples:
-rascal deploy --host 203.0.113.10
-rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN"
-rascal deploy --host 203.0.113.10 --codex-auth ~/.codex/auth.json
+rascal deploy --host "$SERVER_IP"
+rascal deploy --host "$SERVER_IP" --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN"
+rascal deploy --host "$SERVER_IP" --codex-auth ~/.codex/auth.json
 
 Flags:
       --agent-backend string          agent backend to use on the server (goose or codex) (default "goose")
