@@ -44,6 +44,17 @@ Cancel active run:
 ./bin/rascal cancel <run_id>
 ```
 
+## Deployment Model
+
+Rascal deploys `rascald` with blue/green slots, but active task execution is
+detached into Docker containers.
+
+Operationally this means:
+
+- Blue/green still provides readiness-checked cutover, rollback safety, and API/webhook continuity.
+- Blue/green is no longer required to keep active runs alive during deploy.
+- After deploy, restart, or slot rotation, the active slot should recover and adopt detached run supervision.
+
 ## Agent Session Resume
 
 Rascal can persist agent session state on disk and resume it across later runs

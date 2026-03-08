@@ -54,6 +54,10 @@ See also: [webhooks.md](webhooks.md)
 
 ## 2) Deploy Failing or Regressing
 
+Blue/green deploy and rollback are primarily for restoring `rascald` API/webhook
+service safely. In-flight task execution is detached in Docker containers and
+should survive slot rotation while the active slot adopts supervision.
+
 Run deploy directly:
 
 ```bash
@@ -146,6 +150,10 @@ If run remains active unexpectedly, capture:
 ## 5) Manual Rollback (Blue/Green)
 
 Use only if automatic rollback did not recover service.
+
+This restores the control plane to a known-good slot. It is not intended to
+preserve already-running work because active runs continue in detached
+containers and should be adopted by whichever slot becomes active.
 
 1. Determine slot state:
 
