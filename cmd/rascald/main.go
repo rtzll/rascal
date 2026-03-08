@@ -403,7 +403,7 @@ func (s *server) bootstrapAuth() error {
 		ExternalLogin: "system",
 		Role:          state.UserRoleAdmin,
 	}); err != nil {
-		return err
+		return fmt.Errorf("bootstrap system user: %w", err)
 	}
 	token := strings.TrimSpace(s.cfg.APIToken)
 	if token == "" {
@@ -414,14 +414,17 @@ func (s *server) bootstrapAuth() error {
 		ExternalLogin: "bootstrap-admin",
 		Role:          state.UserRoleAdmin,
 	}); err != nil {
-		return err
+		return fmt.Errorf("bootstrap admin user: %w", err)
 	}
-	return s.store.UpsertAPIKey(state.UpsertAPIKeyInput{
+	if err := s.store.UpsertAPIKey(state.UpsertAPIKeyInput{
 		ID:      "bootstrap-admin-key",
 		UserID:  "bootstrap-admin",
 		KeyHash: hashAPIKey(token),
 		Label:   "bootstrap",
-	})
+	}); err != nil {
+		return fmt.Errorf("bootstrap admin api key: %w", err)
+	}
+	return nil
 }
 
 func hashAPIKey(token string) string {
@@ -819,7 +822,7 @@ func credentialResponse(credential state.CodexCredential) map[string]any {
 func newCredentialID() (string, error) {
 	buf := make([]byte, 8)
 	if _, err := rand.Read(buf); err != nil {
-		return "", err
+		return "", fmt.Errorf("generate credential id: %w", err)
 	}
 	return "cred_" + hex.EncodeToString(buf), nil
 }
@@ -1576,7 +1579,7 @@ func (s *server) prepareRunCredentialAuth(runID, runDir, requesterUserID string)
 			return lease.ID, nil
 		}
 		if !errors.Is(err, credentials.ErrNoCredentialAvailable) {
-			return "", err
+			return "", fmt.Errorf("acquire broker credential: %w", err)
 		}
 	}
 

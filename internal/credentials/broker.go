@@ -57,12 +57,12 @@ func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 	}
 	now := time.Now().UTC()
 	if _, err := b.store.ReclaimExpiredCredentialLeases(now); err != nil {
-		return Lease{}, err
+		return Lease{}, fmt.Errorf("reclaim expired credential leases: %w", err)
 	}
 	for attempt := 0; attempt < 12; attempt++ {
 		candidates, err := b.store.ListCredentialCandidates(req.UserID, now, now.Add(-b.usageWindow))
 		if err != nil {
-			return Lease{}, err
+			return Lease{}, fmt.Errorf("list credential candidates for %s: %w", req.UserID, err)
 		}
 		if len(candidates) == 0 {
 			return Lease{}, ErrNoCredentialAvailable
@@ -92,7 +92,7 @@ func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 			if errors.Is(err, ErrNoCredentialMatch) {
 				return Lease{}, ErrNoCredentialAvailable
 			}
-			return Lease{}, err
+			return Lease{}, fmt.Errorf("select credential for run %s: %w", req.RunID, err)
 		}
 
 		leaseID, err := newLeaseID()
@@ -112,7 +112,7 @@ func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 			Now:          acquiredAt,
 		})
 		if err != nil {
-			return Lease{}, err
+			return Lease{}, fmt.Errorf("create credential lease for credential %s: %w", credentialID, err)
 		}
 		if !ok {
 			continue
@@ -123,7 +123,7 @@ func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 			if _, _, releaseErr := b.store.ReleaseCredentialLease(leaseID); releaseErr != nil {
 				return Lease{}, fmt.Errorf("release credential lease %s after lookup failure: %v: %w", leaseID, releaseErr, err)
 			}
-			return Lease{}, err
+			return Lease{}, fmt.Errorf("get credential %s: %w", credentialID, err)
 		}
 		if !exists {
 			if _, _, releaseErr := b.store.ReleaseCredentialLease(leaseID); releaseErr != nil {
@@ -140,13 +140,13 @@ func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 			if statusErr := b.store.SetCodexCredentialStatus(credentialID, "cooldown", &until, "credential decrypt failure"); statusErr != nil {
 				return Lease{}, fmt.Errorf("set credential %s cooldown after decrypt failure: %v: %w", credentialID, statusErr, err)
 			}
-			return Lease{}, err
+			return Lease{}, fmt.Errorf("decrypt credential %s auth blob: %w", credentialID, err)
 		}
 		if err := b.store.SetRunCredentialID(req.RunID, credentialID); err != nil {
 			if _, _, releaseErr := b.store.ReleaseCredentialLease(leaseID); releaseErr != nil {
 				return Lease{}, fmt.Errorf("release credential lease %s after run credential update failure: %v: %w", leaseID, releaseErr, err)
 			}
-			return Lease{}, err
+			return Lease{}, fmt.Errorf("set run %s credential id %s: %w", req.RunID, credentialID, err)
 		}
 		return Lease{
 			ID:           leaseID,
@@ -170,7 +170,7 @@ func (b *Broker) Renew(_ context.Context, leaseID string) error {
 	now := time.Now().UTC()
 	ok, err := b.store.RenewCredentialLease(leaseID, now.Add(b.leaseTTL), now)
 	if err != nil {
-		return err
+		return fmt.Errorf("renew credential lease %s: %w", leaseID, err)
 	}
 	if !ok {
 		return ErrLeaseLost
@@ -185,7 +185,7 @@ func (b *Broker) Release(_ context.Context, leaseID string) error {
 	}
 	lease, released, err := b.store.ReleaseCredentialLease(leaseID)
 	if err != nil {
-		return err
+		return fmt.Errorf("release credential lease %s: %w", leaseID, err)
 	}
 	if !released {
 		return nil
@@ -201,7 +201,10 @@ func (b *Broker) MarkCredentialCooldown(credentialID, reason string, duration ti
 		duration = 5 * time.Minute
 	}
 	until := time.Now().UTC().Add(duration)
-	return b.store.SetCodexCredentialStatus(credentialID, "cooldown", &until, strings.TrimSpace(reason))
+	if err := b.store.SetCodexCredentialStatus(credentialID, "cooldown", &until, strings.TrimSpace(reason)); err != nil {
+		return fmt.Errorf("set credential %s cooldown: %w", credentialID, err)
+	}
+	return nil
 }
 
 func newLeaseID() (string, error) {

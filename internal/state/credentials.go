@@ -153,11 +153,11 @@ func (s *Store) UpsertUser(in UpsertUserInput) (User, error) {
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}); err != nil {
-		return User{}, err
+		return User{}, fmt.Errorf("upsert user %s: %w", in.ID, err)
 	}
 	row, err := s.q.GetUserByID(context.Background(), in.ID)
 	if err != nil {
-		return User{}, err
+		return User{}, fmt.Errorf("get user %s after upsert: %w", in.ID, err)
 	}
 	return fromDBUser(row), nil
 }
@@ -193,7 +193,7 @@ func (s *Store) UpsertAPIKey(in UpsertAPIKeyInput) error {
 		return fmt.Errorf("id, user_id and key_hash are required")
 	}
 	now := time.Now().UTC().UnixNano()
-	return s.q.UpsertAPIKey(context.Background(), sqlitegen.UpsertAPIKeyParams{
+	if err := s.q.UpsertAPIKey(context.Background(), sqlitegen.UpsertAPIKeyParams{
 		ID:         in.ID,
 		UserID:     in.UserID,
 		KeyHash:    in.KeyHash,
@@ -201,7 +201,10 @@ func (s *Store) UpsertAPIKey(in UpsertAPIKeyInput) error {
 		CreatedAt:  now,
 		LastUsedAt: now,
 		DisabledAt: sql.NullInt64{},
-	})
+	}); err != nil {
+		return fmt.Errorf("upsert api key %s for user %s: %w", in.ID, in.UserID, err)
+	}
+	return nil
 }
 
 func (s *Store) ResolveAPIPrincipalByKeyHash(keyHash string) (APIPrincipal, bool, error) {
@@ -214,7 +217,7 @@ func (s *Store) ResolveAPIPrincipalByKeyHash(keyHash string) (APIPrincipal, bool
 		if errors.Is(err, sql.ErrNoRows) {
 			return APIPrincipal{}, false, nil
 		}
-		return APIPrincipal{}, false, err
+		return APIPrincipal{}, false, fmt.Errorf("resolve api principal by key hash: %w", err)
 	}
 	if _, err := s.q.TouchAPIKeyLastUsed(context.Background(), sqlitegen.TouchAPIKeyLastUsedParams{
 		LastUsedAt: time.Now().UTC().UnixNano(),
@@ -241,7 +244,10 @@ func (s *Store) SetTaskCreatedByUser(taskID, userID string) error {
 		UpdatedAt:       time.Now().UTC().UnixNano(),
 		ID:              taskID,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("set task %s created_by_user_id to %s: %w", taskID, userID, err)
+	}
+	return nil
 }
 
 func (s *Store) SetRunCreatedByUser(runID, userID string) error {
@@ -255,7 +261,10 @@ func (s *Store) SetRunCreatedByUser(runID, userID string) error {
 		UpdatedAt:       time.Now().UTC().UnixNano(),
 		ID:              runID,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("set run %s created_by_user_id to %s: %w", runID, userID, err)
+	}
+	return nil
 }
 
 func (s *Store) SetRunCredentialID(runID, credentialID string) error {
@@ -269,7 +278,10 @@ func (s *Store) SetRunCredentialID(runID, credentialID string) error {
 		UpdatedAt:    time.Now().UTC().UnixNano(),
 		ID:           runID,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("set run %s credential_id to %s: %w", runID, credentialID, err)
+	}
+	return nil
 }
 
 func (s *Store) GetRunCredentialInfo(runID string) (RunCredentialInfo, bool) {
@@ -321,11 +333,11 @@ func (s *Store) CreateCodexCredential(in CreateCodexCredentialInput) (CodexCrede
 		CreatedAt:         now.UnixNano(),
 		UpdatedAt:         now.UnixNano(),
 	}); err != nil {
-		return CodexCredential{}, err
+		return CodexCredential{}, fmt.Errorf("create credential %s: %w", in.ID, err)
 	}
 	out, ok, err := s.GetCodexCredential(in.ID)
 	if err != nil {
-		return CodexCredential{}, err
+		return CodexCredential{}, fmt.Errorf("update credential %s: %w", in.ID, err)
 	}
 	if !ok {
 		return CodexCredential{}, fmt.Errorf("credential %q not found after create", in.ID)
@@ -366,7 +378,7 @@ func (s *Store) UpdateCodexCredential(in UpdateCodexCredentialInput) (CodexCrede
 		ID:                in.ID,
 	})
 	if err != nil {
-		return CodexCredential{}, err
+		return CodexCredential{}, fmt.Errorf("update credential %s: %w", in.ID, err)
 	}
 	if rows == 0 {
 		return CodexCredential{}, fmt.Errorf("credential %q not found", in.ID)
@@ -397,7 +409,10 @@ func (s *Store) SetCodexCredentialStatus(credentialID, status string, cooldownUn
 		UpdatedAt:     time.Now().UTC().UnixNano(),
 		ID:            credentialID,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("set credential %s status to %s: %w", credentialID, status, err)
+	}
+	return nil
 }
 
 func (s *Store) GetCodexCredential(credentialID string) (CodexCredential, bool, error) {
@@ -406,7 +421,7 @@ func (s *Store) GetCodexCredential(credentialID string) (CodexCredential, bool, 
 		if errors.Is(err, sql.ErrNoRows) {
 			return CodexCredential{}, false, nil
 		}
-		return CodexCredential{}, false, err
+		return CodexCredential{}, false, fmt.Errorf("get credential %s: %w", credentialID, err)
 	}
 	return fromDBCodexCredential(row), true, nil
 }
@@ -414,7 +429,7 @@ func (s *Store) GetCodexCredential(credentialID string) (CodexCredential, bool, 
 func (s *Store) ListCodexCredentialsByOwner(ownerUserID string) ([]CodexCredential, error) {
 	rows, err := s.q.ListCodexCredentialsByOwner(context.Background(), toNullString(ownerUserID))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list credentials by owner %s: %w", ownerUserID, err)
 	}
 	out := make([]CodexCredential, 0, len(rows))
 	for _, row := range rows {
@@ -426,7 +441,7 @@ func (s *Store) ListCodexCredentialsByOwner(ownerUserID string) ([]CodexCredenti
 func (s *Store) ListSharedCodexCredentials() ([]CodexCredential, error) {
 	rows, err := s.q.ListSharedCodexCredentials(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list shared credentials: %w", err)
 	}
 	out := make([]CodexCredential, 0, len(rows))
 	for _, row := range rows {
@@ -438,7 +453,7 @@ func (s *Store) ListSharedCodexCredentials() ([]CodexCredential, error) {
 func (s *Store) ListAllCodexCredentials() ([]CodexCredential, error) {
 	rows, err := s.q.ListAllCodexCredentials(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list all credentials: %w", err)
 	}
 	out := make([]CodexCredential, 0, len(rows))
 	for _, row := range rows {
@@ -454,7 +469,7 @@ func (s *Store) ListCredentialCandidates(requesterUserID string, now, usageWindo
 		RequesterUserID:  toNullString(requesterUserID),
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list credential candidates for %s: %w", requesterUserID, err)
 	}
 	out := make([]CredentialCandidate, 0, len(rows))
 	for _, row := range rows {
@@ -509,7 +524,7 @@ func (s *Store) TryCreateCredentialLease(in CreateCredentialLeaseInput) (bool, e
 		Now:          sql.NullInt64{Int64: in.Now.UTC().UnixNano(), Valid: true},
 	})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("create credential lease %s for credential %s: %w", in.ID, in.CredentialID, err)
 	}
 	return rows > 0, nil
 }
@@ -520,7 +535,7 @@ func (s *Store) GetCredentialLease(leaseID string) (CredentialLease, bool, error
 		if errors.Is(err, sql.ErrNoRows) {
 			return CredentialLease{}, false, nil
 		}
-		return CredentialLease{}, false, err
+		return CredentialLease{}, false, fmt.Errorf("get credential lease %s: %w", leaseID, err)
 	}
 	return fromDBCredentialLease(row), true, nil
 }
@@ -531,7 +546,7 @@ func (s *Store) GetActiveCredentialLeaseByRunID(runID string) (CredentialLease, 
 		if errors.Is(err, sql.ErrNoRows) {
 			return CredentialLease{}, false, nil
 		}
-		return CredentialLease{}, false, err
+		return CredentialLease{}, false, fmt.Errorf("get active credential lease for run %s: %w", runID, err)
 	}
 	return fromDBCredentialLease(row), true, nil
 }
@@ -553,7 +568,7 @@ func (s *Store) RenewCredentialLease(leaseID string, expiresAt, now time.Time) (
 		ExpiresAt_2: now.UTC().UnixNano(),
 	})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("renew credential lease %s: %w", leaseID, err)
 	}
 	return rows > 0, nil
 }
@@ -571,7 +586,7 @@ func (s *Store) ReleaseCredentialLease(leaseID string) (CredentialLease, bool, e
 		if errors.Is(err, sql.ErrNoRows) {
 			return CredentialLease{}, false, nil
 		}
-		return CredentialLease{}, false, err
+		return CredentialLease{}, false, fmt.Errorf("release credential lease %s: %w", leaseID, err)
 	}
 	return fromDBCredentialLease(row), true, nil
 }
@@ -585,7 +600,10 @@ func (s *Store) ReleaseCredentialLeaseByRunID(runID string) error {
 		ReleasedAt: sql.NullInt64{Int64: time.Now().UTC().UnixNano(), Valid: true},
 		RunID:      runID,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("release credential lease by run %s: %w", runID, err)
+	}
+	return nil
 }
 
 func (s *Store) ReclaimExpiredCredentialLeases(now time.Time) (int, error) {
@@ -597,7 +615,7 @@ func (s *Store) ReclaimExpiredCredentialLeases(now time.Time) (int, error) {
 		ExpiresAt:  now.UTC().UnixNano(),
 	})
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("reclaim expired credential leases before %s: %w", now.UTC().Format(time.RFC3339), err)
 	}
 	return int(rows), nil
 }
@@ -610,12 +628,15 @@ func (s *Store) UpsertCredentialUsage(credentialID string, windowStart time.Time
 	if windowStart.IsZero() {
 		windowStart = time.Now().UTC().Truncate(time.Hour)
 	}
-	return s.q.UpsertCredentialUsage(context.Background(), sqlitegen.UpsertCredentialUsageParams{
+	if err := s.q.UpsertCredentialUsage(context.Background(), sqlitegen.UpsertCredentialUsageParams{
 		CredentialID: credentialID,
 		WindowStart:  windowStart.UTC().UnixNano(),
 		Tokens:       tokens,
 		Runs:         runs,
-	})
+	}); err != nil {
+		return fmt.Errorf("upsert credential usage for %s: %w", credentialID, err)
+	}
+	return nil
 }
 
 func fromDBUser(row sqlitegen.User) User {
