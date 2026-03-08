@@ -218,13 +218,12 @@ func (s *Store) MarkTaskOpen(taskID string) error {
 	if taskID == "" {
 		return fmt.Errorf("task id is required")
 	}
-	res, err := s.db.ExecContext(context.Background(), "UPDATE tasks SET status = 'open', updated_at = ? WHERE id = ?", time.Now().UTC().UnixNano(), taskID)
+	rows, err := s.q.MarkTaskOpen(context.Background(), sqlitegen.MarkTaskOpenParams{
+		UpdatedAt: time.Now().UTC().UnixNano(),
+		ID:        taskID,
+	})
 	if err != nil {
 		return fmt.Errorf("mark task %q open: %w", taskID, err)
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("count updated rows for task %q reopen: %w", taskID, err)
 	}
 	if rows == 0 {
 		return fmt.Errorf("task %q not found", taskID)

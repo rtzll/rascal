@@ -88,6 +88,12 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 	if !store.IsTaskCompleted("repo#1") {
 		t.Fatal("expected task to be completed")
 	}
+	if err := store.MarkTaskOpen("repo#1"); err != nil {
+		t.Fatalf("mark task open: %v", err)
+	}
+	if store.IsTaskCompleted("repo#1") {
+		t.Fatal("expected task to be reopened")
+	}
 }
 
 func TestStoreAllowsRecoveryTransitionRunningToQueued(t *testing.T) {

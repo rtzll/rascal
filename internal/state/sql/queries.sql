@@ -67,6 +67,11 @@ UPDATE tasks
 SET status = 'completed', updated_at = ?
 WHERE id = ?;
 
+-- name: MarkTaskOpen :execrows
+UPDATE tasks
+SET status = 'open', updated_at = ?
+WHERE id = ?;
+
 -- name: SetTaskLastRun :execrows
 UPDATE tasks
 SET

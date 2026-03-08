@@ -202,6 +202,18 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatalf("expected task to be completed after MarkTaskCompleted")
 	}
 
+	if _, err := q.MarkTaskOpen(ctx, MarkTaskOpenParams{UpdatedAt: later + 4, ID: "task_1"}); err != nil {
+		t.Fatalf("MarkTaskOpen: %v", err)
+	}
+
+	completed, err = q.IsTaskCompleted(ctx, "task_1")
+	if err != nil {
+		t.Fatalf("IsTaskCompleted (after reopen): %v", err)
+	}
+	if completed {
+		t.Fatalf("expected task to be open after MarkTaskOpen")
+	}
+
 	run1, err := q.InsertRun(ctx, InsertRunParams{
 		ID:           "run_1",
 		TaskID:       "task_1",

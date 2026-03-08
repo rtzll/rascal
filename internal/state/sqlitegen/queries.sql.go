@@ -1788,6 +1788,25 @@ func (q *Queries) MarkTaskCompleted(ctx context.Context, arg MarkTaskCompletedPa
 	return result.RowsAffected()
 }
 
+const markTaskOpen = `-- name: MarkTaskOpen :execrows
+UPDATE tasks
+SET status = 'open', updated_at = ?
+WHERE id = ?
+`
+
+type MarkTaskOpenParams struct {
+	UpdatedAt int64  `json:"updated_at"`
+	ID        string `json:"id"`
+}
+
+func (q *Queries) MarkTaskOpen(ctx context.Context, arg MarkTaskOpenParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markTaskOpen, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const reclaimExpiredCredentialLeases = `-- name: ReclaimExpiredCredentialLeases :execrows
 UPDATE credential_leases
 SET released_at = ?
