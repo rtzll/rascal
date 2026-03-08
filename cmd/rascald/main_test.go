@@ -2035,6 +2035,129 @@ func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *tes
 	}
 }
 
+func TestExecuteRunPostsFailureCommentForGooseUsageLimit(t *testing.T) {
+	launcher := &fakeLauncher{
+		res: fakeRunResult{
+			ExitCode: 1,
+			Error:    "goose run failed: exit status 1",
+		},
+	}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_comment_usage_limit",
+		TaskID:      "owner/repo#53",
+		Repo:        "owner/repo",
+		Task:        "Address PR #53 feedback",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/pr-53",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		IssueNumber: 16,
+		PRNumber:    53,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 53,
+		RequestedBy: "alice",
+		Trigger:     "pr_comment",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+	gooseLog := `{"type":"message","message":{"id":null,"role":"assistant","created":1772899608,"content":[{"type":"text","text":"Ran into this error: Request failed: Codex CLI error: You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 10th, 2026 6:31 AM..\n\nPlease retry if you think this is a transient or recoverable error."}],"metadata":{"userVisible":true,"agentVisible":true}}}`
+	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(gooseLog+"\n"), 0o644); err != nil {
+		t.Fatalf("write goose log: %v", err)
+	}
+
+	s.executeRun(run.ID)
+
+	comments := fakeGH.postedComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted comment, got %d", len(comments))
+	}
+	comment := comments[0]
+	if comment.repo != "owner/repo" || comment.issueNumber != 53 {
+		t.Fatalf("unexpected comment target: %+v", comment)
+	}
+	if !strings.Contains(comment.body, runFailureCommentBodyMarker) {
+		t.Fatalf("expected failure marker in comment body, got body:\n%s", comment.body)
+	}
+	if !strings.Contains(comment.body, "@alice Rascal run `run_comment_usage_limit` failed because Goose hit the Codex usage limit.") {
+		t.Fatalf("expected usage-limit headline, got body:\n%s", comment.body)
+	}
+	if !strings.Contains(comment.body, "The provider said to try again at Mar 10th, 2026 6:31 AM.") {
+		t.Fatalf("expected retry timestamp, got body:\n%s", comment.body)
+	}
+	if !strings.Contains(comment.body, "Run error:\ngoose run failed: exit status 1") {
+		t.Fatalf("expected run error details, got body:\n%s", comment.body)
+	}
+	if !strings.Contains(comment.body, "Goose log:\n"+gooseLog) {
+		t.Fatalf("expected goose log details, got body:\n%s", comment.body)
+	}
+	if _, err := os.Stat(runFailureCommentMarkerPath(run.RunDir)); err != nil {
+		t.Fatalf("expected failure marker after successful post: %v", err)
+	}
+}
+
+func TestExecuteRunPostsFailureCommentForIssueTriggeredRun(t *testing.T) {
+	launcher := &fakeLauncher{
+		res: fakeRunResult{
+			ExitCode: 1,
+			Error:    "goose run failed: exit status 1",
+		},
+	}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_issue_usage_limit",
+		TaskID:      "owner/repo#16",
+		Repo:        "owner/repo",
+		Task:        "Investigate issue #16",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/issue-16",
+		Trigger:     "issue_label",
+		RunDir:      t.TempDir(),
+		IssueNumber: 16,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	gooseLog := `{"type":"message","message":{"content":[{"type":"text","text":"Request failed: Codex CLI error: You've hit your usage limit. Try again at Mar 10th, 2026 6:31 AM."}]}}`
+	if err := os.WriteFile(filepath.Join(run.RunDir, "goose.ndjson"), []byte(gooseLog+"\n"), 0o644); err != nil {
+		t.Fatalf("write goose log: %v", err)
+	}
+
+	s.executeRun(run.ID)
+
+	comments := fakeGH.postedComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted comment, got %d", len(comments))
+	}
+	comment := comments[0]
+	if comment.repo != "owner/repo" || comment.issueNumber != 16 {
+		t.Fatalf("unexpected comment target: %+v", comment)
+	}
+	if !strings.Contains(comment.body, "Rascal run `run_issue_usage_limit` failed because Goose hit the Codex usage limit.") {
+		t.Fatalf("expected usage-limit headline, got body:\n%s", comment.body)
+	}
+	if !strings.Contains(comment.body, "The provider said to try again at Mar 10th, 2026 6:31 AM.") {
+		t.Fatalf("expected retry timestamp, got body:\n%s", comment.body)
+	}
+}
+
 func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
@@ -2081,7 +2204,7 @@ func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read completion marker: %v", err)
 	}
-	var marker runCompletionCommentMarker
+	var marker runCommentMarker
 	if err := json.Unmarshal(markerData, &marker); err != nil {
 		t.Fatalf("decode completion marker: %v", err)
 	}
@@ -2148,6 +2271,72 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(runCompletionCommentMarkerPath(run.RunDir)); err != nil {
 		t.Fatalf("expected marker after successful retry: %v", err)
+	}
+}
+
+func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{
+		createIssueCommentErrSeq: []error{
+			errors.New("transient github failure"),
+			nil,
+		},
+	}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_failure_retry",
+		TaskID:     "owner/repo#90",
+		Repo:       "owner/repo",
+		Task:       "Address PR #90 feedback",
+		BaseBranch: "main",
+		HeadBranch: "rascal/pr-90",
+		Trigger:    "pr_comment",
+		RunDir:     t.TempDir(),
+		PRNumber:   90,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	run.Error = "goose run failed: exit status 1"
+	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 90,
+		RequestedBy: "alice",
+		Trigger:     "pr_comment",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+
+	s.postRunFailureCommentBestEffort(run)
+
+	if calls := fakeGH.createCommentCalls(); calls != 1 {
+		t.Fatalf("expected one github comment call after first attempt, got %d", calls)
+	}
+	if comments := fakeGH.postedComments(); len(comments) != 0 {
+		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
+	}
+	if _, err := os.Stat(runFailureCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
+		t.Fatalf("expected failure marker to be absent after failed post, stat err=%v", err)
+	}
+
+	s.postRunFailureCommentBestEffort(run)
+
+	if calls := fakeGH.createCommentCalls(); calls != 2 {
+		t.Fatalf("expected second github comment call on retry, got %d", calls)
+	}
+	comments := fakeGH.postedComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted comment after retry, got %d", len(comments))
+	}
+	if !strings.Contains(comments[0].body, "Reason: goose run failed: exit status 1") {
+		t.Fatalf("expected generic failure reason in comment, got body:\n%s", comments[0].body)
+	}
+	if _, err := os.Stat(runFailureCommentMarkerPath(run.RunDir)); err != nil {
+		t.Fatalf("expected failure marker after successful retry: %v", err)
 	}
 }
 

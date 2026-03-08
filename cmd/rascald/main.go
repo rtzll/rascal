@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -39,9 +40,14 @@ const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
 const runResponseTargetFile = "response_target.json"
 const runCompletionCommentMarkerFile = "completion_comment_posted.json"
+const runFailureCommentMarkerFile = "failure_comment_posted.json"
 const runCompletionCommentBodyMarker = "<!-- rascal:completion-comment -->"
 const agentLogFile = "agent.ndjson"
 const legacyAgentLogFile = "goose.ndjson"
+const runFailureCommentBodyMarker = "<!-- rascal:failure-comment -->"
+
+var usageLimitPattern = regexp.MustCompile(`(?i)(?:you['’]?ve hit your usage limit|hit your usage limit|usage limit)`)
+var retryAtPattern = regexp.MustCompile(`(?i)try again at ([^\r\n.]+)`)
 
 type githubClient interface {
 	GetIssue(ctx context.Context, repo string, issueNumber int) (ghapi.IssueData, error)
@@ -90,11 +96,17 @@ type runResponseTarget struct {
 	Trigger     string `json:"trigger"`
 }
 
-type runCompletionCommentMarker struct {
+type runCommentMarker struct {
 	RunID       string `json:"run_id"`
 	Repo        string `json:"repo"`
 	IssueNumber int    `json:"issue_number"`
 	PostedAt    string `json:"posted_at"`
+}
+
+type runFailureSummary struct {
+	Headline string
+	RetryAt  string
+	Reason   string
 }
 
 type createTaskRequest struct {
@@ -1563,8 +1575,11 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	if updated.PRNumber > 0 {
 		s.setTaskPRBestEffort(updated.TaskID, updated.Repo, updated.PRNumber)
 	}
-	if updated.Status == state.StatusSucceeded || updated.Status == state.StatusReview {
+	switch updated.Status {
+	case state.StatusSucceeded, state.StatusReview:
 		s.postRunCompletionCommentBestEffort(updated)
+	case state.StatusFailed:
+		s.postRunFailureCommentBestEffort(updated)
 	}
 
 	s.cleanupDetachedExecution(runID, execRec)
@@ -2358,27 +2373,43 @@ func loadRunResponseTarget(runDir string) (runResponseTarget, bool, error) {
 	return target, true, nil
 }
 
-func runCompletionCommentMarkerPath(runDir string) string {
-	return filepath.Join(strings.TrimSpace(runDir), runCompletionCommentMarkerFile)
+func runCommentMarkerPath(runDir, markerFile string) string {
+	return filepath.Join(strings.TrimSpace(runDir), markerFile)
 }
 
-func runCompletionCommentMarkerExists(runDir string) (bool, error) {
-	path := runCompletionCommentMarkerPath(runDir)
+func runCompletionCommentMarkerPath(runDir string) string {
+	return runCommentMarkerPath(runDir, runCompletionCommentMarkerFile)
+}
+
+func runFailureCommentMarkerPath(runDir string) string {
+	return runCommentMarkerPath(runDir, runFailureCommentMarkerFile)
+}
+
+func runCommentMarkerExists(runDir, markerFile, markerKind string) (bool, error) {
+	path := runCommentMarkerPath(runDir, markerFile)
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
-		return false, fmt.Errorf("stat completion comment marker: %w", err)
+		return false, fmt.Errorf("stat %s marker: %w", markerKind, err)
 	}
 	if info.IsDir() {
-		return false, fmt.Errorf("completion comment marker path is a directory: %s", path)
+		return false, fmt.Errorf("%s marker path is a directory: %s", markerKind, path)
 	}
 	return true, nil
 }
 
-func writeRunCompletionCommentMarker(run state.Run, repo string, issueNumber int) error {
-	marker := runCompletionCommentMarker{
+func runCompletionCommentMarkerExists(runDir string) (bool, error) {
+	return runCommentMarkerExists(runDir, runCompletionCommentMarkerFile, "completion comment")
+}
+
+func runFailureCommentMarkerExists(runDir string) (bool, error) {
+	return runCommentMarkerExists(runDir, runFailureCommentMarkerFile, "failure comment")
+}
+
+func writeRunCommentMarker(run state.Run, repo string, issueNumber int, markerFile, markerKind string) error {
+	marker := runCommentMarker{
 		RunID:       run.ID,
 		Repo:        strings.TrimSpace(repo),
 		IssueNumber: issueNumber,
@@ -2386,13 +2417,21 @@ func writeRunCompletionCommentMarker(run state.Run, repo string, issueNumber int
 	}
 	data, err := json.MarshalIndent(marker, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode completion comment marker: %w", err)
+		return fmt.Errorf("encode %s marker: %w", markerKind, err)
 	}
-	path := runCompletionCommentMarkerPath(run.RunDir)
+	path := runCommentMarkerPath(run.RunDir, markerFile)
 	if err := writeFileAtomically(path, data, 0o644); err != nil {
-		return fmt.Errorf("write completion comment marker: %w", err)
+		return fmt.Errorf("write %s marker: %w", markerKind, err)
 	}
 	return nil
+}
+
+func writeRunCompletionCommentMarker(run state.Run, repo string, issueNumber int) error {
+	return writeRunCommentMarker(run, repo, issueNumber, runCompletionCommentMarkerFile, "completion comment")
+}
+
+func writeRunFailureCommentMarker(run state.Run, repo string, issueNumber int) error {
+	return writeRunCommentMarker(run, repo, issueNumber, runFailureCommentMarkerFile, "failure comment")
 }
 
 func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
@@ -2486,6 +2525,63 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 	}
 }
 
+func (s *server) postRunFailureCommentBestEffort(run state.Run) {
+	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+		return
+	}
+
+	target, ok, err := loadRunResponseTarget(run.RunDir)
+	if err != nil {
+		log.Printf("failed to load run response target for %s: %v", run.ID, err)
+	}
+	if !ok {
+		target = runResponseTarget{}
+	}
+	if markerExists, err := runFailureCommentMarkerExists(run.RunDir); err != nil {
+		log.Printf("failed to check failure comment marker for run %s: %v", run.ID, err)
+		return
+	} else if markerExists {
+		return
+	}
+
+	repo, issueNumber := resolveRunCommentTarget(run, target)
+	if repo == "" || issueNumber <= 0 {
+		return
+	}
+
+	body, err := buildRunFailureComment(run, target)
+	if err != nil {
+		log.Printf("failed to build failure comment for %s: %v", run.ID, err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := s.gh.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
+		log.Printf("failed to post failure comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
+		return
+	}
+	if err := writeRunFailureCommentMarker(run, repo, issueNumber); err != nil {
+		log.Printf("failed to persist failure comment marker for run %s: %v", run.ID, err)
+	}
+}
+
+func resolveRunCommentTarget(run state.Run, target runResponseTarget) (string, int) {
+	repo := strings.TrimSpace(target.Repo)
+	if repo == "" {
+		repo = strings.TrimSpace(run.Repo)
+	}
+	issueNumber := target.IssueNumber
+	if issueNumber <= 0 {
+		if isCommentTriggeredRun(run.Trigger) && run.PRNumber > 0 {
+			issueNumber = run.PRNumber
+		} else {
+			issueNumber = run.IssueNumber
+		}
+	}
+	return repo, issueNumber
+}
+
 func buildRunCompletionComment(run state.Run, target runResponseTarget, repo string) (string, error) {
 	agentOutput := "(no agent output captured)"
 	agentPath, err := resolveRunAgentLogPath(run.RunDir)
@@ -2521,12 +2617,104 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 	return runCompletionCommentBodyMarker + "\n\n" + body, nil
 }
 
+func buildRunFailureComment(run state.Run, target runResponseTarget) (string, error) {
+	agentOutput := ""
+	agentLogLabel := "Agent log"
+	agentPath, err := resolveRunAgentLogPath(run.RunDir)
+	if err == nil {
+		if data, readErr := os.ReadFile(agentPath); readErr == nil {
+			agentOutput = string(data)
+			if filepath.Base(agentPath) == legacyAgentLogFile {
+				agentLogLabel = "Goose log"
+			}
+		} else if !os.IsNotExist(readErr) {
+			return "", fmt.Errorf("read agent log: %w", readErr)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("resolve agent log: %w", err)
+	}
+
+	summary := summarizeRunFailure(run, agentOutput)
+	header := summary.Headline
+	if requestedBy := strings.TrimSpace(target.RequestedBy); requestedBy != "" {
+		header = fmt.Sprintf("@%s %s", requestedBy, header)
+	}
+
+	parts := []string{header}
+	if summary.RetryAt != "" {
+		parts = append(parts, fmt.Sprintf("The provider said to try again at %s.", summary.RetryAt))
+	}
+	if summary.Reason != "" {
+		parts = append(parts, fmt.Sprintf("Reason: %s", summary.Reason))
+	}
+	if details := buildRunFailureDetails(run.Error, agentOutput, agentLogLabel); details != "" {
+		parts = append(parts, "<details><summary>Failure Details</summary>\n\n```text\n"+details+"\n```\n\n</details>")
+	}
+	return runFailureCommentBodyMarker + "\n\n" + strings.Join(parts, "\n\n"), nil
+}
+
+func summarizeRunFailure(run state.Run, agentOutput string) runFailureSummary {
+	corpusParts := make([]string, 0, 2)
+	if reason := strings.TrimSpace(run.Error); reason != "" {
+		corpusParts = append(corpusParts, reason)
+	}
+	if output := strings.TrimSpace(agentOutput); output != "" {
+		corpusParts = append(corpusParts, output)
+	}
+	corpus := strings.Join(corpusParts, "\n")
+	if usageLimitPattern.MatchString(corpus) {
+		summary := runFailureSummary{
+			Headline: fmt.Sprintf("Rascal run `%s` failed because Goose hit the Codex usage limit.", run.ID),
+		}
+		if matches := retryAtPattern.FindStringSubmatch(corpus); len(matches) == 2 {
+			summary.RetryAt = strings.TrimSpace(matches[1])
+		}
+		return summary
+	}
+
+	reason := compactFailureReason(run.Error)
+	if reason == "" {
+		reason = "The runner exited without a more specific error message."
+	}
+	return runFailureSummary{
+		Headline: fmt.Sprintf("Rascal run `%s` failed.", run.ID),
+		Reason:   reason,
+	}
+}
+
+func compactFailureReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return ""
+	}
+	reason = strings.Join(strings.Fields(reason), " ")
+	const maxReasonLen = 280
+	if len(reason) <= maxReasonLen {
+		return reason
+	}
+	return strings.TrimSpace(reason[:maxReasonLen-3]) + "..."
+}
+
+func buildRunFailureDetails(runError, agentOutput, agentLogLabel string) string {
+	parts := make([]string, 0, 2)
+	if reason := strings.TrimSpace(runError); reason != "" {
+		parts = append(parts, "Run error:\n"+reason)
+	}
+	if output := strings.TrimSpace(agentOutput); output != "" {
+		parts = append(parts, agentLogLabel+":\n"+output)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 func isRascalAutomationComment(body string) bool {
 	trimmed := strings.TrimSpace(body)
 	if trimmed == "" {
 		return false
 	}
 	if strings.Contains(trimmed, runCompletionCommentBodyMarker) {
+		return true
+	}
+	if strings.Contains(trimmed, runFailureCommentBodyMarker) {
 		return true
 	}
 	legacy := strings.ToLower(trimmed)
