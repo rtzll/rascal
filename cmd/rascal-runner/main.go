@@ -22,18 +22,22 @@ import (
 )
 
 const (
-	defaultMetaDir          = "/rascal-meta"
-	defaultWorkRoot         = "/work"
-	defaultRepoDirName      = "repo"
-	defaultAgentLogFile     = "agent.ndjson"
-	defaultMetaFile         = "meta.json"
-	defaultInstructionsFile = "instructions.md"
-	defaultCommitMsgFile    = "commit_message.txt"
-	defaultAgentOutputFile  = "agent_output.txt"
-	defaultPRBodyFile       = "pr_body.md"
-	defaultPRLabel          = "rascal"
-	defaultCodexAuthFile    = "auth.json"
-	defaultCodexSessionDir  = "sessions"
+	defaultMetaDir                 = "/rascal-meta"
+	defaultWorkRoot                = "/work"
+	defaultRepoDirName             = "repo"
+	defaultAgentLogFile            = "agent.ndjson"
+	defaultMetaFile                = "meta.json"
+	defaultInstructionsFile        = "instructions.md"
+	defaultCommitMsgFile           = "commit_message.txt"
+	defaultAgentOutputFile         = "agent_output.txt"
+	defaultPRBodyFile              = "pr_body.md"
+	defaultPRLabel                 = "rascal"
+	defaultCodexAuthFile           = "auth.json"
+	defaultCodexSessionDir         = "sessions"
+	defaultDeterministicChecksFile = "deterministic-checks.json"
+	defaultReviewLoopSummaryFile   = "review-loop.json"
+	defaultReviewFindingsFile      = "review-findings.json"
+	defaultReviewSummaryFile       = "review-summary.md"
 )
 
 var (
@@ -53,7 +57,9 @@ type config struct {
 	BaseBranch  string
 	HeadBranch  string
 	IssueNumber int
+	PRNumber    int
 	Trigger     string
+	Context     string
 	GitHubToken string
 
 	MetaDir          string
@@ -80,6 +86,14 @@ type config struct {
 	GooseSessionResume bool
 	GooseSessionKey    string
 	GooseSessionName   string
+
+	ReviewLoop                 reviewLoopConfig
+	DeterministicCheckCommands []string
+
+	DeterministicChecksPath string
+	ReviewLoopSummaryPath   string
+	ReviewFindingsPath      string
+	ReviewSummaryPath       string
 }
 
 type prView struct {
@@ -89,6 +103,34 @@ type prView struct {
 
 type gooseSessionInfo struct {
 	Name string `json:"name"`
+}
+
+type deterministicCheckResult struct {
+	Name         string `json:"name"`
+	Command      string `json:"command"`
+	Required     bool   `json:"required"`
+	Passed       bool   `json:"passed"`
+	Output       string `json:"output,omitempty"`
+	Error        string `json:"error,omitempty"`
+	TerminalFail bool   `json:"terminal_fail,omitempty"`
+}
+
+type deterministicCheckRun struct {
+	Stage  string                     `json:"stage"`
+	RanAt  string                     `json:"ran_at"`
+	Passed bool                       `json:"passed"`
+	Checks []deterministicCheckResult `json:"checks"`
+}
+
+type deterministicChecksReport struct {
+	Runs []deterministicCheckRun `json:"runs"`
+}
+
+func (r deterministicChecksReport) latest() deterministicCheckRun {
+	if len(r.Runs) == 0 {
+		return deterministicCheckRun{}
+	}
+	return r.Runs[len(r.Runs)-1]
 }
 
 type commandExecutor interface {
@@ -238,6 +280,8 @@ func runWithExecutor(ex commandExecutor) error {
 	}
 
 	var agentOutput string
+	latestAuthorLogPath := cfg.GooseLogPath
+	latestAuthorOutputPath := cfg.AgentOutputPath
 	if err := runStage("run_agent", func() error {
 		var err error
 		var agentSessionID string
@@ -250,17 +294,62 @@ func runWithExecutor(ex commandExecutor) error {
 		return fail(err)
 	}
 
-	if _, statErr := os.Stat(filepath.Join(cfg.RepoDir, "Makefile")); statErr == nil {
-		if err := runStage("verify", func() error {
-			log.Printf("[%s] running lightweight verify: make -n test", nowUTC())
-			if _, err := runCommand(ex, cfg.RepoDir, nil, "make", "-n", "test"); err != nil {
-				return fmt.Errorf("preview make test target: %w", err)
+	checksReport := deterministicChecksReport{}
+	if err := runStage("deterministic_checks", func() error {
+		result, err := runDeterministicChecks(ex, cfg, "post_author")
+		if err != nil {
+			checksReport.Runs = append(checksReport.Runs, result)
+			if writeErr := writeJSONFile(cfg.DeterministicChecksPath, checksReport); writeErr != nil {
+				return fmt.Errorf("%w (artifact write failed: %v)", err, writeErr)
+			}
+			return err
+		}
+		checksReport.Runs = append(checksReport.Runs, result)
+		return writeJSONFile(cfg.DeterministicChecksPath, checksReport)
+	}); err != nil {
+		return fail(err)
+	}
+
+	reviewResult := reviewLoopResult{Config: cfg.ReviewLoop.normalized()}
+	if cfg.ReviewLoop.Enabled {
+		if err := runStage("review_loop", func() error {
+			result, finalAgentOutput, finalLogPath, finalOutputPath, err := runReviewLoop(ex, cfg, checksReport)
+			if err != nil {
+				return err
+			}
+			reviewResult = result
+			if strings.TrimSpace(finalAgentOutput) != "" {
+				agentOutput = finalAgentOutput
+			}
+			if strings.TrimSpace(finalLogPath) != "" {
+				latestAuthorLogPath = finalLogPath
+			}
+			if strings.TrimSpace(finalOutputPath) != "" {
+				latestAuthorOutputPath = finalOutputPath
 			}
 			return nil
 		}); err != nil {
-			log.Printf("[%s] lightweight verify warning: %v", nowUTC(), err)
+			return fail(err)
+		}
+	} else {
+		reviewResult = reviewLoopResult{
+			Config: cfg.ReviewLoop.normalized(),
+			Ran:    false,
+		}
+		if err := writeReviewArtifacts(cfg, reviewResult); err != nil {
+			return fail(fmt.Errorf("write skipped review artifacts: %w", err))
 		}
 	}
+
+	if err := promoteAuthorOutputs(latestAuthorLogPath, latestAuthorOutputPath, cfg); err != nil {
+		return fail(fmt.Errorf("promote final author output: %w", err))
+	}
+	meta.ReviewLoopRan = reviewResult.Ran
+	meta.ReviewReviewerPasses = reviewResult.ReviewerPasses
+	meta.ReviewAuthorFixPasses = reviewResult.AuthorFixPasses
+	meta.ReviewFixesApplied = reviewResult.FixesApplied
+	meta.ReviewFindingCount = reviewResult.FinalFindingCount
+	meta.ReviewUnresolvedFindings = reviewResult.UnresolvedFindings
 
 	commitTitle := fmt.Sprintf("chore(rascal): %s", taskSubject(cfg.Task, cfg.TaskID))
 	commitBody := ""
@@ -427,6 +516,14 @@ func loadConfig() (config, error) {
 		}
 		issueNumber = n
 	}
+	prNumber := 0
+	if raw := strings.TrimSpace(os.Getenv("RASCAL_PR_NUMBER")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return config{}, fmt.Errorf("invalid RASCAL_PR_NUMBER: %w", err)
+		}
+		prNumber = n
+	}
 
 	trigger := strings.TrimSpace(os.Getenv("RASCAL_TRIGGER"))
 	if trigger == "" {
@@ -468,6 +565,11 @@ func loadConfig() (config, error) {
 	}
 	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))
 	codexHome := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CODEX_HOME")), filepath.Join(metaDir, "codex"))
+	reviewEnabled := parseBoolEnv(os.Getenv("RASCAL_REVIEW_LOOP_ENABLED"), false)
+	reviewMaxInitialPasses := parseNonNegativeIntEnv(os.Getenv("RASCAL_REVIEW_MAX_INITIAL_PASSES"), 1)
+	reviewMaxFixPasses := parseNonNegativeIntEnv(os.Getenv("RASCAL_REVIEW_MAX_FIX_PASSES"), 1)
+	reviewMaxVerificationPasses := parseNonNegativeIntEnv(os.Getenv("RASCAL_REVIEW_MAX_VERIFICATION_PASSES"), 1)
+	checkCommands := parseCommandListEnv(os.Getenv("RASCAL_DETERMINISTIC_CHECK_COMMANDS"))
 
 	return config{
 		RunID:              runID,
@@ -477,7 +579,9 @@ func loadConfig() (config, error) {
 		BaseBranch:         baseBranch,
 		HeadBranch:         headBranch,
 		IssueNumber:        issueNumber,
+		PRNumber:           prNumber,
 		Trigger:            trigger,
+		Context:            strings.TrimSpace(os.Getenv("RASCAL_CONTEXT")),
 		GitHubToken:        ghToken,
 		MetaDir:            metaDir,
 		WorkRoot:           workRoot,
@@ -500,6 +604,17 @@ func loadConfig() (config, error) {
 		GooseSessionResume: agentSessionResume,
 		GooseSessionKey:    agentSessionKey,
 		GooseSessionName:   backendSessionID,
+		ReviewLoop: reviewLoopConfig{
+			Enabled:                     reviewEnabled,
+			MaxInitialReviewerPasses:    reviewMaxInitialPasses,
+			MaxAuthorFixPasses:          reviewMaxFixPasses,
+			MaxVerificationReviewerPass: reviewMaxVerificationPasses,
+		},
+		DeterministicCheckCommands: checkCommands,
+		DeterministicChecksPath:    filepath.Join(metaDir, defaultDeterministicChecksFile),
+		ReviewLoopSummaryPath:      filepath.Join(metaDir, defaultReviewLoopSummaryFile),
+		ReviewFindingsPath:         filepath.Join(metaDir, defaultReviewFindingsFile),
+		ReviewSummaryPath:          filepath.Join(metaDir, defaultReviewSummaryFile),
 	}, nil
 }
 
@@ -533,6 +648,32 @@ func parseBoolEnv(raw string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func parseNonNegativeIntEnv(raw string, fallback int) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return fallback
+	}
+	return n
+}
+
+func parseCommandListEnv(raw string) []string {
+	raw = strings.ReplaceAll(raw, ";;", "\n")
+	lines := strings.Split(raw, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 func configuredAgentBackend(cfg config) agent.Backend {
@@ -676,6 +817,472 @@ func checkoutRepo(ex commandExecutor, cfg config) error {
 	_, err := runCommand(ex, cfg.RepoDir, nil, "git", "checkout", "-b", cfg.HeadBranch)
 	if err != nil {
 		return fmt.Errorf("create head branch %s: %w", cfg.HeadBranch, err)
+	}
+	return nil
+}
+
+type deterministicCheckSpec struct {
+	Name     string
+	Command  string
+	Required bool
+}
+
+func buildDeterministicCheckSpecs(cfg config) []deterministicCheckSpec {
+	specs := make([]deterministicCheckSpec, 0, len(cfg.DeterministicCheckCommands)+1)
+	if _, err := os.Stat(filepath.Join(cfg.RepoDir, "Makefile")); err == nil {
+		specs = append(specs, deterministicCheckSpec{
+			Name:     "make_test_preview",
+			Command:  "make -n test",
+			Required: false,
+		})
+	}
+	for i, cmd := range cfg.DeterministicCheckCommands {
+		specs = append(specs, deterministicCheckSpec{
+			Name:     fmt.Sprintf("custom_check_%d", i+1),
+			Command:  strings.TrimSpace(cmd),
+			Required: true,
+		})
+	}
+	return specs
+}
+
+func runDeterministicChecks(ex commandExecutor, cfg config, stage string) (deterministicCheckRun, error) {
+	specs := buildDeterministicCheckSpecs(cfg)
+	run := deterministicCheckRun{
+		Stage:  strings.TrimSpace(stage),
+		RanAt:  nowUTC(),
+		Passed: true,
+		Checks: make([]deterministicCheckResult, 0, len(specs)),
+	}
+	if len(specs) == 0 {
+		return run, nil
+	}
+
+	var firstTerminalErr error
+	for _, spec := range specs {
+		res := deterministicCheckResult{
+			Name:     strings.TrimSpace(spec.Name),
+			Command:  strings.TrimSpace(spec.Command),
+			Required: spec.Required,
+		}
+		out, err := ex.CombinedOutput(cfg.RepoDir, nil, "bash", "-lc", res.Command)
+		res.Output = strings.TrimSpace(out)
+		if err != nil {
+			res.Passed = false
+			res.Error = strings.TrimSpace(err.Error())
+			if res.Required {
+				res.TerminalFail = true
+				run.Passed = false
+				if firstTerminalErr == nil {
+					detail := firstNonEmptyValue(res.Output, res.Error)
+					firstTerminalErr = fmt.Errorf("%s failed: %s", res.Name, detail)
+				}
+			}
+		} else {
+			res.Passed = true
+		}
+		run.Checks = append(run.Checks, res)
+	}
+	if firstTerminalErr != nil {
+		return run, firstTerminalErr
+	}
+	return run, nil
+}
+
+func runReviewLoop(ex commandExecutor, cfg config, checksReport deterministicChecksReport) (result reviewLoopResult, finalAgentOutput, finalLogPath, finalOutputPath string, err error) {
+	finalLogPath = cfg.GooseLogPath
+	finalOutputPath = cfg.AgentOutputPath
+
+	latestChecks := checksReport.latest()
+	reviewer := func(passNumber int, phase reviewPassPhase, priorFindings []reviewFinding) (reviewerOutput, error) {
+		findingsPath := filepath.Join(cfg.MetaDir, fmt.Sprintf("review-findings.pass-%d.json", passNumber))
+		summaryPath := filepath.Join(cfg.MetaDir, fmt.Sprintf("review-summary.pass-%d.md", passNumber))
+		instructionsPath := filepath.Join(cfg.MetaDir, fmt.Sprintf("review-instructions.pass-%d.md", passNumber))
+		logPath := filepath.Join(cfg.MetaDir, fmt.Sprintf("review-agent.pass-%d.ndjson", passNumber))
+		outputPath := filepath.Join(cfg.MetaDir, fmt.Sprintf("review-agent.pass-%d.txt", passNumber))
+
+		if err := removeFileIfExists(findingsPath); err != nil {
+			return reviewerOutput{}, err
+		}
+		if err := removeFileIfExists(summaryPath); err != nil {
+			return reviewerOutput{}, err
+		}
+		snapshot := collectGitSnapshot(ex, cfg)
+		prompt := buildReviewerInstructions(cfg, passNumber, phase, findingsPath, summaryPath, latestChecks, snapshot, priorFindings)
+		if err := os.WriteFile(instructionsPath, []byte(prompt), 0o644); err != nil {
+			return reviewerOutput{}, fmt.Errorf("write reviewer instructions: %w", err)
+		}
+		roleCfg := configForSecondaryPass(cfg, instructionsPath, logPath, outputPath)
+		if _, _, err := runAgent(ex, roleCfg); err != nil {
+			return reviewerOutput{}, err
+		}
+		out, err := loadReviewerOutput(findingsPath)
+		if err != nil {
+			return reviewerOutput{}, err
+		}
+		if data, readErr := os.ReadFile(summaryPath); readErr == nil {
+			out.Summary = firstNonEmptyValue(strings.TrimSpace(string(data)), out.Summary)
+		}
+		return out, nil
+	}
+
+	authorFix := func(passNumber int, findings []reviewFinding) error {
+		instructionsPath := filepath.Join(cfg.MetaDir, fmt.Sprintf("author-fix-instructions.pass-%d.md", passNumber))
+		logPath := filepath.Join(cfg.MetaDir, fmt.Sprintf("author-fix.pass-%d.ndjson", passNumber))
+		outputPath := filepath.Join(cfg.MetaDir, fmt.Sprintf("author-fix.pass-%d.txt", passNumber))
+		prompt := buildAuthorFixInstructions(cfg, passNumber, findings)
+		if err := os.WriteFile(instructionsPath, []byte(prompt), 0o644); err != nil {
+			return fmt.Errorf("write author fix instructions: %w", err)
+		}
+		roleCfg := configForSecondaryPass(cfg, instructionsPath, logPath, outputPath)
+		out, _, err := runAgent(ex, roleCfg)
+		if err != nil {
+			return err
+		}
+		finalAgentOutput = out
+		finalLogPath = logPath
+		finalOutputPath = outputPath
+		return nil
+	}
+
+	verifyAfterFix := func(passNumber int) error {
+		stage := fmt.Sprintf("post_fix_%d", passNumber)
+		run, err := runDeterministicChecks(ex, cfg, stage)
+		checksReport.Runs = append(checksReport.Runs, run)
+		if writeErr := writeJSONFile(cfg.DeterministicChecksPath, checksReport); writeErr != nil {
+			return writeErr
+		}
+		if err != nil {
+			return err
+		}
+		latestChecks = run
+		return nil
+	}
+
+	loop := reviewLoopExecutor{cfg: cfg.ReviewLoop}
+	result, loopErr := loop.Execute(reviewLoopHooks{
+		RunReviewerPass:  reviewer,
+		RunAuthorFixPass: authorFix,
+		VerifyAfterFix:   verifyAfterFix,
+	})
+	writeErr := writeReviewArtifacts(cfg, result)
+	if loopErr != nil {
+		if writeErr != nil {
+			return result, finalAgentOutput, finalLogPath, finalOutputPath, fmt.Errorf("%v (artifact write failed: %w)", loopErr, writeErr)
+		}
+		return result, finalAgentOutput, finalLogPath, finalOutputPath, loopErr
+	}
+	if writeErr != nil {
+		return result, finalAgentOutput, finalLogPath, finalOutputPath, writeErr
+	}
+	return result, finalAgentOutput, finalLogPath, finalOutputPath, nil
+}
+
+type reviewGitSnapshot struct {
+	StatusShort  string
+	ChangedFiles string
+	DiffStat     string
+	Diff         string
+}
+
+func collectGitSnapshot(ex commandExecutor, cfg config) reviewGitSnapshot {
+	return reviewGitSnapshot{
+		StatusShort:  captureCommandForPrompt(ex, cfg.RepoDir, "git", "status", "--short"),
+		ChangedFiles: captureCommandForPrompt(ex, cfg.RepoDir, "git", "diff", "--name-only"),
+		DiffStat:     captureCommandForPrompt(ex, cfg.RepoDir, "git", "diff", "--stat", "--no-color"),
+		Diff:         truncateForPrompt(captureCommandForPrompt(ex, cfg.RepoDir, "git", "diff", "--unified=0", "--no-color"), 32000),
+	}
+}
+
+func captureCommandForPrompt(ex commandExecutor, dir string, name string, args ...string) string {
+	out, err := ex.CombinedOutput(dir, nil, name, args...)
+	text := strings.TrimSpace(out)
+	if err != nil {
+		if text == "" {
+			return fmt.Sprintf("(command failed: %v)", err)
+		}
+		return fmt.Sprintf("%s\n\n(command failed: %v)", text, err)
+	}
+	if text == "" {
+		return "(empty)"
+	}
+	return text
+}
+
+func truncateForPrompt(text string, maxBytes int) string {
+	if maxBytes <= 0 || len(text) <= maxBytes {
+		return text
+	}
+	trimmed := text[:maxBytes]
+	return trimmed + "\n\n...(truncated)..."
+}
+
+func buildReviewerInstructions(cfg config, passNumber int, phase reviewPassPhase, findingsPath, summaryPath string, checks deterministicCheckRun, snapshot reviewGitSnapshot, priorFindings []reviewFinding) string {
+	var b strings.Builder
+	_, _ = fmt.Fprintf(&b, `# Rascal Reviewer Pass
+
+Role: You are a strict code reviewer. You must not edit repository code.
+Pass: %d (%s)
+Run ID: %s
+Task ID: %s
+Repository: %s
+
+## Review Scope
+- Requested task and constraints
+- Current git diff/changed files
+- Deterministic local check outputs
+- Relevant issue/PR context
+
+## Task
+%s
+
+## Context
+- Trigger: %s
+- Issue: %d
+- Pull Request: %d
+- Additional context: %s
+
+## Deterministic Checks
+%s
+
+## Git Snapshot
+### git status --short
+%s
+
+### git diff --name-only
+%s
+
+### git diff --stat --no-color
+%s
+
+### git diff --unified=0 --no-color (truncated)
+%s
+
+## Prior Findings (if any)
+%s
+
+## Output Contract (required)
+1. Write JSON findings to:
+%s
+
+JSON schema:
+{
+  "summary": "short pass summary",
+  "findings": [
+    {
+      "severity": "must_fix | should_fix | nit",
+      "path": "file path when applicable",
+      "rationale": "why this matters",
+      "suggested_change": "specific change suggestion"
+    }
+  ]
+}
+
+2. Write a concise human-readable markdown summary to:
+%s
+
+If there are no findings, write an empty findings list and state "No findings."
+Do not rely on conversational state from prior passes.
+`, passNumber, phase, cfg.RunID, cfg.TaskID, cfg.Repo, cfg.Task, cfg.Trigger, cfg.IssueNumber, cfg.PRNumber, firstNonEmptyValue(cfg.Context, "(none)"),
+		renderDeterministicChecks(checks), snapshot.StatusShort, snapshot.ChangedFiles, snapshot.DiffStat, snapshot.Diff,
+		renderPriorFindings(priorFindings), findingsPath, summaryPath)
+	return b.String()
+}
+
+func buildAuthorFixInstructions(cfg config, passNumber int, findings []reviewFinding) string {
+	var b strings.Builder
+	findingsJSON, err := json.MarshalIndent(findings, "", "  ")
+	if err != nil {
+		findingsJSON = []byte("[]")
+	}
+	_, _ = fmt.Fprintf(&b, `# Rascal Author Fix Pass
+
+Role: You are the implementing author.
+Pass: %d
+Run ID: %s
+Task ID: %s
+Repository: %s
+
+## Task
+%s
+
+## Required Input
+Apply fixes based only on:
+1) The original task above
+2) The reviewer findings JSON below
+
+Do not rely on hidden conversational state.
+
+## Reviewer Findings JSON
+%s
+
+## Constraints
+- Fix all `+"`must_fix`"+` and `+"`should_fix`"+` findings where feasible.
+- Keep scope minimal and avoid unrelated changes.
+- Update tests as needed.
+- Do not create commit messages or PR content in this pass.
+`, passNumber, cfg.RunID, cfg.TaskID, cfg.Repo, cfg.Task, string(findingsJSON))
+	return b.String()
+}
+
+func renderPriorFindings(findings []reviewFinding) string {
+	if len(findings) == 0 {
+		return "(none)"
+	}
+	data, err := json.MarshalIndent(findings, "", "  ")
+	if err != nil {
+		return "(failed to render prior findings)"
+	}
+	return string(data)
+}
+
+func renderDeterministicChecks(run deterministicCheckRun) string {
+	if len(run.Checks) == 0 {
+		return "(no deterministic checks configured)"
+	}
+	var b strings.Builder
+	_, _ = fmt.Fprintf(&b, "Stage: %s\nPassed: %t\n", run.Stage, run.Passed)
+	for _, check := range run.Checks {
+		_, _ = fmt.Fprintf(&b, "\n- %s (required=%t passed=%t)\n", check.Name, check.Required, check.Passed)
+		if check.Command != "" {
+			_, _ = fmt.Fprintf(&b, "  command: %s\n", check.Command)
+		}
+		if strings.TrimSpace(check.Output) != "" {
+			_, _ = fmt.Fprintf(&b, "  output:\n%s\n", truncateForPrompt(check.Output, 4000))
+		}
+		if strings.TrimSpace(check.Error) != "" {
+			_, _ = fmt.Fprintf(&b, "  error: %s\n", check.Error)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func configForSecondaryPass(base config, instructionsPath, logPath, outputPath string) config {
+	cfg := base
+	cfg.InstructionsPath = instructionsPath
+	cfg.GooseLogPath = logPath
+	cfg.AgentOutputPath = outputPath
+	cfg.AgentSessionMode = agent.SessionModeOff
+	cfg.AgentSessionResume = false
+	cfg.AgentSessionKey = ""
+	cfg.BackendSessionID = ""
+	cfg.GooseSessionMode = runner.GooseSessionModeOff
+	cfg.GooseSessionResume = false
+	cfg.GooseSessionKey = ""
+	cfg.GooseSessionName = ""
+	return cfg
+}
+
+func loadReviewerOutput(path string) (reviewerOutput, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return reviewerOutput{}, fmt.Errorf("read reviewer findings %s: %w", path, err)
+	}
+	var out reviewerOutput
+	if err := json.Unmarshal(data, &out); err != nil {
+		return reviewerOutput{}, fmt.Errorf("decode reviewer findings %s: %w", path, err)
+	}
+	out.Summary = strings.TrimSpace(out.Summary)
+	out.Findings = normalizeFindings(out.Findings)
+	return out, nil
+}
+
+func writeJSONFile(path string, payload any) error {
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode json artifact %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write json artifact %s: %w", path, err)
+	}
+	return nil
+}
+
+func writeReviewArtifacts(cfg config, result reviewLoopResult) error {
+	if err := writeJSONFile(cfg.ReviewLoopSummaryPath, result); err != nil {
+		return err
+	}
+	findingsArtifact := struct {
+		Ran            bool               `json:"ran"`
+		ReviewerPasses int                `json:"reviewer_passes"`
+		FinalFindings  []reviewFinding    `json:"final_findings"`
+		NoFindings     bool               `json:"no_findings"`
+		Passes         []reviewPassRecord `json:"passes"`
+	}{
+		Ran:            result.Ran,
+		ReviewerPasses: result.ReviewerPasses,
+		FinalFindings:  result.FinalFindings,
+		NoFindings:     len(result.FinalFindings) == 0,
+		Passes:         result.Passes,
+	}
+	if err := writeJSONFile(cfg.ReviewFindingsPath, findingsArtifact); err != nil {
+		return err
+	}
+	if err := os.WriteFile(cfg.ReviewSummaryPath, []byte(buildReviewSummaryMarkdown(result)), 0o644); err != nil {
+		return fmt.Errorf("write review summary %s: %w", cfg.ReviewSummaryPath, err)
+	}
+	return nil
+}
+
+func removeFileIfExists(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
+	return nil
+}
+
+func buildReviewSummaryMarkdown(result reviewLoopResult) string {
+	var b strings.Builder
+	b.WriteString("# Review Loop Summary\n\n")
+	_, _ = fmt.Fprintf(&b, "- Review loop ran: %t\n", result.Ran)
+	_, _ = fmt.Fprintf(&b, "- Reviewer passes: %d\n", result.ReviewerPasses)
+	_, _ = fmt.Fprintf(&b, "- Author fix passes: %d\n", result.AuthorFixPasses)
+	_, _ = fmt.Fprintf(&b, "- Findings in final pass: %d\n", result.FinalFindingCount)
+	_, _ = fmt.Fprintf(&b, "- Fixes applied: %t\n", result.FixesApplied)
+	_, _ = fmt.Fprintf(&b, "- Exited cleanly: %t\n", result.exitedCleanly())
+	_, _ = fmt.Fprintf(&b, "- Unresolved reviewer findings: %t\n", result.UnresolvedFindings)
+	_, _ = fmt.Fprintf(&b, "- Budget exhausted: %t\n", result.BudgetExhausted)
+	_, _ = fmt.Fprintf(&b, "- Verification skipped: %t\n", result.VerificationSkipped)
+	if len(result.Passes) > 0 {
+		b.WriteString("\n## Passes\n\n")
+		for _, pass := range result.Passes {
+			_, _ = fmt.Fprintf(&b, "- Pass %d (%s): %d findings", pass.PassNumber, pass.Phase, pass.FindingCount)
+			if strings.TrimSpace(pass.Summary) != "" {
+				_, _ = fmt.Fprintf(&b, " - %s", strings.TrimSpace(pass.Summary))
+			}
+			b.WriteByte('\n')
+		}
+	}
+	if len(result.FinalFindings) > 0 {
+		b.WriteString("\n## Final Findings\n\n")
+		for _, finding := range result.FinalFindings {
+			_, _ = fmt.Fprintf(&b, "- [%s] %s", finding.Severity, firstNonEmptyValue(finding.Rationale, "(no rationale)"))
+			if strings.TrimSpace(finding.Path) != "" {
+				_, _ = fmt.Fprintf(&b, " (%s)", finding.Path)
+			}
+			if strings.TrimSpace(finding.SuggestedChange) != "" {
+				_, _ = fmt.Fprintf(&b, " -> %s", finding.SuggestedChange)
+			}
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func promoteAuthorOutputs(logPath, outputPath string, cfg config) error {
+	if path := strings.TrimSpace(logPath); path != "" && !samePath(path, cfg.GooseLogPath) {
+		if _, err := os.Stat(path); err == nil {
+			if err := copyFile(path, cfg.GooseLogPath, 0o644); err != nil {
+				return fmt.Errorf("promote agent log: %w", err)
+			}
+		}
+	}
+	if path := strings.TrimSpace(outputPath); path != "" && !samePath(path, cfg.AgentOutputPath) {
+		if _, err := os.Stat(path); err == nil {
+			if err := copyFile(path, cfg.AgentOutputPath, 0o644); err != nil {
+				return fmt.Errorf("promote agent output: %w", err)
+			}
+		}
 	}
 	return nil
 }

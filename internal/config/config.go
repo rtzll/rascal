@@ -15,32 +15,37 @@ import (
 
 // ServerConfig controls rascald runtime behavior.
 type ServerConfig struct {
-	ListenAddr              string
-	DataDir                 string
-	StatePath               string
-	Slot                    string
-	ActiveSlotPath          string
-	APIToken                string
-	GitHubToken             string
-	GitHubWebhookSecret     string
-	BotLogin                string
-	RunnerMode              string
-	AgentBackend            agent.Backend
-	RunnerImage             string
-	RunnerImageGoose        string
-	RunnerImageCodex        string
-	RunnerMaxAttempts       int
-	CredentialStrategy      string
-	CredentialLeaseTTL      time.Duration
-	CredentialRenewEvery    time.Duration
-	CredentialEncryptionKey string
-	GooseSessionMode        string
-	GooseSessionRoot        string
-	GooseSessionTTLDays     int
-	AgentSessionMode        agent.SessionMode
-	AgentSessionRoot        string
-	AgentSessionTTLDays     int
-	MaxRuns                 int
+	ListenAddr                  string
+	DataDir                     string
+	StatePath                   string
+	Slot                        string
+	ActiveSlotPath              string
+	APIToken                    string
+	GitHubToken                 string
+	GitHubWebhookSecret         string
+	BotLogin                    string
+	RunnerMode                  string
+	AgentBackend                agent.Backend
+	RunnerImage                 string
+	RunnerImageGoose            string
+	RunnerImageCodex            string
+	RunnerMaxAttempts           int
+	CredentialStrategy          string
+	CredentialLeaseTTL          time.Duration
+	CredentialRenewEvery        time.Duration
+	CredentialEncryptionKey     string
+	GooseSessionMode            string
+	GooseSessionRoot            string
+	GooseSessionTTLDays         int
+	AgentSessionMode            agent.SessionMode
+	AgentSessionRoot            string
+	AgentSessionTTLDays         int
+	ReviewLoopEnabled           bool
+	ReviewMaxInitialPasses      int
+	ReviewMaxFixPasses          int
+	ReviewMaxVerificationPasses int
+	DeterministicCheckCommands  string
+	MaxRuns                     int
 }
 
 // ClientConfig controls rascal CLI behavior.
@@ -62,28 +67,33 @@ func LoadServerConfig() ServerConfig {
 	statePath := envOrDefault("RASCAL_STATE_PATH", filepath.Join(dataDir, "state.db"))
 
 	cfg := ServerConfig{
-		ListenAddr:              envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
-		DataDir:                 dataDir,
-		StatePath:               statePath,
-		Slot:                    strings.TrimSpace(os.Getenv("RASCAL_SLOT")),
-		ActiveSlotPath:          envOrDefault("RASCAL_ACTIVE_SLOT_PATH", "/etc/rascal/active_slot"),
-		APIToken:                strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")),
-		GitHubToken:             strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")),
-		GitHubWebhookSecret:     strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
-		BotLogin:                strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
-		RunnerMode:              envOrDefault("RASCAL_RUNNER_MODE", "noop"),
-		AgentBackend:            loadAgentBackend(),
-		RunnerImageGoose:        envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", defaults.GooseRunnerImageTag),
-		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
-		RunnerMaxAttempts:       envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
-		CredentialStrategy:      envOrDefault("RASCAL_CREDENTIAL_STRATEGY", "requester_own_then_shared"),
-		CredentialLeaseTTL:      envDurationOrDefault("RASCAL_CREDENTIAL_LEASE_TTL", 90*time.Second),
-		CredentialRenewEvery:    envDurationOrDefault("RASCAL_CREDENTIAL_RENEW_INTERVAL", 30*time.Second),
-		CredentialEncryptionKey: firstNonEmptyEnv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "RASCAL_API_TOKEN"),
-		AgentSessionMode:        loadAgentSessionMode(),
-		AgentSessionRoot:        loadAgentSessionRoot(dataDir),
-		AgentSessionTTLDays:     loadAgentSessionTTLDays(),
-		MaxRuns:                 200,
+		ListenAddr:                  envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
+		DataDir:                     dataDir,
+		StatePath:                   statePath,
+		Slot:                        strings.TrimSpace(os.Getenv("RASCAL_SLOT")),
+		ActiveSlotPath:              envOrDefault("RASCAL_ACTIVE_SLOT_PATH", "/etc/rascal/active_slot"),
+		APIToken:                    strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")),
+		GitHubToken:                 strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")),
+		GitHubWebhookSecret:         strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
+		BotLogin:                    strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
+		RunnerMode:                  envOrDefault("RASCAL_RUNNER_MODE", "noop"),
+		AgentBackend:                loadAgentBackend(),
+		RunnerImageGoose:            envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", defaults.GooseRunnerImageTag),
+		RunnerImageCodex:            envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
+		RunnerMaxAttempts:           envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
+		CredentialStrategy:          envOrDefault("RASCAL_CREDENTIAL_STRATEGY", "requester_own_then_shared"),
+		CredentialLeaseTTL:          envDurationOrDefault("RASCAL_CREDENTIAL_LEASE_TTL", 90*time.Second),
+		CredentialRenewEvery:        envDurationOrDefault("RASCAL_CREDENTIAL_RENEW_INTERVAL", 30*time.Second),
+		CredentialEncryptionKey:     firstNonEmptyEnv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "RASCAL_API_TOKEN"),
+		AgentSessionMode:            loadAgentSessionMode(),
+		AgentSessionRoot:            loadAgentSessionRoot(dataDir),
+		AgentSessionTTLDays:         loadAgentSessionTTLDays(),
+		ReviewLoopEnabled:           envBoolOrDefault("RASCAL_REVIEW_LOOP_ENABLED", false),
+		ReviewMaxInitialPasses:      envNonNegativeIntOrDefault("RASCAL_REVIEW_MAX_INITIAL_PASSES", 1),
+		ReviewMaxFixPasses:          envNonNegativeIntOrDefault("RASCAL_REVIEW_MAX_FIX_PASSES", 1),
+		ReviewMaxVerificationPasses: envNonNegativeIntOrDefault("RASCAL_REVIEW_MAX_VERIFICATION_PASSES", 1),
+		DeterministicCheckCommands:  strings.TrimSpace(os.Getenv("RASCAL_DETERMINISTIC_CHECK_COMMANDS")),
+		MaxRuns:                     200,
 	}
 	cfg.RunnerImage = cfg.RunnerImageForBackend(cfg.AgentBackend)
 	cfg.GooseSessionMode = string(cfg.AgentSessionMode)
@@ -301,6 +311,21 @@ func envDurationOrDefault(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return out
+}
+
+func envBoolOrDefault(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func loadAgentBackend() agent.Backend {

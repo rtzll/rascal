@@ -265,6 +265,45 @@ func TestLoadConfigRespectsGooseSessionEnv(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReviewLoopEnv(t *testing.T) {
+	metaDir := filepath.Join(t.TempDir(), "meta")
+	workRoot := filepath.Join(t.TempDir(), "work")
+	t.Setenv("RASCAL_RUN_ID", "run_review")
+	t.Setenv("RASCAL_TASK_ID", "task_review")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_META_DIR", metaDir)
+	t.Setenv("RASCAL_WORK_ROOT", workRoot)
+	t.Setenv("RASCAL_REVIEW_LOOP_ENABLED", "true")
+	t.Setenv("RASCAL_REVIEW_MAX_INITIAL_PASSES", "2")
+	t.Setenv("RASCAL_REVIEW_MAX_FIX_PASSES", "3")
+	t.Setenv("RASCAL_REVIEW_MAX_VERIFICATION_PASSES", "4")
+	t.Setenv("RASCAL_DETERMINISTIC_CHECK_COMMANDS", "go test ./...;;golangci-lint run")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if !cfg.ReviewLoop.Enabled {
+		t.Fatal("expected review loop to be enabled")
+	}
+	if cfg.ReviewLoop.MaxInitialReviewerPasses != 2 {
+		t.Fatalf("MaxInitialReviewerPasses = %d, want 2", cfg.ReviewLoop.MaxInitialReviewerPasses)
+	}
+	if cfg.ReviewLoop.MaxAuthorFixPasses != 3 {
+		t.Fatalf("MaxAuthorFixPasses = %d, want 3", cfg.ReviewLoop.MaxAuthorFixPasses)
+	}
+	if cfg.ReviewLoop.MaxVerificationReviewerPass != 4 {
+		t.Fatalf("MaxVerificationReviewerPass = %d, want 4", cfg.ReviewLoop.MaxVerificationReviewerPass)
+	}
+	if len(cfg.DeterministicCheckCommands) != 2 {
+		t.Fatalf("DeterministicCheckCommands len = %d, want 2", len(cfg.DeterministicCheckCommands))
+	}
+	if cfg.DeterministicCheckCommands[0] != "go test ./..." || cfg.DeterministicCheckCommands[1] != "golangci-lint run" {
+		t.Fatalf("unexpected DeterministicCheckCommands: %+v", cfg.DeterministicCheckCommands)
+	}
+}
+
 func TestRunGooseNoSessionByDefault(t *testing.T) {
 	root := t.TempDir()
 	cfg := config{

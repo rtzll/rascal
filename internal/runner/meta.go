@@ -8,17 +8,23 @@ import (
 
 // Meta mirrors /rascal-meta/meta.json produced by the container entrypoint.
 type Meta struct {
-	RunID          string `json:"run_id"`
-	TaskID         string `json:"task_id"`
-	Repo           string `json:"repo"`
-	BaseBranch     string `json:"base_branch"`
-	HeadBranch     string `json:"head_branch"`
-	PRNumber       int    `json:"pr_number"`
-	PRURL          string `json:"pr_url"`
-	HeadSHA        string `json:"head_sha"`
-	AgentSessionID string `json:"agent_session_id,omitempty"`
-	ExitCode       int    `json:"exit_code"`
-	Error          string `json:"error,omitempty"`
+	RunID                    string `json:"run_id"`
+	TaskID                   string `json:"task_id"`
+	Repo                     string `json:"repo"`
+	BaseBranch               string `json:"base_branch"`
+	HeadBranch               string `json:"head_branch"`
+	PRNumber                 int    `json:"pr_number"`
+	PRURL                    string `json:"pr_url"`
+	HeadSHA                  string `json:"head_sha"`
+	AgentSessionID           string `json:"agent_session_id,omitempty"`
+	ReviewLoopRan            bool   `json:"review_loop_ran,omitempty"`
+	ReviewReviewerPasses     int    `json:"review_reviewer_passes,omitempty"`
+	ReviewAuthorFixPasses    int    `json:"review_author_fix_passes,omitempty"`
+	ReviewFindingCount       int    `json:"review_finding_count,omitempty"`
+	ReviewFixesApplied       bool   `json:"review_fixes_applied,omitempty"`
+	ReviewUnresolvedFindings bool   `json:"review_unresolved_findings,omitempty"`
+	ExitCode                 int    `json:"exit_code"`
+	Error                    string `json:"error,omitempty"`
 }
 
 func ReadMeta(path string) (Meta, error) {

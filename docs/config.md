@@ -91,3 +91,25 @@ Rascal uses encrypted stored credentials for Codex runs.
 Operators can manage stored credentials with `rascal auth credentials ...`.
 Bootstrap and deploy flows can seed an initial shared credential with
 `--codex-auth ~/.codex/auth.json`.
+
+## Server Review Loop Settings
+
+- `RASCAL_REVIEW_LOOP_ENABLED`
+  Enable bounded internal author/reviewer loop before PR handoff.
+  Default: `false`
+
+- `RASCAL_REVIEW_MAX_INITIAL_PASSES`
+  Max reviewer passes before any fix pass.
+  Default: `1`
+
+- `RASCAL_REVIEW_MAX_FIX_PASSES`
+  Max author fix passes from reviewer findings.
+  Default: `1`
+
+- `RASCAL_REVIEW_MAX_VERIFICATION_PASSES`
+  Max reviewer verification passes after fixes.
+  Default: `1`
+
+- `RASCAL_DETERMINISTIC_CHECK_COMMANDS`
+  Optional deterministic check commands run in the repo before reviewer passes and after fix passes.
+  Separate commands with `;;` or newlines.

@@ -121,6 +121,11 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_ROOT", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_TTL_DAYS", "")
+	t.Setenv("RASCAL_REVIEW_LOOP_ENABLED", "")
+	t.Setenv("RASCAL_REVIEW_MAX_INITIAL_PASSES", "")
+	t.Setenv("RASCAL_REVIEW_MAX_FIX_PASSES", "")
+	t.Setenv("RASCAL_REVIEW_MAX_VERIFICATION_PASSES", "")
+	t.Setenv("RASCAL_DETERMINISTIC_CHECK_COMMANDS", "")
 
 	cfg := LoadServerConfig()
 	if cfg.GooseSessionMode != "all" {
@@ -132,6 +137,21 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 	}
 	if cfg.GooseSessionTTLDays != 14 {
 		t.Fatalf("GooseSessionTTLDays = %d, want 14", cfg.GooseSessionTTLDays)
+	}
+	if cfg.ReviewLoopEnabled {
+		t.Fatal("ReviewLoopEnabled = true, want false")
+	}
+	if cfg.ReviewMaxInitialPasses != 1 {
+		t.Fatalf("ReviewMaxInitialPasses = %d, want 1", cfg.ReviewMaxInitialPasses)
+	}
+	if cfg.ReviewMaxFixPasses != 1 {
+		t.Fatalf("ReviewMaxFixPasses = %d, want 1", cfg.ReviewMaxFixPasses)
+	}
+	if cfg.ReviewMaxVerificationPasses != 1 {
+		t.Fatalf("ReviewMaxVerificationPasses = %d, want 1", cfg.ReviewMaxVerificationPasses)
+	}
+	if cfg.DeterministicCheckCommands != "" {
+		t.Fatalf("DeterministicCheckCommands = %q, want empty", cfg.DeterministicCheckCommands)
 	}
 }
 
@@ -152,6 +172,11 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "PR-ONLY")
 	t.Setenv("RASCAL_GOOSE_SESSION_ROOT", root)
 	t.Setenv("RASCAL_GOOSE_SESSION_TTL_DAYS", "0")
+	t.Setenv("RASCAL_REVIEW_LOOP_ENABLED", "true")
+	t.Setenv("RASCAL_REVIEW_MAX_INITIAL_PASSES", "2")
+	t.Setenv("RASCAL_REVIEW_MAX_FIX_PASSES", "3")
+	t.Setenv("RASCAL_REVIEW_MAX_VERIFICATION_PASSES", "4")
+	t.Setenv("RASCAL_DETERMINISTIC_CHECK_COMMANDS", "go test ./...;;golangci-lint run")
 
 	cfg := LoadServerConfig()
 	if cfg.GooseSessionMode != "pr-only" {
@@ -162,6 +187,21 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	}
 	if cfg.GooseSessionTTLDays != 0 {
 		t.Fatalf("GooseSessionTTLDays = %d, want 0", cfg.GooseSessionTTLDays)
+	}
+	if !cfg.ReviewLoopEnabled {
+		t.Fatal("ReviewLoopEnabled = false, want true")
+	}
+	if cfg.ReviewMaxInitialPasses != 2 {
+		t.Fatalf("ReviewMaxInitialPasses = %d, want 2", cfg.ReviewMaxInitialPasses)
+	}
+	if cfg.ReviewMaxFixPasses != 3 {
+		t.Fatalf("ReviewMaxFixPasses = %d, want 3", cfg.ReviewMaxFixPasses)
+	}
+	if cfg.ReviewMaxVerificationPasses != 4 {
+		t.Fatalf("ReviewMaxVerificationPasses = %d, want 4", cfg.ReviewMaxVerificationPasses)
+	}
+	if cfg.DeterministicCheckCommands != "go test ./...;;golangci-lint run" {
+		t.Fatalf("DeterministicCheckCommands = %q, want value", cfg.DeterministicCheckCommands)
 	}
 }
 

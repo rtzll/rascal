@@ -202,21 +202,26 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
-		AgentBackend:        agent.BackendGoose,
-		RunID:               "run_1",
-		TaskID:              "owner/repo#1",
-		Repo:                "owner/repo",
-		Task:                "task",
-		BaseBranch:          "main",
-		HeadBranch:          "rascal/task-1",
-		Trigger:             "pr_comment",
-		Debug:               true,
-		RunDir:              runDir,
-		GooseSessionMode:    GooseSessionModePROnly,
-		GooseSessionResume:  true,
-		GooseSessionTaskDir: sessionDir,
-		GooseSessionTaskKey: "owner-repo-1-abc123",
-		GooseSessionName:    "rascal-owner-repo-1-abc123",
+		AgentBackend:                agent.BackendGoose,
+		RunID:                       "run_1",
+		TaskID:                      "owner/repo#1",
+		Repo:                        "owner/repo",
+		Task:                        "task",
+		BaseBranch:                  "main",
+		HeadBranch:                  "rascal/task-1",
+		Trigger:                     "pr_comment",
+		Debug:                       true,
+		RunDir:                      runDir,
+		ReviewLoopEnabled:           true,
+		ReviewMaxInitialPasses:      1,
+		ReviewMaxFixPasses:          1,
+		ReviewMaxVerificationPasses: 1,
+		DeterministicCheckCommands:  "go test ./...",
+		GooseSessionMode:            GooseSessionModePROnly,
+		GooseSessionResume:          true,
+		GooseSessionTaskDir:         sessionDir,
+		GooseSessionTaskKey:         "owner-repo-1-abc123",
+		GooseSessionName:            "rascal-owner-repo-1-abc123",
 	})
 	if err != nil {
 		t.Fatalf("launcher start: %v", err)
@@ -235,6 +240,17 @@ exit 0
 	}
 	if !strings.Contains(call, "-e RASCAL_GOOSE_SESSION_RESUME=true") {
 		t.Fatalf("expected resume env, got:\n%s", call)
+	}
+	for _, want := range []string{
+		"-e RASCAL_REVIEW_LOOP_ENABLED=true",
+		"-e RASCAL_REVIEW_MAX_INITIAL_PASSES=1",
+		"-e RASCAL_REVIEW_MAX_FIX_PASSES=1",
+		"-e RASCAL_REVIEW_MAX_VERIFICATION_PASSES=1",
+		"-e RASCAL_DETERMINISTIC_CHECK_COMMANDS=go test ./...",
+	} {
+		if !strings.Contains(call, want) {
+			t.Fatalf("expected %q in env, got:\n%s", want, call)
+		}
 	}
 	if !strings.Contains(call, sessionDir+":/rascal-goose-session") {
 		t.Fatalf("expected task session mount, got:\n%s", call)

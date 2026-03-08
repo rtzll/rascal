@@ -1787,20 +1787,25 @@ func (s *server) executeRun(runID string) {
 	}
 
 	spec := runner.Spec{
-		RunID:        run.ID,
-		TaskID:       run.TaskID,
-		Repo:         run.Repo,
-		Task:         run.Task,
-		AgentBackend: run.AgentBackend,
-		RunnerImage:  s.cfg.RunnerImageForBackend(run.AgentBackend),
-		BaseBranch:   run.BaseBranch,
-		HeadBranch:   run.HeadBranch,
-		Trigger:      run.Trigger,
-		RunDir:       run.RunDir,
-		IssueNumber:  run.IssueNumber,
-		PRNumber:     run.PRNumber,
-		Context:      run.Context,
-		Debug:        run.Debug,
+		RunID:                       run.ID,
+		TaskID:                      run.TaskID,
+		Repo:                        run.Repo,
+		Task:                        run.Task,
+		AgentBackend:                run.AgentBackend,
+		RunnerImage:                 s.cfg.RunnerImageForBackend(run.AgentBackend),
+		BaseBranch:                  run.BaseBranch,
+		HeadBranch:                  run.HeadBranch,
+		Trigger:                     run.Trigger,
+		RunDir:                      run.RunDir,
+		IssueNumber:                 run.IssueNumber,
+		PRNumber:                    run.PRNumber,
+		Context:                     run.Context,
+		Debug:                       run.Debug,
+		ReviewLoopEnabled:           s.cfg.ReviewLoopEnabled,
+		ReviewMaxInitialPasses:      s.cfg.ReviewMaxInitialPasses,
+		ReviewMaxFixPasses:          s.cfg.ReviewMaxFixPasses,
+		ReviewMaxVerificationPasses: s.cfg.ReviewMaxVerificationPasses,
+		DeterministicCheckCommands:  s.cfg.DeterministicCheckCommands,
 		AgentSession: runner.SessionSpec{
 			Mode:             sessionMode,
 			Resume:           sessionResume,
@@ -3365,11 +3370,21 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 		CommitMessage:   commitMessageData,
 		DurationSeconds: runsummary.RunDurationSeconds(run.CreatedAt, run.StartedAt, run.CompletedAt),
 		TotalTokens:     totalTokens,
+		ReviewSummary:   loadRunReviewSummary(run.RunDir),
 	})
 	if err != nil {
 		return "", fmt.Errorf("build run completion comment: %w", err)
 	}
 	return runCompletionCommentBodyMarker + "\n\n" + body, nil
+}
+
+func loadRunReviewSummary(runDir string) string {
+	path := filepath.Join(strings.TrimSpace(runDir), "review-summary.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func loadRunTokenUsage(run state.Run) (state.RunTokenUsage, bool, error) {

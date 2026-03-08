@@ -266,6 +266,22 @@ func TestBuildCompletionComment(t *testing.T) {
 			t.Fatalf("expected explicit token summary:\n%s", body)
 		}
 	})
+
+	t.Run("appends review summary when provided", func(t *testing.T) {
+		body, err := BuildCompletionComment(CompletionCommentInput{
+			RunID:           "run_3",
+			GooseOutput:     `{"usage":{"total_tokens":10}}`,
+			CommitMessage:   []byte("feat: test\n"),
+			DurationSeconds: 9,
+			ReviewSummary:   "Review loop ran: true\nFindings: 0",
+		})
+		if err != nil {
+			t.Fatalf("BuildCompletionComment returned error: %v", err)
+		}
+		if !strings.Contains(body, "Review loop ran: true\nFindings: 0") {
+			t.Fatalf("expected review summary in completion comment:\n%s", body)
+		}
+	})
 }
 
 func TestBuildStartComment(t *testing.T) {

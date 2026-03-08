@@ -22,6 +22,7 @@ type CompletionCommentInput struct {
 	CommitMessage   []byte
 	DurationSeconds int64
 	TotalTokens     *int64
+	ReviewSummary   string
 }
 
 type StartCommentInput struct {
@@ -154,6 +155,9 @@ func BuildCompletionComment(in CompletionCommentInput) (string, error) {
 			formatTokenCount(*in.TotalTokens),
 		)
 		commentBody = body
+	}
+	if summary := strings.TrimSpace(in.ReviewSummary); summary != "" {
+		commentBody += "\n\n---\n\n" + summary
 	}
 
 	requestedBy := strings.TrimSpace(in.RequestedBy)

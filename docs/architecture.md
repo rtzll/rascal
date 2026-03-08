@@ -230,8 +230,12 @@ Each run directory stores metadata and artifacts such as:
 - `runner.log`
 - `agent.ndjson` (canonical agent stream log path for both backends)
 - `agent_output.txt` (structured/fallback agent output, especially for Codex)
+- `deterministic-checks.json` (deterministic check runs and outputs)
 - `commit_message.txt`
 - `pr_body.md`
+- `review-loop.json` (review loop counts/outcome)
+- `review-findings.json` (structured reviewer findings)
+- `review-summary.md` (human-readable review summary)
 - `meta.json`
 - `response_target.json` and completion-comment markers when comment-triggered flows are used
 
@@ -305,6 +309,11 @@ Common optional:
 - `RASCAL_AGENT_SESSION_RESUME` (set by orchestrator per run)
 - `RASCAL_AGENT_SESSION_KEY` (stable task-scoped key when resume is enabled)
 - `RASCAL_AGENT_SESSION_ID` (backend session id when known)
+- `RASCAL_REVIEW_LOOP_ENABLED` (default: `false`)
+- `RASCAL_REVIEW_MAX_INITIAL_PASSES` (default: `1`)
+- `RASCAL_REVIEW_MAX_FIX_PASSES` (default: `1`)
+- `RASCAL_REVIEW_MAX_VERIFICATION_PASSES` (default: `1`)
+- `RASCAL_DETERMINISTIC_CHECK_COMMANDS` (optional `;;` or newline-delimited shell commands)
 - `CODEX_HOME` (run-scoped `/rascal-meta/codex` in stateless mode, or task-scoped mount in resume mode for Codex)
 - `GOOSE_PATH_ROOT` (run-scoped `/rascal-meta/goose` in stateless mode, or task-scoped mount in resume mode for Goose)
 

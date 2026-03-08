@@ -11,21 +11,26 @@ import (
 
 // Spec defines the input contract for a single run.
 type Spec struct {
-	RunID        string
-	TaskID       string
-	Repo         string
-	Task         string
-	AgentBackend agent.Backend
-	RunnerImage  string
-	BaseBranch   string
-	HeadBranch   string
-	Trigger      string
-	Debug        bool
-	RunDir       string
-	IssueNumber  int
-	PRNumber     int
-	Context      string
-	AgentSession SessionSpec
+	RunID                       string
+	TaskID                      string
+	Repo                        string
+	Task                        string
+	AgentBackend                agent.Backend
+	RunnerImage                 string
+	BaseBranch                  string
+	HeadBranch                  string
+	Trigger                     string
+	Debug                       bool
+	RunDir                      string
+	IssueNumber                 int
+	PRNumber                    int
+	Context                     string
+	AgentSession                SessionSpec
+	ReviewLoopEnabled           bool
+	ReviewMaxInitialPasses      int
+	ReviewMaxFixPasses          int
+	ReviewMaxVerificationPasses int
+	DeterministicCheckCommands  string
 
 	GooseSessionMode    string
 	GooseSessionResume  bool
