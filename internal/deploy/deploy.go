@@ -760,7 +760,7 @@ func expandPath(path string) (string, error) {
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("resolve user home directory: %w", err)
 		}
 		return filepath.Join(home, path[2:]), nil
 	}

@@ -312,7 +312,10 @@ func writeFakeMeta(spec runner.Spec, res fakeRunResult) error {
 		ExitCode:   res.ExitCode,
 		Error:      strings.TrimSpace(res.Error),
 	}
-	return runner.WriteMeta(filepath.Join(spec.RunDir, "meta.json"), meta)
+	if err := runner.WriteMeta(filepath.Join(spec.RunDir, "meta.json"), meta); err != nil {
+		return fmt.Errorf("write fake run metadata: %w", err)
+	}
+	return nil
 }
 
 func (f *fakeGitHubClient) GetIssue(_ context.Context, _ string, _ int) (ghapi.IssueData, error) {

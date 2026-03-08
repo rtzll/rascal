@@ -342,12 +342,18 @@ func prepareMountAccess(runDir, workspaceDir, sessionDir string) error {
 }
 
 func chownTree(root string, uid, gid int) error {
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return fmt.Errorf("walk %s: %w", path, err)
 		}
-		return os.Lchown(path, uid, gid)
-	})
+		if err := os.Lchown(path, uid, gid); err != nil {
+			return fmt.Errorf("lchown %s: %w", path, err)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("chown tree %s: %w", root, err)
+	}
+	return nil
 }
 
 func chmodIfExists(path string, mode os.FileMode) error {
@@ -355,7 +361,7 @@ func chmodIfExists(path string, mode os.FileMode) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("chmod %s: %w", path, err)
 	}
 	return nil
 }

@@ -378,14 +378,20 @@ func (a *app) emit(v any, tableFn func() error) error {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(v)
+		if err := enc.Encode(v); err != nil {
+			return fmt.Errorf("encode JSON output: %w", err)
+		}
+		return nil
 	case "toml":
 		data, err := toml.Marshal(v)
 		if err != nil {
-			return err
+			return fmt.Errorf("marshal TOML output: %w", err)
 		}
 		_, err = os.Stdout.Write(data)
-		return err
+		if err != nil {
+			return fmt.Errorf("write TOML output: %w", err)
+		}
+		return nil
 	default:
 		return &cliError{Code: exitInput, Message: "invalid output format", Hint: "use table|json|toml"}
 	}
@@ -822,7 +828,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 					save.Transport = "auto"
 				}
 				if err := config.SaveClientConfig(a.configPath, save); err != nil {
-					return err
+					return fmt.Errorf("save client config: %w", err)
 				}
 			}
 
@@ -1026,7 +1032,7 @@ func (a *app) newPSCmd() *cobra.Command {
 				return a.emit(map[string]any{"runs": runs}, func() error {
 					tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 					if _, err := fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tPR\tCREATED (UTC)"); err != nil {
-						return err
+						return fmt.Errorf("write runs table header: %w", err)
 					}
 					for _, run := range runs {
 						if _, err := fmt.Fprintf(
@@ -1038,7 +1044,7 @@ func (a *app) newPSCmd() *cobra.Command {
 							psPRLabel(run),
 							psCreatedLabel(run.CreatedAt),
 						); err != nil {
-							return err
+							return fmt.Errorf("write runs table row: %w", err)
 						}
 					}
 					return tw.Flush()
@@ -1066,7 +1072,7 @@ func (a *app) newPSCmd() *cobra.Command {
 				}
 				if a.ansiEnabled() {
 					if _, err := fmt.Fprint(os.Stdout, "\033[H\033[2J"); err != nil {
-						return err
+						return fmt.Errorf("clear terminal: %w", err)
 					}
 				}
 				if err := render(runs); err != nil {
@@ -1131,19 +1137,19 @@ rascal logs run run_abc123 --follow --interval 4s
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.runIDCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runFollow, err := cmd.Flags().GetBool("follow")
+			runFollow, err := boolFlag(cmd, "follow")
 			if err != nil {
 				return err
 			}
-			runInterval, err := cmd.Flags().GetDuration("interval")
+			runInterval, err := durationFlag(cmd, "interval")
 			if err != nil {
 				return err
 			}
-			runSince, err := cmd.Flags().GetDuration("since")
+			runSince, err := durationFlag(cmd, "since")
 			if err != nil {
 				return err
 			}
-			runLines, err := cmd.Flags().GetInt("lines")
+			runLines, err := intFlag(cmd, "lines")
 			if err != nil {
 				return err
 			}
@@ -1165,27 +1171,27 @@ rascal logs rascald --follow
 rascal logs rascald --host rascal-server
 		`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			host, err := cmd.Flags().GetString("host")
+			host, err := stringFlag(cmd, "host")
 			if err != nil {
 				return err
 			}
-			sshUser, err := cmd.Flags().GetString("ssh-user")
+			sshUser, err := stringFlag(cmd, "ssh-user")
 			if err != nil {
 				return err
 			}
-			sshKey, err := cmd.Flags().GetString("ssh-key")
+			sshKey, err := stringFlag(cmd, "ssh-key")
 			if err != nil {
 				return err
 			}
-			sshPort, err := cmd.Flags().GetInt("ssh-port")
+			sshPort, err := intFlag(cmd, "ssh-port")
 			if err != nil {
 				return err
 			}
-			serviceFollow, err := cmd.Flags().GetBool("follow")
+			serviceFollow, err := boolFlag(cmd, "follow")
 			if err != nil {
 				return err
 			}
-			serviceLines, err := cmd.Flags().GetInt("lines")
+			serviceLines, err := intFlag(cmd, "lines")
 			if err != nil {
 				return err
 			}
@@ -1202,27 +1208,27 @@ rascal logs caddy
 rascal logs caddy --follow
 		`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			host, err := cmd.Flags().GetString("host")
+			host, err := stringFlag(cmd, "host")
 			if err != nil {
 				return err
 			}
-			sshUser, err := cmd.Flags().GetString("ssh-user")
+			sshUser, err := stringFlag(cmd, "ssh-user")
 			if err != nil {
 				return err
 			}
-			sshKey, err := cmd.Flags().GetString("ssh-key")
+			sshKey, err := stringFlag(cmd, "ssh-key")
 			if err != nil {
 				return err
 			}
-			sshPort, err := cmd.Flags().GetInt("ssh-port")
+			sshPort, err := intFlag(cmd, "ssh-port")
 			if err != nil {
 				return err
 			}
-			serviceFollow, err := cmd.Flags().GetBool("follow")
+			serviceFollow, err := boolFlag(cmd, "follow")
 			if err != nil {
 				return err
 			}
-			serviceLines, err := cmd.Flags().GetInt("lines")
+			serviceLines, err := intFlag(cmd, "lines")
 			if err != nil {
 				return err
 			}
@@ -1240,27 +1246,27 @@ rascal logs caddy-access
 rascal logs caddy-access --follow
 		`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			host, err := cmd.Flags().GetString("host")
+			host, err := stringFlag(cmd, "host")
 			if err != nil {
 				return err
 			}
-			sshUser, err := cmd.Flags().GetString("ssh-user")
+			sshUser, err := stringFlag(cmd, "ssh-user")
 			if err != nil {
 				return err
 			}
-			sshKey, err := cmd.Flags().GetString("ssh-key")
+			sshKey, err := stringFlag(cmd, "ssh-key")
 			if err != nil {
 				return err
 			}
-			sshPort, err := cmd.Flags().GetInt("ssh-port")
+			sshPort, err := intFlag(cmd, "ssh-port")
 			if err != nil {
 				return err
 			}
-			serviceFollow, err := cmd.Flags().GetBool("follow")
+			serviceFollow, err := boolFlag(cmd, "follow")
 			if err != nil {
 				return err
 			}
-			serviceLines, err := cmd.Flags().GetInt("lines")
+			serviceLines, err := intFlag(cmd, "lines")
 			if err != nil {
 				return err
 			}
@@ -1319,7 +1325,7 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 		defer closeWithLog("close cancel response body", resp.Body)
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("read run logs response: %w", err)
 		}
 		return string(body), nil
 	}
@@ -1333,7 +1339,10 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 			body = filterLogsSince(body, time.Now().Add(-since))
 		}
 		_, err = io.WriteString(os.Stdout, body)
-		return err
+		if err != nil {
+			return fmt.Errorf("write run logs: %w", err)
+		}
+		return nil
 	}
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -1372,12 +1381,12 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 			diff := strings.TrimPrefix(body, last)
 			if diff != "" {
 				if _, err := io.WriteString(os.Stdout, diff); err != nil {
-					return err
+					return fmt.Errorf("write incremental run logs: %w", err)
 				}
 			}
 		} else if body != last {
 			if _, err := io.WriteString(os.Stdout, body); err != nil {
-				return err
+				return fmt.Errorf("write run logs: %w", err)
 			}
 		}
 		last = body
@@ -1814,10 +1823,10 @@ rascal task run_abc123
 			return a.emit(map[string]any{"task": task}, func() error {
 				tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 				if _, err := fmt.Fprintln(tw, "TASK ID\tSTATUS\tREPO\tPR\tPENDING INPUT\tUPDATED"); err != nil {
-					return err
+					return fmt.Errorf("write task table header: %w", err)
 				}
 				if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%t\t%s\n", task.ID, task.Status, task.Repo, task.PRNumber, task.PendingInput, task.UpdatedAt.Format(time.RFC3339)); err != nil {
-					return err
+					return fmt.Errorf("write task table row: %w", err)
 				}
 				return tw.Flush()
 			})
@@ -2270,7 +2279,7 @@ func newCompletionCmd(root *cobra.Command) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()
 			if err != nil {
-				return err
+				return fmt.Errorf("resolve user home directory: %w", err)
 			}
 			var (
 				target string
@@ -2280,32 +2289,32 @@ func newCompletionCmd(root *cobra.Command) *cobra.Command {
 			case "bash":
 				target = filepath.Join(home, ".local", "share", "bash-completion", "completions", "rascal")
 				if err := root.GenBashCompletionV2(&data, true); err != nil {
-					return err
+					return fmt.Errorf("generate bash completion: %w", err)
 				}
 			case "zsh":
 				target = filepath.Join(home, ".zfunc", "_rascal")
 				if err := root.GenZshCompletion(&data); err != nil {
-					return err
+					return fmt.Errorf("generate zsh completion: %w", err)
 				}
 			case "fish":
 				target = filepath.Join(home, ".config", "fish", "completions", "rascal.fish")
 				if err := root.GenFishCompletion(&data, true); err != nil {
-					return err
+					return fmt.Errorf("generate fish completion: %w", err)
 				}
 			case "powershell":
 				target = filepath.Join(home, "Documents", "PowerShell", "Modules", "rascal_completion.ps1")
 				if err := root.GenPowerShellCompletionWithDesc(&data); err != nil {
-					return err
+					return fmt.Errorf("generate powershell completion: %w", err)
 				}
 			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
+				return fmt.Errorf("create completion directory: %w", err)
 			}
 			if err := os.WriteFile(target, data.Bytes(), 0o644); err != nil {
-				return err
+				return fmt.Errorf("write completion file: %w", err)
 			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "installed completion: %s\n", target); err != nil {
-				return err
+				return fmt.Errorf("print completion install path: %w", err)
 			}
 			return nil
 		},
@@ -2553,7 +2562,7 @@ func loadEnvFile(path string) (out map[string]string, err error) {
 	}
 	f, err := os.Open(expanded)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open env file: %w", err)
 	}
 	defer func() {
 		if closeErr := f.Close(); err == nil && closeErr != nil {
@@ -2589,7 +2598,7 @@ func loadEnvFile(path string) (out map[string]string, err error) {
 		out[key] = value
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("scan env file: %w", err)
 	}
 	return out, nil
 }
@@ -2603,6 +2612,38 @@ func closeWithLog(name string, closer io.Closer) {
 	}
 }
 
+func boolFlag(cmd *cobra.Command, name string) (bool, error) {
+	value, err := cmd.Flags().GetBool(name)
+	if err != nil {
+		return false, fmt.Errorf("get %q flag: %w", name, err)
+	}
+	return value, nil
+}
+
+func durationFlag(cmd *cobra.Command, name string) (time.Duration, error) {
+	value, err := cmd.Flags().GetDuration(name)
+	if err != nil {
+		return 0, fmt.Errorf("get %q flag: %w", name, err)
+	}
+	return value, nil
+}
+
+func intFlag(cmd *cobra.Command, name string) (int, error) {
+	value, err := cmd.Flags().GetInt(name)
+	if err != nil {
+		return 0, fmt.Errorf("get %q flag: %w", name, err)
+	}
+	return value, nil
+}
+
+func stringFlag(cmd *cobra.Command, name string) (string, error) {
+	value, err := cmd.Flags().GetString(name)
+	if err != nil {
+		return "", fmt.Errorf("get %q flag: %w", name, err)
+	}
+	return value, nil
+}
+
 func (a *app) loadGlobalEnv() error {
 	explicitPath := strings.TrimSpace(a.envFilePath)
 	if explicitPath == "" {
@@ -2612,11 +2653,11 @@ func (a *app) loadGlobalEnv() error {
 	if explicitPath != "" {
 		expanded, err := expandPath(explicitPath)
 		if err != nil {
-			return err
+			return fmt.Errorf("expand env file path: %w", err)
 		}
 		st, err := os.Stat(expanded)
 		if err != nil {
-			return err
+			return fmt.Errorf("stat env file path: %w", err)
 		}
 		if st.IsDir() {
 			return fmt.Errorf("env file path is a directory: %s", expanded)
@@ -2625,13 +2666,13 @@ func (a *app) loadGlobalEnv() error {
 	} else {
 		cwd, err := os.Getwd()
 		if err != nil {
-			return err
+			return fmt.Errorf("get working directory: %w", err)
 		}
 		candidate := filepath.Join(cwd, ".rascal.env")
 		st, err := os.Stat(candidate)
 		if err != nil {
 			if !os.IsNotExist(err) {
-				return err
+				return fmt.Errorf("stat default env file: %w", err)
 			}
 		} else if !st.IsDir() {
 			path = candidate
@@ -2669,16 +2710,16 @@ func noColorRequested(flagValue bool) bool {
 func promptString(r *bufio.Reader, label, def string) (string, error) {
 	if strings.TrimSpace(def) != "" {
 		if _, err := fmt.Printf("%s [%s]: ", label, def); err != nil {
-			return "", err
+			return "", fmt.Errorf("print prompt: %w", err)
 		}
 	} else {
 		if _, err := fmt.Printf("%s: ", label); err != nil {
-			return "", err
+			return "", fmt.Errorf("print prompt: %w", err)
 		}
 	}
 	line, err := r.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
-		return "", err
+		return "", fmt.Errorf("read prompt input: %w", err)
 	}
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -2852,7 +2893,7 @@ func parseRawHTTPResponse(raw []byte, method string) (*http.Response, error) {
 	req := &http.Request{Method: method}
 	resp, err := http.ReadResponse(reader, req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse raw HTTP response: %w", err)
 	}
 	return resp, nil
 }
@@ -2867,7 +2908,7 @@ func randomToken(numBytes int) (string, error) {
 	}
 	buf := make([]byte, numBytes)
 	if _, err := rand.Read(buf); err != nil {
-		return "", err
+		return "", fmt.Errorf("read random bytes: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
@@ -2882,7 +2923,10 @@ const (
 )
 
 func deployToExistingHost(cfg deployConfig) error {
-	return deployengine.Execute(cfg)
+	if err := deployengine.Execute(cfg); err != nil {
+		return fmt.Errorf("deploy to existing host: %w", err)
+	}
+	return nil
 }
 
 func runLocal(name string, args ...string) error {
@@ -2909,7 +2953,11 @@ func runLocalCapture(name string, args ...string) (string, error) {
 }
 
 func detectRemoteGOARCH(cfg deployConfig) (string, error) {
-	return deployengine.DetectRemoteGOARCH(cfg)
+	goarch, err := deployengine.DetectRemoteGOARCH(cfg)
+	if err != nil {
+		return "", fmt.Errorf("detect remote GOARCH: %w", err)
+	}
+	return goarch, nil
 }
 
 func goarchFromUnameMachine(machine string) (string, bool) {
@@ -2962,7 +3010,7 @@ func expandPath(path string) (string, error) {
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("resolve user home directory: %w", err)
 		}
 		return filepath.Join(home, path[2:]), nil
 	}
@@ -2983,7 +3031,10 @@ func openURLInBrowser(rawURL string) error {
 	default:
 		cmd = exec.Command("xdg-open", rawURL)
 	}
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("open URL in browser: %w", err)
+	}
+	return nil
 }
 
 func resolveRepo(explicit, defaultRepo string, infer func() string) (string, bool) {
@@ -3021,7 +3072,7 @@ func gitRemoteOrigin() (string, error) {
 	cmd := exec.Command("git", "remote", "get-url", "origin")
 	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get git remote origin: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

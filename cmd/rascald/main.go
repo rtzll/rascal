@@ -953,7 +953,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			}
 			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
 			if err := s.store.CancelQueuedRuns(taskID, "issue edited"); err != nil {
-				return err
+				return fmt.Errorf("cancel queued runs for edited issue: %w", err)
 			}
 			_, err := s.createAndQueueRun(runRequest{
 				TaskID:      taskID,
@@ -978,13 +978,13 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				Repo:        ev.Repository.FullName,
 				IssueNumber: ev.Issue.Number,
 			}); err != nil {
-				return err
+				return fmt.Errorf("upsert task for closed issue: %w", err)
 			}
 			if err := s.store.MarkTaskCompleted(taskID); err != nil {
-				return err
+				return fmt.Errorf("mark task completed for closed issue: %w", err)
 			}
 			if err := s.store.CancelQueuedRuns(taskID, "issue closed"); err != nil {
-				return err
+				return fmt.Errorf("cancel queued runs for closed issue: %w", err)
 			}
 			s.cancelRunningTaskRuns(taskID, "issue closed")
 			return nil
@@ -998,10 +998,10 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				Repo:        ev.Repository.FullName,
 				IssueNumber: ev.Issue.Number,
 			}); err != nil {
-				return err
+				return fmt.Errorf("upsert task for reopened issue: %w", err)
 			}
 			if err := s.store.MarkTaskOpen(taskID); err != nil {
-				return err
+				return fmt.Errorf("mark task open for reopened issue: %w", err)
 			}
 			_, err := s.createAndQueueRun(runRequest{
 				TaskID:      taskID,
@@ -1185,10 +1185,10 @@ Inline comment location: %s`, contextText, location)
 			taskID := task.ID
 			if ev.PullRequest.Merged {
 				if err := s.store.MarkTaskCompleted(taskID); err != nil {
-					return err
+					return fmt.Errorf("mark task completed for merged PR: %w", err)
 				}
 				if err := s.store.CancelQueuedRuns(taskID, "task completed by merged PR"); err != nil {
-					return err
+					return fmt.Errorf("cancel queued runs for merged PR: %w", err)
 				}
 				s.reconcileClosedPRRuns(ev.Repository.FullName, ev.PullRequest.Number, true)
 				s.addIssueReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ghapi.ReactionRocket)
@@ -1390,7 +1390,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 
 	runID, err := state.NewRunID()
 	if err != nil {
-		return state.Run{}, err
+		return state.Run{}, fmt.Errorf("create run ID: %w", err)
 	}
 	if req.TaskID == "" {
 		req.TaskID = runID
@@ -1471,7 +1471,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 
 func (s *server) writeRunFiles(run state.Run) (err error) {
 	if err := os.MkdirAll(filepath.Join(run.RunDir, "codex"), 0o755); err != nil {
-		return err
+		return fmt.Errorf("create codex run directory: %w", err)
 	}
 
 	ctxPayload := map[string]any{
@@ -1487,29 +1487,32 @@ func (s *server) writeRunFiles(run state.Run) (err error) {
 	}
 	ctxData, err := json.MarshalIndent(ctxPayload, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal run context: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(run.RunDir, "context.json"), ctxData, 0o644); err != nil {
-		return err
+		return fmt.Errorf("write run context file: %w", err)
 	}
 
 	instructions := instructionText(run)
 	if err := os.WriteFile(filepath.Join(run.RunDir, "instructions.md"), []byte(instructions), 0o644); err != nil {
-		return err
+		return fmt.Errorf("write run instructions: %w", err)
 	}
 
 	logLine := fmt.Sprintf("[%s] queued run=%s task=%s trigger=%s\n", time.Now().UTC().Format(time.RFC3339), run.ID, run.TaskID, run.Trigger)
 	f, err := os.OpenFile(filepath.Join(run.RunDir, "runner.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return err
+		return fmt.Errorf("open runner log: %w", err)
 	}
 	defer func() {
 		if closeErr := f.Close(); err == nil && closeErr != nil {
-			err = closeErr
+			err = fmt.Errorf("close runner log: %w", closeErr)
 		}
 	}()
 	_, err = f.WriteString(logLine)
-	return err
+	if err != nil {
+		return fmt.Errorf("write runner log entry: %w", err)
+	}
+	return nil
 }
 
 func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget) error {
@@ -2117,7 +2120,7 @@ func (s *server) startDetachedWithRetry(ctx context.Context, spec runner.Spec) (
 	)
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return handle, err
+			return handle, fmt.Errorf("check start-detached context: %w", err)
 		}
 		handle, err = s.launcher.StartDetached(ctx, spec)
 		if err == nil {
@@ -2139,7 +2142,7 @@ func (s *server) startDetachedWithRetry(ctx context.Context, spec runner.Spec) (
 		case <-timer.C:
 		}
 	}
-	return handle, err
+	return handle, fmt.Errorf("start detached run %s: %w", spec.RunID, err)
 }
 
 func (s *server) stopRunSupervisors() {
@@ -2777,7 +2780,7 @@ func cleanupStaleAgentSessionDirs(root string, ttlDays int, now time.Time) (int,
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, nil
 		}
-		return 0, err
+		return 0, fmt.Errorf("read agent session directory %s: %w", root, err)
 	}
 	cutoff := now.AddDate(0, 0, -ttlDays)
 	removed := 0
@@ -2789,7 +2792,7 @@ func cleanupStaleAgentSessionDirs(root string, ttlDays int, now time.Time) (int,
 		info, infoErr := entry.Info()
 		if infoErr != nil {
 			if firstErr == nil {
-				firstErr = infoErr
+				firstErr = fmt.Errorf("stat agent session entry %s: %w", entry.Name(), infoErr)
 			}
 			continue
 		}
@@ -2799,7 +2802,7 @@ func cleanupStaleAgentSessionDirs(root string, ttlDays int, now time.Time) (int,
 		path := filepath.Join(root, entry.Name())
 		if rmErr := os.RemoveAll(path); rmErr != nil {
 			if firstErr == nil {
-				firstErr = rmErr
+				firstErr = fmt.Errorf("remove stale agent session dir %s: %w", path, rmErr)
 			}
 			continue
 		}
@@ -2820,7 +2823,7 @@ func resolveRunAgentLogPath(runDir string) (string, error) {
 		}
 		return primary, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		return "", fmt.Errorf("stat agent log path %s: %w", primary, err)
 	}
 
 	legacy := filepath.Join(strings.TrimSpace(runDir), legacyAgentLogFile)
@@ -2830,7 +2833,7 @@ func resolveRunAgentLogPath(runDir string) (string, error) {
 		}
 		return legacy, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		return "", fmt.Errorf("stat legacy agent log path %s: %w", legacy, err)
 	}
 
 	return primary, os.ErrNotExist
@@ -2939,7 +2942,7 @@ func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
 	tempFile, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
-		return err
+		return fmt.Errorf("create temp file for %s: %w", path, err)
 	}
 	tempPath := tempFile.Name()
 	removeTemp := true
@@ -2954,19 +2957,19 @@ func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
 		if closeErr := tempFile.Close(); closeErr != nil {
 			return fmt.Errorf("write temp file: %w (close temp file: %v)", err, closeErr)
 		}
-		return err
+		return fmt.Errorf("write temp file for %s: %w", path, err)
 	}
 	if err := tempFile.Chmod(mode); err != nil {
 		if closeErr := tempFile.Close(); closeErr != nil {
 			return fmt.Errorf("chmod temp file: %w (close temp file: %v)", err, closeErr)
 		}
-		return err
+		return fmt.Errorf("chmod temp file for %s: %w", path, err)
 	}
 	if err := tempFile.Close(); err != nil {
-		return err
+		return fmt.Errorf("close temp file for %s: %w", path, err)
 	}
 	if err := os.Rename(tempPath, path); err != nil {
-		return err
+		return fmt.Errorf("rename temp file to %s: %w", path, err)
 	}
 	removeTemp = false
 	return nil
@@ -3113,7 +3116,7 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 		DurationSeconds: runsummary.RunDurationSeconds(run.CreatedAt, run.StartedAt, run.CompletedAt),
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("build run completion comment: %w", err)
 	}
 	return runCompletionCommentBodyMarker + "\n\n" + body, nil
 }
@@ -3233,7 +3236,10 @@ func (s *server) requeueRun(runID string) error {
 		r.CompletedAt = nil
 		return nil
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("requeue run %q: %w", runID, err)
+	}
+	return nil
 }
 
 func (s *server) addIssueReactionBestEffort(repo string, issueNumber int, reaction string) {
@@ -3309,26 +3315,26 @@ func (s *server) addPullRequestReviewCommentReactionBestEffort(repo string, comm
 func copyFile(src, dst string, mode os.FileMode) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("open source file %s: %w", src, err)
 	}
 	defer func() {
 		if closeErr := in.Close(); err == nil && closeErr != nil {
-			err = closeErr
+			err = fmt.Errorf("close source file %s: %w", src, closeErr)
 		}
 	}()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
-		return err
+		return fmt.Errorf("open destination file %s: %w", dst, err)
 	}
 	defer func() {
 		if closeErr := out.Close(); err == nil && closeErr != nil {
-			err = closeErr
+			err = fmt.Errorf("close destination file %s: %w", dst, closeErr)
 		}
 	}()
 
 	if _, err = io.Copy(out, in); err != nil {
-		return err
+		return fmt.Errorf("copy %s to %s: %w", src, dst, err)
 	}
 	return nil
 }

@@ -119,11 +119,11 @@ func (s *Store) UpsertTask(in UpsertTaskInput) (Task, error) {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}); err != nil {
-		return Task{}, err
+		return Task{}, fmt.Errorf("upsert task %q: %w", in.ID, err)
 	}
 	row, err := s.q.GetTask(context.Background(), in.ID)
 	if err != nil {
-		return Task{}, err
+		return Task{}, fmt.Errorf("load task %q after upsert: %w", in.ID, err)
 	}
 	return fromDBGetTaskRow(row), nil
 }
@@ -167,7 +167,7 @@ func (s *Store) SetTaskPR(taskID, _ string, prNumber int) error {
 		ID:        taskID,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("set PR number for task %q: %w", taskID, err)
 	}
 	if rows == 0 {
 		return fmt.Errorf("task %q not found", taskID)
@@ -185,7 +185,7 @@ func (s *Store) MarkTaskCompleted(taskID string) error {
 		ID:        taskID,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("mark task %q completed: %w", taskID, err)
 	}
 	if rows == 0 {
 		return fmt.Errorf("task %q not found", taskID)
@@ -200,11 +200,11 @@ func (s *Store) MarkTaskOpen(taskID string) error {
 	}
 	res, err := s.db.ExecContext(context.Background(), "UPDATE tasks SET status = 'open', updated_at = ? WHERE id = ?", time.Now().UTC().UnixNano(), taskID)
 	if err != nil {
-		return err
+		return fmt.Errorf("mark task %q open: %w", taskID, err)
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return fmt.Errorf("count updated rows for task %q reopen: %w", taskID, err)
 	}
 	if rows == 0 {
 		return fmt.Errorf("task %q not found", taskID)
@@ -237,11 +237,11 @@ func (s *Store) UpsertTaskAgentSession(in UpsertTaskAgentSessionInput) (TaskAgen
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}); err != nil {
-		return TaskAgentSession{}, err
+		return TaskAgentSession{}, fmt.Errorf("upsert task agent session for task %q: %w", in.TaskID, err)
 	}
 	row, err := s.q.GetTaskAgentSession(context.Background(), in.TaskID)
 	if err != nil {
-		return TaskAgentSession{}, err
+		return TaskAgentSession{}, fmt.Errorf("load task agent session for task %q: %w", in.TaskID, err)
 	}
 	return fromDBTaskAgentSession(row), nil
 }
@@ -263,7 +263,10 @@ func (s *Store) DeleteTaskAgentSession(taskID string) error {
 		return nil
 	}
 	_, err := s.q.DeleteTaskAgentSession(context.Background(), taskID)
-	return err
+	if err != nil {
+		return fmt.Errorf("delete task agent session for task %q: %w", taskID, err)
+	}
+	return nil
 }
 
 func (s *Store) IsTaskCompleted(taskID string) bool {
@@ -306,7 +309,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
-		return Run{}, err
+		return Run{}, fmt.Errorf("begin create run transaction for task %q: %w", in.TaskID, err)
 	}
 	defer func() {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
@@ -320,7 +323,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 			return Run{}, fmt.Errorf("task %q already uses agent backend %q", in.TaskID, agent.NormalizeBackend(taskRow.AgentBackend))
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		return Run{}, err
+		return Run{}, fmt.Errorf("load task %q before creating run: %w", in.TaskID, err)
 	}
 
 	if err := qtx.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
@@ -334,7 +337,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		CreatedAt:    now.UnixNano(),
 		UpdatedAt:    now.UnixNano(),
 	}); err != nil {
-		return Run{}, err
+		return Run{}, fmt.Errorf("upsert task %q while creating run %q: %w", in.TaskID, in.ID, err)
 	}
 
 	row, err := qtx.InsertRun(context.Background(), sqlitegen.InsertRunParams{
@@ -365,7 +368,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: runs.id") {
 			return Run{}, fmt.Errorf("run %q already exists", in.ID)
 		}
-		return Run{}, err
+		return Run{}, fmt.Errorf("insert run %q: %w", in.ID, err)
 	}
 
 	if _, err := qtx.SetTaskLastRun(context.Background(), sqlitegen.SetTaskLastRunParams{
@@ -375,14 +378,14 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		PrNumber:    int64(in.PRNumber),
 		ID:          in.TaskID,
 	}); err != nil {
-		return Run{}, err
+		return Run{}, fmt.Errorf("set last run for task %q to %q: %w", in.TaskID, row.ID, err)
 	}
 	if err := qtx.TrimOldRuns(context.Background(), int64(s.maxRuns)); err != nil {
-		return Run{}, err
+		return Run{}, fmt.Errorf("trim old runs after creating run %q: %w", in.ID, err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return Run{}, err
+		return Run{}, fmt.Errorf("commit create run transaction for run %q: %w", in.ID, err)
 	}
 	return fromDBRun(row), nil
 }
@@ -431,7 +434,7 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
-		return Run{}, err
+		return Run{}, fmt.Errorf("begin update run transaction for run %q: %w", id, err)
 	}
 	defer func() {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
@@ -445,22 +448,22 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Run{}, fmt.Errorf("run %q not found", id)
 		}
-		return Run{}, err
+		return Run{}, fmt.Errorf("load run %q for update: %w", id, err)
 	}
 	r := fromDBRun(row)
 	prevStatus := r.Status
 	if err := fn(&r); err != nil {
-		return Run{}, err
+		return Run{}, fmt.Errorf("apply run update for %q: %w", id, err)
 	}
 	r.Status = CanonicalRunStatus(r.Status)
 	if err := ValidateRunStatusTransition(prevStatus, r.Status); err != nil {
-		return Run{}, err
+		return Run{}, fmt.Errorf("validate run status transition for %q: %w", id, err)
 	}
 	r.UpdatedAt = time.Now().UTC()
 
 	rows, err := qtx.UpdateRun(context.Background(), toDBUpdateRunParams(r))
 	if err != nil {
-		return Run{}, err
+		return Run{}, fmt.Errorf("update run %q: %w", id, err)
 	}
 	if rows == 0 {
 		return Run{}, fmt.Errorf("run %q not found", id)
@@ -473,7 +476,7 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 		PrNumber:    int64(r.PRNumber),
 		ID:          r.TaskID,
 	}); err != nil {
-		return Run{}, err
+		return Run{}, fmt.Errorf("set last run for task %q to %q: %w", r.TaskID, r.ID, err)
 	}
 	if r.PRNumber > 0 {
 		_, err = qtx.SetTaskPR(context.Background(), sqlitegen.SetTaskPRParams{
@@ -482,12 +485,12 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 			ID:        r.TaskID,
 		})
 		if err != nil {
-			return Run{}, err
+			return Run{}, fmt.Errorf("set PR number for task %q from run %q: %w", r.TaskID, r.ID, err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return Run{}, err
+		return Run{}, fmt.Errorf("commit update run transaction for run %q: %w", id, err)
 	}
 	return r, nil
 }
@@ -519,14 +522,14 @@ func (s *Store) ClaimRunStart(runID string) (Run, bool, error) {
 		ID:        runID,
 	})
 	if err != nil {
-		return Run{}, false, err
+		return Run{}, false, fmt.Errorf("claim run start for run %q: %w", runID, err)
 	}
 	row, err := s.q.GetRun(context.Background(), runID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Run{}, false, fmt.Errorf("run %q not found", runID)
 		}
-		return Run{}, false, err
+		return Run{}, false, fmt.Errorf("load run %q after claim start: %w", runID, err)
 	}
 	return fromDBRun(row), rows > 0, nil
 }
@@ -544,7 +547,7 @@ func (s *Store) ClaimNextQueuedRun(preferredTaskID string) (Run, bool, error) {
 			return fromDBRun(row), true, nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
-			return Run{}, false, err
+			return Run{}, false, fmt.Errorf("claim next queued run for task %q: %w", preferredTaskID, err)
 		}
 	}
 
@@ -556,7 +559,7 @@ func (s *Store) ClaimNextQueuedRun(preferredTaskID string) (Run, bool, error) {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Run{}, false, nil
 		}
-		return Run{}, false, err
+		return Run{}, false, fmt.Errorf("claim next queued run: %w", err)
 	}
 	return fromDBRun(row), true, nil
 }
@@ -574,12 +577,15 @@ func (s *Store) UpsertRunLease(runID, ownerID string, ttl time.Duration) error {
 		ttl = 90 * time.Second
 	}
 	now := time.Now().UTC()
-	return s.q.UpsertRunLease(context.Background(), sqlitegen.UpsertRunLeaseParams{
+	if err := s.q.UpsertRunLease(context.Background(), sqlitegen.UpsertRunLeaseParams{
 		RunID:          runID,
 		OwnerID:        ownerID,
 		HeartbeatAt:    now.UnixNano(),
 		LeaseExpiresAt: now.Add(ttl).UnixNano(),
-	})
+	}); err != nil {
+		return fmt.Errorf("upsert run lease for run %q: %w", runID, err)
+	}
+	return nil
 }
 
 func (s *Store) RenewRunLease(runID, ownerID string, ttl time.Duration) (bool, error) {
@@ -602,7 +608,7 @@ func (s *Store) RenewRunLease(runID, ownerID string, ttl time.Duration) (bool, e
 		OwnerID:        ownerID,
 	})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("renew run lease for run %q owner %q: %w", runID, ownerID, err)
 	}
 	return rows > 0, nil
 }
@@ -613,7 +619,10 @@ func (s *Store) DeleteRunLease(runID string) error {
 		return nil
 	}
 	_, err := s.q.DeleteRunLease(context.Background(), runID)
-	return err
+	if err != nil {
+		return fmt.Errorf("delete run lease for run %q: %w", runID, err)
+	}
+	return nil
 }
 
 func (s *Store) DeleteRunLeaseForOwner(runID, ownerID string) error {
@@ -626,7 +635,10 @@ func (s *Store) DeleteRunLeaseForOwner(runID, ownerID string) error {
 		RunID:   runID,
 		OwnerID: ownerID,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("delete run lease for run %q owner %q: %w", runID, ownerID, err)
+	}
+	return nil
 }
 
 func (s *Store) GetRunLease(runID string) (RunLease, bool) {
@@ -690,11 +702,11 @@ func (s *Store) UpsertRunExecution(exec RunExecution) (RunExecution, error) {
 		UpdatedAt:      now.UnixNano(),
 		LastObservedAt: now.UnixNano(),
 	}); err != nil {
-		return RunExecution{}, err
+		return RunExecution{}, fmt.Errorf("upsert run execution for run %q: %w", exec.RunID, err)
 	}
 	row, err := s.q.GetRunExecution(context.Background(), exec.RunID)
 	if err != nil {
-		return RunExecution{}, err
+		return RunExecution{}, fmt.Errorf("load run execution for run %q: %w", exec.RunID, err)
 	}
 	return fromDBRunExecution(row), nil
 }
@@ -719,14 +731,14 @@ func (s *Store) UpdateRunExecutionState(runID, status string, exitCode int, last
 		RunID:          runID,
 	})
 	if err != nil {
-		return RunExecution{}, err
+		return RunExecution{}, fmt.Errorf("update run execution state for run %q: %w", runID, err)
 	}
 	if rows == 0 {
 		return RunExecution{}, fmt.Errorf("run execution %q not found", runID)
 	}
 	row, err := s.q.GetRunExecution(context.Background(), runID)
 	if err != nil {
-		return RunExecution{}, err
+		return RunExecution{}, fmt.Errorf("load run execution for run %q after update: %w", runID, err)
 	}
 	return fromDBRunExecution(row), nil
 }
@@ -748,7 +760,10 @@ func (s *Store) DeleteRunExecution(runID string) error {
 		return nil
 	}
 	_, err := s.q.DeleteRunExecution(context.Background(), runID)
-	return err
+	if err != nil {
+		return fmt.Errorf("delete run execution for run %q: %w", runID, err)
+	}
+	return nil
 }
 
 func (s *Store) RequestRunCancel(runID, reason, source string) error {
@@ -764,12 +779,15 @@ func (s *Store) RequestRunCancel(runID, reason, source string) error {
 	if source == "" {
 		source = "system"
 	}
-	return s.q.UpsertRunCancel(context.Background(), sqlitegen.UpsertRunCancelParams{
+	if err := s.q.UpsertRunCancel(context.Background(), sqlitegen.UpsertRunCancelParams{
 		RunID:       runID,
 		Reason:      reason,
 		Source:      source,
 		RequestedAt: time.Now().UTC().UnixNano(),
-	})
+	}); err != nil {
+		return fmt.Errorf("request cancel for run %q: %w", runID, err)
+	}
+	return nil
 }
 
 func (s *Store) GetRunCancel(runID string) (RunCancelRequest, bool) {
@@ -794,7 +812,10 @@ func (s *Store) ClearRunCancel(runID string) error {
 		return nil
 	}
 	_, err := s.q.DeleteRunCancel(context.Background(), runID)
-	return err
+	if err != nil {
+		return fmt.Errorf("clear cancel request for run %q: %w", runID, err)
+	}
+	return nil
 }
 
 func (s *Store) ActiveRunForTask(taskID string) (Run, bool) {
@@ -821,12 +842,15 @@ func (s *Store) LastRunForTask(taskID string) (Run, bool) {
 
 func (s *Store) CancelQueuedRuns(taskID, reason string) error {
 	now := time.Now().UTC().UnixNano()
-	return s.q.CancelQueuedRuns(context.Background(), sqlitegen.CancelQueuedRunsParams{
+	if err := s.q.CancelQueuedRuns(context.Background(), sqlitegen.CancelQueuedRunsParams{
 		Error:       reason,
 		UpdatedAt:   now,
 		CompletedAt: sql.NullInt64{Int64: now, Valid: true},
 		TaskID:      strings.TrimSpace(taskID),
-	})
+	}); err != nil {
+		return fmt.Errorf("cancel queued runs for task %q: %w", strings.TrimSpace(taskID), err)
+	}
+	return nil
 }
 
 // DeliverySeen returns true if the delivery was already processed.
@@ -858,7 +882,7 @@ func (s *Store) ClaimDelivery(deliveryID, claimedBy string) (DeliveryClaim, bool
 	}
 	token, err := newClaimToken()
 	if err != nil {
-		return DeliveryClaim{}, false, err
+		return DeliveryClaim{}, false, fmt.Errorf("create claim token for delivery %q: %w", deliveryID, err)
 	}
 	now := time.Now().UTC()
 	row, err := s.q.ClaimDelivery(context.Background(), sqlitegen.ClaimDeliveryParams{
@@ -869,10 +893,10 @@ func (s *Store) ClaimDelivery(deliveryID, claimedBy string) (DeliveryClaim, bool
 		SeenAt:     now.UnixNano(),
 	})
 	if err != nil {
-		return DeliveryClaim{}, false, err
+		return DeliveryClaim{}, false, fmt.Errorf("claim delivery %q: %w", deliveryID, err)
 	}
 	if err := s.trimDeliveriesIfNeeded(); err != nil {
-		return DeliveryClaim{}, false, err
+		return DeliveryClaim{}, false, fmt.Errorf("trim deliveries after claiming %q: %w", deliveryID, err)
 	}
 	return DeliveryClaim{ID: deliveryID, Token: token}, row.Status == "processing" && row.ClaimToken == token, nil
 }
@@ -891,7 +915,7 @@ func (s *Store) CompleteDeliveryClaim(claim DeliveryClaim) error {
 		ClaimToken:  claim.Token,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("complete delivery claim %q: %w", claim.ID, err)
 	}
 	if rows == 0 {
 		return fmt.Errorf("delivery claim %q is no longer active", claim.ID)
@@ -909,7 +933,10 @@ func (s *Store) ReleaseDeliveryClaim(claim DeliveryClaim) error {
 		ID:         claim.ID,
 		ClaimToken: claim.Token,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("release delivery claim %q: %w", claim.ID, err)
+	}
+	return nil
 }
 
 // RecordDelivery stores a processed delivery id.
@@ -924,7 +951,7 @@ func (s *Store) RecordDelivery(deliveryID string) error {
 		ProcessedAt: sql.NullInt64{Int64: now, Valid: true},
 		SeenAt:      now,
 	}); err != nil {
-		return err
+		return fmt.Errorf("record delivery %q: %w", deliveryID, err)
 	}
 	return s.trimDeliveriesIfNeeded()
 }
@@ -932,12 +959,15 @@ func (s *Store) RecordDelivery(deliveryID string) error {
 func (s *Store) trimDeliveriesIfNeeded() error {
 	count, err := s.q.CountDeliveries(context.Background())
 	if err != nil {
-		return err
+		return fmt.Errorf("count deliveries: %w", err)
 	}
 	if count <= maxDeliveries {
 		return nil
 	}
-	return s.q.DeleteOldestDeliveries(context.Background(), count-maxDeliveries)
+	if err := s.q.DeleteOldestDeliveries(context.Background(), count-maxDeliveries); err != nil {
+		return fmt.Errorf("delete %d oldest deliveries: %w", count-maxDeliveries, err)
+	}
+	return nil
 }
 
 func newClaimToken() (string, error) {

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1636,7 +1637,7 @@ func captureStdout(fn func() error) (string, error) {
 	old := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create stdout pipe: %w", err)
 	}
 	os.Stdout = w
 
