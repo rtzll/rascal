@@ -5,7 +5,7 @@ Usage:
 
 Flags:
       --api-token string              API token for orchestrator (auto-generated if empty)
-      --codex-auth string             local Codex auth.json path copied to the server (default "~/.codex/auth.json")
+      --codex-auth string             local Codex auth.json path used to seed the initial stored shared credential (default "~/.codex/auth.json")
       --domain string                 orchestrator domain (e.g. rascal.example.com)
       --github-admin-token string     GitHub token with repo Webhooks (rw) and Issues (rw) for label/webhook setup
       --github-runtime-token string   GitHub token for remote runner operations (push/PR)

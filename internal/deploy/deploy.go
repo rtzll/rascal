@@ -33,7 +33,6 @@ type Config struct {
 	APIToken           string
 	WebhookSecret      string
 	GitHubRuntimeToken string
-	CodexAuthPath      string
 	RunnerMode         string
 	AgentBackend       agent.Backend
 	RunnerImage        string
@@ -42,10 +41,8 @@ type Config struct {
 	ServerListenAddr   string
 	ServerDataDir      string
 	ServerStatePath    string
-	ServerCodexAuthDst string
 	GOARCH             string
 	UploadEnvFile      bool
-	UploadCodexAuth    bool
 }
 
 type remoteUpload struct {
@@ -64,7 +61,6 @@ type plan struct {
 	RunnerImageGoose string   `json:"runner_image_goose"`
 	RunnerImageCodex string   `json:"runner_image_codex"`
 	UploadEnvFile    bool     `json:"upload_env_file"`
-	UploadCodexAuth  bool     `json:"upload_codex_auth"`
 	Steps            []string `json:"steps"`
 }
 
@@ -83,15 +79,6 @@ func Execute(cfg Config) error {
 			return fmt.Errorf("webhook secret is required when uploading /etc/rascal/rascal.env")
 		}
 	}
-	if cfg.UploadCodexAuth {
-		if strings.TrimSpace(cfg.CodexAuthPath) == "" {
-			return fmt.Errorf("codex auth path is required")
-		}
-		if _, err := os.Stat(cfg.CodexAuthPath); err != nil {
-			return fmt.Errorf("codex auth file is required at %s: %w", cfg.CodexAuthPath, err)
-		}
-	}
-
 	tmpDir, err := os.MkdirTemp("", "rascal-bootstrap-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
@@ -158,7 +145,6 @@ func Execute(cfg Config) error {
 		RunnerImageGoose: strings.TrimSpace(cfg.RunnerImageGoose),
 		RunnerImageCodex: strings.TrimSpace(cfg.RunnerImageCodex),
 		UploadEnvFile:    cfg.UploadEnvFile,
-		UploadCodexAuth:  cfg.UploadCodexAuth,
 		CreatedAt:        time.Now().UTC().Format(time.RFC3339),
 		Steps: []string{
 			"prepare_remote_dirs",
@@ -192,9 +178,6 @@ func Execute(cfg Config) error {
 	}
 	if cfg.UploadEnvFile {
 		uploads = append(uploads, remoteUpload{LocalPath: envPath, RemotePath: "/tmp/rascal-bootstrap/rascal.env"})
-	}
-	if cfg.UploadCodexAuth {
-		uploads = append(uploads, remoteUpload{LocalPath: cfg.CodexAuthPath, RemotePath: "/tmp/rascal-bootstrap/auth.json"})
 	}
 	for _, up := range uploads {
 		if err := runLocal("scp", scpArgs(cfg, up.LocalPath, remoteTarget(cfg, up.RemotePath))...); err != nil {
@@ -242,11 +225,6 @@ install -m 0644 /tmp/rascal-bootstrap/rascal@.service /etc/systemd/system/rascal
 	} else {
 		if err := runRemoteScript(cfg, "set -eu\nif [ ! -f /etc/rascal/rascal.env ]; then echo \"missing /etc/rascal/rascal.env\" >&2; exit 1; fi\n"); err != nil {
 			return fmt.Errorf("remote env file missing; bootstrap first or run deploy without --skip-env-upload: %w", err)
-		}
-	}
-	if cfg.UploadCodexAuth {
-		if err := runRemoteScript(cfg, fmt.Sprintf("set -eu\ninstall -m 0600 /tmp/rascal-bootstrap/auth.json %s\n", shellSingleQuote(cfg.ServerCodexAuthDst))); err != nil {
-			return err
 		}
 	}
 	if err := runRemoteScript(cfg, fmt.Sprintf(strings.TrimSpace(`
@@ -676,7 +654,6 @@ RASCAL_RUNNER_MAX_ATTEMPTS=1
 RASCAL_AGENT_SESSION_MODE=all
 RASCAL_AGENT_SESSION_ROOT=%s
 RASCAL_AGENT_SESSION_TTL_DAYS=14
-RASCAL_CODEX_AUTH_PATH=%s
 	`)+"\n",
 		cfg.ServerListenAddr,
 		cfg.ServerDataDir,
@@ -689,7 +666,6 @@ RASCAL_CODEX_AUTH_PATH=%s
 		gooseImage,
 		codexImage,
 		filepath.Join(cfg.ServerDataDir, defaults.AgentSessionDirName),
-		cfg.ServerCodexAuthDst,
 	)
 }
 

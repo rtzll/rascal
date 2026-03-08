@@ -5,12 +5,13 @@ Usage:
 
 Examples:
 rascal deploy --host 203.0.113.10
-rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN" --upload-auth --codex-auth ~/.codex/auth.json
+rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN"
+rascal deploy --host 203.0.113.10 --codex-auth ~/.codex/auth.json
 
 Flags:
       --agent-backend string          agent backend to use on the server (goose or codex) (default "goose")
       --api-token string              orchestrator API token
-      --codex-auth string             local Codex auth.json path (default "~/.codex/auth.json")
+      --codex-auth string             local Codex auth.json path to seed as a stored shared credential
       --domain string                 public domain for TLS/Caddy
       --github-runtime-token string   GitHub runtime token
       --goarch string                 GOARCH for rascald binary (auto-detected when empty)
@@ -22,7 +23,6 @@ Flags:
       --ssh-key string                SSH private key path
       --ssh-port int                  SSH target port (default 22)
       --ssh-user string               SSH target user (default "root")
-      --upload-auth                   upload/update codex auth file on server
       --upload-env                    upload/update /etc/rascal/rascal.env on server
       --webhook-secret string         GitHub webhook secret
 

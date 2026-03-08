@@ -220,8 +220,8 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := deployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
 		t.Fatalf("deploy default upload-env = %q, want false", got)
 	}
-	if got := deployCmd.Flags().Lookup("upload-auth").DefValue; got != "false" {
-		t.Fatalf("deploy default upload-auth = %q, want false", got)
+	if got := deployCmd.Flags().Lookup("codex-auth").DefValue; got != "" {
+		t.Fatalf("deploy default codex-auth = %q, want empty", got)
 	}
 
 	provisionCmd, _, err := root.Find([]string{"infra", "provision-hetzner"})
@@ -245,8 +245,8 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := infraDeployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
 		t.Fatalf("infra deploy-existing default upload-env = %q, want false", got)
 	}
-	if got := infraDeployCmd.Flags().Lookup("upload-auth").DefValue; got != "false" {
-		t.Fatalf("infra deploy-existing default upload-auth = %q, want false", got)
+	if got := infraDeployCmd.Flags().Lookup("codex-auth").DefValue; got != "" {
+		t.Fatalf("infra deploy-existing default codex-auth = %q, want empty", got)
 	}
 
 	infraUpCmd, _, err := root.Find([]string{"infra", "up"})

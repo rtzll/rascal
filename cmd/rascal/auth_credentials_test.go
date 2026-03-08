@@ -265,6 +265,127 @@ func TestAuthCredentialsDisableFetchesUpdatedCredential(t *testing.T) {
 	}
 }
 
+func TestSeedBootstrapSharedCredentialCreatesWhenMissing(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"token":"abc"}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	var seenMethods []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenMethods = append(seenMethods, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/credentials/"+bootstrapSharedCredentialID:
+			http.Error(w, "credential not found", http.StatusNotFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/credentials":
+			var req credentialCreateRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode create request: %v", err)
+			}
+			if req.ID != bootstrapSharedCredentialID || req.Scope != "shared" || req.AuthBlob != `{"token":"abc"}` {
+				t.Fatalf("unexpected create request: %+v", req)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"credential": map[string]any{
+					"id":                bootstrapSharedCredentialID,
+					"scope":             "shared",
+					"weight":            1,
+					"max_active_leases": 1,
+					"status":            "active",
+					"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					"updated_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				},
+			}); err != nil {
+				t.Fatalf("encode create response: %v", err)
+			}
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client := apiClient{
+		baseURL: srv.URL,
+		token:   "token",
+		http:    &http.Client{Timeout: 5 * time.Second},
+	}
+	cred, err := seedBootstrapSharedCredential(client, authPath)
+	if err != nil {
+		t.Fatalf("seedBootstrapSharedCredential: %v", err)
+	}
+	if cred.ID != bootstrapSharedCredentialID {
+		t.Fatalf("credential id = %q, want %q", cred.ID, bootstrapSharedCredentialID)
+	}
+	if strings.Join(seenMethods, ",") != "GET /v1/credentials/"+bootstrapSharedCredentialID+",POST /v1/credentials" {
+		t.Fatalf("unexpected request flow: %v", seenMethods)
+	}
+}
+
+func TestSeedBootstrapSharedCredentialUpdatesWhenPresent(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"token":"updated"}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	var raw map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/credentials/"+bootstrapSharedCredentialID:
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"credential": map[string]any{
+					"id":                bootstrapSharedCredentialID,
+					"scope":             "shared",
+					"weight":            2,
+					"max_active_leases": 3,
+					"status":            "cooldown",
+					"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					"updated_at":        time.Date(2026, 3, 8, 12, 1, 0, 0, time.UTC),
+				},
+			}); err != nil {
+				t.Fatalf("encode get response: %v", err)
+			}
+		case r.Method == http.MethodPatch && r.URL.Path == "/v1/credentials/"+bootstrapSharedCredentialID:
+			if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+				t.Fatalf("decode patch request: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"credential": map[string]any{
+					"id":                bootstrapSharedCredentialID,
+					"scope":             "shared",
+					"weight":            2,
+					"max_active_leases": 3,
+					"status":            "active",
+					"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					"updated_at":        time.Date(2026, 3, 8, 12, 2, 0, 0, time.UTC),
+				},
+			}); err != nil {
+				t.Fatalf("encode patch response: %v", err)
+			}
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client := apiClient{
+		baseURL: srv.URL,
+		token:   "token",
+		http:    &http.Client{Timeout: 5 * time.Second},
+	}
+	if _, err := seedBootstrapSharedCredential(client, authPath); err != nil {
+		t.Fatalf("seedBootstrapSharedCredential: %v", err)
+	}
+	if raw["scope"] != "shared" || raw["status"] != "active" || raw["auth_blob"] != `{"token":"updated"}` {
+		t.Fatalf("unexpected patch payload: %+v", raw)
+	}
+	if raw["cooldown_until"] != "" || raw["last_error"] != "" {
+		t.Fatalf("expected cooldown state cleared, got %+v", raw)
+	}
+}
+
 func TestAuthCredentialsEnableClearsCooldown(t *testing.T) {
 	var raw map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

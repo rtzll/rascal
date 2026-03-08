@@ -288,25 +288,26 @@ func TestServerEnvFileOmitsLegacyRunnerImageEnv(t *testing.T) {
 	if strings.Contains(content, "RASCAL_RUNNER_IMAGE=") {
 		t.Fatalf("expected server env file to omit legacy runner image, got:\n%s", content)
 	}
+	if strings.Contains(content, "RASCAL_CODEX_AUTH_PATH=") {
+		t.Fatalf("expected server env file to omit static codex auth path, got:\n%s", content)
+	}
 }
 
 func testDeployConfig() Config {
 	return Config{
-		Host:               "example-host",
-		SSHUser:            "root",
-		SSHPort:            22,
-		Domain:             "rascal.example.com",
-		AgentBackend:       agent.BackendGoose,
-		RunnerImage:        defaults.GooseRunnerImageTag,
-		RunnerImageGoose:   defaults.GooseRunnerImageTag,
-		RunnerImageCodex:   defaults.CodexRunnerImageTag,
-		ServerListenAddr:   ":8080",
-		ServerDataDir:      "/var/lib/rascal",
-		ServerStatePath:    "/var/lib/rascal/state.db",
-		ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
-		GOARCH:             "amd64",
-		UploadEnvFile:      false,
-		UploadCodexAuth:    false,
+		Host:             "example-host",
+		SSHUser:          "root",
+		SSHPort:          22,
+		Domain:           "rascal.example.com",
+		AgentBackend:     agent.BackendGoose,
+		RunnerImage:      defaults.GooseRunnerImageTag,
+		RunnerImageGoose: defaults.GooseRunnerImageTag,
+		RunnerImageCodex: defaults.CodexRunnerImageTag,
+		ServerListenAddr: ":8080",
+		ServerDataDir:    "/var/lib/rascal",
+		ServerStatePath:  "/var/lib/rascal/state.db",
+		GOARCH:           "amd64",
+		UploadEnvFile:    false,
 	}
 }
 

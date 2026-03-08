@@ -39,4 +39,3 @@
 
 - `Stored credential`: encrypted Codex auth payload stored in Rascal state.
 - `Credential lease`: temporary assignment of a stored credential to one run.
-- `Static auth file`: fallback auth file on disk, typically `RASCAL_CODEX_AUTH_PATH`, used when no stored credential can be leased.

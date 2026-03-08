@@ -262,8 +262,7 @@ Common failure and recovery cases:
 
 ## Credential Handling
 
-Rascal supports stored Codex credentials in addition to the legacy static
-`/etc/rascal/codex_auth.json` file.
+Rascal uses stored Codex credentials managed by `rascald`.
 
 - Stored credentials are encrypted before being persisted in SQLite.
 - Each credential is either `personal` (owned by a user) or `shared`.
@@ -275,8 +274,8 @@ Rascal supports stored Codex credentials in addition to the legacy static
   and removed during run cleanup.
 - While a run is active, `rascald` renews the credential lease. If renewal is
   lost, the run is canceled.
-- If no stored credential can be leased, Rascal can fall back to the static
-  `RASCAL_CODEX_AUTH_PATH` auth file when present.
+- Bootstrap and deploy can seed an initial shared stored credential from a
+  local Codex auth file.
 
 ## Runner Environment Contract
 

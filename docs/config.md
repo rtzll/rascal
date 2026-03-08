@@ -69,8 +69,7 @@ Tip: use `doctor` to confirm both local and remote resolution.
 
 ## Server Credential Settings
 
-Rascal supports encrypted stored credentials for Codex runs in addition to the
-legacy static auth file on disk.
+Rascal uses encrypted stored credentials for Codex runs.
 
 - `RASCAL_CREDENTIAL_STRATEGY`
   Allocation strategy for choosing among eligible credentials.
@@ -89,7 +88,6 @@ legacy static auth file on disk.
   If unset, Rascal falls back to `RASCAL_API_TOKEN`.
   Recommended: set a dedicated encryption key instead of reusing the API token.
 
-- `RASCAL_CODEX_AUTH_PATH`
-  Path to the static fallback auth file used when no stored credential can be
-  leased.
-  Default: `/etc/rascal/codex_auth.json`
+Operators can manage stored credentials with `rascal auth credentials ...`.
+Bootstrap and deploy flows can seed an initial shared credential with
+`--codex-auth ~/.codex/auth.json`.

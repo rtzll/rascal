@@ -1600,23 +1600,7 @@ func (s *server) prepareRunCredentialAuth(runID, runDir, requesterUserID string)
 		if !errors.Is(err, credentials.ErrNoCredentialAvailable) {
 			return "", fmt.Errorf("acquire broker credential: %w", err)
 		}
-	}
-
-	fallbackPath := strings.TrimSpace(s.cfg.CodexAuthPath)
-	if fallbackPath == "" {
-		if s.broker != nil {
-			return "", credentials.ErrNoCredentialAvailable
-		}
-		return "", nil
-	}
-	if _, err := os.Stat(fallbackPath); err != nil {
-		if s.broker != nil {
-			return "", credentials.ErrNoCredentialAvailable
-		}
-		return "", nil
-	}
-	if err := copyFile(fallbackPath, authPath, 0o600); err != nil {
-		return "", fmt.Errorf("copy fallback codex auth: %w", err)
+		return "", credentials.ErrNoCredentialAvailable
 	}
 	return "", nil
 }
@@ -3379,31 +3363,4 @@ func (s *server) addPullRequestReviewCommentReactionBestEffort(repo string, comm
 	if err := s.gh.AddPullRequestReviewCommentReaction(ctx, repo, commentID, reaction); err != nil {
 		log.Printf("failed to add %q reaction for PR review comment %d in %s: %v", reaction, commentID, repo, err)
 	}
-}
-
-func copyFile(src, dst string, mode os.FileMode) (err error) {
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("open source file %s: %w", src, err)
-	}
-	defer func() {
-		if closeErr := in.Close(); err == nil && closeErr != nil {
-			err = fmt.Errorf("close source file %s: %w", src, closeErr)
-		}
-	}()
-
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return fmt.Errorf("open destination file %s: %w", dst, err)
-	}
-	defer func() {
-		if closeErr := out.Close(); err == nil && closeErr != nil {
-			err = fmt.Errorf("close destination file %s: %w", dst, closeErr)
-		}
-	}()
-
-	if _, err = io.Copy(out, in); err != nil {
-		return fmt.Errorf("copy %s to %s: %w", src, dst, err)
-	}
-	return nil
 }

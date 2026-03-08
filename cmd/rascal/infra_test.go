@@ -1,8 +1,11 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rtzll/rascal/internal/config"
 )
@@ -59,10 +62,14 @@ func TestRunDeployExistingSkipsHealthyHost(t *testing.T) {
 	origRunRemoteDoctor := runRemoteDoctorFn
 	origDeploy := deployToExistingHostFn
 	origCaddy := remoteCaddyDomainConfiguredFn
+	origHealth := waitForServerHealthSSHFn
+	origSeed := seedBootstrapSharedCredentialFn
 	t.Cleanup(func() {
 		runRemoteDoctorFn = origRunRemoteDoctor
 		deployToExistingHostFn = origDeploy
 		remoteCaddyDomainConfiguredFn = origCaddy
+		waitForServerHealthSSHFn = origHealth
+		seedBootstrapSharedCredentialFn = origSeed
 	})
 
 	runRemoteDoctorFn = func(cfg deployConfig) (remoteDoctorStatus, error) {
@@ -74,7 +81,6 @@ func TestRunDeployExistingSkipsHealthyHost(t *testing.T) {
 			CaddyInstalled:     true,
 			EnvFilePresent:     true,
 			AuthRuntimeSynced:  true,
-			CodexAuthPresent:   true,
 			RunnerImagePresent: true,
 		}, nil
 	}
@@ -87,16 +93,20 @@ func TestRunDeployExistingSkipsHealthyHost(t *testing.T) {
 		return nil
 	}
 
+	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error { return nil }
+	seedBootstrapSharedCredentialFn = func(client apiClient, authFilePath string) (credentialRecord, error) {
+		return credentialRecord{}, nil
+	}
+
 	a := &app{}
 	result, err := a.runDeployExisting(deployExistingInput{
-		Host:           "203.0.113.10",
-		SSHPort:        22,
-		GOARCH:         "amd64",
-		Domain:         "rascal.example.com",
-		SkipEnvUpload:  true,
-		SkipAuthUpload: true,
-		SkipIfHealthy:  true,
-		RawErrors:      true,
+		Host:          "203.0.113.10",
+		SSHPort:       22,
+		GOARCH:        "amd64",
+		Domain:        "rascal.example.com",
+		SkipEnvUpload: true,
+		SkipIfHealthy: true,
+		RawErrors:     true,
 	})
 	if err != nil {
 		t.Fatalf("runDeployExisting failed: %v", err)
@@ -111,14 +121,22 @@ func TestRunDeployExistingSkipsHealthyHost(t *testing.T) {
 
 func TestRunDeployExistingUsesConfiguredHost(t *testing.T) {
 	origDeploy := deployToExistingHostFn
+	origHealth := waitForServerHealthSSHFn
+	origSeed := seedBootstrapSharedCredentialFn
 	t.Cleanup(func() {
 		deployToExistingHostFn = origDeploy
+		waitForServerHealthSSHFn = origHealth
+		seedBootstrapSharedCredentialFn = origSeed
 	})
 
 	deployHost := ""
 	deployToExistingHostFn = func(cfg deployConfig) error {
 		deployHost = cfg.Host
 		return nil
+	}
+	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error { return nil }
+	seedBootstrapSharedCredentialFn = func(client apiClient, authFilePath string) (credentialRecord, error) {
+		return credentialRecord{}, nil
 	}
 
 	a := &app{
@@ -127,11 +145,10 @@ func TestRunDeployExistingUsesConfiguredHost(t *testing.T) {
 		},
 	}
 	result, err := a.runDeployExisting(deployExistingInput{
-		SSHPort:        22,
-		GOARCH:         "amd64",
-		SkipEnvUpload:  true,
-		SkipAuthUpload: true,
-		RawErrors:      true,
+		SSHPort:       22,
+		GOARCH:        "amd64",
+		SkipEnvUpload: true,
+		RawErrors:     true,
 	})
 	if err != nil {
 		t.Fatalf("runDeployExisting failed: %v", err)
@@ -146,23 +163,30 @@ func TestRunDeployExistingUsesConfiguredHost(t *testing.T) {
 
 func TestRunDeployExistingUsesCanonicalRuntimeTokenEnv(t *testing.T) {
 	origDeploy := deployToExistingHostFn
+	origHealth := waitForServerHealthSSHFn
+	origSeed := seedBootstrapSharedCredentialFn
 	t.Cleanup(func() {
 		deployToExistingHostFn = origDeploy
+		waitForServerHealthSSHFn = origHealth
+		seedBootstrapSharedCredentialFn = origSeed
 	})
 
 	deployToExistingHostFn = func(cfg deployConfig) error {
 		return nil
+	}
+	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error { return nil }
+	seedBootstrapSharedCredentialFn = func(client apiClient, authFilePath string) (credentialRecord, error) {
+		return credentialRecord{}, nil
 	}
 
 	t.Setenv("RASCAL_GITHUB_TOKEN", "runtime-token")
 
 	a := &app{}
 	_, err := a.runDeployExisting(deployExistingInput{
-		Host:           "203.0.113.10",
-		SSHPort:        22,
-		GOARCH:         "amd64",
-		SkipAuthUpload: true,
-		RawErrors:      true,
+		Host:      "203.0.113.10",
+		SSHPort:   22,
+		GOARCH:    "amd64",
+		RawErrors: true,
 	})
 	if err != nil {
 		t.Fatalf("runDeployExisting failed: %v", err)
@@ -175,16 +199,98 @@ func TestRunDeployExistingIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
 
 	a := &app{}
 	_, err := a.runDeployExisting(deployExistingInput{
-		Host:           "203.0.113.10",
-		SSHPort:        22,
-		GOARCH:         "amd64",
-		SkipAuthUpload: true,
-		RawErrors:      true,
+		Host:      "203.0.113.10",
+		SSHPort:   22,
+		GOARCH:    "amd64",
+		RawErrors: true,
 	})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "--github-runtime-token is required when --upload-env is used") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunDeployExistingSeedsStoredCredentialWhenCodexAuthProvided(t *testing.T) {
+	origDeploy := deployToExistingHostFn
+	origHealth := waitForServerHealthSSHFn
+	origSeed := seedBootstrapSharedCredentialFn
+	t.Cleanup(func() {
+		deployToExistingHostFn = origDeploy
+		waitForServerHealthSSHFn = origHealth
+		seedBootstrapSharedCredentialFn = origSeed
+	})
+
+	authPath := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"token":"abc"}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	deployCalled := false
+	deployToExistingHostFn = func(cfg deployConfig) error {
+		deployCalled = true
+		return nil
+	}
+	healthCalls := 0
+	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error {
+		healthCalls++
+		return nil
+	}
+	var gotClient apiClient
+	var gotAuthPath string
+	seedBootstrapSharedCredentialFn = func(client apiClient, authFilePath string) (credentialRecord, error) {
+		gotClient = client
+		gotAuthPath = authFilePath
+		return credentialRecord{ID: bootstrapSharedCredentialID}, nil
+	}
+
+	a := &app{cfg: config.ClientConfig{APIToken: "cfg-api-token"}}
+	_, err := a.runDeployExisting(deployExistingInput{
+		Host:          "203.0.113.10",
+		SSHUser:       "root",
+		SSHPort:       22,
+		GOARCH:        "amd64",
+		SkipEnvUpload: true,
+		CodexAuthPath: authPath,
+		RawErrors:     true,
+	})
+	if err != nil {
+		t.Fatalf("runDeployExisting failed: %v", err)
+	}
+	if !deployCalled {
+		t.Fatal("expected deploy to run")
+	}
+	if healthCalls != 1 {
+		t.Fatalf("health checks = %d, want 1", healthCalls)
+	}
+	if gotAuthPath != authPath {
+		t.Fatalf("seed auth path = %q, want %q", gotAuthPath, authPath)
+	}
+	if gotClient.transport != "ssh" || gotClient.sshHost != "203.0.113.10" || gotClient.token != "cfg-api-token" {
+		t.Fatalf("unexpected seed client: %+v", gotClient)
+	}
+}
+
+func TestRunDeployExistingRequiresAPITokenForCredentialSeeding(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"token":"abc"}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	a := &app{}
+	_, err := a.runDeployExisting(deployExistingInput{
+		Host:          "203.0.113.10",
+		SSHPort:       22,
+		GOARCH:        "amd64",
+		SkipEnvUpload: true,
+		CodexAuthPath: authPath,
+		RawErrors:     true,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "--codex-auth requires API access") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

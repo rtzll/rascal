@@ -59,6 +59,8 @@ type credentialUpdateRequest struct {
 	LastError       *string `json:"last_error,omitempty"`
 }
 
+const bootstrapSharedCredentialID = "cred_bootstrap_shared"
+
 func (a *app) newAuthCredentialsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "credentials",
@@ -361,7 +363,36 @@ func (a *app) newAuthCredentialsCooldownCmd() *cobra.Command {
 }
 
 func (a *app) listCredentials() ([]credentialRecord, error) {
-	resp, err := a.client.do(http.MethodGet, "/v1/credentials", nil)
+	return listCredentialsWithClient(a.client)
+}
+
+func (a *app) getCredential(id string) (credentialRecord, error) {
+	cred, _, err := getCredentialWithClient(a.client, id)
+	return cred, err
+}
+
+func (a *app) createCredential(req credentialCreateRequest) (credentialRecord, error) {
+	return createCredentialWithClient(a.client, req)
+}
+
+func (a *app) updateCredential(id string, req credentialUpdateRequest) (credentialRecord, error) {
+	return updateCredentialWithClient(a.client, id, req)
+}
+
+func (a *app) disableCredential(id string) (credentialRecord, error) {
+	resp, err := a.client.do(http.MethodDelete, "/v1/credentials/"+url.PathEscape(strings.TrimSpace(id)), nil)
+	if err != nil {
+		return credentialRecord{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
+	}
+	defer closeWithLog("close disable credential response body", resp.Body)
+	if resp.StatusCode >= 300 {
+		return credentialRecord{}, decodeServerError(resp)
+	}
+	return a.getCredential(id)
+}
+
+func listCredentialsWithClient(client apiClient) ([]credentialRecord, error) {
+	resp, err := client.do(http.MethodGet, "/v1/credentials", nil)
 	if err != nil {
 		return nil, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
@@ -376,24 +407,27 @@ func (a *app) listCredentials() ([]credentialRecord, error) {
 	return out.Credentials, nil
 }
 
-func (a *app) getCredential(id string) (credentialRecord, error) {
-	resp, err := a.client.do(http.MethodGet, "/v1/credentials/"+url.PathEscape(strings.TrimSpace(id)), nil)
+func getCredentialWithClient(client apiClient, id string) (credentialRecord, bool, error) {
+	resp, err := client.do(http.MethodGet, "/v1/credentials/"+url.PathEscape(strings.TrimSpace(id)), nil)
 	if err != nil {
-		return credentialRecord{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
+		return credentialRecord{}, false, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
 	defer closeWithLog("close get credential response body", resp.Body)
+	if resp.StatusCode == http.StatusNotFound {
+		return credentialRecord{}, false, nil
+	}
 	if resp.StatusCode >= 300 {
-		return credentialRecord{}, decodeServerError(resp)
+		return credentialRecord{}, false, decodeServerError(resp)
 	}
 	var out credentialGetResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return credentialRecord{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+		return credentialRecord{}, false, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 	}
-	return out.Credential, nil
+	return out.Credential, true, nil
 }
 
-func (a *app) createCredential(req credentialCreateRequest) (credentialRecord, error) {
-	resp, err := a.client.doJSON(http.MethodPost, "/v1/credentials", req)
+func createCredentialWithClient(client apiClient, req credentialCreateRequest) (credentialRecord, error) {
+	resp, err := client.doJSON(http.MethodPost, "/v1/credentials", req)
 	if err != nil {
 		return credentialRecord{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
@@ -408,8 +442,8 @@ func (a *app) createCredential(req credentialCreateRequest) (credentialRecord, e
 	return out.Credential, nil
 }
 
-func (a *app) updateCredential(id string, req credentialUpdateRequest) (credentialRecord, error) {
-	resp, err := a.client.doJSON(http.MethodPatch, "/v1/credentials/"+url.PathEscape(strings.TrimSpace(id)), req)
+func updateCredentialWithClient(client apiClient, id string, req credentialUpdateRequest) (credentialRecord, error) {
+	resp, err := client.doJSON(http.MethodPatch, "/v1/credentials/"+url.PathEscape(strings.TrimSpace(id)), req)
 	if err != nil {
 		return credentialRecord{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
@@ -424,16 +458,34 @@ func (a *app) updateCredential(id string, req credentialUpdateRequest) (credenti
 	return out.Credential, nil
 }
 
-func (a *app) disableCredential(id string) (credentialRecord, error) {
-	resp, err := a.client.do(http.MethodDelete, "/v1/credentials/"+url.PathEscape(strings.TrimSpace(id)), nil)
+func seedBootstrapSharedCredential(client apiClient, authFilePath string) (credentialRecord, error) {
+	authBlob, err := resolveCredentialAuthBlob(authFilePath, "", true)
 	if err != nil {
-		return credentialRecord{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
+		return credentialRecord{}, err
 	}
-	defer closeWithLog("close disable credential response body", resp.Body)
-	if resp.StatusCode >= 300 {
-		return credentialRecord{}, decodeServerError(resp)
+
+	if _, found, err := getCredentialWithClient(client, bootstrapSharedCredentialID); err != nil {
+		return credentialRecord{}, err
+	} else if !found {
+		return createCredentialWithClient(client, credentialCreateRequest{
+			ID:              bootstrapSharedCredentialID,
+			Scope:           "shared",
+			AuthBlob:        authBlob,
+			Weight:          1,
+			MaxActiveLeases: 1,
+		})
 	}
-	return a.getCredential(id)
+
+	scope := "shared"
+	status := "active"
+	clearValue := ""
+	return updateCredentialWithClient(client, bootstrapSharedCredentialID, credentialUpdateRequest{
+		Scope:         &scope,
+		AuthBlob:      &authBlob,
+		Status:        &status,
+		CooldownUntil: &clearValue,
+		LastError:     &clearValue,
+	})
 }
 
 func resolveCredentialAuthBlob(authFile, authBlob string, required bool) (string, error) {

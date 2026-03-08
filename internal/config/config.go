@@ -30,7 +30,6 @@ type ServerConfig struct {
 	RunnerImageGoose        string
 	RunnerImageCodex        string
 	RunnerMaxAttempts       int
-	CodexAuthPath           string
 	CredentialStrategy      string
 	CredentialLeaseTTL      time.Duration
 	CredentialRenewEvery    time.Duration
@@ -77,7 +76,6 @@ func LoadServerConfig() ServerConfig {
 		RunnerImageGoose:        envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", defaults.GooseRunnerImageTag),
 		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
 		RunnerMaxAttempts:       envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
-		CodexAuthPath:           envOrDefault("RASCAL_CODEX_AUTH_PATH", "/etc/rascal/codex_auth.json"),
 		CredentialStrategy:      envOrDefault("RASCAL_CREDENTIAL_STRATEGY", "requester_own_then_shared"),
 		CredentialLeaseTTL:      envDurationOrDefault("RASCAL_CREDENTIAL_LEASE_TTL", 90*time.Second),
 		CredentialRenewEvery:    envDurationOrDefault("RASCAL_CREDENTIAL_RENEW_INTERVAL", 30*time.Second),

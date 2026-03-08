@@ -126,65 +126,22 @@ func TestSyncRemoteAuthIncludesRestartWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestSyncRemoteAuthCodexOnlyWithoutRestart(t *testing.T) {
-	logDir := setupSyncCommandFakes(t)
-	codexAuthPath := filepath.Join(t.TempDir(), "auth.json")
-	if err := os.WriteFile(codexAuthPath, []byte(`{"access_token":"abc"}`), 0o600); err != nil {
-		t.Fatalf("write codex auth file: %v", err)
-	}
-
-	err := syncRemoteAuth(syncRemoteAuthConfig{
-		Host:          "example-host",
-		CodexAuthPath: codexAuthPath,
-		Restart:       false,
-	})
-	if err != nil {
-		t.Fatalf("syncRemoteAuth: %v", err)
-	}
-
-	authPayloadPath := filepath.Join(logDir, "scp_payload_auth.json")
-	payload, err := os.ReadFile(authPayloadPath)
-	if err != nil {
-		t.Fatalf("read uploaded codex payload: %v", err)
-	}
-	if strings.TrimSpace(string(payload)) != `{"access_token":"abc"}` {
-		t.Fatalf("unexpected codex auth payload:\n%s", string(payload))
-	}
-
-	sshLog, err := os.ReadFile(filepath.Join(logDir, "ssh_calls.log"))
-	if err != nil {
-		t.Fatalf("read ssh log: %v", err)
-	}
-	sshCalls := string(sshLog)
-	if strings.Contains(sshCalls, "awk -F=") {
-		t.Fatalf("did not expect env merge command for codex-only sync, got:\n%s", sshCalls)
-	}
-	if !strings.Contains(sshCalls, "install -m 0600 /tmp/rascal-bootstrap/auth.json /etc/rascal/codex_auth.json") {
-		t.Fatalf("expected codex auth install command, got:\n%s", sshCalls)
-	}
-	if strings.Contains(sshCalls, `systemctl restart "rascal@$slot"`) {
-		t.Fatalf("did not expect restart command when Restart=false, got:\n%s", sshCalls)
-	}
-}
-
 func TestAuthSyncCommandUsesConfiguredSSHHost(t *testing.T) {
 	logDir := setupSyncCommandFakes(t)
-	codexAuthPath := filepath.Join(t.TempDir(), "auth.json")
-	if err := os.WriteFile(codexAuthPath, []byte(`{"access_token":"abc"}`), 0o600); err != nil {
-		t.Fatalf("write codex auth file: %v", err)
-	}
 
 	a := &app{
 		cfg: config.ClientConfig{
-			SSHHost: "configured-host",
+			SSHHost:  "configured-host",
+			APIToken: "api-token",
 		},
 		output: "json",
 	}
+	t.Setenv("RASCAL_GITHUB_TOKEN", "runtime-token")
 	cmd := a.newAuthSyncCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{
-		"--codex-auth", codexAuthPath,
+		"--webhook-secret", "webhook-secret",
 		"--restart-service=false",
 	})
 
@@ -227,9 +184,6 @@ cp "$src" "$log_dir/scp_payload.env"
 case "$dst" in
   *auth.env.update)
     cp "$src" "$log_dir/scp_payload.env"
-    ;;
-  *auth.json)
-    cp "$src" "$log_dir/scp_payload_auth.json"
     ;;
 esac
 exit 0

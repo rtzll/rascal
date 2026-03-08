@@ -64,7 +64,7 @@ Operationally this means:
 | Run is stuck in `queued` | Control plane / scheduler | `./bin/rascal ps`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
 | Run is `running` but appears idle | Execution plane / backend | `./bin/rascal logs <run_id> --follow`, inspect detached containers on host |
 | Cancel does not take effect | Execution plane / supervision adoption | `./bin/rascal cancel <run_id>`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
-| Auth failures in Codex runs | Credential layer | inspect run logs, verify stored credential status or fallback auth file |
+| Auth failures in Codex runs | Credential layer | inspect run logs, verify stored credential status and lease availability |
 | Deploy succeeds locally but service is unhealthy | Deployment / blue-green cutover | check active slot, slot readiness, Caddy logs, and rollback readiness |
 
 ## First-Response Commands
@@ -111,8 +111,7 @@ Backend notes:
 
 ## Credential Leasing
 
-For Codex runs, Rascal can use a leased stored credential instead of relying
-only on the static server auth file.
+For Codex runs, Rascal uses leased stored credentials.
 
 Operational notes:
 
@@ -122,8 +121,9 @@ Operational notes:
   credentials are only available to their owner.
 - Stored credential payloads are encrypted at rest in SQLite using
   `RASCAL_CREDENTIAL_ENCRYPTION_KEY`.
-- If no stored credential is available, Rascal can fall back to
-  `RASCAL_CODEX_AUTH_PATH` when that file exists.
+- Manage credentials with `rascal auth credentials ...`.
+- `rascal bootstrap --codex-auth ...` and `rascal deploy --codex-auth ...`
+  seed or update a shared stored credential for the server.
 
 ## Safe Manual Interventions
 

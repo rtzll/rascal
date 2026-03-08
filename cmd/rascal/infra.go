@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -202,14 +203,13 @@ func (a *app) newInfraUpCmd() *cobra.Command {
 		runnerImageGoose   string
 		runnerImageCodex   string
 		skipEnvUpload      bool
-		skipAuthUpload     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "up",
 		Short: "Provision (optional) and deploy rascald",
 		Long:  "One-shot infrastructure flow: optionally provision a Hetzner host, then deploy rascald over SSH.",
 		Example: strings.TrimSpace(`
-rascal infra up --host 203.0.113.10 --github-runtime-token "$RASCAL_GITHUB_TOKEN" --codex-auth ~/.codex/auth.json
+rascal infra up --host 203.0.113.10 --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$RASCAL_GITHUB_TOKEN" --codex-auth ~/.codex/auth.json
 `),
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -261,7 +261,6 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 				RunnerImageGoose:   runnerImageGoose,
 				RunnerImageCodex:   runnerImageCodex,
 				SkipEnvUpload:      skipEnvUpload,
-				SkipAuthUpload:     skipAuthUpload,
 			})
 			if err != nil {
 				return err
@@ -298,14 +297,13 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token")
 	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
-	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path")
+	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.BackendGoose), "agent backend to use on the server (goose or codex)")
 	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
 	cmd.Flags().BoolVar(&skipEnvUpload, "skip-env-upload", false, "keep existing /etc/rascal/rascal.env on server")
-	cmd.Flags().BoolVar(&skipAuthUpload, "skip-auth-upload", false, "keep existing codex auth file on server")
 	return cmd
 }
 
@@ -326,7 +324,6 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 		runnerImageGoose   string
 		runnerImageCodex   string
 		uploadEnv          bool
-		uploadAuth         bool
 	)
 
 	cmd := &cobra.Command{
@@ -349,7 +346,6 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 				RunnerImageGoose:   runnerImageGoose,
 				RunnerImageCodex:   runnerImageCodex,
 				SkipEnvUpload:      !uploadEnv,
-				SkipAuthUpload:     !uploadAuth,
 			})
 			if err != nil {
 				return err
@@ -378,14 +374,13 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token")
 	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
-	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path")
+	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.BackendGoose), "agent backend to use on the server (goose or codex)")
 	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
 	cmd.Flags().BoolVar(&uploadEnv, "upload-env", false, "upload/update /etc/rascal/rascal.env on server")
-	cmd.Flags().BoolVar(&uploadAuth, "upload-auth", false, "upload/update codex auth file on server")
 	return cmd
 }
 
@@ -406,7 +401,6 @@ type deployExistingInput struct {
 	RunnerImageGoose   string
 	RunnerImageCodex   string
 	SkipEnvUpload      bool
-	SkipAuthUpload     bool
 	SkipIfHealthy      bool
 	RawErrors          bool
 }
@@ -419,9 +413,11 @@ type deployExistingResult struct {
 }
 
 var (
-	deployToExistingHostFn        = deployToExistingHost
-	runRemoteDoctorFn             = runRemoteDoctor
-	remoteCaddyDomainConfiguredFn = remoteCaddyDomainConfigured
+	deployToExistingHostFn          = deployToExistingHost
+	runRemoteDoctorFn               = runRemoteDoctor
+	remoteCaddyDomainConfiguredFn   = remoteCaddyDomainConfigured
+	waitForServerHealthSSHFn        = waitForServerHealthSSH
+	seedBootstrapSharedCredentialFn = seedBootstrapSharedCredential
 )
 
 func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult, error) {
@@ -437,7 +433,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	runnerImageGoose := firstNonEmpty(strings.TrimSpace(input.RunnerImageGoose), runnerImage, defaults.GooseRunnerImageTag)
 	runnerImageCodex := firstNonEmpty(strings.TrimSpace(input.RunnerImageCodex), defaults.CodexRunnerImageTag)
 	sshPort := input.SSHPort
-	apiToken := strings.TrimSpace(input.APIToken)
+	apiToken := firstNonEmpty(strings.TrimSpace(input.APIToken), strings.TrimSpace(a.cfg.APIToken))
 	githubRuntimeToken := strings.TrimSpace(input.GitHubRuntimeToken)
 	webhookSecret := strings.TrimSpace(input.WebhookSecret)
 
@@ -449,10 +445,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	}
 
 	expandedAuthPath := ""
-	if !input.SkipAuthUpload {
-		if codexAuthPath == "" {
-			return deployExistingResult{}, &cliError{Code: exitInput, Message: "--codex-auth must be set when --upload-auth is used"}
-		}
+	if codexAuthPath != "" {
 		var err error
 		expandedAuthPath, err = expandPath(codexAuthPath)
 		if err != nil {
@@ -460,6 +453,9 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		}
 		if _, err := os.Stat(expandedAuthPath); err != nil {
 			return deployExistingResult{}, &cliError{Code: exitInput, Message: "codex auth file is required", Hint: "run `codex login` first", Cause: err}
+		}
+		if apiToken == "" {
+			return deployExistingResult{}, &cliError{Code: exitInput, Message: "--codex-auth requires API access", Hint: "pass --api-token or configure local auth"}
 		}
 	}
 
@@ -532,7 +528,6 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		APIToken:           apiToken,
 		WebhookSecret:      webhookSecret,
 		GitHubRuntimeToken: githubRuntimeToken,
-		CodexAuthPath:      expandedAuthPath,
 		RunnerMode:         "docker",
 		AgentBackend:       agentBackend,
 		RunnerImage:        runnerImageGoose,
@@ -541,11 +536,9 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		ServerListenAddr:   ":8080",
 		ServerDataDir:      "/var/lib/rascal",
 		ServerStatePath:    "/var/lib/rascal/state.db",
-		ServerCodexAuthDst: "/etc/rascal/codex_auth.json",
 		GOARCH:             resolvedGoarch,
 		Domain:             domain,
 		UploadEnvFile:      !input.SkipEnvUpload,
-		UploadCodexAuth:    !input.SkipAuthUpload,
 	}
 	healthyExisting := false
 	if input.SkipIfHealthy {
@@ -567,7 +560,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 					caddyOK = false
 				}
 			}
-			healthyExisting = st.RascalService && st.DockerInstalled && st.SQLiteInstalled && caddyOK && st.EnvFilePresent && st.AuthRuntimeSynced && st.CodexAuthPresent && st.RunnerImagePresent
+			healthyExisting = st.RascalService && st.DockerInstalled && st.SQLiteInstalled && caddyOK && st.EnvFilePresent && st.AuthRuntimeSynced && st.RunnerImagePresent
 		}
 	}
 	deployPerformed := false
@@ -581,6 +574,32 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		deployPerformed = true
 	} else if input.SkipIfHealthy {
 		a.println("existing deployment detected on %s; skipping deploy", host)
+	}
+
+	if expandedAuthPath != "" {
+		if err := waitForServerHealthSSHFn(deployConfig{
+			Host:       host,
+			SSHUser:    cfg.SSHUser,
+			SSHKeyPath: cfg.SSHKeyPath,
+			SSHPort:    cfg.SSHPort,
+		}, 90*time.Second); err != nil {
+			return deployExistingResult{}, fmt.Errorf("server health check failed before credential seeding: %w", err)
+		}
+		if _, err := seedBootstrapSharedCredentialFn(apiClient{
+			token:     apiToken,
+			http:      &http.Client{Timeout: 30 * time.Second},
+			transport: "ssh",
+			sshHost:   host,
+			sshUser:   cfg.SSHUser,
+			sshKey:    cfg.SSHKeyPath,
+			sshPort:   cfg.SSHPort,
+		}, expandedAuthPath); err != nil {
+			if input.RawErrors {
+				return deployExistingResult{}, fmt.Errorf("seed stored credential: %w", err)
+			}
+			return deployExistingResult{}, &cliError{Code: exitRuntime, Message: "failed to seed stored credential", Cause: err}
+		}
+		a.println("seeded stored shared credential: %s", bootstrapSharedCredentialID)
 	}
 
 	serverURL := firstNonEmpty(strings.TrimSpace(a.cfg.ServerURL), "http://"+host+":8080")

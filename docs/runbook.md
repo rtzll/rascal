@@ -69,6 +69,9 @@ set -a; source ./.rascal.env; set +a
   --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 ```
 
+That `--codex-auth` value seeds or updates the shared stored credential used
+for Codex runs; it is not copied to a static server-side fallback file.
+
 Inspect remote services:
 
 ```bash

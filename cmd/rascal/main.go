@@ -588,7 +588,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			}
 			if shouldDeploy {
 				if strings.TrimSpace(codexAuthPath) == "" {
-					missing = append(missing, "codex auth file path is required for deployment (--codex-auth)")
+					missing = append(missing, "codex auth file path is required to seed the initial stored credential (--codex-auth)")
 				} else if expandedAuthPath, err := expandPath(codexAuthPath); err != nil {
 					missing = append(missing, fmt.Sprintf("codex auth path cannot be expanded (%s): %v", codexAuthPath, err))
 				} else if _, err := os.Stat(expandedAuthPath); err != nil {
@@ -751,7 +751,6 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 					CodexAuthPath:      expandedAuthPath,
 					Domain:             domain,
 					SkipEnvUpload:      false,
-					SkipAuthUpload:     false,
 					SkipIfHealthy:      true,
 					RawErrors:          true,
 				}
@@ -763,14 +762,6 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 					return err
 				}
 				deployPerformed = result.DeployPerformed
-				if err := waitForServerHealthSSH(deployConfig{
-					Host:       host,
-					SSHUser:    firstNonEmpty(sshUser, "root"),
-					SSHKeyPath: sshKey,
-					SSHPort:    sshPort,
-				}, 90*time.Second); err != nil {
-					return fmt.Errorf("server health check failed after bootstrap deploy stage: %w", err)
-				}
 				if deployPerformed {
 					a.println("deployed rascald to %s", host)
 				}
@@ -884,7 +875,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH target port for existing host deployment")
 	cmd.Flags().BoolVar(&skipDeploy, "skip-deploy", false, "skip remote deployment")
 	cmd.Flags().BoolVar(&provisionNew, "provision-new", false, "force provisioning a new host when --hcloud-token is set")
-	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path copied to the server")
+	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "~/.codex/auth.json", "local Codex auth.json path used to seed the initial stored shared credential")
 	cmd.Flags().StringVar(&hcloudToken, "hcloud-token", "", "Hetzner Cloud token (or HCLOUD_TOKEN) for provisioning")
 	cmd.Flags().BoolVar(&printPlan, "print-plan", false, "print resolved bootstrap actions and prerequisites without executing")
 
@@ -896,7 +887,8 @@ func (a *app) newDeployCmd() *cobra.Command {
 	cmd.Long = "Deploy or redeploy rascald to an existing Linux host over SSH without running provisioning or webhook setup."
 	cmd.Example = strings.TrimSpace(`
 rascal deploy --host 203.0.113.10
-rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN" --upload-auth --codex-auth ~/.codex/auth.json
+rascal deploy --host 203.0.113.10 --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN"
+rascal deploy --host 203.0.113.10 --codex-auth ~/.codex/auth.json
 `)
 	return cmd
 }
@@ -1564,7 +1556,6 @@ func (a *app) newDoctorCmd() *cobra.Command {
 						"caddy_installed":         remoteStatus.CaddyInstalled,
 						"env_file_present":        remoteStatus.EnvFilePresent,
 						"auth_runtime_synced":     remoteStatus.AuthRuntimeSynced,
-						"codex_auth_present":      remoteStatus.CodexAuthPresent,
 						"runner_image_configured": remoteStatus.RunnerImageConfigured,
 						"runner_image_present":    remoteStatus.RunnerImagePresent,
 						"runner_image_goose":      remoteStatus.RunnerImageGoose,
@@ -2192,7 +2183,6 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 		apiToken           string
 		githubRuntimeToken string
 		webhookSecret      string
-		codexAuthPath      string
 		restartSvc         bool
 	)
 	cmd := &cobra.Command{
@@ -2207,22 +2197,16 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 			apiToken = strings.TrimSpace(apiToken)
 			githubRuntimeToken = strings.TrimSpace(githubRuntimeToken)
 			webhookSecret = strings.TrimSpace(webhookSecret)
-			codexAuthPath = strings.TrimSpace(codexAuthPath)
-
-			syncCodexAuth := codexAuthPath != ""
-			syncServerAuth := !syncCodexAuth || apiToken != "" || githubRuntimeToken != "" || webhookSecret != ""
-			if syncServerAuth {
-				apiToken = firstNonEmpty(apiToken, strings.TrimSpace(a.cfg.APIToken))
-				if apiToken == "" {
-					return &cliError{Code: exitInput, Message: "missing API token", Hint: "pass --api-token or set local config"}
-				}
-				githubRuntimeToken = firstNonEmpty(githubRuntimeToken, strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")))
-				if githubRuntimeToken == "" {
-					return &cliError{Code: exitInput, Message: "missing GitHub runtime token", Hint: "pass --github-runtime-token or set RASCAL_GITHUB_TOKEN"}
-				}
-				if webhookSecret == "" {
-					return &cliError{Code: exitInput, Message: "missing webhook secret", Hint: "pass --webhook-secret"}
-				}
+			apiToken = firstNonEmpty(apiToken, strings.TrimSpace(a.cfg.APIToken))
+			if apiToken == "" {
+				return &cliError{Code: exitInput, Message: "missing API token", Hint: "pass --api-token or set local config"}
+			}
+			githubRuntimeToken = firstNonEmpty(githubRuntimeToken, strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")))
+			if githubRuntimeToken == "" {
+				return &cliError{Code: exitInput, Message: "missing GitHub runtime token", Hint: "pass --github-runtime-token or set RASCAL_GITHUB_TOKEN"}
+			}
+			if webhookSecret == "" {
+				return &cliError{Code: exitInput, Message: "missing webhook secret", Hint: "pass --webhook-secret"}
 			}
 			if err := syncRemoteAuth(syncRemoteAuthConfig{
 				Host:          host,
@@ -2232,27 +2216,18 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 				APIToken:      apiToken,
 				GitHubRuntime: githubRuntimeToken,
 				WebhookSecret: webhookSecret,
-				CodexAuthPath: codexAuthPath,
 				Restart:       restartSvc,
 			}); err != nil {
 				return &cliError{Code: exitRuntime, Message: "failed to sync auth", Cause: err}
 			}
 			return a.emit(map[string]any{
 				"host":              host,
-				"synced_env_auth":   syncServerAuth,
-				"synced_codex":      syncCodexAuth,
+				"synced_env_auth":   true,
 				"api_token":         maskSecret(apiToken),
 				"webhook_secret":    maskSecret(webhookSecret),
-				"codex_auth_path":   codexAuthPath,
 				"restarted_service": restartSvc,
 			}, func() error {
-				if syncServerAuth && syncCodexAuth {
-					a.println("synced server env auth and codex auth on %s", host)
-				} else if syncCodexAuth {
-					a.println("synced codex auth on %s", host)
-				} else {
-					a.println("synced server env auth on %s", host)
-				}
+				a.println("synced server env auth on %s", host)
 				if restartSvc {
 					a.println("active rascal slot restarted")
 				}
@@ -2267,7 +2242,6 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token (defaults to current config)")
 	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token (or RASCAL_GITHUB_TOKEN)")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
-	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to upload to /etc/rascal/codex_auth.json")
 	cmd.Flags().BoolVar(&restartSvc, "restart-service", true, "restart active rascal slot after updating env")
 	return cmd
 }

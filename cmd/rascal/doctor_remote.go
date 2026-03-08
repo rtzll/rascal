@@ -19,7 +19,6 @@ type remoteDoctorStatus struct {
 	CaddyInstalled        bool   `json:"caddy_installed"`
 	EnvFilePresent        bool   `json:"env_file_present"`
 	AuthRuntimeSynced     bool   `json:"auth_runtime_synced"`
-	CodexAuthPresent      bool   `json:"codex_auth_present"`
 	RunnerImageConfigured bool   `json:"runner_image_configured"`
 	RunnerImagePresent    bool   `json:"runner_image_present"`
 	RunnerImageGoose      string `json:"runner_image_goose,omitempty"`
@@ -73,7 +72,6 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		`[ "$svc_epoch" -ge "$env_epoch" ]`,
 		"echo ok",
 	}, "\n"))
-	status.CodexAuthPresent = check("[ -f /etc/rascal/codex_auth.json ] && echo ok")
 	runnerImages, err := runLocalCapture("ssh", sshArgs(cfg, strings.Join([]string{
 		"set -eu",
 		fmt.Sprintf(`goose_image=%q`, defaults.GooseRunnerImageTag),
