@@ -58,6 +58,12 @@ You can also set a custom env file via `--env-file` or `RASCAL_ENV_FILE`.
 
 ## Paths
 
+Rascal setup follows this boundary:
+
+- `provision` creates cloud resources only.
+- `bootstrap` prepares host OS dependencies (packages, Docker, Caddy) via `internal/deploy/assets/bootstrap_host.sh`.
+- `deploy` uploads Rascal artifacts, builds runner images, and performs blue/green cutover.
+
 ### A) Provision + Deploy + Webhook (recommended)
 
 ```bash

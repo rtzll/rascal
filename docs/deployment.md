@@ -9,6 +9,15 @@ process restarts. Blue/green remains in place for readiness-checked cutover,
 webhook/API continuity, and rollback safety rather than for keeping active runs
 alive.
 
+## Provision, Bootstrap, Deploy Boundaries
+
+- `provision`: cloud resources only (for example, `rascal infra provision-hetzner`).
+- `bootstrap`: host OS/system dependencies only, owned by `internal/deploy/assets/bootstrap_host.sh`.
+- `deploy`: Rascal artifact upload/install, runner image builds, slot switch, and Caddy cutover.
+
+If you need to add a host package (for example `ripgrep`), update
+`internal/deploy/assets/bootstrap_host.sh`.
+
 ## What Gets Deployed
 
 Rascal deploy uploads/builds these artifacts on the server:
@@ -50,7 +59,7 @@ Given active slot `A` and inactive slot `B`, deploy does:
 
 1. Build `rascald` for Linux and upload artifacts.
 2. Build `rascal-runner` for Linux and upload artifacts.
-3. Ensure base packages (`docker`, `caddy`, `curl`, `sqlite3`, `ripgrep`) exist.
+3. Run bootstrap (`internal/deploy/assets/bootstrap_host.sh`) to ensure base packages and host services (`docker`, `caddy`, `curl`, `sqlite3`, `ripgrep`) exist.
 4. Install uploaded `rascal-runner` into `/opt/rascal/runner/rascal-runner`.
 5. Build/update runner images on host.
 6. Install/update systemd unit and env files.

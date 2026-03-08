@@ -195,34 +195,67 @@ func TestExecuteDoesNotEmitLegacySingleUnitSystemdCommands(t *testing.T) {
 	}
 }
 
-func TestEmbeddedInstallDockerScriptEnsuresRipgrep(t *testing.T) {
-	content, err := assetsFS.ReadFile("assets/install_docker.sh")
+func TestEmbeddedBootstrapHostScriptOwnsPackageInstallation(t *testing.T) {
+	content, err := assetsFS.ReadFile("assets/bootstrap_host.sh")
 	if err != nil {
-		t.Fatalf("read embedded install_docker.sh: %v", err)
+		t.Fatalf("read embedded bootstrap_host.sh: %v", err)
 	}
 	script := string(content)
 	for _, want := range []string{
-		"have_ripgrep=0",
-		"command -v rg",
-		"docker, sqlite3, and ripgrep already installed",
-		"apt-get install -y -qq sqlite3 ripgrep >/dev/null",
+		"ensure_base_packages()",
+		"ensure_docker()",
+		"ensure_caddy()",
+		"apt-get install -y -qq sqlite3 ripgrep curl gpg debian-keyring debian-archive-keyring apt-transport-https ca-certificates gnupg lsb-release >/dev/null",
+		"apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null",
+		"apt-get install -y -qq caddy >/dev/null",
 	} {
 		if !strings.Contains(script, want) {
-			t.Fatalf("install_docker.sh missing %q:\n%s", want, script)
+			t.Fatalf("bootstrap_host.sh missing %q:\n%s", want, script)
 		}
 	}
 }
 
-func TestExecuteBootstrapInstallsRipgrepWithCaddyPackages(t *testing.T) {
+func TestExecuteRunsUnifiedBootstrapScript(t *testing.T) {
 	logDir := setupFakeDeployCommands(t, "")
 
 	if err := Execute(testDeployConfig()); err != nil {
 		t.Fatalf("execute deploy: %v", err)
 	}
 
+	scpCalls := readCapturedCommandLines(t, filepath.Join(logDir, "scp_calls.log"))
+	if !containsLine(scpCalls, "/tmp/rascal-bootstrap/bootstrap_host.sh") {
+		t.Fatalf("expected scp upload of bootstrap_host.sh, got calls: %v", scpCalls)
+	}
+
 	scripts := readCapturedSSHScripts(t, logDir)
-	if !containsScript(scripts, "apt-get install -y -qq sqlite3 ripgrep curl gpg debian-keyring debian-archive-keyring apt-transport-https ca-certificates >/dev/null") {
-		t.Fatalf("expected bootstrap script to install ripgrep with caddy prerequisites, got %d scripts", len(scripts))
+	if !containsScript(scripts, "/tmp/rascal-bootstrap/bootstrap_host.sh") {
+		t.Fatalf("expected deploy to execute unified bootstrap_host.sh, got %d scripts", len(scripts))
+	}
+	for _, legacyInline := range []string{
+		"download.docker.com/linux/ubuntu",
+		"dl.cloudsmith.io/public/caddy/stable",
+		"apt-get install -y -qq sqlite3 ripgrep curl gpg debian-keyring debian-archive-keyring apt-transport-https ca-certificates",
+	} {
+		if containsScript(scripts, legacyInline) {
+			t.Fatalf("found inline bootstrap package shell %q in deploy ssh scripts", legacyInline)
+		}
+	}
+}
+
+func TestDeployGoDoesNotEmbedBootstrapPackageInstallShell(t *testing.T) {
+	content, err := os.ReadFile("deploy.go")
+	if err != nil {
+		t.Fatalf("read deploy.go: %v", err)
+	}
+	source := string(content)
+	for _, disallowed := range []string{
+		"apt-get install -y -qq",
+		"download.docker.com/linux/ubuntu",
+		"dl.cloudsmith.io/public/caddy/stable",
+	} {
+		if strings.Contains(source, disallowed) {
+			t.Fatalf("deploy.go should not contain bootstrap package install logic %q", disallowed)
+		}
 	}
 }
 

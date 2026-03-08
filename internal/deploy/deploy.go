@@ -64,7 +64,7 @@ type plan struct {
 	Steps            []string `json:"steps"`
 }
 
-//go:embed assets/install_docker.sh assets/Caddyfile.tmpl
+//go:embed assets/bootstrap_host.sh assets/Caddyfile.tmpl
 var assetsFS embed.FS
 
 func Execute(cfg Config) error {
@@ -116,13 +116,13 @@ func Execute(cfg Config) error {
 		return fmt.Errorf("package runner assets: %w", err)
 	}
 
-	installDocker, err := assetsFS.ReadFile("assets/install_docker.sh")
+	bootstrapHostScript, err := assetsFS.ReadFile("assets/bootstrap_host.sh")
 	if err != nil {
-		return fmt.Errorf("read embedded install_docker.sh: %w", err)
+		return fmt.Errorf("read embedded bootstrap_host.sh: %w", err)
 	}
-	installDockerPath := filepath.Join(tmpDir, "install_docker.sh")
-	if err := os.WriteFile(installDockerPath, installDocker, 0o700); err != nil {
-		return fmt.Errorf("write install_docker.sh: %w", err)
+	bootstrapHostScriptPath := filepath.Join(tmpDir, "bootstrap_host.sh")
+	if err := os.WriteFile(bootstrapHostScriptPath, bootstrapHostScript, 0o700); err != nil {
+		return fmt.Errorf("write bootstrap_host.sh: %w", err)
 	}
 
 	caddyPath := filepath.Join(tmpDir, "Caddyfile")
@@ -147,9 +147,9 @@ func Execute(cfg Config) error {
 		UploadEnvFile:    cfg.UploadEnvFile,
 		CreatedAt:        time.Now().UTC().Format(time.RFC3339),
 		Steps: []string{
-			"prepare_remote_dirs",
+			"prepare_remote_staging",
 			"upload_artifacts",
-			"ensure_dependencies",
+			"bootstrap_host",
 			"build_runner_images",
 			"install_rascal_files",
 			"switch_blue_green_slot",
@@ -163,7 +163,7 @@ func Execute(cfg Config) error {
 		return fmt.Errorf("write deploy plan: %w", err)
 	}
 
-	if err := runRemoteScript(cfg, "set -eu\nmkdir -p /opt/rascal /etc/rascal /var/lib/rascal /tmp/rascal-bootstrap /etc/caddy\n"); err != nil {
+	if err := runRemoteScript(cfg, "set -eu\nmkdir -p /tmp/rascal-bootstrap\n"); err != nil {
 		return err
 	}
 
@@ -171,7 +171,7 @@ func Execute(cfg Config) error {
 		{LocalPath: binaryPath, RemotePath: "/tmp/rascal-bootstrap/rascald"},
 		{LocalPath: runnerBinaryPath, RemotePath: "/tmp/rascal-bootstrap/rascal-runner"},
 		{LocalPath: servicePath, RemotePath: "/tmp/rascal-bootstrap/rascal@.service"},
-		{LocalPath: installDockerPath, RemotePath: "/tmp/rascal-bootstrap/install_docker.sh"},
+		{LocalPath: bootstrapHostScriptPath, RemotePath: "/tmp/rascal-bootstrap/bootstrap_host.sh"},
 		{LocalPath: runnerArchivePath, RemotePath: "/tmp/rascal-bootstrap/runner.tgz"},
 		{LocalPath: caddyPath, RemotePath: "/tmp/rascal-bootstrap/Caddyfile"},
 		{LocalPath: planPath, RemotePath: "/tmp/rascal-bootstrap/plan.json"},
@@ -185,25 +185,7 @@ func Execute(cfg Config) error {
 		}
 	}
 
-	if err := runRemoteScript(cfg, "set -eu\nchmod +x /tmp/rascal-bootstrap/install_docker.sh\n/tmp/rascal-bootstrap/install_docker.sh\n"); err != nil {
-		return err
-	}
-	if err := runRemoteScript(cfg, strings.TrimSpace(`
-set -eu
-export DEBIAN_FRONTEND=noninteractive
-if command -v caddy >/dev/null 2>&1; then
-  echo "caddy already installed"
-else
-  apt-get -qq update >/dev/null
-  apt-get install -y -qq sqlite3 ripgrep curl gpg debian-keyring debian-archive-keyring apt-transport-https ca-certificates >/dev/null
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' -o /etc/apt/sources.list.d/caddy-stable.list
-  chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  chmod o+r /etc/apt/sources.list.d/caddy-stable.list
-  apt-get -qq update >/dev/null
-  apt-get install -y -qq caddy >/dev/null
-fi
-`)+"\n"); err != nil {
+	if err := runRemoteScript(cfg, "set -eu\nchmod +x /tmp/rascal-bootstrap/bootstrap_host.sh\n/tmp/rascal-bootstrap/bootstrap_host.sh\n"); err != nil {
 		return err
 	}
 	if err := runRemoteScript(cfg, fmt.Sprintf(strings.TrimSpace(`
