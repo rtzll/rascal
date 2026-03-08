@@ -3,136 +3,15 @@ package sqlitegen
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"testing"
 
+	"github.com/rtzll/rascal/internal/state/testdb"
 	_ "modernc.org/sqlite"
 )
 
-const schemaDDL = `
-CREATE TABLE tasks (
-  id TEXT PRIMARY KEY,
-  repo TEXT NOT NULL,
-  agent_backend TEXT NOT NULL DEFAULT 'codex',
-  issue_number INTEGER NOT NULL DEFAULT 0,
-  pr_number INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'open',
-  last_run_id TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-
-CREATE INDEX idx_tasks_repo_pr ON tasks (repo, pr_number);
-
-CREATE TABLE runs (
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,
-  id TEXT NOT NULL UNIQUE,
-  task_id TEXT NOT NULL,
-  repo TEXT NOT NULL,
-  task TEXT NOT NULL,
-  agent_backend TEXT NOT NULL DEFAULT 'codex',
-  base_branch TEXT NOT NULL,
-  head_branch TEXT NOT NULL,
-  trigger TEXT NOT NULL,
-  debug BOOLEAN NOT NULL DEFAULT 1,
-  status TEXT NOT NULL,
-  run_dir TEXT NOT NULL,
-  issue_number INTEGER NOT NULL DEFAULT 0,
-  pr_number INTEGER NOT NULL DEFAULT 0,
-  pr_url TEXT NOT NULL DEFAULT '',
-  pr_status TEXT NOT NULL DEFAULT 'none',
-  head_sha TEXT NOT NULL DEFAULT '',
-  context TEXT NOT NULL DEFAULT '',
-  error TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  started_at INTEGER,
-  completed_at INTEGER
-);
-
-CREATE INDEX idx_runs_status_seq ON runs (status, seq DESC);
-CREATE INDEX idx_runs_task_seq ON runs (task_id, seq DESC);
-
-CREATE TABLE task_agent_sessions (
-  task_id TEXT PRIMARY KEY,
-  agent_backend TEXT NOT NULL,
-  backend_session_id TEXT NOT NULL DEFAULT '',
-  session_key TEXT NOT NULL DEFAULT '',
-  session_root TEXT NOT NULL DEFAULT '',
-  last_run_id TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-
-CREATE INDEX idx_task_agent_sessions_backend_updated ON task_agent_sessions (agent_backend, updated_at DESC);
-
-CREATE TABLE run_leases (
-  run_id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL,
-  heartbeat_at INTEGER NOT NULL,
-  lease_expires_at INTEGER NOT NULL
-);
-
-CREATE INDEX idx_run_leases_expires ON run_leases (lease_expires_at ASC);
-
-CREATE TABLE run_executions (
-  run_id TEXT PRIMARY KEY,
-  backend TEXT NOT NULL,
-  container_name TEXT NOT NULL,
-  container_id TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'created',
-  exit_code INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  last_observed_at INTEGER NOT NULL
-);
-
-CREATE UNIQUE INDEX idx_run_executions_container_id ON run_executions (container_id);
-CREATE INDEX idx_run_executions_status ON run_executions (status);
-
-CREATE TABLE run_cancels (
-  run_id TEXT PRIMARY KEY,
-  reason TEXT NOT NULL,
-  source TEXT NOT NULL,
-  requested_at INTEGER NOT NULL
-);
-
-CREATE TABLE deliveries (
-  id TEXT PRIMARY KEY,
-  status TEXT NOT NULL DEFAULT 'processing',
-  claim_token TEXT NOT NULL DEFAULT '',
-  claimed_by TEXT NOT NULL DEFAULT '',
-  claimed_at INTEGER NOT NULL DEFAULT 0,
-  processed_at INTEGER,
-  seen_at INTEGER NOT NULL,
-  last_error TEXT NOT NULL DEFAULT ''
-);
-
-CREATE INDEX idx_deliveries_seen_at ON deliveries (seen_at ASC);
-`
-
 func newQueriesForTest(t *testing.T) (*sql.DB, *Queries) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "state.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open sqlite db: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
-			t.Errorf("close db: %v", err)
-		}
-	})
-
-	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-		t.Fatalf("set WAL mode: %v", err)
-	}
-	if _, err := db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
-		t.Fatalf("set busy timeout: %v", err)
-	}
-	if _, err := db.Exec(schemaDDL); err != nil {
-		t.Fatalf("apply schema: %v", err)
-	}
+	db := testdb.OpenMigratedSQLite(t)
 	return db, New(db)
 }
 
