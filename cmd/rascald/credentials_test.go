@@ -265,6 +265,9 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 		t.Fatalf("create run B: %v", err)
 	}
 
+	_ = waitForRunExecution(t, s, runA.ID)
+	_ = waitForRunExecution(t, s, runB.ID)
+
 	waitFor(t, 2*time.Second, func() bool {
 		if _, err := os.Stat(filepath.Join(runA.RunDir, "codex", "auth.json")); err != nil {
 			return false
@@ -272,17 +275,17 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(runB.RunDir, "codex", "auth.json")); err != nil {
 			return false
 		}
+		if _, ok, err := s.store.GetActiveCredentialLeaseByRunID(runA.ID); err != nil || !ok {
+			return false
+		}
+		if _, ok, err := s.store.GetActiveCredentialLeaseByRunID(runB.ID); err != nil || !ok {
+			return false
+		}
 		return true
-	}, "shared auth files created for both runs")
+	}, "shared auth files and leases created for both runs")
 
 	if calls := launcher.Calls(); calls != 2 {
 		t.Fatalf("expected two concurrent launcher calls, got %d", calls)
-	}
-	if _, ok, err := s.store.GetActiveCredentialLeaseByRunID(runA.ID); err != nil || !ok {
-		t.Fatalf("expected active lease for run A, ok=%t err=%v", ok, err)
-	}
-	if _, ok, err := s.store.GetActiveCredentialLeaseByRunID(runB.ID); err != nil || !ok {
-		t.Fatalf("expected active lease for run B, ok=%t err=%v", ok, err)
 	}
 
 	close(waitCh)
