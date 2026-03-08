@@ -2171,6 +2171,7 @@ rascal auth sync --host 203.0.113.10
 		},
 	})
 	cmd.AddCommand(a.newAuthSyncCmd())
+	cmd.AddCommand(a.newAuthCredentialsCmd())
 	cmd.PersistentFlags().BoolVar(&writeConfig, "write-config", false, "write generated API token to local config")
 	cmd.PersistentFlags().BoolVar(&showRaw, "show", false, "print raw token values")
 	cmd.PersistentFlags().StringVar(&host, "host", "", "existing server host for remote auth sync")

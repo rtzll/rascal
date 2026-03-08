@@ -1203,6 +1203,7 @@ func TestHelpGoldenSnapshots(t *testing.T) {
 		{name: "bootstrap", args: []string{"bootstrap"}},
 		{name: "deploy", args: []string{"deploy"}},
 		{name: "auth", args: []string{"auth"}},
+		{name: "auth_credentials", args: []string{"auth", "credentials"}},
 		{name: "github", args: []string{"github"}},
 		{name: "infra", args: []string{"infra"}},
 	}

@@ -146,6 +146,8 @@ type updateCredentialRequest struct {
 	Weight          *int    `json:"weight,omitempty"`
 	MaxActiveLeases *int    `json:"max_active_leases,omitempty"`
 	Status          *string `json:"status,omitempty"`
+	CooldownUntil   *string `json:"cooldown_until,omitempty"`
+	LastError       *string `json:"last_error,omitempty"`
 }
 
 type requestIDKey struct{}
@@ -784,6 +786,23 @@ func (s *server) handleCredentialSubresources(w http.ResponseWriter, r *http.Req
 		}
 		if req.Status != nil {
 			updated.Status = strings.ToLower(strings.TrimSpace(*req.Status))
+		}
+		if req.CooldownUntil != nil {
+			value := strings.TrimSpace(*req.CooldownUntil)
+			if value == "" {
+				updated.CooldownUntil = nil
+			} else {
+				parsed, err := time.Parse(time.RFC3339, value)
+				if err != nil {
+					http.Error(w, "invalid cooldown_until", http.StatusBadRequest)
+					return
+				}
+				parsed = parsed.UTC()
+				updated.CooldownUntil = &parsed
+			}
+		}
+		if req.LastError != nil {
+			updated.LastError = strings.TrimSpace(*req.LastError)
 		}
 		credential, err := s.store.UpdateCodexCredential(updated)
 		if err != nil {
