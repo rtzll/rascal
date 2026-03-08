@@ -4,8 +4,8 @@
 
 - `Task`: durable unit of work tracked across retries, follow-up input, and PR iteration.
 - `Run`: one execution attempt to advance a task.
-- `AgentBackend`: the backend used for a task and its runs. Rascal currently supports `goose` and `codex`.
-- `AgentSession`: optional task-scoped backend state used to resume later runs.
+- `AgentBackend`: the backend recorded for a task or run attempt. Rascal currently supports `goose` and `codex`, and a task may switch backends across runs.
+- `AgentSession`: optional task-scoped backend state used to resume later runs. Rascal resets it when the task switches backends.
 - `RunExecution`: detached execution metadata for a run, such as container identity and observed state.
 - `RunLease`: supervision ownership record for a running run. It tells Rascal which orchestrator instance currently owns supervision.
 

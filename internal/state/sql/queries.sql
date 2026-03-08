@@ -717,14 +717,13 @@ INSERT INTO codex_credentials (
   scope,
   encrypted_auth_blob,
   weight,
-  max_active_leases,
   status,
   cooldown_until,
   last_error,
   created_at,
   updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdateCodexCredential :execrows
 UPDATE codex_credentials
@@ -733,7 +732,6 @@ SET
   scope = ?,
   encrypted_auth_blob = ?,
   weight = ?,
-  max_active_leases = ?,
   status = ?,
   cooldown_until = ?,
   last_error = ?,
@@ -756,7 +754,6 @@ SELECT
   scope,
   encrypted_auth_blob,
   weight,
-  max_active_leases,
   status,
   cooldown_until,
   last_error,
@@ -772,7 +769,6 @@ SELECT
   scope,
   encrypted_auth_blob,
   weight,
-  max_active_leases,
   status,
   cooldown_until,
   last_error,
@@ -789,7 +785,6 @@ SELECT
   scope,
   encrypted_auth_blob,
   weight,
-  max_active_leases,
   status,
   cooldown_until,
   last_error,
@@ -806,7 +801,6 @@ SELECT
   scope,
   encrypted_auth_blob,
   weight,
-  max_active_leases,
   status,
   cooldown_until,
   last_error,
@@ -821,7 +815,6 @@ SELECT
   c.owner_user_id,
   c.scope,
   c.weight,
-  c.max_active_leases,
   c.status,
   c.cooldown_until,
   CAST(COALESCE((
@@ -882,13 +875,6 @@ WHERE EXISTS (
       c.scope = 'shared'
       OR (c.scope = 'personal' AND c.owner_user_id = sqlc.arg(user_id))
     )
-    AND (
-      SELECT COUNT(*)
-      FROM credential_leases AS l
-      WHERE l.credential_id = c.id
-        AND l.released_at IS NULL
-        AND l.expires_at > sqlc.arg(now)
-    ) < c.max_active_leases
 )
 AND NOT EXISTS (
   SELECT 1

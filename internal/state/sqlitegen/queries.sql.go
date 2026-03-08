@@ -503,14 +503,13 @@ INSERT INTO codex_credentials (
   scope,
   encrypted_auth_blob,
   weight,
-  max_active_leases,
   status,
   cooldown_until,
   last_error,
   created_at,
   updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateCodexCredentialParams struct {
@@ -519,7 +518,6 @@ type CreateCodexCredentialParams struct {
 	Scope             string         `json:"scope"`
 	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
 	Weight            int64          `json:"weight"`
-	MaxActiveLeases   int64          `json:"max_active_leases"`
 	Status            string         `json:"status"`
 	CooldownUntil     sql.NullInt64  `json:"cooldown_until"`
 	LastError         string         `json:"last_error"`
@@ -534,7 +532,6 @@ func (q *Queries) CreateCodexCredential(ctx context.Context, arg CreateCodexCred
 		arg.Scope,
 		arg.EncryptedAuthBlob,
 		arg.Weight,
-		arg.MaxActiveLeases,
 		arg.Status,
 		arg.CooldownUntil,
 		arg.LastError,
@@ -790,7 +787,6 @@ SELECT
   scope,
   encrypted_auth_blob,
   weight,
-  max_active_leases,
   status,
   cooldown_until,
   last_error,
@@ -809,7 +805,6 @@ func (q *Queries) GetCodexCredential(ctx context.Context, id string) (CodexCrede
 		&i.Scope,
 		&i.EncryptedAuthBlob,
 		&i.Weight,
-		&i.MaxActiveLeases,
 		&i.Status,
 		&i.CooldownUntil,
 		&i.LastError,
@@ -1361,7 +1356,6 @@ SELECT
   scope,
   encrypted_auth_blob,
   weight,
-  max_active_leases,
   status,
   cooldown_until,
   last_error,
@@ -1386,7 +1380,6 @@ func (q *Queries) ListAllCodexCredentials(ctx context.Context) ([]CodexCredentia
 			&i.Scope,
 			&i.EncryptedAuthBlob,
 			&i.Weight,
-			&i.MaxActiveLeases,
 			&i.Status,
 			&i.CooldownUntil,
 			&i.LastError,
@@ -1413,7 +1406,6 @@ SELECT
   scope,
   encrypted_auth_blob,
   weight,
-  max_active_leases,
   status,
   cooldown_until,
   last_error,
@@ -1439,7 +1431,6 @@ func (q *Queries) ListCodexCredentialsByOwner(ctx context.Context, ownerUserID s
 			&i.Scope,
 			&i.EncryptedAuthBlob,
 			&i.Weight,
-			&i.MaxActiveLeases,
 			&i.Status,
 			&i.CooldownUntil,
 			&i.LastError,
@@ -1465,7 +1456,6 @@ SELECT
   c.owner_user_id,
   c.scope,
   c.weight,
-  c.max_active_leases,
   c.status,
   c.cooldown_until,
   CAST(COALESCE((
@@ -1504,19 +1494,18 @@ type ListCredentialCandidatesParams struct {
 }
 
 type ListCredentialCandidatesRow struct {
-	ID              string         `json:"id"`
-	OwnerUserID     sql.NullString `json:"owner_user_id"`
-	Scope           string         `json:"scope"`
-	Weight          int64          `json:"weight"`
-	MaxActiveLeases int64          `json:"max_active_leases"`
-	Status          string         `json:"status"`
-	CooldownUntil   sql.NullInt64  `json:"cooldown_until"`
-	ActiveLeases    int64          `json:"active_leases"`
-	UsageTokens     int64          `json:"usage_tokens"`
-	UsageRuns       int64          `json:"usage_runs"`
-	LastError       string         `json:"last_error"`
-	CreatedAt       int64          `json:"created_at"`
-	UpdatedAt       int64          `json:"updated_at"`
+	ID            string         `json:"id"`
+	OwnerUserID   sql.NullString `json:"owner_user_id"`
+	Scope         string         `json:"scope"`
+	Weight        int64          `json:"weight"`
+	Status        string         `json:"status"`
+	CooldownUntil sql.NullInt64  `json:"cooldown_until"`
+	ActiveLeases  int64          `json:"active_leases"`
+	UsageTokens   int64          `json:"usage_tokens"`
+	UsageRuns     int64          `json:"usage_runs"`
+	LastError     string         `json:"last_error"`
+	CreatedAt     int64          `json:"created_at"`
+	UpdatedAt     int64          `json:"updated_at"`
 }
 
 func (q *Queries) ListCredentialCandidates(ctx context.Context, arg ListCredentialCandidatesParams) ([]ListCredentialCandidatesRow, error) {
@@ -1533,7 +1522,6 @@ func (q *Queries) ListCredentialCandidates(ctx context.Context, arg ListCredenti
 			&i.OwnerUserID,
 			&i.Scope,
 			&i.Weight,
-			&i.MaxActiveLeases,
 			&i.Status,
 			&i.CooldownUntil,
 			&i.ActiveLeases,
@@ -1723,7 +1711,6 @@ SELECT
   scope,
   encrypted_auth_blob,
   weight,
-  max_active_leases,
   status,
   cooldown_until,
   last_error,
@@ -1749,7 +1736,6 @@ func (q *Queries) ListSharedCodexCredentials(ctx context.Context) ([]CodexCreden
 			&i.Scope,
 			&i.EncryptedAuthBlob,
 			&i.Weight,
-			&i.MaxActiveLeases,
 			&i.Status,
 			&i.CooldownUntil,
 			&i.LastError,
@@ -2177,13 +2163,6 @@ WHERE EXISTS (
       c.scope = 'shared'
       OR (c.scope = 'personal' AND c.owner_user_id = ?4)
     )
-    AND (
-      SELECT COUNT(*)
-      FROM credential_leases AS l
-      WHERE l.credential_id = c.id
-        AND l.released_at IS NULL
-        AND l.expires_at > ?8
-    ) < c.max_active_leases
 )
 AND NOT EXISTS (
   SELECT 1
@@ -2229,7 +2208,6 @@ SET
   scope = ?,
   encrypted_auth_blob = ?,
   weight = ?,
-  max_active_leases = ?,
   status = ?,
   cooldown_until = ?,
   last_error = ?,
@@ -2242,7 +2220,6 @@ type UpdateCodexCredentialParams struct {
 	Scope             string         `json:"scope"`
 	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
 	Weight            int64          `json:"weight"`
-	MaxActiveLeases   int64          `json:"max_active_leases"`
 	Status            string         `json:"status"`
 	CooldownUntil     sql.NullInt64  `json:"cooldown_until"`
 	LastError         string         `json:"last_error"`
@@ -2256,7 +2233,6 @@ func (q *Queries) UpdateCodexCredential(ctx context.Context, arg UpdateCodexCred
 		arg.Scope,
 		arg.EncryptedAuthBlob,
 		arg.Weight,
-		arg.MaxActiveLeases,
 		arg.Status,
 		arg.CooldownUntil,
 		arg.LastError,

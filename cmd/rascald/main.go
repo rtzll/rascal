@@ -147,23 +147,21 @@ type createIssueTaskRequest struct {
 }
 
 type createCredentialRequest struct {
-	ID              string `json:"id"`
-	OwnerUserID     string `json:"owner_user_id,omitempty"`
-	Scope           string `json:"scope"`
-	AuthBlob        string `json:"auth_blob"`
-	Weight          int    `json:"weight,omitempty"`
-	MaxActiveLeases int    `json:"max_active_leases,omitempty"`
+	ID          string `json:"id"`
+	OwnerUserID string `json:"owner_user_id,omitempty"`
+	Scope       string `json:"scope"`
+	AuthBlob    string `json:"auth_blob"`
+	Weight      int    `json:"weight,omitempty"`
 }
 
 type updateCredentialRequest struct {
-	OwnerUserID     *string `json:"owner_user_id,omitempty"`
-	Scope           *string `json:"scope,omitempty"`
-	AuthBlob        *string `json:"auth_blob,omitempty"`
-	Weight          *int    `json:"weight,omitempty"`
-	MaxActiveLeases *int    `json:"max_active_leases,omitempty"`
-	Status          *string `json:"status,omitempty"`
-	CooldownUntil   *string `json:"cooldown_until,omitempty"`
-	LastError       *string `json:"last_error,omitempty"`
+	OwnerUserID   *string `json:"owner_user_id,omitempty"`
+	Scope         *string `json:"scope,omitempty"`
+	AuthBlob      *string `json:"auth_blob,omitempty"`
+	Weight        *int    `json:"weight,omitempty"`
+	Status        *string `json:"status,omitempty"`
+	CooldownUntil *string `json:"cooldown_until,omitempty"`
+	LastError     *string `json:"last_error,omitempty"`
 }
 
 type requestIDKey struct{}
@@ -711,7 +709,6 @@ func (s *server) handleCredentials(w http.ResponseWriter, r *http.Request) {
 			Scope:             scope,
 			EncryptedAuthBlob: encrypted,
 			Weight:            req.Weight,
-			MaxActiveLeases:   req.MaxActiveLeases,
 			Status:            "active",
 		})
 		if err != nil {
@@ -769,7 +766,6 @@ func (s *server) handleCredentialSubresources(w http.ResponseWriter, r *http.Req
 			Scope:             credential.Scope,
 			EncryptedAuthBlob: credential.EncryptedAuthBlob,
 			Weight:            credential.Weight,
-			MaxActiveLeases:   credential.MaxActiveLeases,
 			Status:            credential.Status,
 			CooldownUntil:     credential.CooldownUntil,
 			LastError:         credential.LastError,
@@ -806,9 +802,6 @@ func (s *server) handleCredentialSubresources(w http.ResponseWriter, r *http.Req
 		}
 		if req.Weight != nil {
 			updated.Weight = *req.Weight
-		}
-		if req.MaxActiveLeases != nil {
-			updated.MaxActiveLeases = *req.MaxActiveLeases
 		}
 		if req.Status != nil {
 			updated.Status = strings.ToLower(strings.TrimSpace(*req.Status))
@@ -851,16 +844,15 @@ func (s *server) canAccessCredential(ctx context.Context, credential state.Codex
 
 func credentialResponse(credential state.CodexCredential) map[string]any {
 	return map[string]any{
-		"id":                credential.ID,
-		"owner_user_id":     credential.OwnerUserID,
-		"scope":             credential.Scope,
-		"weight":            credential.Weight,
-		"max_active_leases": credential.MaxActiveLeases,
-		"status":            credential.Status,
-		"cooldown_until":    credential.CooldownUntil,
-		"last_error":        credential.LastError,
-		"created_at":        credential.CreatedAt,
-		"updated_at":        credential.UpdatedAt,
+		"id":             credential.ID,
+		"owner_user_id":  credential.OwnerUserID,
+		"scope":          credential.Scope,
+		"weight":         credential.Weight,
+		"status":         credential.Status,
+		"cooldown_until": credential.CooldownUntil,
+		"last_error":     credential.LastError,
+		"created_at":     credential.CreatedAt,
+		"updated_at":     credential.UpdatedAt,
 	}
 }
 
@@ -1487,9 +1479,6 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	}
 
 	runDir := filepath.Join(s.cfg.DataDir, "runs", runID)
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		return state.Run{}, fmt.Errorf("create run dir: %w", err)
-	}
 
 	_, err = s.store.UpsertTask(state.UpsertTaskInput{
 		ID:           req.TaskID,

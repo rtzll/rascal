@@ -71,19 +71,18 @@ func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 		states := make([]CredentialState, 0, len(candidates))
 		for _, c := range candidates {
 			states = append(states, CredentialState{
-				ID:              c.ID,
-				OwnerUserID:     c.OwnerUserID,
-				Scope:           c.Scope,
-				Weight:          c.Weight,
-				MaxActiveLeases: c.MaxActiveLeases,
-				Status:          c.Status,
-				CooldownUntil:   c.CooldownUntil,
-				ActiveLeases:    c.ActiveLeases,
-				UsageTokens:     c.UsageTokens,
-				UsageRuns:       c.UsageRuns,
-				LastError:       c.LastError,
-				CreatedAt:       c.CreatedAt,
-				UpdatedAt:       c.UpdatedAt,
+				ID:            c.ID,
+				OwnerUserID:   c.OwnerUserID,
+				Scope:         c.Scope,
+				Weight:        c.Weight,
+				Status:        c.Status,
+				CooldownUntil: c.CooldownUntil,
+				ActiveLeases:  c.ActiveLeases,
+				UsageTokens:   c.UsageTokens,
+				UsageRuns:     c.UsageRuns,
+				LastError:     c.LastError,
+				CreatedAt:     c.CreatedAt,
+				UpdatedAt:     c.UpdatedAt,
 			})
 		}
 

@@ -12,11 +12,7 @@ func (HybridReservePlusPool) Select(req credentials.AcquireRequest, candidates [
 		return candidate.Scope == "personal" && candidate.OwnerUserID == req.UserID && hasCapacity(candidate)
 	})
 	for _, candidate := range personal {
-		reserve := candidate.MaxActiveLeases / 2
-		if reserve < 1 {
-			reserve = 1
-		}
-		if candidate.ActiveLeases < reserve {
+		if candidate.ActiveLeases == 0 {
 			return candidate.ID, nil
 		}
 	}

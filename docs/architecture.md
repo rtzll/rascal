@@ -17,9 +17,9 @@ In simple terms:
 
 - A Task is the long-lived unit of work.
 - A Run is one attempt to advance that task.
-- A Task has exactly one `AgentBackend` for its lifetime.
-- A Task may have one backend-specific `AgentSession`.
-- A Run uses the task's backend and may resume the task's session.
+- A Task tracks the backend selected for its latest run.
+- A Task may have one current backend-specific `AgentSession`.
+- A Run uses the backend recorded on that run and may resume the task's session when the backend still matches.
 - A detached container is execution state for a run, not the run itself.
 
 This split is important during deploys and restarts:
@@ -165,10 +165,10 @@ active slot A running
 
 ## System Invariants
 
-- A task has exactly one backend for its lifetime.
 - A run belongs to exactly one task.
-- A run uses the same backend as its task.
-- A task may have at most one backend-specific session record.
+- A run uses the backend recorded on that run.
+- A task may have at most one current backend-specific session record.
+- Changing a task backend must discard incompatible task-scoped session resume state before the next run starts.
 - At most one orchestrator instance should own a run lease at a time.
 - `run_executions` store detached execution metadata, not user-visible business progress.
 - Only the active slot should process webhook traffic during blue/green overlap.
@@ -241,6 +241,7 @@ Each run directory stores metadata and artifacts such as:
 - `pr-only` currently resumes for `pr_comment`, `pr_review`, `pr_review_comment`, `retry`, and `issue_edited`.
 - Goose resumes by named Goose session plus mounted session storage.
 - Codex resumes by reusing a task-scoped `CODEX_HOME` and the discovered backend session id.
+- If a task switches backend between runs, Rascal starts a fresh session for the new backend and replaces the stored task session record.
 - If a Goose resume attempt fails because the stored session is missing or invalid, the runner falls back to a fresh session.
 
 ## Failure and Recovery
@@ -269,7 +270,7 @@ Rascal uses stored Codex credentials managed by `rascald`.
 - When a run starts, `rascald` asks the credential broker to lease a credential
   for that run and records the selected credential id in state.
 - The broker chooses from eligible credentials using the configured allocation
-  strategy and enforces `max_active_leases`.
+  strategy and tracks lease assignment per run.
 - The leased auth blob is written into the run-scoped `codex/auth.json` file
   and removed during run cleanup.
 - While a run is active, `rascald` renews the credential lease. If renewal is

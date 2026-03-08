@@ -24,11 +24,7 @@ func (SharedWeightedUsage) Select(_ credentials.AcquireRequest, candidates []cre
 		if weight < 1 {
 			weight = 1
 		}
-		capacity := float64(candidate.MaxActiveLeases)
-		if capacity < 1 {
-			capacity = 1
-		}
-		load := float64(candidate.ActiveLeases) / capacity
+		load := float64(candidate.ActiveLeases) / weight
 		usagePenalty := float64(candidate.UsageTokens)/weight/1_000_000 + float64(candidate.UsageRuns)/weight
 		score := load + usagePenalty
 		if score < bestScore {

@@ -24,7 +24,6 @@ type CodexCredential struct {
 	Scope             string         `json:"scope"`
 	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
 	Weight            int64          `json:"weight"`
-	MaxActiveLeases   int64          `json:"max_active_leases"`
 	Status            string         `json:"status"`
 	CooldownUntil     sql.NullInt64  `json:"cooldown_until"`
 	LastError         string         `json:"last_error"`

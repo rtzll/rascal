@@ -22,7 +22,7 @@ func newBrokerTestStore(t *testing.T) *state.Store {
 	return store
 }
 
-func createCredential(t *testing.T, store *state.Store, c credentials.Cipher, id, owner, scope string, maxActive int) {
+func createCredential(t *testing.T, store *state.Store, c credentials.Cipher, id, owner, scope string) {
 	t.Helper()
 	blob, err := c.Encrypt([]byte(`{"token":"` + id + `"}`))
 	if err != nil {
@@ -33,7 +33,6 @@ func createCredential(t *testing.T, store *state.Store, c credentials.Cipher, id
 		OwnerUserID:       owner,
 		Scope:             scope,
 		EncryptedAuthBlob: blob,
-		MaxActiveLeases:   maxActive,
 		Weight:            1,
 		Status:            "active",
 	}); err != nil {
@@ -51,8 +50,8 @@ func TestBrokerAcquireOwnThenShared(t *testing.T) {
 		t.Fatalf("upsert user: %v", err)
 	}
 
-	createCredential(t, store, c, "cred-personal", "u1", "personal", 1)
-	createCredential(t, store, c, "cred-shared", "", "shared", 5)
+	createCredential(t, store, c, "cred-personal", "u1", "personal")
+	createCredential(t, store, c, "cred-shared", "", "shared")
 
 	strategy, err := credentialstrategies.ByName("requester_own_then_shared")
 	if err != nil {
@@ -81,7 +80,7 @@ func TestBrokerRenewReleaseAndExpiryReclaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	createCredential(t, store, c, "cred-shared", "", "shared", 1)
+	createCredential(t, store, c, "cred-shared", "", "shared")
 	strategy, err := credentialstrategies.ByName("shared_least_active_leases")
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
@@ -119,13 +118,13 @@ func TestBrokerRenewReleaseAndExpiryReclaim(t *testing.T) {
 	}
 }
 
-func TestBrokerConcurrentAcquireRespectsCapacity(t *testing.T) {
+func TestBrokerConcurrentAcquireAllowsCredentialReuse(t *testing.T) {
 	store := newBrokerTestStore(t)
 	c, err := credentials.NewAESCipher("test-secret")
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	createCredential(t, store, c, "cred-shared", "", "shared", 1)
+	createCredential(t, store, c, "cred-shared", "", "shared")
 	strategy, err := credentialstrategies.ByName("priority_burst")
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
@@ -135,6 +134,7 @@ func TestBrokerConcurrentAcquireRespectsCapacity(t *testing.T) {
 	var successes atomic.Int64
 	var leaseIDs []string
 	var leaseMu sync.Mutex
+	var errs []error
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -149,12 +149,16 @@ func TestBrokerConcurrentAcquireRespectsCapacity(t *testing.T) {
 				leaseMu.Lock()
 				leaseIDs = append(leaseIDs, lease.ID)
 				leaseMu.Unlock()
+				return
 			}
+			leaseMu.Lock()
+			errs = append(errs, err)
+			leaseMu.Unlock()
 		}(i)
 	}
 	wg.Wait()
-	if successes.Load() != 1 {
-		t.Fatalf("expected exactly one successful acquire, got %d", successes.Load())
+	if successes.Load() != 10 {
+		t.Fatalf("expected all acquires to succeed, got %d (errs=%v)", successes.Load(), errs)
 	}
 	for _, leaseID := range leaseIDs {
 		if err := broker.Release(t.Context(), leaseID); err != nil {
@@ -169,8 +173,8 @@ func TestBrokerSkipsCooldownCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	createCredential(t, store, c, "cred-cooldown", "", "shared", 1)
-	createCredential(t, store, c, "cred-active", "", "shared", 1)
+	createCredential(t, store, c, "cred-cooldown", "", "shared")
+	createCredential(t, store, c, "cred-active", "", "shared")
 
 	until := time.Now().UTC().Add(10 * time.Minute)
 	if err := store.SetCodexCredentialStatus("cred-cooldown", "cooldown", &until, "auth failure"); err != nil {

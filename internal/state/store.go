@@ -238,9 +238,6 @@ func (s *Store) UpsertTaskAgentSession(in UpsertTaskAgentSessionInput) (TaskAgen
 	if in.TaskID == "" {
 		return TaskAgentSession{}, fmt.Errorf("task id is required")
 	}
-	if task, ok := s.GetTask(in.TaskID); ok && task.AgentBackend != in.AgentBackend {
-		return TaskAgentSession{}, fmt.Errorf("task %q already uses agent backend %q", in.TaskID, task.AgentBackend)
-	}
 
 	now := time.Now().UTC().UnixNano()
 	if err := s.q.UpsertTaskAgentSession(context.Background(), sqlitegen.UpsertTaskAgentSessionParams{

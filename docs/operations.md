@@ -108,6 +108,7 @@ Backend notes:
 
 - Goose resumes a named Goose session with a task-scoped mounted session directory.
 - Codex resumes by reusing a task-scoped `CODEX_HOME` and the last discovered backend session id.
+- Switching a task between Goose and Codex is supported; Rascal clears stale task-scoped resume state and starts a fresh session for the new backend.
 
 ## Credential Leasing
 
@@ -117,8 +118,8 @@ Operational notes:
 
 - Credential leases are granted per run and renewed while the run is active.
 - If lease renewal fails, Rascal requests cancellation of the run.
-- Shared credentials can be constrained with `max_active_leases`; personal
-  credentials are only available to their owner.
+- Shared credentials may be reused across concurrent runs; personal credentials
+  are only available to their owner.
 - Stored credential payloads are encrypted at rest in SQLite using
   `RASCAL_CREDENTIAL_ENCRYPTION_KEY`.
 - Manage credentials with `rascal auth credentials ...`.
@@ -132,6 +133,7 @@ Operational notes:
 - Roll traffic back to a known-good slot by restoring Caddy upstream and `active_slot`.
 - Retry or cancel runs through Rascal commands.
 - Remove stale task session directories when intentionally resetting backend session resume.
+- Change the configured server backend; future runs can migrate existing tasks to the new backend.
 
 ## Unsafe Manual Interventions
 
@@ -139,7 +141,6 @@ Operational notes:
 - Editing SQLite state directly on disk.
 - Forcing both blue and green slots to process live webhook traffic at once.
 - Deleting run directories before finalization completes.
-- Manually changing task backend assumptions for an existing task.
 
 ## Troubleshooting Checklist
 

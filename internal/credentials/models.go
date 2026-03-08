@@ -19,17 +19,16 @@ type Lease struct {
 }
 
 type CredentialState struct {
-	ID              string
-	OwnerUserID     string
-	Scope           string
-	Weight          int
-	MaxActiveLeases int
-	Status          string
-	CooldownUntil   *time.Time
-	ActiveLeases    int
-	UsageTokens     int64
-	UsageRuns       int64
-	LastError       string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID            string
+	OwnerUserID   string
+	Scope         string
+	Weight        int
+	Status        string
+	CooldownUntil *time.Time
+	ActiveLeases  int
+	UsageTokens   int64
+	UsageRuns     int64
+	LastError     string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }

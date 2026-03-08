@@ -14,16 +14,15 @@ import (
 )
 
 type credentialRecord struct {
-	ID              string     `json:"id" toml:"id"`
-	OwnerUserID     string     `json:"owner_user_id" toml:"owner_user_id"`
-	Scope           string     `json:"scope" toml:"scope"`
-	Weight          int        `json:"weight" toml:"weight"`
-	MaxActiveLeases int        `json:"max_active_leases" toml:"max_active_leases"`
-	Status          string     `json:"status" toml:"status"`
-	CooldownUntil   *time.Time `json:"cooldown_until,omitempty" toml:"cooldown_until,omitempty"`
-	LastError       string     `json:"last_error,omitempty" toml:"last_error,omitempty"`
-	CreatedAt       time.Time  `json:"created_at" toml:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at" toml:"updated_at"`
+	ID            string     `json:"id" toml:"id"`
+	OwnerUserID   string     `json:"owner_user_id" toml:"owner_user_id"`
+	Scope         string     `json:"scope" toml:"scope"`
+	Weight        int        `json:"weight" toml:"weight"`
+	Status        string     `json:"status" toml:"status"`
+	CooldownUntil *time.Time `json:"cooldown_until,omitempty" toml:"cooldown_until,omitempty"`
+	LastError     string     `json:"last_error,omitempty" toml:"last_error,omitempty"`
+	CreatedAt     time.Time  `json:"created_at" toml:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at" toml:"updated_at"`
 }
 
 type credentialListResponse struct {
@@ -40,23 +39,21 @@ type credentialDisableResponse struct {
 }
 
 type credentialCreateRequest struct {
-	ID              string `json:"id,omitempty"`
-	OwnerUserID     string `json:"owner_user_id,omitempty"`
-	Scope           string `json:"scope,omitempty"`
-	AuthBlob        string `json:"auth_blob"`
-	Weight          int    `json:"weight,omitempty"`
-	MaxActiveLeases int    `json:"max_active_leases,omitempty"`
+	ID          string `json:"id,omitempty"`
+	OwnerUserID string `json:"owner_user_id,omitempty"`
+	Scope       string `json:"scope,omitempty"`
+	AuthBlob    string `json:"auth_blob"`
+	Weight      int    `json:"weight,omitempty"`
 }
 
 type credentialUpdateRequest struct {
-	OwnerUserID     *string `json:"owner_user_id,omitempty"`
-	Scope           *string `json:"scope,omitempty"`
-	AuthBlob        *string `json:"auth_blob,omitempty"`
-	Weight          *int    `json:"weight,omitempty"`
-	MaxActiveLeases *int    `json:"max_active_leases,omitempty"`
-	Status          *string `json:"status,omitempty"`
-	CooldownUntil   *string `json:"cooldown_until,omitempty"`
-	LastError       *string `json:"last_error,omitempty"`
+	OwnerUserID   *string `json:"owner_user_id,omitempty"`
+	Scope         *string `json:"scope,omitempty"`
+	AuthBlob      *string `json:"auth_blob,omitempty"`
+	Weight        *int    `json:"weight,omitempty"`
+	Status        *string `json:"status,omitempty"`
+	CooldownUntil *string `json:"cooldown_until,omitempty"`
+	LastError     *string `json:"last_error,omitempty"`
 }
 
 const bootstrapSharedCredentialID = "cred_bootstrap_shared"
@@ -134,7 +131,6 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 		scope           string
 		ownerUserID     string
 		weight          int
-		maxActiveLeases int
 		authFile        string
 		authBlob        string
 	)
@@ -154,12 +150,11 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 				return err
 			}
 			cred, err := a.createCredential(credentialCreateRequest{
-				ID:              strings.TrimSpace(id),
-				OwnerUserID:     strings.TrimSpace(ownerUserID),
-				Scope:           resolvedScope,
-				AuthBlob:        resolvedAuthBlob,
-				Weight:          weight,
-				MaxActiveLeases: maxActiveLeases,
+				ID:          strings.TrimSpace(id),
+				OwnerUserID: strings.TrimSpace(ownerUserID),
+				Scope:       resolvedScope,
+				AuthBlob:    resolvedAuthBlob,
+				Weight:      weight,
 			})
 			if err != nil {
 				return err
@@ -174,7 +169,6 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&scope, "scope", "personal", "credential scope: personal|shared")
 	cmd.Flags().StringVar(&ownerUserID, "owner-user-id", "", "owner user id for personal credentials (admin only)")
 	cmd.Flags().IntVar(&weight, "weight", 1, "selection weight")
-	cmd.Flags().IntVar(&maxActiveLeases, "max-active-leases", 1, "maximum simultaneous leases")
 	cmd.Flags().StringVar(&authFile, "auth-file", "", "path to auth payload file to store")
 	cmd.Flags().StringVar(&authBlob, "auth-blob", "", "raw auth payload to store")
 	return cmd
@@ -185,7 +179,6 @@ func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 		scope           string
 		ownerUserID     string
 		weight          int
-		maxActiveLeases int
 		authFile        string
 		authBlob        string
 	)
@@ -220,14 +213,6 @@ func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 				req.Weight = &value
 				changed = true
 			}
-			if cmd.Flags().Changed("max-active-leases") {
-				if maxActiveLeases <= 0 {
-					return &cliError{Code: exitInput, Message: "--max-active-leases must be positive"}
-				}
-				value := maxActiveLeases
-				req.MaxActiveLeases = &value
-				changed = true
-			}
 			if cmd.Flags().Changed("auth-file") || cmd.Flags().Changed("auth-blob") {
 				value, err := resolveCredentialAuthBlob(authFile, authBlob, true)
 				if err != nil {
@@ -252,7 +237,6 @@ func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&scope, "scope", "", "credential scope: personal|shared")
 	cmd.Flags().StringVar(&ownerUserID, "owner-user-id", "", "owner user id for personal credentials (admin only)")
 	cmd.Flags().IntVar(&weight, "weight", 0, "selection weight")
-	cmd.Flags().IntVar(&maxActiveLeases, "max-active-leases", 0, "maximum simultaneous leases")
 	cmd.Flags().StringVar(&authFile, "auth-file", "", "path to replacement auth payload file")
 	cmd.Flags().StringVar(&authBlob, "auth-blob", "", "replacement raw auth payload")
 	return cmd
@@ -468,11 +452,10 @@ func seedBootstrapSharedCredential(client apiClient, authFilePath string) (crede
 		return credentialRecord{}, err
 	} else if !found {
 		return createCredentialWithClient(client, credentialCreateRequest{
-			ID:              bootstrapSharedCredentialID,
-			Scope:           "shared",
-			AuthBlob:        authBlob,
-			Weight:          1,
-			MaxActiveLeases: 1,
+			ID:       bootstrapSharedCredentialID,
+			Scope:    "shared",
+			AuthBlob: authBlob,
+			Weight:   1,
 		})
 	}
 
@@ -528,16 +511,15 @@ func normalizeCredentialScope(scope string) (string, error) {
 
 func renderCredentialListTable(creds []credentialRecord) error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "ID\tSCOPE\tOWNER\tSTATUS\tMAX\tCOOLDOWN\tUPDATED"); err != nil {
+	if _, err := fmt.Fprintln(tw, "ID\tSCOPE\tOWNER\tSTATUS\tCOOLDOWN\tUPDATED"); err != nil {
 		return fmt.Errorf("write credential list header: %w", err)
 	}
 	for _, cred := range creds {
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			cred.ID,
 			firstNonEmpty(strings.TrimSpace(cred.Scope), "-"),
 			credentialOwnerLabel(cred),
 			firstNonEmpty(strings.TrimSpace(cred.Status), "-"),
-			cred.MaxActiveLeases,
 			credentialCooldownLabel(cred.CooldownUntil),
 			credentialTimeLabel(cred.UpdatedAt),
 		); err != nil {
@@ -558,7 +540,6 @@ func renderCredentialDetailTable(cred credentialRecord) error {
 		{"owner_user_id", credentialOwnerLabel(cred)},
 		{"status", cred.Status},
 		{"weight", fmt.Sprintf("%d", cred.Weight)},
-		{"max_active_leases", fmt.Sprintf("%d", cred.MaxActiveLeases)},
 		{"cooldown_until", credentialCooldownLabel(cred.CooldownUntil)},
 		{"last_error", firstNonEmpty(strings.TrimSpace(cred.LastError), "-")},
 		{"created_at", credentialTimeLabel(cred.CreatedAt)},

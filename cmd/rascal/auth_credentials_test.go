@@ -41,14 +41,13 @@ func TestAuthCredentialsListJSON(t *testing.T) {
 		if err := json.NewEncoder(w).Encode(map[string]any{
 			"credentials": []map[string]any{
 				{
-					"id":                "cred_one",
-					"owner_user_id":     "user_1",
-					"scope":             "personal",
-					"weight":            2,
-					"max_active_leases": 3,
-					"status":            "active",
-					"created_at":        now,
-					"updated_at":        now,
+					"id":            "cred_one",
+					"owner_user_id": "user_1",
+					"scope":         "personal",
+					"weight":        2,
+					"status":        "active",
+					"created_at":    now,
+					"updated_at":    now,
 				},
 			},
 		}); err != nil {
@@ -95,14 +94,13 @@ func TestAuthCredentialsCreateUsesAuthFile(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]any{
 			"credential": map[string]any{
-				"id":                "cred_create",
-				"owner_user_id":     "user_1",
-				"scope":             payload.Scope,
-				"weight":            payload.Weight,
-				"max_active_leases": payload.MaxActiveLeases,
-				"status":            "active",
-				"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-				"updated_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				"id":            "cred_create",
+				"owner_user_id": "user_1",
+				"scope":         payload.Scope,
+				"weight":        payload.Weight,
+				"status":        "active",
+				"created_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				"updated_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
 			},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
@@ -120,7 +118,6 @@ func TestAuthCredentialsCreateUsesAuthFile(t *testing.T) {
 		"--scope", "shared",
 		"--owner-user-id", "ignored_owner",
 		"--weight", "5",
-		"--max-active-leases", "7",
 		"--auth-file", authPath,
 	})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
@@ -133,7 +130,7 @@ func TestAuthCredentialsCreateUsesAuthFile(t *testing.T) {
 	if payload.Scope != "shared" {
 		t.Fatalf("payload scope = %q, want shared", payload.Scope)
 	}
-	if payload.Weight != 5 || payload.MaxActiveLeases != 7 {
+	if payload.Weight != 5 {
 		t.Fatalf("unexpected numeric payload: %+v", payload)
 	}
 	if payload.AuthBlob != `{"token":"abc"}` {
@@ -163,14 +160,13 @@ func TestAuthCredentialsUpdateSendsChangedFields(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]any{
 			"credential": map[string]any{
-				"id":                "cred_update",
-				"owner_user_id":     "user_2",
-				"scope":             "personal",
-				"weight":            9,
-				"max_active_leases": 4,
-				"status":            "active",
-				"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-				"updated_at":        time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
+				"id":            "cred_update",
+				"owner_user_id": "user_2",
+				"scope":         "personal",
+				"weight":        9,
+				"status":        "active",
+				"created_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				"updated_at":    time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
 			},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
@@ -187,7 +183,6 @@ func TestAuthCredentialsUpdateSendsChangedFields(t *testing.T) {
 		"--scope", "personal",
 		"--owner-user-id", "user_2",
 		"--weight", "9",
-		"--max-active-leases", "4",
 		"--auth-blob", `{"token":"updated"}`,
 	})
 	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
@@ -201,9 +196,6 @@ func TestAuthCredentialsUpdateSendsChangedFields(t *testing.T) {
 	}
 	if raw["weight"] != float64(9) {
 		t.Fatalf("unexpected weight payload: %v", raw["weight"])
-	}
-	if raw["max_active_leases"] != float64(4) {
-		t.Fatalf("unexpected max_active_leases payload: %v", raw["max_active_leases"])
 	}
 	if raw["auth_blob"] != `{"token":"updated"}` {
 		t.Fatalf("unexpected auth blob payload: %v", raw["auth_blob"])
@@ -225,15 +217,14 @@ func TestAuthCredentialsDisableFetchesUpdatedCredential(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(map[string]any{
 				"credential": map[string]any{
-					"id":                "cred_disable",
-					"owner_user_id":     "user_1",
-					"scope":             "personal",
-					"weight":            1,
-					"max_active_leases": 1,
-					"status":            "disabled",
-					"last_error":        "disabled by API",
-					"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-					"updated_at":        time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
+					"id":            "cred_disable",
+					"owner_user_id": "user_1",
+					"scope":         "personal",
+					"weight":        1,
+					"status":        "disabled",
+					"last_error":    "disabled by API",
+					"created_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					"updated_at":    time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
 				},
 			}); err != nil {
 				t.Fatalf("encode get response: %v", err)
@@ -288,13 +279,12 @@ func TestSeedBootstrapSharedCredentialCreatesWhenMissing(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(map[string]any{
 				"credential": map[string]any{
-					"id":                bootstrapSharedCredentialID,
-					"scope":             "shared",
-					"weight":            1,
-					"max_active_leases": 1,
-					"status":            "active",
-					"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-					"updated_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					"id":         bootstrapSharedCredentialID,
+					"scope":      "shared",
+					"weight":     1,
+					"status":     "active",
+					"created_at": time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					"updated_at": time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
 				},
 			}); err != nil {
 				t.Fatalf("encode create response: %v", err)
@@ -335,13 +325,12 @@ func TestSeedBootstrapSharedCredentialUpdatesWhenPresent(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(map[string]any{
 				"credential": map[string]any{
-					"id":                bootstrapSharedCredentialID,
-					"scope":             "shared",
-					"weight":            2,
-					"max_active_leases": 3,
-					"status":            "cooldown",
-					"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-					"updated_at":        time.Date(2026, 3, 8, 12, 1, 0, 0, time.UTC),
+					"id":         bootstrapSharedCredentialID,
+					"scope":      "shared",
+					"weight":     2,
+					"status":     "cooldown",
+					"created_at": time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					"updated_at": time.Date(2026, 3, 8, 12, 1, 0, 0, time.UTC),
 				},
 			}); err != nil {
 				t.Fatalf("encode get response: %v", err)
@@ -353,13 +342,12 @@ func TestSeedBootstrapSharedCredentialUpdatesWhenPresent(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(map[string]any{
 				"credential": map[string]any{
-					"id":                bootstrapSharedCredentialID,
-					"scope":             "shared",
-					"weight":            2,
-					"max_active_leases": 3,
-					"status":            "active",
-					"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-					"updated_at":        time.Date(2026, 3, 8, 12, 2, 0, 0, time.UTC),
+					"id":         bootstrapSharedCredentialID,
+					"scope":      "shared",
+					"weight":     2,
+					"status":     "active",
+					"created_at": time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					"updated_at": time.Date(2026, 3, 8, 12, 2, 0, 0, time.UTC),
 				},
 			}); err != nil {
 				t.Fatalf("encode patch response: %v", err)
@@ -401,14 +389,13 @@ func TestAuthCredentialsEnableClearsCooldown(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]any{
 			"credential": map[string]any{
-				"id":                "cred_enable",
-				"owner_user_id":     "user_1",
-				"scope":             "personal",
-				"weight":            1,
-				"max_active_leases": 1,
-				"status":            "active",
-				"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-				"updated_at":        time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
+				"id":            "cred_enable",
+				"owner_user_id": "user_1",
+				"scope":         "personal",
+				"weight":        1,
+				"status":        "active",
+				"created_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				"updated_at":    time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
 			},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
@@ -450,16 +437,15 @@ func TestAuthCredentialsCooldownSetsCooldown(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]any{
 			"credential": map[string]any{
-				"id":                "cred_cooldown",
-				"owner_user_id":     "user_1",
-				"scope":             "personal",
-				"weight":            1,
-				"max_active_leases": 1,
-				"status":            "cooldown",
-				"cooldown_until":    time.Date(2026, 3, 8, 13, 0, 0, 0, time.UTC),
-				"last_error":        "manual cooldown",
-				"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-				"updated_at":        time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
+				"id":             "cred_cooldown",
+				"owner_user_id":  "user_1",
+				"scope":          "personal",
+				"weight":         1,
+				"status":         "cooldown",
+				"cooldown_until": time.Date(2026, 3, 8, 13, 0, 0, 0, time.UTC),
+				"last_error":     "manual cooldown",
+				"created_at":     time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				"updated_at":     time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
 			},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
@@ -502,14 +488,13 @@ func TestAuthCredentialsCooldownClear(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]any{
 			"credential": map[string]any{
-				"id":                "cred_clear",
-				"owner_user_id":     "user_1",
-				"scope":             "personal",
-				"weight":            1,
-				"max_active_leases": 1,
-				"status":            "active",
-				"created_at":        time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-				"updated_at":        time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
+				"id":            "cred_clear",
+				"owner_user_id": "user_1",
+				"scope":         "personal",
+				"weight":        1,
+				"status":        "active",
+				"created_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				"updated_at":    time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
 			},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)

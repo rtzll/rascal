@@ -46,7 +46,6 @@ type CodexCredential struct {
 	Scope             string
 	EncryptedAuthBlob []byte
 	Weight            int
-	MaxActiveLeases   int
 	Status            string
 	CooldownUntil     *time.Time
 	LastError         string
@@ -55,19 +54,18 @@ type CodexCredential struct {
 }
 
 type CredentialCandidate struct {
-	ID              string
-	OwnerUserID     string
-	Scope           string
-	Weight          int
-	MaxActiveLeases int
-	Status          string
-	CooldownUntil   *time.Time
-	ActiveLeases    int
-	UsageTokens     int64
-	UsageRuns       int64
-	LastError       string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID            string
+	OwnerUserID   string
+	Scope         string
+	Weight        int
+	Status        string
+	CooldownUntil *time.Time
+	ActiveLeases  int
+	UsageTokens   int64
+	UsageRuns     int64
+	LastError     string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type CredentialLease struct {
@@ -100,7 +98,6 @@ type CreateCodexCredentialInput struct {
 	Scope             string
 	EncryptedAuthBlob []byte
 	Weight            int
-	MaxActiveLeases   int
 	Status            string
 	CooldownUntil     *time.Time
 	LastError         string
@@ -112,7 +109,6 @@ type UpdateCodexCredentialInput struct {
 	Scope             string
 	EncryptedAuthBlob []byte
 	Weight            int
-	MaxActiveLeases   int
 	Status            string
 	CooldownUntil     *time.Time
 	LastError         string
@@ -316,9 +312,6 @@ func (s *Store) CreateCodexCredential(in CreateCodexCredentialInput) (CodexCrede
 	if in.Weight <= 0 {
 		in.Weight = 1
 	}
-	if in.MaxActiveLeases <= 0 {
-		in.MaxActiveLeases = 1
-	}
 	now := time.Now().UTC()
 	if err := s.q.CreateCodexCredential(context.Background(), sqlitegen.CreateCodexCredentialParams{
 		ID:                in.ID,
@@ -326,7 +319,6 @@ func (s *Store) CreateCodexCredential(in CreateCodexCredentialInput) (CodexCrede
 		Scope:             in.Scope,
 		EncryptedAuthBlob: in.EncryptedAuthBlob,
 		Weight:            int64(in.Weight),
-		MaxActiveLeases:   int64(in.MaxActiveLeases),
 		Status:            in.Status,
 		CooldownUntil:     toNullInt64(in.CooldownUntil),
 		LastError:         in.LastError,
@@ -362,15 +354,11 @@ func (s *Store) UpdateCodexCredential(in UpdateCodexCredentialInput) (CodexCrede
 	if in.Weight <= 0 {
 		in.Weight = 1
 	}
-	if in.MaxActiveLeases <= 0 {
-		in.MaxActiveLeases = 1
-	}
 	rows, err := s.q.UpdateCodexCredential(context.Background(), sqlitegen.UpdateCodexCredentialParams{
 		OwnerUserID:       toNullString(in.OwnerUserID),
 		Scope:             in.Scope,
 		EncryptedAuthBlob: in.EncryptedAuthBlob,
 		Weight:            int64(in.Weight),
-		MaxActiveLeases:   int64(in.MaxActiveLeases),
 		Status:            in.Status,
 		CooldownUntil:     toNullInt64(in.CooldownUntil),
 		LastError:         in.LastError,
@@ -474,19 +462,18 @@ func (s *Store) ListCredentialCandidates(requesterUserID string, now, usageWindo
 	out := make([]CredentialCandidate, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, CredentialCandidate{
-			ID:              row.ID,
-			OwnerUserID:     fromNullString(row.OwnerUserID),
-			Scope:           row.Scope,
-			Weight:          int(row.Weight),
-			MaxActiveLeases: int(row.MaxActiveLeases),
-			Status:          row.Status,
-			CooldownUntil:   fromNullTime(row.CooldownUntil),
-			ActiveLeases:    int(row.ActiveLeases),
-			UsageTokens:     row.UsageTokens,
-			UsageRuns:       row.UsageRuns,
-			LastError:       row.LastError,
-			CreatedAt:       time.Unix(0, row.CreatedAt).UTC(),
-			UpdatedAt:       time.Unix(0, row.UpdatedAt).UTC(),
+			ID:            row.ID,
+			OwnerUserID:   fromNullString(row.OwnerUserID),
+			Scope:         row.Scope,
+			Weight:        int(row.Weight),
+			Status:        row.Status,
+			CooldownUntil: fromNullTime(row.CooldownUntil),
+			ActiveLeases:  int(row.ActiveLeases),
+			UsageTokens:   row.UsageTokens,
+			UsageRuns:     row.UsageRuns,
+			LastError:     row.LastError,
+			CreatedAt:     time.Unix(0, row.CreatedAt).UTC(),
+			UpdatedAt:     time.Unix(0, row.UpdatedAt).UTC(),
 		})
 	}
 	return out, nil
@@ -656,7 +643,6 @@ func fromDBCodexCredential(row sqlitegen.CodexCredential) CodexCredential {
 		Scope:             row.Scope,
 		EncryptedAuthBlob: append([]byte(nil), row.EncryptedAuthBlob...),
 		Weight:            int(row.Weight),
-		MaxActiveLeases:   int(row.MaxActiveLeases),
 		Status:            row.Status,
 		CooldownUntil:     fromNullTime(row.CooldownUntil),
 		LastError:         row.LastError,

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rtzll/rascal/internal/agent"
 )
 
 func TestStoreRunAndTaskLifecycle(t *testing.T) {
@@ -93,6 +95,77 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 	}
 	if store.IsTaskCompleted("repo#1") {
 		t.Fatal("expected task to be reopened")
+	}
+}
+
+func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	task, err := store.UpsertTask(UpsertTaskInput{
+		ID:           "repo#2",
+		Repo:         "owner/repo",
+		AgentBackend: agent.BackendGoose,
+		IssueNumber:  2,
+	})
+	if err != nil {
+		t.Fatalf("upsert goose task: %v", err)
+	}
+	if task.AgentBackend != agent.BackendGoose {
+		t.Fatalf("task backend = %s, want %s", task.AgentBackend, agent.BackendGoose)
+	}
+
+	session, err := store.UpsertTaskAgentSession(UpsertTaskAgentSessionInput{
+		TaskID:           task.ID,
+		AgentBackend:     agent.BackendGoose,
+		BackendSessionID: "goose-session",
+		SessionKey:       "owner-repo-2",
+		SessionRoot:      "/tmp/goose-session",
+		LastRunID:        "run_goose",
+	})
+	if err != nil {
+		t.Fatalf("upsert goose task session: %v", err)
+	}
+	if session.AgentBackend != agent.BackendGoose {
+		t.Fatalf("session backend = %s, want %s", session.AgentBackend, agent.BackendGoose)
+	}
+
+	task, err = store.UpsertTask(UpsertTaskInput{
+		ID:           task.ID,
+		Repo:         task.Repo,
+		AgentBackend: agent.BackendCodex,
+		IssueNumber:  task.IssueNumber,
+	})
+	if err != nil {
+		t.Fatalf("migrate task backend to codex: %v", err)
+	}
+	if task.AgentBackend != agent.BackendCodex {
+		t.Fatalf("task backend = %s, want %s", task.AgentBackend, agent.BackendCodex)
+	}
+
+	session, err = store.UpsertTaskAgentSession(UpsertTaskAgentSessionInput{
+		TaskID:           task.ID,
+		AgentBackend:     agent.BackendCodex,
+		BackendSessionID: "",
+		SessionKey:       "owner-repo-2",
+		SessionRoot:      "/tmp/codex-session",
+		LastRunID:        "run_codex",
+	})
+	if err != nil {
+		t.Fatalf("migrate task session backend to codex: %v", err)
+	}
+	if session.AgentBackend != agent.BackendCodex {
+		t.Fatalf("session backend = %s, want %s", session.AgentBackend, agent.BackendCodex)
+	}
+	if session.BackendSessionID != "" {
+		t.Fatalf("session id = %q, want empty after backend migration", session.BackendSessionID)
+	}
+	if session.SessionRoot != "/tmp/codex-session" {
+		t.Fatalf("session root = %q, want /tmp/codex-session", session.SessionRoot)
 	}
 }
 

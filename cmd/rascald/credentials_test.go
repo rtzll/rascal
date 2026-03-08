@@ -115,6 +115,7 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 
 func TestCreateTaskPersistsRequesterIdentity(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader([]byte(`{"repo":"owner/repo","task":"do work"}`)))
 	req = withPrincipal(req, "owner", state.UserRoleUser)
 	rec := httptest.NewRecorder()
@@ -140,6 +141,7 @@ func TestCreateTaskPersistsRequesterIdentity(t *testing.T) {
 func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 	waitCh := make(chan struct{})
 	s := newTestServer(t, &fakeLauncher{waitCh: waitCh, res: fakeRunResult{ExitCode: 0}})
+	defer waitForServerIdle(t, s)
 	cipher, err := credentials.NewAESCipher("test-secret")
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
@@ -163,7 +165,6 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 		OwnerUserID:       "owner",
 		Scope:             "personal",
 		EncryptedAuthBlob: blob,
-		MaxActiveLeases:   1,
 		Weight:            1,
 		Status:            "active",
 	}); err != nil {
@@ -209,4 +210,85 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 		_, ok, err := s.store.GetActiveCredentialLeaseByRunID(run.ID)
 		return err == nil && !ok
 	}, "credential lease release")
+}
+
+func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh, res: fakeRunResult{ExitCode: 0}}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+	cipher, err := credentials.NewAESCipher("test-secret")
+	if err != nil {
+		t.Fatalf("new cipher: %v", err)
+	}
+	strategy, err := credentialstrategies.ByName("requester_own_then_shared")
+	if err != nil {
+		t.Fatalf("strategy: %v", err)
+	}
+	s.cipher = cipher
+	s.broker = credentials.NewBroker(s.store, strategy, cipher, 90*time.Second)
+	s.maxConcurrent = 2
+
+	if _, err := s.store.UpsertUser(state.UpsertUserInput{ID: "owner", ExternalLogin: "owner", Role: state.UserRoleUser}); err != nil {
+		t.Fatalf("upsert owner: %v", err)
+	}
+	blob, err := cipher.Encrypt([]byte(`{"token":"shared-token"}`))
+	if err != nil {
+		t.Fatalf("encrypt auth blob: %v", err)
+	}
+	if _, err := s.store.CreateCodexCredential(state.CreateCodexCredentialInput{
+		ID:                "cred-shared",
+		Scope:             "shared",
+		EncryptedAuthBlob: blob,
+		Weight:            1,
+		Status:            "active",
+	}); err != nil {
+		t.Fatalf("create credential: %v", err)
+	}
+
+	runA, err := s.createAndQueueRun(runRequest{
+		TaskID:          "owner/repo#reuse-a",
+		Repo:            "owner/repo",
+		Task:            "reuse shared credential a",
+		CreatedByUserID: "owner",
+	})
+	if err != nil {
+		t.Fatalf("create run A: %v", err)
+	}
+	runB, err := s.createAndQueueRun(runRequest{
+		TaskID:          "owner/repo#reuse-b",
+		Repo:            "owner/repo",
+		Task:            "reuse shared credential b",
+		CreatedByUserID: "owner",
+	})
+	if err != nil {
+		t.Fatalf("create run B: %v", err)
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		if _, err := os.Stat(filepath.Join(runA.RunDir, "codex", "auth.json")); err != nil {
+			return false
+		}
+		if _, err := os.Stat(filepath.Join(runB.RunDir, "codex", "auth.json")); err != nil {
+			return false
+		}
+		return true
+	}, "shared auth files created for both runs")
+
+	if calls := launcher.Calls(); calls != 2 {
+		t.Fatalf("expected two concurrent launcher calls, got %d", calls)
+	}
+	if _, ok, err := s.store.GetActiveCredentialLeaseByRunID(runA.ID); err != nil || !ok {
+		t.Fatalf("expected active lease for run A, ok=%t err=%v", ok, err)
+	}
+	if _, ok, err := s.store.GetActiveCredentialLeaseByRunID(runB.ID); err != nil || !ok {
+		t.Fatalf("expected active lease for run B, ok=%t err=%v", ok, err)
+	}
+
+	close(waitCh)
+	waitFor(t, 3*time.Second, func() bool {
+		a, okA := s.store.GetRun(runA.ID)
+		b, okB := s.store.GetRun(runB.ID)
+		return okA && okB && state.IsFinalRunStatus(a.Status) && state.IsFinalRunStatus(b.Status)
+	}, "both runs complete")
 }

@@ -25,5 +25,5 @@ func filter(candidates []credentials.CredentialState, pred func(credentials.Cred
 }
 
 func hasCapacity(candidate credentials.CredentialState) bool {
-	return candidate.MaxActiveLeases > candidate.ActiveLeases
+	return true
 }

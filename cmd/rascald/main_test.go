@@ -815,7 +815,6 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
-	defer close(waitCh)
 	taskID := "owner/repo#7"
 
 	runningRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "work", IssueNumber: 7})
@@ -861,6 +860,12 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 	if editedRun.ID == runningRun.ID || editedRun.ID == queuedRun.ID {
 		t.Fatalf("expected new run for edit, got existing run id %q", editedRun.ID)
 	}
+
+	close(waitCh)
+	waitFor(t, 3*time.Second, func() bool {
+		r, ok := s.store.GetRun(editedRun.ID)
+		return ok && state.IsFinalRunStatus(r.Status)
+	}, "edited run completed")
 
 }
 
@@ -1604,6 +1609,33 @@ func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 	}
 	if target.Trigger != "pr_comment" {
 		t.Fatalf("target trigger = %q, want pr_comment", target.Trigger)
+	}
+}
+
+func TestCreateAndQueueRunDoesNotCreateRunDirWhenEnqueueFails(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+
+	runsDir := filepath.Join(s.cfg.DataDir, "runs")
+	if err := s.store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	_, err := s.createAndQueueRun(runRequest{
+		TaskID: "owner/repo#101",
+		Repo:   "owner/repo",
+		Task:   "fail before enqueue persists",
+	})
+	if err == nil {
+		t.Fatal("expected enqueue failure")
+	}
+	if !strings.Contains(err.Error(), "upsert task") {
+		t.Fatalf("unexpected enqueue error: %v", err)
+	}
+
+	_, statErr := os.Stat(runsDir)
+	if !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected no runs dir after failed enqueue, got err=%v", statErr)
 	}
 }
 

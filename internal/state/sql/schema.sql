@@ -86,7 +86,6 @@ CREATE TABLE codex_credentials (
   scope TEXT NOT NULL,
   encrypted_auth_blob BLOB NOT NULL,
   weight INTEGER NOT NULL DEFAULT 1,
-  max_active_leases INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'active',
   cooldown_until INTEGER,
   last_error TEXT NOT NULL DEFAULT '',
