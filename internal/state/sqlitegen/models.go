@@ -60,6 +60,34 @@ type Delivery struct {
 	LastError   string        `json:"last_error"`
 }
 
+type Repository struct {
+	FullName               string `json:"full_name"`
+	WebhookKey             string `json:"webhook_key"`
+	Enabled                bool   `json:"enabled"`
+	EncryptedGithubToken   []byte `json:"encrypted_github_token"`
+	EncryptedWebhookSecret []byte `json:"encrypted_webhook_secret"`
+	AgentBackend           string `json:"agent_backend"`
+	AgentSessionMode       string `json:"agent_session_mode"`
+	BaseBranchOverride     string `json:"base_branch_override"`
+	MaxConcurrentRuns      int64  `json:"max_concurrent_runs"`
+	AllowManual            bool   `json:"allow_manual"`
+	AllowIssueLabel        bool   `json:"allow_issue_label"`
+	AllowIssueEdit         bool   `json:"allow_issue_edit"`
+	AllowPrComment         bool   `json:"allow_pr_comment"`
+	AllowPrReview          bool   `json:"allow_pr_review"`
+	AllowPrReviewComment   bool   `json:"allow_pr_review_comment"`
+	CreatedAt              int64  `json:"created_at"`
+	UpdatedAt              int64  `json:"updated_at"`
+}
+
+type RepositoryUserRole struct {
+	RepoFullName string `json:"repo_full_name"`
+	UserID       string `json:"user_id"`
+	Role         string `json:"role"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+}
+
 type Run struct {
 	Seq             int64         `json:"seq"`
 	ID              string        `json:"id"`

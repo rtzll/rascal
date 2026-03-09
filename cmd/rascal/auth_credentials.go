@@ -127,12 +127,12 @@ func (a *app) newAuthCredentialsGetCmd() *cobra.Command {
 
 func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 	var (
-		id              string
-		scope           string
-		ownerUserID     string
-		weight          int
-		authFile        string
-		authBlob        string
+		id          string
+		scope       string
+		ownerUserID string
+		weight      int
+		authFile    string
+		authBlob    string
 	)
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -176,11 +176,11 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 
 func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 	var (
-		scope           string
-		ownerUserID     string
-		weight          int
-		authFile        string
-		authBlob        string
+		scope       string
+		ownerUserID string
+		weight      int
+		authFile    string
+		authBlob    string
 	)
 	cmd := &cobra.Command{
 		Use:   "update <credential-id>",

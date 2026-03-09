@@ -110,51 +110,6 @@ func (a *app) runRepoEnable(input repoEnableInput) (repoEnableResult, error) {
 	return repoEnableResult{Repo: repo, WebhookURL: webhookURL}, nil
 }
 
-func (a *app) newRepoEnableCmd() *cobra.Command {
-	var (
-		githubToken            string
-		webhookSecret          string
-		useServerWebhookSecret bool
-		webhookURL             string
-		timeout                time.Duration
-	)
-	cmd := &cobra.Command{
-		Use:   "enable [OWNER/REPO]",
-		Short: "Ensure rascal label and webhook are configured",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			repo := resolveRepoArg(args, a.cfg.DefaultRepo)
-			result, err := a.runRepoEnable(repoEnableInput{
-				Repo:                   repo,
-				GitHubToken:            githubToken,
-				WebhookSecret:          webhookSecret,
-				UseServerWebhookSecret: useServerWebhookSecret,
-				WebhookURL:             webhookURL,
-				Timeout:                timeout,
-			})
-			if err != nil {
-				return err
-			}
-			return a.emit(map[string]any{
-				"repo":        result.Repo,
-				"enabled":     true,
-				"webhook_url": result.WebhookURL,
-				"label":       "rascal",
-			}, func() error {
-				a.println("repo enabled: %s", result.Repo)
-				a.println("webhook: %s", result.WebhookURL)
-				return nil
-			})
-		},
-	}
-	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token (or GITHUB_TOKEN)")
-	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret (must match server secret)")
-	cmd.Flags().BoolVar(&useServerWebhookSecret, "use-server-webhook-secret", false, "resolve webhook secret from remote /etc/rascal/rascal.env over SSH")
-	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "override webhook URL (default: <orchestrator-url>/v1/webhooks/github)")
-	cmd.Flags().DurationVar(&timeout, "timeout", 45*time.Second, "GitHub API timeout")
-	return cmd
-}
-
 func (a *app) fetchServerWebhookSecret() (string, error) {
 	cfg, err := a.resolveSSHConfig("", "", "", 0)
 	if err != nil {

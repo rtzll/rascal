@@ -173,6 +173,8 @@ func newRootCmd() *cobra.Command {
 
 	githubCmd := a.newGitHubCmd()
 	githubCmd.GroupID = "integrations"
+	repoCmd := a.newRepoCmd()
+	repoCmd.GroupID = "integrations"
 	infraCmd := a.newInfraCmd()
 	infraCmd.GroupID = "integrations"
 
@@ -194,6 +196,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(taskCmd)
 	root.AddCommand(logsCmd)
 	root.AddCommand(githubCmd)
+	root.AddCommand(repoCmd)
 	root.AddCommand(infraCmd)
 	root.AddCommand(doctorCmd)
 	root.AddCommand(completionCmd)
@@ -580,10 +583,10 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			if !skipWebhook && githubAdminToken == "" {
 				missing = append(missing, "GitHub admin token is required for webhook setup (--github-admin-token or GITHUB_ADMIN_TOKEN)")
 			}
-			if shouldDeploy && githubRuntimeToken == "" {
-				missing = append(missing, "GitHub runtime token is required for deployment (--github-runtime-token or RASCAL_GITHUB_TOKEN)")
+			if repo != "" && githubRuntimeToken == "" {
+				missing = append(missing, "GitHub runtime token is required when --repo is set (--github-runtime-token or RASCAL_GITHUB_TOKEN)")
 			}
-			if err := validateDistinctGitHubTokens(githubAdminToken, githubRuntimeToken, !skipWebhook && shouldDeploy); err != nil {
+			if err := validateDistinctGitHubTokens(githubAdminToken, githubRuntimeToken, !skipWebhook && repo != ""); err != nil {
 				missing = append(missing, err.Error())
 			}
 			if shouldDeploy {
@@ -680,10 +683,10 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			if !skipWebhook && githubAdminToken == "" {
 				return fmt.Errorf("--github-admin-token is required when webhook setup is enabled")
 			}
-			if shouldDeploy && githubRuntimeToken == "" {
-				return fmt.Errorf("--github-runtime-token is required when deployment is enabled")
+			if repo != "" && githubRuntimeToken == "" {
+				return fmt.Errorf("--github-runtime-token is required when --repo is set")
 			}
-			if err := validateDistinctGitHubTokens(githubAdminToken, githubRuntimeToken, !skipWebhook && shouldDeploy); err != nil {
+			if err := validateDistinctGitHubTokens(githubAdminToken, githubRuntimeToken, !skipWebhook && repo != ""); err != nil {
 				return err
 			}
 
@@ -781,12 +784,67 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			}
 			serverURL = strings.TrimRight(serverURL, "/")
 
+			var bootstrapRepo repositoryRecord
+			if repo != "" && githubRuntimeToken != "" {
+				bootstrapClient := a.client
+				bootstrapClient.baseURL = serverURL
+				bootstrapClient.token = apiToken
+				bootstrapClient.http = &http.Client{Timeout: 30 * time.Second}
+				bootstrapClient.transport = resolveTransport(a.cfg.Transport, serverURL, a.cfg.SSHHost)
+				if bootstrapClient.sshHost == "" {
+					bootstrapClient.sshHost = a.cfg.SSHHost
+				}
+				if bootstrapClient.sshUser == "" {
+					bootstrapClient.sshUser = a.cfg.SSHUser
+				}
+				if bootstrapClient.sshPort <= 0 {
+					bootstrapClient.sshPort = a.cfg.SSHPort
+				}
+				prevClient := a.client
+				a.client = bootstrapClient
+				createPayload := map[string]any{
+					"full_name":               repo,
+					"github_token":            githubRuntimeToken,
+					"webhook_secret":          webhookSecret,
+					"allow_manual":            true,
+					"allow_issue_label":       true,
+					"allow_issue_edit":        true,
+					"allow_pr_comment":        true,
+					"allow_pr_review":         true,
+					"allow_pr_review_comment": true,
+				}
+				created, createErr := a.createRepository(createPayload)
+				if createErr == nil {
+					bootstrapRepo = created
+				} else if ce, ok := createErr.(*cliError); ok && strings.Contains(strings.ToLower(ce.Error()), "server error (409)") {
+					updated, patchErr := a.patchRepository(repo, map[string]any{
+						"github_token":   githubRuntimeToken,
+						"webhook_secret": webhookSecret,
+					})
+					if patchErr != nil {
+						a.client = prevClient
+						return patchErr
+					}
+					bootstrapRepo = updated
+				} else {
+					a.client = prevClient
+					return createErr
+				}
+				a.client = prevClient
+			}
+
 			if !skipWebhook {
+				if strings.TrimSpace(repo) == "" {
+					return fmt.Errorf("--repo is required when webhook setup is enabled")
+				}
+				if strings.TrimSpace(bootstrapRepo.WebhookKey) == "" {
+					return fmt.Errorf("repository record is missing webhook_key; register repo first")
+				}
 				if _, err := a.runRepoEnable(repoEnableInput{
 					Repo:          repo,
 					GitHubToken:   githubAdminToken,
 					WebhookSecret: webhookSecret,
-					WebhookURL:    serverURL + "/v1/webhooks/github",
+					WebhookURL:    serverURL + "/v1/webhooks/github/" + bootstrapRepo.WebhookKey,
 					Timeout:       45 * time.Second,
 					RawErrors:     true,
 				}); err != nil {

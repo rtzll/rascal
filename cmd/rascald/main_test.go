@@ -23,6 +23,7 @@ import (
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/credentials"
 	ghapi "github.com/rtzll/rascal/internal/github"
+	"github.com/rtzll/rascal/internal/repositories"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -511,11 +512,19 @@ func newTestServerWithPaths(t *testing.T, launcher runner.Launcher, dataDir, sta
 	if err != nil {
 		t.Fatalf("new state store: %v", err)
 	}
+	cipher, err := credentials.NewAESCipher("test-key")
+	if err != nil {
+		t.Fatalf("new test cipher: %v", err)
+	}
+	repoResolver := repositories.NewResolver(store, cipher, cfg.AgentBackend, cfg.EffectiveAgentSessionMode())
 	return &server{
 		cfg:                cfg,
 		store:              store,
 		launcher:           launcher,
 		gh:                 ghapi.NewAPIClient(""),
+		repo:               repoResolver,
+		ghByRepo:           ghapi.NewClientResolver(repoResolver),
+		cipher:             cipher,
 		runCancels:         make(map[string]context.CancelFunc),
 		maxConcurrent:      defaultMaxConcurrent(),
 		instanceID:         strings.TrimSpace(instanceID),
@@ -1630,7 +1639,7 @@ func TestCreateAndQueueRunDoesNotCreateRunDirWhenEnqueueFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected enqueue failure")
 	}
-	if !strings.Contains(err.Error(), "upsert task") {
+	if !strings.Contains(err.Error(), "database is closed") {
 		t.Fatalf("unexpected enqueue error: %v", err)
 	}
 

@@ -15,6 +15,7 @@ type Spec struct {
 	TaskID       string
 	Repo         string
 	Task         string
+	GitHubToken  string
 	AgentBackend agent.Backend
 	RunnerImage  string
 	BaseBranch   string

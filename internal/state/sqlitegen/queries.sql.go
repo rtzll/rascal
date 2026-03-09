@@ -410,6 +410,112 @@ func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQu
 	return i, err
 }
 
+const claimQueuedRunByID = `-- name: ClaimQueuedRunByID :one
+UPDATE runs
+SET status = 'running', error = '', updated_at = ?1, started_at = ?2
+WHERE id = ?3
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM runs AS other
+    WHERE other.task_id = runs.task_id
+      AND other.status = 'running'
+      AND other.id <> runs.id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM run_cancels AS rc
+    WHERE rc.run_id = runs.id
+  )
+RETURNING
+  seq,
+  id,
+  task_id,
+  repo,
+  task,
+  agent_backend,
+  base_branch,
+  head_branch,
+  trigger,
+  debug,
+  status,
+  run_dir,
+  issue_number,
+  pr_number,
+  pr_url,
+  pr_status,
+  head_sha,
+  context,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+`
+
+type ClaimQueuedRunByIDParams struct {
+	UpdatedAt int64         `json:"updated_at"`
+	StartedAt sql.NullInt64 `json:"started_at"`
+	RunID     string        `json:"run_id"`
+}
+
+type ClaimQueuedRunByIDRow struct {
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) ClaimQueuedRunByID(ctx context.Context, arg ClaimQueuedRunByIDParams) (ClaimQueuedRunByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, claimQueuedRunByID, arg.UpdatedAt, arg.StartedAt, arg.RunID)
+	var i ClaimQueuedRunByIDRow
+	err := row.Scan(
+		&i.Seq,
+		&i.ID,
+		&i.TaskID,
+		&i.Repo,
+		&i.Task,
+		&i.AgentBackend,
+		&i.BaseBranch,
+		&i.HeadBranch,
+		&i.Trigger,
+		&i.Debug,
+		&i.Status,
+		&i.RunDir,
+		&i.IssueNumber,
+		&i.PrNumber,
+		&i.PrUrl,
+		&i.PrStatus,
+		&i.HeadSha,
+		&i.Context,
+		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const claimRunStart = `-- name: ClaimRunStart :execrows
 UPDATE runs
 SET status = 'running', error = '', updated_at = ?, started_at = ?
@@ -483,6 +589,18 @@ func (q *Queries) CountDeliveries(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countRepositories = `-- name: CountRepositories :one
+SELECT COUNT(*)
+FROM repositories
+`
+
+func (q *Queries) CountRepositories(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRepositories)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRunLeasesByOwner = `-- name: CountRunLeasesByOwner :one
 SELECT COUNT(*)
 FROM run_leases
@@ -494,6 +612,41 @@ func (q *Queries) CountRunLeasesByOwner(ctx context.Context, ownerID string) (in
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countRunningRunsByRepo = `-- name: CountRunningRunsByRepo :many
+SELECT repo, COUNT(*) AS run_count
+FROM runs
+WHERE status = 'running'
+GROUP BY repo
+`
+
+type CountRunningRunsByRepoRow struct {
+	Repo     string `json:"repo"`
+	RunCount int64  `json:"run_count"`
+}
+
+func (q *Queries) CountRunningRunsByRepo(ctx context.Context) ([]CountRunningRunsByRepoRow, error) {
+	rows, err := q.db.QueryContext(ctx, countRunningRunsByRepo)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountRunningRunsByRepoRow{}
+	for rows.Next() {
+		var i CountRunningRunsByRepoRow
+		if err := rows.Scan(&i.Repo, &i.RunCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const createCodexCredential = `-- name: CreateCodexCredential :exec
@@ -554,6 +707,37 @@ WHERE id IN (
 func (q *Queries) DeleteOldestDeliveries(ctx context.Context, limit int64) error {
 	_, err := q.db.ExecContext(ctx, deleteOldestDeliveries, limit)
 	return err
+}
+
+const deleteRepository = `-- name: DeleteRepository :execrows
+DELETE FROM repositories
+WHERE full_name = ?
+`
+
+func (q *Queries) DeleteRepository(ctx context.Context, fullName string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteRepository, fullName)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteRepositoryUserRole = `-- name: DeleteRepositoryUserRole :execrows
+DELETE FROM repository_user_roles
+WHERE repo_full_name = ? AND user_id = ?
+`
+
+type DeleteRepositoryUserRoleParams struct {
+	RepoFullName string `json:"repo_full_name"`
+	UserID       string `json:"user_id"`
+}
+
+func (q *Queries) DeleteRepositoryUserRole(ctx context.Context, arg DeleteRepositoryUserRoleParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteRepositoryUserRole, arg.RepoFullName, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteRunCancel = `-- name: DeleteRunCancel :execrows
@@ -832,6 +1016,126 @@ func (q *Queries) GetCredentialLease(ctx context.Context, id string) (Credential
 		&i.AcquiredAt,
 		&i.ExpiresAt,
 		&i.ReleasedAt,
+	)
+	return i, err
+}
+
+const getRepositoryByFullName = `-- name: GetRepositoryByFullName :one
+SELECT
+  full_name,
+  webhook_key,
+  enabled,
+  encrypted_github_token,
+  encrypted_webhook_secret,
+  agent_backend,
+  agent_session_mode,
+  base_branch_override,
+  max_concurrent_runs,
+  allow_manual,
+  allow_issue_label,
+  allow_issue_edit,
+  allow_pr_comment,
+  allow_pr_review,
+  allow_pr_review_comment,
+  created_at,
+  updated_at
+FROM repositories
+WHERE full_name = ?
+`
+
+func (q *Queries) GetRepositoryByFullName(ctx context.Context, fullName string) (Repository, error) {
+	row := q.db.QueryRowContext(ctx, getRepositoryByFullName, fullName)
+	var i Repository
+	err := row.Scan(
+		&i.FullName,
+		&i.WebhookKey,
+		&i.Enabled,
+		&i.EncryptedGithubToken,
+		&i.EncryptedWebhookSecret,
+		&i.AgentBackend,
+		&i.AgentSessionMode,
+		&i.BaseBranchOverride,
+		&i.MaxConcurrentRuns,
+		&i.AllowManual,
+		&i.AllowIssueLabel,
+		&i.AllowIssueEdit,
+		&i.AllowPrComment,
+		&i.AllowPrReview,
+		&i.AllowPrReviewComment,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRepositoryByWebhookKey = `-- name: GetRepositoryByWebhookKey :one
+SELECT
+  full_name,
+  webhook_key,
+  enabled,
+  encrypted_github_token,
+  encrypted_webhook_secret,
+  agent_backend,
+  agent_session_mode,
+  base_branch_override,
+  max_concurrent_runs,
+  allow_manual,
+  allow_issue_label,
+  allow_issue_edit,
+  allow_pr_comment,
+  allow_pr_review,
+  allow_pr_review_comment,
+  created_at,
+  updated_at
+FROM repositories
+WHERE webhook_key = ?
+`
+
+func (q *Queries) GetRepositoryByWebhookKey(ctx context.Context, webhookKey string) (Repository, error) {
+	row := q.db.QueryRowContext(ctx, getRepositoryByWebhookKey, webhookKey)
+	var i Repository
+	err := row.Scan(
+		&i.FullName,
+		&i.WebhookKey,
+		&i.Enabled,
+		&i.EncryptedGithubToken,
+		&i.EncryptedWebhookSecret,
+		&i.AgentBackend,
+		&i.AgentSessionMode,
+		&i.BaseBranchOverride,
+		&i.MaxConcurrentRuns,
+		&i.AllowManual,
+		&i.AllowIssueLabel,
+		&i.AllowIssueEdit,
+		&i.AllowPrComment,
+		&i.AllowPrReview,
+		&i.AllowPrReviewComment,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRepositoryUserRole = `-- name: GetRepositoryUserRole :one
+SELECT repo_full_name, user_id, role, created_at, updated_at
+FROM repository_user_roles
+WHERE repo_full_name = ? AND user_id = ?
+`
+
+type GetRepositoryUserRoleParams struct {
+	RepoFullName string `json:"repo_full_name"`
+	UserID       string `json:"user_id"`
+}
+
+func (q *Queries) GetRepositoryUserRole(ctx context.Context, arg GetRepositoryUserRoleParams) (RepositoryUserRole, error) {
+	row := q.db.QueryRowContext(ctx, getRepositoryUserRole, arg.RepoFullName, arg.UserID)
+	var i RepositoryUserRole
+	err := row.Scan(
+		&i.RepoFullName,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1135,6 +1439,72 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const insertRepository = `-- name: InsertRepository :exec
+INSERT INTO repositories (
+  full_name,
+  webhook_key,
+  enabled,
+  encrypted_github_token,
+  encrypted_webhook_secret,
+  agent_backend,
+  agent_session_mode,
+  base_branch_override,
+  max_concurrent_runs,
+  allow_manual,
+  allow_issue_label,
+  allow_issue_edit,
+  allow_pr_comment,
+  allow_pr_review,
+  allow_pr_review_comment,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type InsertRepositoryParams struct {
+	FullName               string `json:"full_name"`
+	WebhookKey             string `json:"webhook_key"`
+	Enabled                bool   `json:"enabled"`
+	EncryptedGithubToken   []byte `json:"encrypted_github_token"`
+	EncryptedWebhookSecret []byte `json:"encrypted_webhook_secret"`
+	AgentBackend           string `json:"agent_backend"`
+	AgentSessionMode       string `json:"agent_session_mode"`
+	BaseBranchOverride     string `json:"base_branch_override"`
+	MaxConcurrentRuns      int64  `json:"max_concurrent_runs"`
+	AllowManual            bool   `json:"allow_manual"`
+	AllowIssueLabel        bool   `json:"allow_issue_label"`
+	AllowIssueEdit         bool   `json:"allow_issue_edit"`
+	AllowPrComment         bool   `json:"allow_pr_comment"`
+	AllowPrReview          bool   `json:"allow_pr_review"`
+	AllowPrReviewComment   bool   `json:"allow_pr_review_comment"`
+	CreatedAt              int64  `json:"created_at"`
+	UpdatedAt              int64  `json:"updated_at"`
+}
+
+func (q *Queries) InsertRepository(ctx context.Context, arg InsertRepositoryParams) error {
+	_, err := q.db.ExecContext(ctx, insertRepository,
+		arg.FullName,
+		arg.WebhookKey,
+		arg.Enabled,
+		arg.EncryptedGithubToken,
+		arg.EncryptedWebhookSecret,
+		arg.AgentBackend,
+		arg.AgentSessionMode,
+		arg.BaseBranchOverride,
+		arg.MaxConcurrentRuns,
+		arg.AllowManual,
+		arg.AllowIssueLabel,
+		arg.AllowIssueEdit,
+		arg.AllowPrComment,
+		arg.AllowPrReview,
+		arg.AllowPrReviewComment,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
 }
 
 const insertRun = `-- name: InsertRun :one
@@ -1528,6 +1898,330 @@ func (q *Queries) ListCredentialCandidates(ctx context.Context, arg ListCredenti
 			&i.UsageTokens,
 			&i.UsageRuns,
 			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQueuedRunsForTask = `-- name: ListQueuedRunsForTask :many
+SELECT
+  seq,
+  id,
+  task_id,
+  repo,
+  task,
+  agent_backend,
+  base_branch,
+  head_branch,
+  trigger,
+  debug,
+  status,
+  run_dir,
+  issue_number,
+  pr_number,
+  pr_url,
+  pr_status,
+  head_sha,
+  context,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+FROM runs
+WHERE status = 'queued'
+  AND task_id = ?
+  AND NOT EXISTS (
+    SELECT 1
+    FROM run_cancels AS rc
+    WHERE rc.run_id = runs.id
+  )
+ORDER BY created_at ASC, seq ASC
+LIMIT ?
+`
+
+type ListQueuedRunsForTaskParams struct {
+	TaskID string `json:"task_id"`
+	Limit  int64  `json:"limit"`
+}
+
+type ListQueuedRunsForTaskRow struct {
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) ListQueuedRunsForTask(ctx context.Context, arg ListQueuedRunsForTaskParams) ([]ListQueuedRunsForTaskRow, error) {
+	rows, err := q.db.QueryContext(ctx, listQueuedRunsForTask, arg.TaskID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueuedRunsForTaskRow{}
+	for rows.Next() {
+		var i ListQueuedRunsForTaskRow
+		if err := rows.Scan(
+			&i.Seq,
+			&i.ID,
+			&i.TaskID,
+			&i.Repo,
+			&i.Task,
+			&i.AgentBackend,
+			&i.BaseBranch,
+			&i.HeadBranch,
+			&i.Trigger,
+			&i.Debug,
+			&i.Status,
+			&i.RunDir,
+			&i.IssueNumber,
+			&i.PrNumber,
+			&i.PrUrl,
+			&i.PrStatus,
+			&i.HeadSha,
+			&i.Context,
+			&i.Error,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQueuedRunsOrdered = `-- name: ListQueuedRunsOrdered :many
+SELECT
+  seq,
+  id,
+  task_id,
+  repo,
+  task,
+  agent_backend,
+  base_branch,
+  head_branch,
+  trigger,
+  debug,
+  status,
+  run_dir,
+  issue_number,
+  pr_number,
+  pr_url,
+  pr_status,
+  head_sha,
+  context,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+FROM runs
+WHERE status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM run_cancels AS rc
+    WHERE rc.run_id = runs.id
+  )
+ORDER BY created_at ASC, seq ASC
+LIMIT ?
+`
+
+type ListQueuedRunsOrderedRow struct {
+	Seq          int64         `json:"seq"`
+	ID           string        `json:"id"`
+	TaskID       string        `json:"task_id"`
+	Repo         string        `json:"repo"`
+	Task         string        `json:"task"`
+	AgentBackend string        `json:"agent_backend"`
+	BaseBranch   string        `json:"base_branch"`
+	HeadBranch   string        `json:"head_branch"`
+	Trigger      string        `json:"trigger"`
+	Debug        bool          `json:"debug"`
+	Status       string        `json:"status"`
+	RunDir       string        `json:"run_dir"`
+	IssueNumber  int64         `json:"issue_number"`
+	PrNumber     int64         `json:"pr_number"`
+	PrUrl        string        `json:"pr_url"`
+	PrStatus     string        `json:"pr_status"`
+	HeadSha      string        `json:"head_sha"`
+	Context      string        `json:"context"`
+	Error        string        `json:"error"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	StartedAt    sql.NullInt64 `json:"started_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) ListQueuedRunsOrdered(ctx context.Context, limit int64) ([]ListQueuedRunsOrderedRow, error) {
+	rows, err := q.db.QueryContext(ctx, listQueuedRunsOrdered, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueuedRunsOrderedRow{}
+	for rows.Next() {
+		var i ListQueuedRunsOrderedRow
+		if err := rows.Scan(
+			&i.Seq,
+			&i.ID,
+			&i.TaskID,
+			&i.Repo,
+			&i.Task,
+			&i.AgentBackend,
+			&i.BaseBranch,
+			&i.HeadBranch,
+			&i.Trigger,
+			&i.Debug,
+			&i.Status,
+			&i.RunDir,
+			&i.IssueNumber,
+			&i.PrNumber,
+			&i.PrUrl,
+			&i.PrStatus,
+			&i.HeadSha,
+			&i.Context,
+			&i.Error,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRepositories = `-- name: ListRepositories :many
+SELECT
+  full_name,
+  webhook_key,
+  enabled,
+  encrypted_github_token,
+  encrypted_webhook_secret,
+  agent_backend,
+  agent_session_mode,
+  base_branch_override,
+  max_concurrent_runs,
+  allow_manual,
+  allow_issue_label,
+  allow_issue_edit,
+  allow_pr_comment,
+  allow_pr_review,
+  allow_pr_review_comment,
+  created_at,
+  updated_at
+FROM repositories
+ORDER BY full_name ASC
+`
+
+func (q *Queries) ListRepositories(ctx context.Context) ([]Repository, error) {
+	rows, err := q.db.QueryContext(ctx, listRepositories)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Repository{}
+	for rows.Next() {
+		var i Repository
+		if err := rows.Scan(
+			&i.FullName,
+			&i.WebhookKey,
+			&i.Enabled,
+			&i.EncryptedGithubToken,
+			&i.EncryptedWebhookSecret,
+			&i.AgentBackend,
+			&i.AgentSessionMode,
+			&i.BaseBranchOverride,
+			&i.MaxConcurrentRuns,
+			&i.AllowManual,
+			&i.AllowIssueLabel,
+			&i.AllowIssueEdit,
+			&i.AllowPrComment,
+			&i.AllowPrReview,
+			&i.AllowPrReviewComment,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRepositoryUserRoles = `-- name: ListRepositoryUserRoles :many
+SELECT repo_full_name, user_id, role, created_at, updated_at
+FROM repository_user_roles
+WHERE repo_full_name = ?
+ORDER BY user_id ASC
+`
+
+func (q *Queries) ListRepositoryUserRoles(ctx context.Context, repoFullName string) ([]RepositoryUserRole, error) {
+	rows, err := q.db.QueryContext(ctx, listRepositoryUserRoles, repoFullName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RepositoryUserRole{}
+	for rows.Next() {
+		var i RepositoryUserRole
+		if err := rows.Scan(
+			&i.RepoFullName,
+			&i.UserID,
+			&i.Role,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -2245,6 +2939,71 @@ func (q *Queries) UpdateCodexCredential(ctx context.Context, arg UpdateCodexCred
 	return result.RowsAffected()
 }
 
+const updateRepository = `-- name: UpdateRepository :execrows
+UPDATE repositories
+SET
+  webhook_key = ?,
+  enabled = ?,
+  encrypted_github_token = ?,
+  encrypted_webhook_secret = ?,
+  agent_backend = ?,
+  agent_session_mode = ?,
+  base_branch_override = ?,
+  max_concurrent_runs = ?,
+  allow_manual = ?,
+  allow_issue_label = ?,
+  allow_issue_edit = ?,
+  allow_pr_comment = ?,
+  allow_pr_review = ?,
+  allow_pr_review_comment = ?,
+  updated_at = ?
+WHERE full_name = ?
+`
+
+type UpdateRepositoryParams struct {
+	WebhookKey             string `json:"webhook_key"`
+	Enabled                bool   `json:"enabled"`
+	EncryptedGithubToken   []byte `json:"encrypted_github_token"`
+	EncryptedWebhookSecret []byte `json:"encrypted_webhook_secret"`
+	AgentBackend           string `json:"agent_backend"`
+	AgentSessionMode       string `json:"agent_session_mode"`
+	BaseBranchOverride     string `json:"base_branch_override"`
+	MaxConcurrentRuns      int64  `json:"max_concurrent_runs"`
+	AllowManual            bool   `json:"allow_manual"`
+	AllowIssueLabel        bool   `json:"allow_issue_label"`
+	AllowIssueEdit         bool   `json:"allow_issue_edit"`
+	AllowPrComment         bool   `json:"allow_pr_comment"`
+	AllowPrReview          bool   `json:"allow_pr_review"`
+	AllowPrReviewComment   bool   `json:"allow_pr_review_comment"`
+	UpdatedAt              int64  `json:"updated_at"`
+	FullName               string `json:"full_name"`
+}
+
+func (q *Queries) UpdateRepository(ctx context.Context, arg UpdateRepositoryParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateRepository,
+		arg.WebhookKey,
+		arg.Enabled,
+		arg.EncryptedGithubToken,
+		arg.EncryptedWebhookSecret,
+		arg.AgentBackend,
+		arg.AgentSessionMode,
+		arg.BaseBranchOverride,
+		arg.MaxConcurrentRuns,
+		arg.AllowManual,
+		arg.AllowIssueLabel,
+		arg.AllowIssueEdit,
+		arg.AllowPrComment,
+		arg.AllowPrReview,
+		arg.AllowPrReviewComment,
+		arg.UpdatedAt,
+		arg.FullName,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateRun = `-- name: UpdateRun :execrows
 UPDATE runs
 SET
@@ -2426,6 +3185,39 @@ func (q *Queries) UpsertCredentialUsage(ctx context.Context, arg UpsertCredentia
 		arg.WindowStart,
 		arg.Tokens,
 		arg.Runs,
+	)
+	return err
+}
+
+const upsertRepositoryUserRole = `-- name: UpsertRepositoryUserRole :exec
+INSERT INTO repository_user_roles (
+  repo_full_name,
+  user_id,
+  role,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(repo_full_name, user_id) DO UPDATE SET
+  role = excluded.role,
+  updated_at = excluded.updated_at
+`
+
+type UpsertRepositoryUserRoleParams struct {
+	RepoFullName string `json:"repo_full_name"`
+	UserID       string `json:"user_id"`
+	Role         string `json:"role"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+}
+
+func (q *Queries) UpsertRepositoryUserRole(ctx context.Context, arg UpsertRepositoryUserRoleParams) error {
+	_, err := q.db.ExecContext(ctx, upsertRepositoryUserRole,
+		arg.RepoFullName,
+		arg.UserID,
+		arg.Role,
+		arg.CreatedAt,
+		arg.UpdatedAt,
 	)
 	return err
 }

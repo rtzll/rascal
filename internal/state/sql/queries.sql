@@ -299,6 +299,125 @@ RETURNING
   started_at,
   completed_at;
 
+-- name: ListQueuedRunsOrdered :many
+SELECT
+  seq,
+  id,
+  task_id,
+  repo,
+  task,
+  agent_backend,
+  base_branch,
+  head_branch,
+  trigger,
+  debug,
+  status,
+  run_dir,
+  issue_number,
+  pr_number,
+  pr_url,
+  pr_status,
+  head_sha,
+  context,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+FROM runs
+WHERE status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM run_cancels AS rc
+    WHERE rc.run_id = runs.id
+  )
+ORDER BY created_at ASC, seq ASC
+LIMIT ?;
+
+-- name: ListQueuedRunsForTask :many
+SELECT
+  seq,
+  id,
+  task_id,
+  repo,
+  task,
+  agent_backend,
+  base_branch,
+  head_branch,
+  trigger,
+  debug,
+  status,
+  run_dir,
+  issue_number,
+  pr_number,
+  pr_url,
+  pr_status,
+  head_sha,
+  context,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+FROM runs
+WHERE status = 'queued'
+  AND task_id = ?
+  AND NOT EXISTS (
+    SELECT 1
+    FROM run_cancels AS rc
+    WHERE rc.run_id = runs.id
+  )
+ORDER BY created_at ASC, seq ASC
+LIMIT ?;
+
+-- name: ClaimQueuedRunByID :one
+UPDATE runs
+SET status = 'running', error = '', updated_at = sqlc.arg(updated_at), started_at = sqlc.arg(started_at)
+WHERE id = sqlc.arg(run_id)
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM runs AS other
+    WHERE other.task_id = runs.task_id
+      AND other.status = 'running'
+      AND other.id <> runs.id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM run_cancels AS rc
+    WHERE rc.run_id = runs.id
+  )
+RETURNING
+  seq,
+  id,
+  task_id,
+  repo,
+  task,
+  agent_backend,
+  base_branch,
+  head_branch,
+  trigger,
+  debug,
+  status,
+  run_dir,
+  issue_number,
+  pr_number,
+  pr_url,
+  pr_status,
+  head_sha,
+  context,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at;
+
+-- name: CountRunningRunsByRepo :many
+SELECT repo, COUNT(*) AS run_count
+FROM runs
+WHERE status = 'running'
+GROUP BY repo;
+
 -- name: TrimOldRuns :exec
 DELETE FROM runs
 WHERE id IN (
@@ -677,6 +796,150 @@ WHERE id = ?;
 SELECT id, external_login, role, created_at, updated_at
 FROM users
 WHERE external_login = ?;
+
+-- name: InsertRepository :exec
+INSERT INTO repositories (
+  full_name,
+  webhook_key,
+  enabled,
+  encrypted_github_token,
+  encrypted_webhook_secret,
+  agent_backend,
+  agent_session_mode,
+  base_branch_override,
+  max_concurrent_runs,
+  allow_manual,
+  allow_issue_label,
+  allow_issue_edit,
+  allow_pr_comment,
+  allow_pr_review,
+  allow_pr_review_comment,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: UpdateRepository :execrows
+UPDATE repositories
+SET
+  webhook_key = ?,
+  enabled = ?,
+  encrypted_github_token = ?,
+  encrypted_webhook_secret = ?,
+  agent_backend = ?,
+  agent_session_mode = ?,
+  base_branch_override = ?,
+  max_concurrent_runs = ?,
+  allow_manual = ?,
+  allow_issue_label = ?,
+  allow_issue_edit = ?,
+  allow_pr_comment = ?,
+  allow_pr_review = ?,
+  allow_pr_review_comment = ?,
+  updated_at = ?
+WHERE full_name = ?;
+
+-- name: DeleteRepository :execrows
+DELETE FROM repositories
+WHERE full_name = ?;
+
+-- name: GetRepositoryByFullName :one
+SELECT
+  full_name,
+  webhook_key,
+  enabled,
+  encrypted_github_token,
+  encrypted_webhook_secret,
+  agent_backend,
+  agent_session_mode,
+  base_branch_override,
+  max_concurrent_runs,
+  allow_manual,
+  allow_issue_label,
+  allow_issue_edit,
+  allow_pr_comment,
+  allow_pr_review,
+  allow_pr_review_comment,
+  created_at,
+  updated_at
+FROM repositories
+WHERE full_name = ?;
+
+-- name: GetRepositoryByWebhookKey :one
+SELECT
+  full_name,
+  webhook_key,
+  enabled,
+  encrypted_github_token,
+  encrypted_webhook_secret,
+  agent_backend,
+  agent_session_mode,
+  base_branch_override,
+  max_concurrent_runs,
+  allow_manual,
+  allow_issue_label,
+  allow_issue_edit,
+  allow_pr_comment,
+  allow_pr_review,
+  allow_pr_review_comment,
+  created_at,
+  updated_at
+FROM repositories
+WHERE webhook_key = ?;
+
+-- name: ListRepositories :many
+SELECT
+  full_name,
+  webhook_key,
+  enabled,
+  encrypted_github_token,
+  encrypted_webhook_secret,
+  agent_backend,
+  agent_session_mode,
+  base_branch_override,
+  max_concurrent_runs,
+  allow_manual,
+  allow_issue_label,
+  allow_issue_edit,
+  allow_pr_comment,
+  allow_pr_review,
+  allow_pr_review_comment,
+  created_at,
+  updated_at
+FROM repositories
+ORDER BY full_name ASC;
+
+-- name: CountRepositories :one
+SELECT COUNT(*)
+FROM repositories;
+
+-- name: UpsertRepositoryUserRole :exec
+INSERT INTO repository_user_roles (
+  repo_full_name,
+  user_id,
+  role,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(repo_full_name, user_id) DO UPDATE SET
+  role = excluded.role,
+  updated_at = excluded.updated_at;
+
+-- name: DeleteRepositoryUserRole :execrows
+DELETE FROM repository_user_roles
+WHERE repo_full_name = ? AND user_id = ?;
+
+-- name: GetRepositoryUserRole :one
+SELECT repo_full_name, user_id, role, created_at, updated_at
+FROM repository_user_roles
+WHERE repo_full_name = ? AND user_id = ?;
+
+-- name: ListRepositoryUserRoles :many
+SELECT repo_full_name, user_id, role, created_at, updated_at
+FROM repository_user_roles
+WHERE repo_full_name = ?
+ORDER BY user_id ASC;
 
 -- name: UpsertAPIKey :exec
 INSERT INTO api_keys (

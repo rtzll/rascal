@@ -10,7 +10,7 @@ rascal github status OWNER/REPO --github-token "$GITHUB_TOKEN"
 
 Available Commands:
   disable     Remove Rascal webhook from a repository
-  setup       Ensure rascal label and webhook are configured
+  setup       Sync GitHub label/webhook using the registered repository record
   status      Show Rascal label/webhook status
   webhook     Webhook helpers
 

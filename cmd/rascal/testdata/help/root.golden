@@ -25,6 +25,7 @@ Logs:
 Integrations:
   github      GitHub integration setup and status
   infra       Infrastructure operations (provisioning/deploy)
+  repo        Manage daemon repository registry and policies
 
 Utilities:
   completion  Generate shell completion scripts

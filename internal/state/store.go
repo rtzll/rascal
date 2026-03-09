@@ -1146,6 +1146,10 @@ func fromDBRun(row any) Run {
 		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 	case sqlitegen.ListRunningRunsRow:
 		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	case sqlitegen.ListQueuedRunsOrderedRow:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	case sqlitegen.ListQueuedRunsForTaskRow:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 	case sqlitegen.LastRunForTaskRow:
 		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 	case sqlitegen.ActiveRunForTaskRow:
@@ -1153,6 +1157,8 @@ func fromDBRun(row any) Run {
 	case sqlitegen.ClaimNextQueuedRunRow:
 		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 	case sqlitegen.ClaimNextQueuedRunForTaskRow:
+		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	case sqlitegen.ClaimQueuedRunByIDRow:
 		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 	default:
 		return Run{}

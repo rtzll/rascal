@@ -5,6 +5,10 @@ Rascal is a self-hosted coding-agent runner for GitHub repositories.
 It gives you one CLI to provision/deploy the orchestrator, trigger agent runs,
 and ship PRs.
 
+Rascal supports multi-repo deployments through a repository registry in
+`rascald`. Each registered repo has its own runtime token, webhook secret/key,
+defaults, and admission policy.
+
 ## Why Rascal
 
 - Own your runtime: runs execute on your server.
@@ -64,6 +68,8 @@ RASCAL_GITHUB_TOKEN=...
 ./bin/rascal cancel <run_id>
 ./bin/rascal doctor --host <server_ip>
 ./bin/rascal config view
+./bin/rascal repo list
+./bin/rascal repo sync-github OWNER/REPO --github-admin-token "$GITHUB_ADMIN_TOKEN"
 ```
 
 ## Learn More

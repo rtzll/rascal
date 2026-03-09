@@ -66,6 +66,17 @@ You can also set a custom env file via `--env-file` or `RASCAL_ENV_FILE`.
   --domain rascal.example.com
 ```
 
+Bootstrap now performs repository registration on the daemon before GitHub
+sync:
+
+1. Deploy/provision `rascald`
+2. Create or update the repo record in `/v1/repositories`
+3. Sync GitHub label + scoped webhook URL
+4. Write local `default_repo`
+
+`default_repo` is a local CLI convenience only. Actual daemon capability is
+defined by registered repository records.
+
 ### B) Existing Host
 
 ```bash

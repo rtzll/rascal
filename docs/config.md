@@ -61,6 +61,14 @@ Set values:
 ./bin/rascal config set transport ssh
 ```
 
+## `default_repo` vs Repository Registry
+
+- `default_repo` lives in local CLI config and only fills command arguments.
+- Registered repositories live on the daemon in SQLite (`repositories` table)
+  and define admission policy, webhook key/secret, runtime token, and defaults.
+- A repo can be your local `default_repo` but still be rejected by the daemon if
+  it is not registered or is disabled.
+
 Tip: use `doctor` to confirm both local and remote resolution.
 
 ```bash

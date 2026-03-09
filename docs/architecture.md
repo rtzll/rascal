@@ -17,6 +17,7 @@ In simple terms:
 
 - A Task is the long-lived unit of work.
 - A Run is one attempt to advance that task.
+- A Repository record defines repo-scoped policy, credentials, webhook key, and defaults.
 - A Task tracks the backend selected for its latest run.
 - A Task may have one current backend-specific `AgentSession`.
 - A Run uses the backend recorded on that run and may resume the task's session when the backend still matches.
@@ -71,8 +72,10 @@ rascal (CLI) or GitHub webhook
 2. `rascald` (orchestrator server)
 
 - Receives API requests and GitHub webhooks.
+- Resolves repository-scoped policy/credentials before admission and scheduling.
 - Persists task, run, lease, cancellation, and detached execution state.
 - Schedules runs serially per task and concurrently across different tasks.
+- Supports per-repo active-run caps while keeping global worker limits.
 - Starts detached runner containers and supervises them via persisted execution handles.
 - Supports blue/green slot handoff by letting a new slot adopt detached execution supervision.
 - Lives in `cmd/rascald`.
@@ -111,6 +114,7 @@ These are the main layers in the Go codebase.
 
 - `internal/state` owns SQLite-backed persistence and state transitions.
 - It stores runs, tasks, run leases, detached run executions, cancel requests, webhook deliveries, task agent session records, and encrypted stored credentials plus credential leases.
+- It also stores repository registry records and repository user roles.
 - SQL schema lives in embedded migrations and typed queries are generated under `internal/state/sqlitegen`.
 
 5. Supporting integrations
@@ -191,6 +195,8 @@ Key persisted entities:
 
 - `runs`: user-visible execution records and final outcome.
 - `tasks`: long-lived task identity across retries and follow-up feedback.
+- `repositories`: repo-scoped runtime token/secret/defaults/admission policy.
+- `repository_user_roles`: repo-scoped manual trigger ACL.
 - `run_leases`: supervision ownership and heartbeat expiry.
 - `run_executions`: detached execution handle metadata for adoption and cleanup.
 - `run_cancels`: persisted cancel intent.

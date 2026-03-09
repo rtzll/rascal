@@ -31,6 +31,7 @@ import (
 	"github.com/rtzll/rascal/internal/defaults"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/logs"
+	"github.com/rtzll/rascal/internal/repositories"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runsummary"
 	"github.com/rtzll/rascal/internal/state"
@@ -52,6 +53,7 @@ const legacyAgentLogFile = "goose.ndjson"
 const agentOutputFile = "agent_output.txt"
 const runFailureCommentBodyMarker = "<!-- rascal:failure-comment -->"
 const workerPauseScope = "workers"
+const schedulerScanLimit = 100
 const defaultUsageLimitPause = 15 * time.Minute
 const minimumUsageLimitPause = 1 * time.Minute
 
@@ -76,6 +78,8 @@ type server struct {
 	store    *state.Store
 	launcher runner.Launcher
 	gh       githubClient
+	repo     repositories.Resolver
+	ghByRepo ghapi.ClientResolver
 	broker   credentials.CredentialBroker
 	cipher   credentials.Cipher
 
@@ -108,6 +112,7 @@ type runRequest struct {
 	Context         string
 	Debug           *bool
 	CreatedByUserID string
+	ResolvedRepo    *repositories.ResolvedRepoConfig
 
 	ResponseTarget *runResponseTarget
 }
@@ -193,12 +198,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("credential cipher: %v", err)
 	}
+	repoResolver := repositories.NewResolver(store, cipher, cfg.AgentBackend, cfg.EffectiveAgentSessionMode())
 
 	s := &server{
 		cfg:           cfg,
 		store:         store,
 		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImageForBackend(cfg.AgentBackend), cfg.GitHubToken),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
+		repo:          repoResolver,
+		ghByRepo:      ghapi.NewClientResolver(repoResolver),
 		broker:        credentials.NewBroker(store, allocStrategy, cipher, cfg.CredentialLeaseTTL),
 		cipher:        cipher,
 		runCancels:    make(map[string]context.CancelFunc),
@@ -222,7 +230,10 @@ func main() {
 	mux.HandleFunc("/v1/tasks/issue", s.withAuth(s.handleCreateIssueTask))
 	mux.HandleFunc("/v1/credentials", s.withAuth(s.handleCredentials))
 	mux.HandleFunc("/v1/credentials/", s.withAuth(s.handleCredentialSubresources))
+	mux.HandleFunc("/v1/repositories", s.withAuth(s.handleRepositories))
+	mux.HandleFunc("/v1/repositories/", s.withAuth(s.handleRepositorySubresources))
 	mux.HandleFunc("/v1/webhooks/github", s.handleWebhook)
+	mux.HandleFunc("/v1/webhooks/github/", s.handleWebhookScoped)
 
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -547,6 +558,15 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repo and task are required", http.StatusBadRequest)
 		return
 	}
+	admission, statusCode, statusText, admissionErr := s.admitManualRun(r.Context(), req.Repo)
+	if admissionErr != nil {
+		http.Error(w, statusText, statusCode)
+		return
+	}
+	if statusCode != 0 {
+		http.Error(w, statusText, statusCode)
+		return
+	}
 
 	run, err := s.createAndQueueRun(runRequest{
 		TaskID:          req.TaskID,
@@ -556,6 +576,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Trigger:         req.Trigger,
 		Debug:           req.Debug,
 		CreatedByUserID: requesterUserID(r.Context()),
+		ResolvedRepo:    admission.Resolved,
 	})
 	if err != nil {
 		if errors.Is(err, errServerDraining) {
@@ -588,6 +609,15 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repo and issue_number are required", http.StatusBadRequest)
 		return
 	}
+	admission, statusCode, statusText, admissionErr := s.admitManualRun(r.Context(), req.Repo)
+	if admissionErr != nil {
+		http.Error(w, statusText, statusCode)
+		return
+	}
+	if statusCode != 0 {
+		http.Error(w, statusText, statusCode)
+		return
+	}
 
 	taskID := fmt.Sprintf("%s#%d", req.Repo, req.IssueNumber)
 	taskText := fmt.Sprintf("Work on issue #%d in %s", req.IssueNumber, req.Repo)
@@ -596,8 +626,8 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 	if requestedBy == "system" {
 		requestedBy = ""
 	}
-	if strings.TrimSpace(s.cfg.GitHubToken) != "" {
-		issue, err := s.gh.GetIssue(r.Context(), req.Repo, req.IssueNumber)
+	if ghClient, clientErr := s.githubClientForRepo(req.Repo); clientErr == nil {
+		issue, err := ghClient.GetIssue(r.Context(), req.Repo, req.IssueNumber)
 		if err != nil {
 			http.Error(w, "failed to fetch issue: "+err.Error(), http.StatusBadGateway)
 			return
@@ -615,6 +645,7 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		Context:         ctxText,
 		Debug:           req.Debug,
 		CreatedByUserID: requesterUserID(r.Context()),
+		ResolvedRepo:    admission.Resolved,
 		ResponseTarget: &runResponseTarget{
 			Repo:        req.Repo,
 			IssueNumber: req.IssueNumber,
@@ -1429,6 +1460,18 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if req.Repo == "" || req.Task == "" {
 		return state.Run{}, fmt.Errorf("repo and task are required")
 	}
+	resolvedRepo := req.ResolvedRepo
+	if resolvedRepo == nil {
+		cfg, err := s.resolveRunRepoConfig(req.Repo)
+		if err != nil {
+			return state.Run{}, fmt.Errorf("resolve repository config for %s: %w", req.Repo, err)
+		}
+		resolvedRepo = cfg
+	}
+	agentBackend := s.cfg.AgentBackend
+	if resolvedRepo != nil {
+		agentBackend = resolvedRepo.AgentBackend
+	}
 	if req.CreatedByUserID == "" {
 		req.CreatedByUserID = "system"
 	}
@@ -1457,7 +1500,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if s.store.IsTaskCompleted(req.TaskID) {
 		return state.Run{}, errTaskCompleted
 	}
-	if existingTask, ok := s.store.GetTask(req.TaskID); ok && existingTask.AgentBackend != s.cfg.AgentBackend {
+	if existingTask, ok := s.store.GetTask(req.TaskID); ok && existingTask.AgentBackend != agentBackend {
 		if err := s.store.DeleteTaskAgentSession(req.TaskID); err != nil {
 			return state.Run{}, fmt.Errorf("clear stale task session for backend migration: %w", err)
 		}
@@ -1465,7 +1508,9 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 
 	lastRun, hasLastRun := s.store.LastRunForTask(req.TaskID)
 	if req.BaseBranch == "" {
-		if hasLastRun && lastRun.BaseBranch != "" {
+		if resolvedRepo != nil && resolvedRepo.BaseBranchDefault != "" {
+			req.BaseBranch = resolvedRepo.BaseBranchDefault
+		} else if hasLastRun && lastRun.BaseBranch != "" {
 			req.BaseBranch = lastRun.BaseBranch
 		} else {
 			req.BaseBranch = "main"
@@ -1484,7 +1529,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	_, err = s.store.UpsertTask(state.UpsertTaskInput{
 		ID:           req.TaskID,
 		Repo:         req.Repo,
-		AgentBackend: s.cfg.AgentBackend,
+		AgentBackend: agentBackend,
 		IssueNumber:  req.IssueNumber,
 		PRNumber:     req.PRNumber,
 	})
@@ -1500,7 +1545,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		TaskID:       req.TaskID,
 		Repo:         req.Repo,
 		Task:         req.Task,
-		AgentBackend: s.cfg.AgentBackend,
+		AgentBackend: agentBackend,
 		BaseBranch:   req.BaseBranch,
 		HeadBranch:   req.HeadBranch,
 		Trigger:      req.Trigger,
@@ -1739,7 +1784,20 @@ func (s *server) executeRun(runID string) {
 		return
 	}
 
+	resolvedRepo, err := s.resolveRunRepoConfig(run.Repo)
+	if err != nil {
+		updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("resolve repository config: %v", err))
+		s.notifyRunTerminalGitHubBestEffort(updated)
+		s.finishRun(updated)
+		return
+	}
+	githubToken := strings.TrimSpace(s.cfg.GitHubToken)
 	sessionMode := s.cfg.EffectiveAgentSessionMode()
+	if resolvedRepo != nil {
+		githubToken = strings.TrimSpace(resolvedRepo.GitHubToken)
+		sessionMode = agent.NormalizeSessionMode(string(resolvedRepo.AgentSessionMode))
+	}
+
 	if sessionMode != agent.SessionModeOff {
 		s.cleanupAgentSessionsBestEffort()
 	}
@@ -1791,6 +1849,7 @@ func (s *server) executeRun(runID string) {
 		TaskID:       run.TaskID,
 		Repo:         run.Repo,
 		Task:         run.Task,
+		GitHubToken:  githubToken,
 		AgentBackend: run.AgentBackend,
 		RunnerImage:  s.cfg.RunnerImageForBackend(run.AgentBackend),
 		BaseBranch:   run.BaseBranch,
@@ -2375,10 +2434,10 @@ func (s *server) scheduleRuns(preferredTaskID string) {
 			return
 		}
 
-		run, claimed, err := s.store.ClaimNextQueuedRun(preferredTaskID)
+		run, claimed, err := s.claimNextSchedulableRun(preferredTaskID)
 		preferredTaskID = ""
 		if err != nil {
-			log.Printf("failed to claim next queued run: %v", err)
+			log.Printf("failed to claim next schedulable run: %v", err)
 			return
 		}
 		if !claimed {
@@ -2402,6 +2461,87 @@ func (s *server) scheduleRuns(preferredTaskID string) {
 
 		go s.executeRun(run.ID)
 	}
+}
+
+func (s *server) claimNextSchedulableRun(preferredTaskID string) (state.Run, bool, error) {
+	candidates, err := s.queuedCandidates(preferredTaskID, schedulerScanLimit)
+	if err != nil {
+		return state.Run{}, false, err
+	}
+	if len(candidates) == 0 {
+		return state.Run{}, false, nil
+	}
+
+	runningByRepo, err := s.store.CountRunningRunsByRepo()
+	if err != nil {
+		return state.Run{}, false, fmt.Errorf("count running runs by repo: %w", err)
+	}
+	for i, candidate := range candidates {
+		if i >= schedulerScanLimit {
+			break
+		}
+
+		repoCfg, resolveErr := s.resolveRunRepoConfig(candidate.Repo)
+		if resolveErr != nil {
+			if errors.Is(resolveErr, repositories.ErrNotFound) {
+				s.setRunStatusBestEffort(candidate.ID, state.StatusFailed, "repository policy: repository is not registered")
+				continue
+			}
+			return state.Run{}, false, fmt.Errorf("resolve repository config for run %s: %w", candidate.ID, resolveErr)
+		}
+		if repoCfg != nil {
+			if !repoCfg.Enabled {
+				s.setRunStatusBestEffort(candidate.ID, state.StatusFailed, "repository policy: repository is disabled")
+				continue
+			}
+			if repoCfg.MaxConcurrentRuns > 0 && runningByRepo[candidate.Repo] >= repoCfg.MaxConcurrentRuns {
+				continue
+			}
+		}
+
+		run, claimed, claimErr := s.store.ClaimQueuedRunByID(candidate.ID)
+		if claimErr != nil {
+			return state.Run{}, false, fmt.Errorf("claim queued run %s: %w", candidate.ID, claimErr)
+		}
+		if !claimed {
+			continue
+		}
+		return run, true, nil
+	}
+	return state.Run{}, false, nil
+}
+
+func (s *server) queuedCandidates(preferredTaskID string, limit int) ([]state.Run, error) {
+	if limit <= 0 {
+		limit = schedulerScanLimit
+	}
+	seen := make(map[string]struct{}, limit)
+	out := make([]state.Run, 0, limit)
+	appendRuns := func(runs []state.Run) {
+		for _, run := range runs {
+			if len(out) >= limit {
+				return
+			}
+			if _, exists := seen[run.ID]; exists {
+				continue
+			}
+			seen[run.ID] = struct{}{}
+			out = append(out, run)
+		}
+	}
+	if strings.TrimSpace(preferredTaskID) != "" {
+		runs, err := s.store.ListQueuedRunsForTask(preferredTaskID, limit)
+		if err != nil {
+			return nil, fmt.Errorf("list queued runs for task %q: %w", preferredTaskID, err)
+		}
+		appendRuns(runs)
+	}
+	runs, err := s.store.ListQueuedRunsOrdered(limit)
+	if err != nil {
+		return nil, fmt.Errorf("list queued runs: %w", err)
+	}
+	appendRuns(runs)
+	return out, nil
 }
 
 func (s *server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {
@@ -2630,7 +2770,7 @@ Repository: %s
 - Do not ask for interactive input.
 - Do not require MCP tools.
 - Keep changes minimal and scoped to the requested task.
-- Run `+"`make lint`"+` and `+"`make test`"+` before finishing if those targets exist.
+- Run ` + "`make lint`" + ` and ` + "`make test`" + ` before finishing if those targets exist.
 - If one of those commands does not exist or cannot run, explain exactly why and run the closest equivalent checks instead.
 - If you make changes, write /rascal-meta/commit_message.txt using a conventional commit title on the first line.
 - Optionally add a commit body after a blank line in /rascal-meta/commit_message.txt.
@@ -3132,10 +3272,6 @@ func requesterForRun(run state.Run, target runResponseTarget, requesterUserID st
 }
 
 func (s *server) postRunStartCommentBestEffort(run state.Run, sessionMode agent.SessionMode, sessionResume bool) {
-	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
-		return
-	}
-
 	target, ok, err := loadRunResponseTarget(run.RunDir)
 	if err != nil {
 		log.Printf("failed to load run response target for %s: %v", run.ID, err)
@@ -3157,10 +3293,14 @@ func (s *server) postRunStartCommentBestEffort(run state.Run, sessionMode agent.
 
 	runCredentialInfo, _ := s.store.GetRunCredentialInfo(run.ID)
 	body := buildRunStartComment(run, target, requesterForRun(run, target, runCredentialInfo.CreatedByUserID), sessionMode, sessionResume)
+	ghClient, err := s.githubClientForRepo(repo)
+	if err != nil {
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := s.gh.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
+	if err := ghClient.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
 		log.Printf("failed to post start comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
 		return
 	}
@@ -3171,9 +3311,6 @@ func (s *server) postRunStartCommentBestEffort(run state.Run, sessionMode agent.
 
 func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 	if !isCommentTriggeredRun(run.Trigger) {
-		return
-	}
-	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
 		return
 	}
 
@@ -3205,6 +3342,10 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 	if repo == "" || issueNumber <= 0 {
 		return
 	}
+	ghClient, err := s.githubClientForRepo(repo)
+	if err != nil {
+		return
+	}
 
 	var totalTokens *int64
 	if usage, ok := s.store.GetRunTokenUsage(run.ID); ok && usage.TotalTokens > 0 {
@@ -3219,7 +3360,7 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := s.gh.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
+	if err := ghClient.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
 		log.Printf("failed to post completion comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
 		return
 	}
@@ -3229,10 +3370,6 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 }
 
 func (s *server) postRunFailureCommentBestEffort(run state.Run) {
-	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
-		return
-	}
-
 	target, ok, err := loadRunResponseTarget(run.RunDir)
 	if err != nil {
 		log.Printf("failed to load run response target for %s: %v", run.ID, err)
@@ -3251,6 +3388,10 @@ func (s *server) postRunFailureCommentBestEffort(run state.Run) {
 	if repo == "" || issueNumber <= 0 {
 		return
 	}
+	ghClient, err := s.githubClientForRepo(repo)
+	if err != nil {
+		return
+	}
 
 	body, err := buildRunFailureComment(run, target)
 	if err != nil {
@@ -3260,7 +3401,7 @@ func (s *server) postRunFailureCommentBestEffort(run state.Run) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := s.gh.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
+	if err := ghClient.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
 		log.Printf("failed to post failure comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
 		return
 	}
@@ -3786,12 +3927,13 @@ func (s *server) addIssueReactionBestEffort(repo string, issueNumber int, reacti
 	if issueNumber <= 0 || strings.TrimSpace(repo) == "" {
 		return
 	}
-	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+	ghClient, err := s.githubClientForRepo(repo)
+	if err != nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := s.gh.AddIssueReaction(ctx, repo, issueNumber, reaction); err != nil {
+	if err := ghClient.AddIssueReaction(ctx, repo, issueNumber, reaction); err != nil {
 		log.Printf("failed to add %q reaction for %s#%d: %v", reaction, repo, issueNumber, err)
 	}
 }
@@ -3800,12 +3942,13 @@ func (s *server) removeIssueReactionsBestEffort(repo string, issueNumber int) {
 	if issueNumber <= 0 || strings.TrimSpace(repo) == "" {
 		return
 	}
-	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+	ghClient, err := s.githubClientForRepo(repo)
+	if err != nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := s.gh.RemoveIssueReactions(ctx, repo, issueNumber); err != nil {
+	if err := ghClient.RemoveIssueReactions(ctx, repo, issueNumber); err != nil {
 		log.Printf("failed to remove reactions for %s#%d: %v", repo, issueNumber, err)
 	}
 }
@@ -3814,12 +3957,13 @@ func (s *server) addIssueCommentReactionBestEffort(repo string, commentID int64,
 	if commentID <= 0 || strings.TrimSpace(repo) == "" {
 		return
 	}
-	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+	ghClient, err := s.githubClientForRepo(repo)
+	if err != nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := s.gh.AddIssueCommentReaction(ctx, repo, commentID, reaction); err != nil {
+	if err := ghClient.AddIssueCommentReaction(ctx, repo, commentID, reaction); err != nil {
 		log.Printf("failed to add %q reaction for issue comment %d in %s: %v", reaction, commentID, repo, err)
 	}
 }
@@ -3828,12 +3972,13 @@ func (s *server) addPullRequestReviewReactionBestEffort(repo string, pullNumber 
 	if reviewID <= 0 || pullNumber <= 0 || strings.TrimSpace(repo) == "" {
 		return
 	}
-	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+	ghClient, err := s.githubClientForRepo(repo)
+	if err != nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := s.gh.AddPullRequestReviewReaction(ctx, repo, pullNumber, reviewID, reaction); err != nil {
+	if err := ghClient.AddPullRequestReviewReaction(ctx, repo, pullNumber, reviewID, reaction); err != nil {
 		log.Printf("failed to add %q reaction for PR review %d on %s#%d: %v", reaction, reviewID, repo, pullNumber, err)
 	}
 }
@@ -3842,12 +3987,13 @@ func (s *server) addPullRequestReviewCommentReactionBestEffort(repo string, comm
 	if commentID <= 0 || strings.TrimSpace(repo) == "" {
 		return
 	}
-	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
+	ghClient, err := s.githubClientForRepo(repo)
+	if err != nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := s.gh.AddPullRequestReviewCommentReaction(ctx, repo, commentID, reaction); err != nil {
+	if err := ghClient.AddPullRequestReviewCommentReaction(ctx, repo, commentID, reaction); err != nil {
 		log.Printf("failed to add %q reaction for PR review comment %d in %s: %v", reaction, commentID, repo, err)
 	}
 }

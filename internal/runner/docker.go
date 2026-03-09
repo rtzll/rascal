@@ -146,7 +146,9 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		envPairs["RASCAL_GOOSE_SESSION_KEY"] = sessionKey
 		envPairs["RASCAL_GOOSE_SESSION_NAME"] = backendSessionID
 	}
-	if strings.TrimSpace(l.GitHubToken) != "" {
+	if token := strings.TrimSpace(spec.GitHubToken); token != "" {
+		envPairs["GH_TOKEN"] = token
+	} else if strings.TrimSpace(l.GitHubToken) != "" {
 		envPairs["GH_TOKEN"] = l.GitHubToken
 	}
 	containerName := sanitizeContainerName("rascal-" + spec.RunID)

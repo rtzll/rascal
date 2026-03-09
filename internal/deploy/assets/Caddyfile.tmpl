@@ -16,7 +16,7 @@
 
   @allowed_api {
     method GET POST
-    path /v1/runs /v1/runs/* /v1/tasks /v1/tasks/* /v1/tasks/issue
+    path /v1/runs /v1/runs/* /v1/tasks /v1/tasks/* /v1/tasks/issue /v1/credentials /v1/credentials/* /v1/repositories /v1/repositories/*
   }
   handle @allowed_api {
     import /etc/caddy/rascal-upstream.caddy
@@ -24,7 +24,7 @@
 
   @allowed_webhook {
     method POST
-    path /v1/webhooks/github
+    path /v1/webhooks/github /v1/webhooks/github/*
     header X-GitHub-Event *
     header X-GitHub-Delivery *
     header X-Hub-Signature-256 *

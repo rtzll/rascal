@@ -2,9 +2,15 @@
 
 ## Endpoint
 
-Rascal expects GitHub webhooks at:
+Repo-managed integrations use a scoped endpoint per registered repository:
+
+`https://YOUR_DOMAIN/v1/webhooks/github/{webhook_key}`
+
+Legacy single-repo installs can still use:
 
 `https://YOUR_DOMAIN/v1/webhooks/github`
+
+Use the scoped endpoint for new registrations.
 
 ## Setup
 
@@ -55,6 +61,6 @@ If using Cloudflare proxy (orange cloud):
 ## Common Failures
 
 - `401 invalid webhook signature`: webhook secret mismatch between GitHub and
-  server.
+  server (repo-scoped secret for scoped route, global secret for legacy route).
 - `403 resource not accessible by token`: missing admin token permissions.
 - Delivery timeouts: DNS/TLS/redirect misconfiguration.
