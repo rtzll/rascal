@@ -149,6 +149,80 @@ func TestLoadAgentCommitMessage(t *testing.T) {
 	})
 }
 
+func TestNormalizeRepoLocalMetaArtifactsAdoptsCommitMessage(t *testing.T) {
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	metaDir := filepath.Join(t.TempDir(), "meta")
+	if err := os.MkdirAll(filepath.Join(repoDir, "rascal-meta"), 0o755); err != nil {
+		t.Fatalf("mkdir repo-local meta: %v", err)
+	}
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatalf("mkdir meta dir: %v", err)
+	}
+
+	repoLocalCommit := filepath.Join(repoDir, "rascal-meta", "commit_message.txt")
+	want := "fix(runner): keep commit message out of repo\n"
+	if err := os.WriteFile(repoLocalCommit, []byte(want), 0o644); err != nil {
+		t.Fatalf("write repo-local commit message: %v", err)
+	}
+
+	cfg := config{
+		RepoDir:       repoDir,
+		CommitMsgPath: filepath.Join(metaDir, "commit_message.txt"),
+	}
+	if err := normalizeRepoLocalMetaArtifacts(cfg); err != nil {
+		t.Fatalf("normalize repo-local meta artifacts: %v", err)
+	}
+
+	got, err := os.ReadFile(cfg.CommitMsgPath)
+	if err != nil {
+		t.Fatalf("read adopted commit message: %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("commit message = %q, want %q", string(got), want)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "rascal-meta")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected repo-local rascal-meta removed, got err=%v", err)
+	}
+}
+
+func TestNormalizeRepoLocalMetaArtifactsPreservesCanonicalCommitMessage(t *testing.T) {
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	metaDir := filepath.Join(t.TempDir(), "meta")
+	if err := os.MkdirAll(filepath.Join(repoDir, "rascal-meta"), 0o755); err != nil {
+		t.Fatalf("mkdir repo-local meta: %v", err)
+	}
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatalf("mkdir meta dir: %v", err)
+	}
+
+	canonical := filepath.Join(metaDir, "commit_message.txt")
+	if err := os.WriteFile(canonical, []byte("feat(runner): canonical\n"), 0o644); err != nil {
+		t.Fatalf("write canonical commit message: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "rascal-meta", "commit_message.txt"), []byte("feat(runner): repo-local\n"), 0o644); err != nil {
+		t.Fatalf("write repo-local commit message: %v", err)
+	}
+
+	cfg := config{
+		RepoDir:       repoDir,
+		CommitMsgPath: canonical,
+	}
+	if err := normalizeRepoLocalMetaArtifacts(cfg); err != nil {
+		t.Fatalf("normalize repo-local meta artifacts: %v", err)
+	}
+
+	got, err := os.ReadFile(canonical)
+	if err != nil {
+		t.Fatalf("read canonical commit message: %v", err)
+	}
+	if string(got) != "feat(runner): canonical\n" {
+		t.Fatalf("canonical commit message = %q", string(got))
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "rascal-meta")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected repo-local rascal-meta removed, got err=%v", err)
+	}
+}
+
 func TestLoadConfig(t *testing.T) {
 	t.Setenv("RASCAL_RUN_ID", "run_1")
 	t.Setenv("RASCAL_TASK_ID", "task_1")

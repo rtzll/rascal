@@ -265,6 +265,9 @@ func runWithExecutor(ex commandExecutor) error {
 	commitTitle := fmt.Sprintf("chore(rascal): %s", taskSubject(cfg.Task, cfg.TaskID))
 	commitBody := ""
 	if err := runStage("prepare_commit", func() error {
+		if err := normalizeRepoLocalMetaArtifacts(cfg); err != nil {
+			return fmt.Errorf("normalize repo-local meta artifacts: %w", err)
+		}
 		if title, body, msgErr := loadAgentCommitMessage(cfg.CommitMsgPath); msgErr != nil {
 			return fmt.Errorf("load agent commit message: %w", msgErr)
 		} else {
@@ -1121,6 +1124,37 @@ func loadAgentCommitMessage(path string) (title, body string, err error) {
 		return "", "", fmt.Errorf("parse commit body: %w", err)
 	}
 	return title, body, nil
+}
+
+func normalizeRepoLocalMetaArtifacts(cfg config) error {
+	repoDir := strings.TrimSpace(cfg.RepoDir)
+	if repoDir == "" {
+		return nil
+	}
+	repoLocalMetaDir := filepath.Join(repoDir, "rascal-meta")
+	repoLocalCommitPath := filepath.Join(repoLocalMetaDir, defaultCommitMsgFile)
+	commitPath := strings.TrimSpace(cfg.CommitMsgPath)
+	if commitPath != "" && commitPath != repoLocalCommitPath {
+		if data, err := os.ReadFile(repoLocalCommitPath); err == nil {
+			if _, statErr := os.Stat(commitPath); errors.Is(statErr, os.ErrNotExist) {
+				if err := os.MkdirAll(filepath.Dir(commitPath), 0o755); err != nil {
+					return fmt.Errorf("create commit message directory: %w", err)
+				}
+				if err := os.WriteFile(commitPath, data, 0o644); err != nil {
+					return fmt.Errorf("adopt repo-local commit message: %w", err)
+				}
+				log.Printf("[%s] adopted repo-local commit message into %s", nowUTC(), commitPath)
+			} else if statErr != nil {
+				return fmt.Errorf("stat commit message path: %w", statErr)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read repo-local commit message: %w", err)
+		}
+	}
+	if err := os.RemoveAll(repoLocalMetaDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove repo-local rascal-meta: %w", err)
+	}
+	return nil
 }
 
 func firstNonEmptyLine(s string) string {
