@@ -42,7 +42,8 @@ default):
 - `RASCAL_AGENT_SESSION_MODE=all`
 - `RASCAL_AGENT_SESSION_ROOT=/var/lib/rascal/agent-sessions`
 - `RASCAL_AGENT_SESSION_TTL_DAYS=14`
-- `RASCAL_AGENT_BACKEND` selects which runner image is used by default
+- `RASCAL_RUNNER_IMAGE_GOOSE` and `RASCAL_RUNNER_IMAGE_CODEX` set the backend-specific runner images
+- `RASCAL_AGENT_BACKEND` selects which of those configured runner images is used by default
 
 ## Blue/Green Sequence
 
