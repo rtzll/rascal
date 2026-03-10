@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,6 +147,106 @@ func TestLoadAgentCommitMessage(t *testing.T) {
 		wantBody := "- move entrypoint logic\n- add tests"
 		if body != wantBody {
 			t.Fatalf("unexpected body: got %q want %q", body, wantBody)
+		}
+	})
+}
+
+func TestPlanLightweightVerify(t *testing.T) {
+	t.Run("executes test-fast when available", func(t *testing.T) {
+		repoDir := t.TempDir()
+		writeMakefile(t, repoDir, ".PHONY: test-fast test\n\ntest-fast:\n\t@echo fast\n\ntest:\n\t@echo full\n")
+
+		plan, err := planLightweightVerify(repoDir)
+		if err != nil {
+			t.Fatalf("planLightweightVerify returned error: %v", err)
+		}
+		if plan.Status != "execute" {
+			t.Fatalf("status = %q, want execute", plan.Status)
+		}
+		if got := strings.Join(plan.Command, " "); got != "make test-fast" {
+			t.Fatalf("command = %q, want %q", got, "make test-fast")
+		}
+	})
+
+	t.Run("skips when Makefile only has test target", func(t *testing.T) {
+		repoDir := t.TempDir()
+		writeMakefile(t, repoDir, ".PHONY: test\n\ntest:\n\t@echo full\n")
+
+		plan, err := planLightweightVerify(repoDir)
+		if err != nil {
+			t.Fatalf("planLightweightVerify returned error: %v", err)
+		}
+		if plan.Status != "skip" {
+			t.Fatalf("status = %q, want skip", plan.Status)
+		}
+		if !strings.Contains(plan.Message, "defines test but not test-fast") {
+			t.Fatalf("unexpected message: %q", plan.Message)
+		}
+	})
+
+	t.Run("skips when Makefile is missing", func(t *testing.T) {
+		plan, err := planLightweightVerify(t.TempDir())
+		if err != nil {
+			t.Fatalf("planLightweightVerify returned error: %v", err)
+		}
+		if plan.Status != "skip" {
+			t.Fatalf("status = %q, want skip", plan.Status)
+		}
+		if plan.Message != "Makefile not found" {
+			t.Fatalf("message = %q, want %q", plan.Message, "Makefile not found")
+		}
+	})
+}
+
+func TestRunLightweightVerify(t *testing.T) {
+	t.Run("runs make test-fast", func(t *testing.T) {
+		repoDir := t.TempDir()
+		writeMakefile(t, repoDir, ".PHONY: test-fast\n\ntest-fast:\n\t@echo fast\n")
+
+		var calls []string
+		ex := fakeExecutor{
+			combinedFn: func(dir string, _ []string, name string, args ...string) (string, error) {
+				calls = append(calls, strings.Join(append([]string{name}, args...), " "))
+				if dir != repoDir {
+					t.Fatalf("dir = %q, want %q", dir, repoDir)
+				}
+				return "ok", nil
+			},
+		}
+
+		logs := captureLogs(t, func() {
+			if err := runLightweightVerify(ex, config{RepoDir: repoDir}); err != nil {
+				t.Fatalf("runLightweightVerify returned error: %v", err)
+			}
+		})
+
+		if len(calls) != 1 || calls[0] != "make test-fast" {
+			t.Fatalf("calls = %#v, want [make test-fast]", calls)
+		}
+		if !strings.Contains(logs, "lightweight verify executing command=make test-fast") {
+			t.Fatalf("expected execute log, got %q", logs)
+		}
+	})
+
+	t.Run("skips when only test target exists", func(t *testing.T) {
+		repoDir := t.TempDir()
+		writeMakefile(t, repoDir, ".PHONY: test\n\ntest:\n\t@echo full\n")
+
+		ex := fakeExecutor{
+			combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+				t.Fatalf("did not expect command execution: %s %v", name, args)
+				return "", nil
+			},
+		}
+
+		logs := captureLogs(t, func() {
+			if err := runLightweightVerify(ex, config{RepoDir: repoDir}); err != nil {
+				t.Fatalf("runLightweightVerify returned error: %v", err)
+			}
+		})
+
+		if !strings.Contains(logs, "lightweight verify skipped: Makefile defines test but not test-fast; skipping lightweight verify fallback") {
+			t.Fatalf("expected skip log, got %q", logs)
 		}
 	})
 }
@@ -1263,4 +1365,26 @@ func writeExe(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatalf("write executable %s: %v", path, err)
 	}
+}
+
+func writeMakefile(t *testing.T, repoDir, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repoDir, "Makefile"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write Makefile: %v", err)
+	}
+}
+
+func captureLogs(t *testing.T, fn func()) string {
+	t.Helper()
+	var buf bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+	fn()
+	return buf.String()
 }

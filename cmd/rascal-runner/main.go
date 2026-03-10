@@ -37,8 +37,9 @@ const (
 )
 
 var (
-	convCommitPattern = regexp.MustCompile(`^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?(!)?:[[:space:]].+`)
-	prURLPattern      = regexp.MustCompile(`https://github\.com/[^[:space:]]+/pull/[0-9]+`)
+	convCommitPattern       = regexp.MustCompile(`^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?(!)?:[[:space:]].+`)
+	makeSimpleTargetPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+	prURLPattern            = regexp.MustCompile(`https://github\.com/[^[:space:]]+/pull/[0-9]+`)
 
 	buildVersion = "dev"
 	buildCommit  = "unknown"
@@ -89,6 +90,12 @@ type prView struct {
 
 type gooseSessionInfo struct {
 	Name string `json:"name"`
+}
+
+type verifyPlan struct {
+	Command []string
+	Message string
+	Status  string
 }
 
 type commandExecutor interface {
@@ -250,16 +257,10 @@ func runWithExecutor(ex commandExecutor) error {
 		return fail(err)
 	}
 
-	if _, statErr := os.Stat(filepath.Join(cfg.RepoDir, "Makefile")); statErr == nil {
-		if err := runStage("verify", func() error {
-			log.Printf("[%s] running lightweight verify: make -n test", nowUTC())
-			if _, err := runCommand(ex, cfg.RepoDir, nil, "make", "-n", "test"); err != nil {
-				return fmt.Errorf("preview make test target: %w", err)
-			}
-			return nil
-		}); err != nil {
-			log.Printf("[%s] lightweight verify warning: %v", nowUTC(), err)
-		}
+	if err := runStage("verify", func() error {
+		return runLightweightVerify(ex, cfg)
+	}); err != nil {
+		log.Printf("[%s] lightweight verify warning: %v", nowUTC(), err)
 	}
 
 	commitTitle := fmt.Sprintf("chore(rascal): %s", taskSubject(cfg.Task, cfg.TaskID))
@@ -682,6 +683,111 @@ func checkoutRepo(ex commandExecutor, cfg config) error {
 		return fmt.Errorf("create head branch %s: %w", cfg.HeadBranch, err)
 	}
 	return nil
+}
+
+func runLightweightVerify(ex commandExecutor, cfg config) error {
+	plan, err := planLightweightVerify(cfg.RepoDir)
+	if err != nil {
+		return fmt.Errorf("plan lightweight verify: %w", err)
+	}
+
+	switch plan.Status {
+	case "execute":
+		log.Printf("[%s] lightweight verify executing command=%s", nowUTC(), strings.Join(plan.Command, " "))
+		if len(plan.Command) == 0 {
+			return fmt.Errorf("lightweight verify plan missing command")
+		}
+		if _, err := runCommand(ex, cfg.RepoDir, nil, plan.Command[0], plan.Command[1:]...); err != nil {
+			return fmt.Errorf("run lightweight verify command: %w", err)
+		}
+	case "fallback":
+		log.Printf("[%s] lightweight verify fallback command=%s reason=%s", nowUTC(), strings.Join(plan.Command, " "), plan.Message)
+		if len(plan.Command) == 0 {
+			return fmt.Errorf("lightweight verify fallback plan missing command")
+		}
+		if _, err := runCommand(ex, cfg.RepoDir, nil, plan.Command[0], plan.Command[1:]...); err != nil {
+			return fmt.Errorf("run lightweight verify fallback: %w", err)
+		}
+	default:
+		log.Printf("[%s] lightweight verify skipped: %s", nowUTC(), plan.Message)
+	}
+
+	return nil
+}
+
+func planLightweightVerify(repoDir string) (verifyPlan, error) {
+	makefilePath := filepath.Join(repoDir, "Makefile")
+	if _, err := os.Stat(makefilePath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return verifyPlan{
+				Message: "Makefile not found",
+				Status:  "skip",
+			}, nil
+		}
+		return verifyPlan{}, fmt.Errorf("stat Makefile: %w", err)
+	}
+
+	targets, err := loadMakeTargets(makefilePath)
+	if err != nil {
+		return verifyPlan{}, fmt.Errorf("load Makefile targets: %w", err)
+	}
+
+	if targets["test-fast"] {
+		return verifyPlan{
+			Command: []string{"make", "test-fast"},
+			Message: "executing lightweight verify target test-fast",
+			Status:  "execute",
+		}, nil
+	}
+	if targets["test"] {
+		return verifyPlan{
+			Message: "Makefile defines test but not test-fast; skipping lightweight verify fallback",
+			Status:  "skip",
+		}, nil
+	}
+
+	return verifyPlan{
+		Message: "Makefile has no test-fast or test target",
+		Status:  "skip",
+	}, nil
+}
+
+func loadMakeTargets(path string) (_ map[string]bool, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open Makefile: %w", err)
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close Makefile: %w", closeErr)
+		}
+	}()
+
+	targets := make(map[string]bool)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "\t") || strings.HasPrefix(line, " ") {
+			continue
+		}
+		colon := strings.IndexByte(line, ':')
+		if colon <= 0 {
+			continue
+		}
+		suffix := line[colon+1:]
+		if strings.HasPrefix(suffix, "=") || strings.HasPrefix(suffix, ":=") {
+			continue
+		}
+		for _, target := range strings.Fields(strings.TrimSpace(line[:colon])) {
+			if makeSimpleTargetPattern.MatchString(target) {
+				targets[target] = true
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan Makefile: %w", err)
+	}
+	return targets, nil
 }
 
 func runAgent(ex commandExecutor, cfg config) (string, string, error) {
