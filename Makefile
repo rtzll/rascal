@@ -3,6 +3,7 @@
 GOLANGCI_LINT_VERSION ?= v2.11.2
 GOLANGCI_LINT := $(CURDIR)/bin/golangci-lint
 GOLANGCI_LINT_CACHE := $(CURDIR)/tmp/golangci-lint-cache
+FAST_TEST_PACKAGE_FILTER := ^github.com/rtzll/rascal/(cmd/rascald|internal/deploy)$$
 
 .PHONY: test test-fast build build-cli build-daemon run-daemon run-cli fmt lint codegen
 
@@ -10,7 +11,9 @@ test: codegen
 	go test ./...
 
 test-fast:
-	go test ./...
+	# Fast contributor loop: skip the slower daemon/deploy integration-style suites.
+	# Use `make test` for full verification across every package.
+	go test $$(go list ./... | grep -vE '$(FAST_TEST_PACKAGE_FILTER)')
 
 fmt:
 	gofmt -w cmd internal
