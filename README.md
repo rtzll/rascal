@@ -77,3 +77,13 @@ RASCAL_GITHUB_TOKEN=...
 - Operator runbook (failure modes + exact commands): [docs/runbook.md](docs/runbook.md)
 - Architecture overview: [docs/architecture.md](docs/architecture.md)
 - Deployment flow (blue/green + drain): [docs/deployment.md](docs/deployment.md)
+
+## Local Verification
+
+Before opening a PR, run:
+
+```bash
+make verify
+```
+
+This mirrors the standard CI checks by running lint, tests, and verifying that the checks do not leave generated-file changes behind.

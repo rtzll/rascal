@@ -4,7 +4,7 @@ GOLANGCI_LINT_VERSION ?= v2.11.2
 GOLANGCI_LINT := $(CURDIR)/bin/golangci-lint
 GOLANGCI_LINT_CACHE := $(CURDIR)/tmp/golangci-lint-cache
 
-.PHONY: test test-fast build build-cli build-daemon run-daemon run-cli fmt lint codegen
+.PHONY: test test-fast build build-cli build-daemon run-daemon run-cli fmt lint codegen verify
 
 test: codegen
 	go test ./...
@@ -18,6 +18,20 @@ fmt:
 lint: codegen $(GOLANGCI_LINT)
 	mkdir -p "$(GOLANGCI_LINT_CACHE)"
 	GOLANGCI_LINT_CACHE="$(GOLANGCI_LINT_CACHE)" $(GOLANGCI_LINT) run
+
+verify:
+	@before="$$(mktemp)"; \
+	after="$$(mktemp)"; \
+	trap 'rm -f "$$before" "$$after"' EXIT; \
+	git status --porcelain=v1 --untracked-files=all > "$$before"; \
+	$(MAKE) lint; \
+	$(MAKE) test; \
+	git status --porcelain=v1 --untracked-files=all > "$$after"; \
+	if ! cmp -s "$$before" "$$after"; then \
+		echo "working tree changed during verify; commit generated files and re-run"; \
+		diff -u "$$before" "$$after"; \
+		exit 1; \
+	fi
 
 build: build-cli build-daemon
 
