@@ -192,7 +192,7 @@ func TestServerConfigEnsureRejectsLegacyRunnerImageWithoutExplicitGooseImage(t *
 	if err == nil {
 		t.Fatal("expected Ensure to reject legacy runner image env")
 	}
-	if !strings.Contains(err.Error(), "RASCAL_RUNNER_IMAGE") {
+	if !strings.Contains(err.Error(), "RASCAL_RUNNER_IMAGE_GOOSE") || !strings.Contains(err.Error(), "RASCAL_RUNNER_IMAGE_CODEX") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
