@@ -17,6 +17,7 @@ import (
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/credentials"
 	ghapi "github.com/rtzll/rascal/internal/github"
+	"github.com/rtzll/rascal/internal/repositories"
 	"github.com/rtzll/rascal/internal/runner"
 	rt "github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
@@ -81,15 +82,16 @@ type RunNotifier interface {
 }
 
 type Server struct {
-	Config            config.ServerConfig
-	Store             *state.Store
-	Runner            runner.Runner
-	GitHub            GitHubClient
-	Notifier          RunNotifier
-	Broker            credentials.CredentialBroker
-	Cipher            credentials.Cipher
-	CredentialManager *credentials.CredentialManager
-	SM                *RunStateMachine
+	Config             config.ServerConfig
+	Store              *state.Store
+	Runner             runner.Runner
+	GitHub             GitHubClient
+	Notifier           RunNotifier
+	Broker             credentials.CredentialBroker
+	Cipher             credentials.Cipher
+	CredentialManager  *credentials.CredentialManager
+	RepositoryResolver repositories.Resolver
+	SM                 *RunStateMachine
 
 	mu            sync.Mutex
 	runCancels    map[string]context.CancelFunc
@@ -152,7 +154,7 @@ func NewServer(cfg config.ServerConfig, store *state.Store, r runner.Runner, gh 
 	if strings.TrimSpace(instanceID) == "" {
 		instanceID = fmt.Sprintf("%s-%d-%d", strings.TrimSpace(cfg.Slot), os.Getpid(), time.Now().UTC().UnixNano())
 	}
-	return &Server{
+	s := &Server{
 		Config:        cfg,
 		Store:         store,
 		Runner:        r,
@@ -164,6 +166,10 @@ func NewServer(cfg config.ServerConfig, store *state.Store, r runner.Runner, gh 
 		MaxConcurrent: defaultMaxConcurrent(),
 		InstanceID:    instanceID,
 	}
+	if cipher != nil {
+		s.RepositoryResolver = repositories.NewResolver(store, cipher)
+	}
+	return s
 }
 
 func (s *Server) credentialManager() *credentials.CredentialManager {

@@ -23,6 +23,7 @@ import (
 	"github.com/rtzll/rascal/internal/config"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/orchestrator"
+	"github.com/rtzll/rascal/internal/repositories"
 	"github.com/rtzll/rascal/internal/runner"
 	agentrt "github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
@@ -103,6 +104,20 @@ type postedPullRequestReviewCommentReaction struct {
 	repo      string
 	commentID int64
 	content   string
+}
+
+type repoFixtureInput struct {
+	fullName             string
+	webhookKey           string
+	githubToken          string
+	webhookSecret        string
+	enabled              bool
+	allowManual          bool
+	allowIssueLabel      bool
+	allowIssueEdit       bool
+	allowPRComment       bool
+	allowPRReview        bool
+	allowPRReviewComment bool
 }
 
 type fakeGitHubClient struct {
@@ -499,6 +514,43 @@ func (f *fakeRunner) Calls() int {
 	return f.calls
 }
 
+func mustCreateRepositoryFixture(t *testing.T, s *orchestrator.Server, in repoFixtureInput) state.Repository {
+	t.Helper()
+	token := in.githubToken
+	if token == "" {
+		token = "gh-token"
+	}
+	secret := in.webhookSecret
+	if secret == "" {
+		secret = "wh-secret"
+	}
+	encToken, err := s.Cipher.Encrypt([]byte(token))
+	if err != nil {
+		t.Fatalf("encrypt github token: %v", err)
+	}
+	encSecret, err := s.Cipher.Encrypt([]byte(secret))
+	if err != nil {
+		t.Fatalf("encrypt webhook secret: %v", err)
+	}
+	repo, err := s.Store.CreateRepository(state.CreateRepositoryInput{
+		FullName:               in.fullName,
+		WebhookKey:             in.webhookKey,
+		Enabled:                in.enabled,
+		EncryptedGitHubToken:   encToken,
+		EncryptedWebhookSecret: encSecret,
+		AllowManual:            in.allowManual,
+		AllowIssueLabel:        in.allowIssueLabel,
+		AllowIssueEdit:         in.allowIssueEdit,
+		AllowPRComment:         in.allowPRComment,
+		AllowPRReview:          in.allowPRReview,
+		AllowPRReviewComment:   in.allowPRReviewComment,
+	})
+	if err != nil {
+		t.Fatalf("create repository fixture: %v", err)
+	}
+	return repo
+}
+
 func newTestServer(t *testing.T, launcher runner.Runner) *orchestrator.Server {
 	t.Helper()
 
@@ -531,13 +583,17 @@ func newTestServerWithPaths(t *testing.T, launcher runner.Runner, dataDir, state
 	if err != nil {
 		t.Fatalf("new state store: %v", err)
 	}
+	cipher, err := credentials.NewAESCipher("test-secret")
+	if err != nil {
+		t.Fatalf("new cipher: %v", err)
+	}
 	s := orchestrator.NewServer(
 		cfg,
 		store,
 		launcher,
 		ghapi.NewAPIClient(""),
 		nil,
-		nil,
+		cipher,
 		strings.TrimSpace(instanceID),
 	)
 	s.MaxConcurrent = runtime.NumCPU()
@@ -545,6 +601,7 @@ func newTestServerWithPaths(t *testing.T, launcher runner.Runner, dataDir, state
 	s.RetryBackoff = func(_ int) time.Duration {
 		return 10 * time.Millisecond
 	}
+	s.RepositoryResolver = repositories.NewResolver(store, cipher)
 	if err := s.StartRunResultReporter(); err != nil {
 		t.Fatalf("start run result reporter: %v", err)
 	}
@@ -813,6 +870,20 @@ func checkSuiteEventPayload(t *testing.T, action, repo, sender string, suite gha
 		Repository: ghapi.Repository{FullName: repo},
 		Sender:     ghapi.User{Login: sender},
 	})
+}
+
+func scopedWebhookRequest(t *testing.T, webhookKey, eventType, deliveryID, secret string, payload []byte) *http.Request {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/github/"+webhookKey, bytes.NewReader(payload))
+	req.Header.Set("X-GitHub-Event", eventType)
+	req.Header.Set("X-GitHub-Delivery", deliveryID)
+	if secret != "" {
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = mac.Write(payload)
+		req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	}
+	return req
 }
 
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
@@ -1267,6 +1338,195 @@ func TestHandleWebhookSignatureValidation(t *testing.T) {
 	s.HandleWebhook(goodRec, goodReq)
 	if goodRec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for valid signature, got %d", goodRec.Code)
+	}
+}
+
+func TestHandleWebhookLegacyIssueCommentRejectsRegisteredRepoWhenPRCommentsDisabled(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+	s.Config.GitHubWebhookSecret = "legacy-secret"
+
+	mustCreateRepositoryFixture(t, s, repoFixtureInput{
+		fullName:             "owner/repo",
+		webhookKey:           "11111111111111111111111111111111",
+		enabled:              true,
+		allowManual:          true,
+		allowIssueLabel:      true,
+		allowIssueEdit:       true,
+		allowPRComment:       false,
+		allowPRReview:        true,
+		allowPRReviewComment: true,
+	})
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
+		ID:          "owner/repo#7",
+		Repo:        "owner/repo",
+		IssueNumber: 17,
+		PRNumber:    7,
+	}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	payload := issueCommentEventPayload(
+		t,
+		"created",
+		"owner/repo",
+		"alice",
+		testIssue(7, "", "", nil, true),
+		ghapi.Comment{
+			ID:   101,
+			Body: "please fix this",
+			User: ghapi.User{Login: "alice"},
+		},
+		"",
+	)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-legacy-comment-disabled", "legacy-secret")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var out struct {
+		Accepted bool `json:"accepted"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Accepted {
+		t.Fatal("expected accepted=false when repo policy disables pr_comment on legacy endpoint")
+	}
+	for _, run := range s.Store.ListRuns(10) {
+		if run.Trigger == runtrigger.NamePRComment {
+			t.Fatalf("expected no pr_comment run for disabled repo policy")
+		}
+	}
+}
+
+func TestHandleWebhookLegacyPullRequestReviewRejectsRegisteredRepoWhenReviewsDisabled(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+	s.Config.GitHubWebhookSecret = "legacy-secret"
+
+	mustCreateRepositoryFixture(t, s, repoFixtureInput{
+		fullName:             "owner/repo",
+		webhookKey:           "22222222222222222222222222222222",
+		enabled:              true,
+		allowManual:          true,
+		allowIssueLabel:      true,
+		allowIssueEdit:       true,
+		allowPRComment:       true,
+		allowPRReview:        false,
+		allowPRReviewComment: true,
+	})
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
+		ID:          "owner/repo#11",
+		Repo:        "owner/repo",
+		IssueNumber: 31,
+		PRNumber:    11,
+	}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	payload := pullRequestReviewEventPayload(
+		t,
+		"submitted",
+		"owner/repo",
+		"bob",
+		ghapi.Review{
+			ID:    303,
+			Body:  "needs changes",
+			State: "changes_requested",
+			User:  ghapi.User{Login: "bob"},
+		},
+		testPullRequest(11, false, "", ""),
+	)
+	req := webhookRequest(t, payload, "pull_request_review", "delivery-legacy-review-disabled", "legacy-secret")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var out struct {
+		Accepted bool `json:"accepted"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Accepted {
+		t.Fatal("expected accepted=false when repo policy disables pr_review on legacy endpoint")
+	}
+	for _, run := range s.Store.ListRuns(10) {
+		if run.Trigger == runtrigger.NamePRReview {
+			t.Fatalf("expected no pr_review run for disabled repo policy")
+		}
+	}
+}
+
+func TestHandleWebhookScopedRejectsRegisteredRepoWhenReviewCommentsDisabled(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+
+	repo := mustCreateRepositoryFixture(t, s, repoFixtureInput{
+		fullName:             "owner/repo",
+		webhookKey:           "33333333333333333333333333333333",
+		webhookSecret:        "repo-secret",
+		enabled:              true,
+		allowManual:          true,
+		allowIssueLabel:      true,
+		allowIssueEdit:       true,
+		allowPRComment:       true,
+		allowPRReview:        true,
+		allowPRReviewComment: false,
+	})
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
+		ID:          "owner/repo#12",
+		Repo:        "owner/repo",
+		IssueNumber: 44,
+		PRNumber:    12,
+	}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	line := 515
+	payload := pullRequestReviewCommentEventPayload(
+		t,
+		"created",
+		"owner/repo",
+		"eve",
+		ghapi.ReviewComment{
+			ID:   404,
+			Body: "Please rename this helper",
+			Path: "cmd/rascald/main.go",
+			Line: &line,
+			User: ghapi.User{Login: "eve"},
+		},
+		testPullRequest(12, false, "", ""),
+		"",
+	)
+	req := scopedWebhookRequest(t, repo.WebhookKey, "pull_request_review_comment", "delivery-scoped-review-comment-disabled", "repo-secret", payload)
+	rec := httptest.NewRecorder()
+	s.HandleWebhookScoped(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var out struct {
+		Accepted bool `json:"accepted"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Accepted {
+		t.Fatal("expected accepted=false when repo policy disables pr_review_comment on scoped endpoint")
+	}
+	for _, run := range s.Store.ListRuns(10) {
+		if run.Trigger == runtrigger.NamePRReviewComment {
+			t.Fatalf("expected no pr_review_comment run for disabled repo policy")
+		}
 	}
 }
 

@@ -68,6 +68,57 @@ func (s *Server) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	eventType := ghapi.EventType(r.Header)
+	repoCfg, statusCode, err := s.resolveLegacyWebhookPolicy(payload)
+	if err != nil {
+		if deliveryClaim.ID != "" {
+			s.releaseDeliveryClaimBestEffort(deliveryClaim)
+		}
+		http.Error(w, "failed to resolve repository", statusCode)
+		return
+	}
+	if statusCode != 0 {
+		if deliveryClaim.ID != "" {
+			if err := s.Store.CompleteDeliveryClaim(deliveryClaim); err != nil {
+				http.Error(w, "failed to finalize delivery id", http.StatusInternalServerError)
+				return
+			}
+		}
+		accepted := false
+		writeJSON(w, statusCode, api.AcceptedResponse{Accepted: &accepted})
+		return
+	}
+	if repoCfg != nil {
+		if !repoCfg.Enabled {
+			if deliveryClaim.ID != "" {
+				if err := s.Store.CompleteDeliveryClaim(deliveryClaim); err != nil {
+					http.Error(w, "failed to finalize delivery id", http.StatusInternalServerError)
+					return
+				}
+			}
+			accepted := false
+			writeJSON(w, http.StatusAccepted, api.AcceptedResponse{Accepted: &accepted})
+			return
+		}
+		allowed, relevant, err := webhookTriggerAllowed(eventType, payload, *repoCfg)
+		if err != nil {
+			if deliveryClaim.ID != "" {
+				s.releaseDeliveryClaimBestEffort(deliveryClaim)
+			}
+			http.Error(w, "invalid webhook payload", http.StatusBadRequest)
+			return
+		}
+		if relevant && !allowed {
+			if deliveryClaim.ID != "" {
+				if err := s.Store.CompleteDeliveryClaim(deliveryClaim); err != nil {
+					http.Error(w, "failed to finalize delivery id", http.StatusInternalServerError)
+					return
+				}
+			}
+			accepted := false
+			writeJSON(w, http.StatusAccepted, api.AcceptedResponse{Accepted: &accepted})
+			return
+		}
+	}
 	if err := s.processWebhookEvent(r.Context(), eventType, payload); err != nil {
 		if deliveryClaim.ID != "" {
 			s.releaseDeliveryClaimBestEffort(deliveryClaim)
