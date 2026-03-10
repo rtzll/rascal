@@ -98,6 +98,27 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 	}
 }
 
+func TestStoreFindTaskByPRNormalizesRepoCase(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "repo#77", Repo: "owner/repo", PRNumber: 77}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	task, ok := store.FindTaskByPR("Owner/Repo", 77)
+	if !ok {
+		t.Fatal("expected mixed-case repo lookup by pr to succeed")
+	}
+	if task.Repo != "owner/repo" {
+		t.Fatalf("task repo = %q, want owner/repo", task.Repo)
+	}
+}
+
 func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	t.Parallel()
 
