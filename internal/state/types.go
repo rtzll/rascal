@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rtzll/rascal/internal/agent"
@@ -73,6 +74,10 @@ func ValidateRunStatusTransition(from, to RunStatus) error {
 		return fmt.Errorf("invalid run status transition %q -> %q", from, to)
 	}
 	return nil
+}
+
+func NormalizeRepo(repo string) string {
+	return strings.ToLower(strings.TrimSpace(repo))
 }
 
 type PRStatus string

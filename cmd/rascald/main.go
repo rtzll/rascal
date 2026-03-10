@@ -588,8 +588,9 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repo and issue_number are required", http.StatusBadRequest)
 		return
 	}
+	req.Repo = state.NormalizeRepo(req.Repo)
 
-	taskID := fmt.Sprintf("%s#%d", req.Repo, req.IssueNumber)
+	taskID := repoIssueTaskID(req.Repo, req.IssueNumber)
 	taskText := fmt.Sprintf("Work on issue #%d in %s", req.IssueNumber, req.Repo)
 	ctxText := ""
 	requestedBy := requesterUserID(r.Context())
@@ -968,7 +969,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if !strings.EqualFold(ev.Label.Name, "rascal") {
 				return nil
 			}
-			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
+			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
 			_, err := s.createAndQueueRun(runRequest{
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
@@ -998,7 +999,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if !issueHasLabel(ev.Issue.Labels, "rascal") {
 				return nil
 			}
-			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
+			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
 			if err := s.store.CancelQueuedRuns(taskID, "issue edited"); err != nil {
 				return fmt.Errorf("cancel queued runs for edited issue: %w", err)
 			}
@@ -1025,7 +1026,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if !issueHasLabel(ev.Issue.Labels, "rascal") {
 				return nil
 			}
-			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
+			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
 			if _, err := s.store.UpsertTask(state.UpsertTaskInput{
 				ID:          taskID,
 				Repo:        ev.Repository.FullName,
@@ -1045,7 +1046,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if !issueHasLabel(ev.Issue.Labels, "rascal") {
 				return nil
 			}
-			taskID := fmt.Sprintf("%s#%d", ev.Repository.FullName, ev.Issue.Number)
+			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
 			if _, err := s.store.UpsertTask(state.UpsertTaskInput{
 				ID:          taskID,
 				Repo:        ev.Repository.FullName,
@@ -1419,7 +1420,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if s.isDraining() {
 		return state.Run{}, errServerDraining
 	}
-	req.Repo = strings.TrimSpace(req.Repo)
+	req.Repo = state.NormalizeRepo(req.Repo)
 	req.Task = strings.TrimSpace(req.Task)
 	req.TaskID = strings.TrimSpace(req.TaskID)
 	req.BaseBranch = strings.TrimSpace(req.BaseBranch)
@@ -2405,13 +2406,13 @@ func (s *server) scheduleRuns(preferredTaskID string) {
 }
 
 func (s *server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {
-	repo = strings.TrimSpace(repo)
+	repo = state.NormalizeRepo(repo)
 	if repo == "" || prNumber <= 0 {
 		return
 	}
 	runs := s.store.ListRuns(10000)
 	for _, run := range runs {
-		if run.Repo != repo || run.PRNumber != prNumber {
+		if !strings.EqualFold(run.Repo, repo) || run.PRNumber != prNumber {
 			continue
 		}
 		s.updateRunBestEffort(run.ID, func(r *state.Run) error {
@@ -2440,13 +2441,13 @@ func (s *server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {
 }
 
 func (s *server) reconcileReopenedPRRuns(repo string, prNumber int) {
-	repo = strings.TrimSpace(repo)
+	repo = state.NormalizeRepo(repo)
 	if repo == "" || prNumber <= 0 {
 		return
 	}
 	runs := s.store.ListRuns(10000)
 	for _, run := range runs {
-		if run.Repo != repo || run.PRNumber != prNumber {
+		if !strings.EqualFold(run.Repo, repo) || run.PRNumber != prNumber {
 			continue
 		}
 		s.updateRunBestEffort(run.ID, func(r *state.Run) error {
@@ -2460,10 +2461,18 @@ func (s *server) reconcileReopenedPRRuns(repo string, prNumber int) {
 }
 
 func (s *server) taskForPR(repo string, prNumber int) (state.Task, bool) {
-	if strings.TrimSpace(repo) == "" || prNumber <= 0 {
+	if state.NormalizeRepo(repo) == "" || prNumber <= 0 {
 		return state.Task{}, false
 	}
 	return s.store.FindTaskByPR(repo, prNumber)
+}
+
+func repoIssueTaskID(repo string, issueNumber int) string {
+	repo = state.NormalizeRepo(repo)
+	if repo == "" || issueNumber <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s#%d", repo, issueNumber)
 }
 
 func (s *server) activeTaskForPR(repo string, prNumber int) (state.Task, bool) {
@@ -2630,7 +2639,7 @@ Repository: %s
 - Do not ask for interactive input.
 - Do not require MCP tools.
 - Keep changes minimal and scoped to the requested task.
-- Run `+"`make lint`"+` and `+"`make test`"+` before finishing if those targets exist.
+- Run ` + "`make lint`" + ` and ` + "`make test`" + ` before finishing if those targets exist.
 - If one of those commands does not exist or cannot run, explain exactly why and run the closest equivalent checks instead.
 - If you make changes, write /rascal-meta/commit_message.txt using a conventional commit title on the first line.
 - Optionally add a commit body after a blank line in /rascal-meta/commit_message.txt.
