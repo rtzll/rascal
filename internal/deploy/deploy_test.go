@@ -80,6 +80,7 @@ func TestRenderCaddyfileVariants(t *testing.T) {
 	for _, want := range []string{
 		"@allowed_health",
 		"@allowed_api",
+		"@allowed_repository_api",
 		"@allowed_webhook",
 		"path /v1/webhooks/github",
 		"header X-GitHub-Event *",
@@ -93,6 +94,25 @@ func TestRenderCaddyfileVariants(t *testing.T) {
 		if !strings.Contains(domain, want) {
 			t.Fatalf("domain caddyfile missing %q:\n%s", want, domain)
 		}
+	}
+}
+
+func TestRenderCaddyfileAllowsRepositoryWriteMethods(t *testing.T) {
+	rendered, err := renderCaddyfile("")
+	if err != nil {
+		t.Fatalf("render caddyfile: %v", err)
+	}
+
+	wantBlock := strings.TrimSpace(`
+@allowed_repository_api {
+    method GET POST PATCH PUT DELETE
+    path /v1/repositories /v1/repositories/*
+  }
+  handle @allowed_repository_api {
+    import /etc/caddy/rascal-upstream.caddy
+  }`)
+	if !strings.Contains(rendered, wantBlock) {
+		t.Fatalf("repository API matcher missing required methods or paths:\n%s", rendered)
 	}
 }
 

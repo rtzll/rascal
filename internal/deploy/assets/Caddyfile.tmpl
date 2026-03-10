@@ -22,6 +22,14 @@
     import /etc/caddy/rascal-upstream.caddy
   }
 
+  @allowed_repository_api {
+    method GET POST PATCH PUT DELETE
+    path /v1/repositories /v1/repositories/*
+  }
+  handle @allowed_repository_api {
+    import /etc/caddy/rascal-upstream.caddy
+  }
+
   @allowed_webhook {
     method POST
     path /v1/webhooks/github
