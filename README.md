@@ -68,6 +68,7 @@ RASCAL_GITHUB_TOKEN=...
 
 ## Learn More
 
+- Contributing and local verification: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Setup and token details: [docs/setup.md](docs/setup.md)
 - Config and precedence: [docs/config.md](docs/config.md)
 - Command guide: [docs/commands.md](docs/commands.md)
