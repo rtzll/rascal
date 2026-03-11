@@ -976,14 +976,13 @@ rascal run --issue OWNER/REPO#123
 				if err != nil {
 					return &cliError{Code: exitInput, Message: err.Error()}
 				}
-				payload := map[string]any{
-					"repo":         repo,
-					"issue_number": issueNumber,
-				}
-				if cmd.Flags().Changed("debug") {
-					payload["debug"] = debug
-				}
-				resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks/issue", payload)
+				debugValue := optionalBoolFlagValue(cmd, "debug", debug)
+				path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+					Repo:        repo,
+					IssueNumber: issueNumber,
+					Debug:       debugValue,
+				})
+				resp, err := a.client.doJSON(http.MethodPost, path, payload)
 				if err != nil {
 					return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 				}
@@ -1010,15 +1009,14 @@ rascal run --issue OWNER/REPO#123
 				return &cliError{Code: exitInput, Message: "both --repo/-R and --task/-t are required"}
 			}
 
-			payload := map[string]any{
-				"repo":        repo,
-				"task":        task,
-				"base_branch": baseBranch,
-			}
-			if cmd.Flags().Changed("debug") {
-				payload["debug"] = debug
-			}
-			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
+			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
+			path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+				Repo:       repo,
+				Task:       task,
+				BaseBranch: baseBranch,
+				Debug:      debugValue,
+			})
+			resp, err := a.client.doJSON(http.MethodPost, path, payload)
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
 			}
@@ -1051,10 +1049,11 @@ rascal run --issue OWNER/REPO#123
 
 func (a *app) newPSCmd() *cobra.Command {
 	var (
-		limit    int
-		all      bool
-		watch    bool
-		interval time.Duration
+		limit        int
+		all          bool
+		watch        bool
+		interval     time.Duration
+		statusFilter string
 	)
 	cmd := &cobra.Command{
 		Use:     "ps",
@@ -1064,6 +1063,7 @@ func (a *app) newPSCmd() *cobra.Command {
   rascal ps
   rascal ps --limit 25
   rascal ps --all
+  rascal ps --status queued,running
   rascal ps --watch
   rascal ps --output json
 `),
@@ -1076,6 +1076,10 @@ func (a *app) newPSCmd() *cobra.Command {
 			}
 			if watch && a.output != "table" {
 				return &cliError{Code: exitInput, Message: "--watch is only supported with --output table"}
+			}
+			statuses, err := parsePSStatusFilter(statusFilter)
+			if err != nil {
+				return &cliError{Code: exitInput, Message: err.Error()}
 			}
 
 			render := func(runs []state.Run) error {
@@ -1107,6 +1111,7 @@ func (a *app) newPSCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				runs = filterRunsByStatus(runs, statuses)
 				return render(runs)
 			}
 
@@ -1121,6 +1126,7 @@ func (a *app) newPSCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				runs = filterRunsByStatus(runs, statuses)
 				if a.ansiEnabled() {
 					if _, err := fmt.Fprint(os.Stdout, "\033[H\033[2J"); err != nil {
 						return fmt.Errorf("clear terminal: %w", err)
@@ -1139,6 +1145,7 @@ func (a *app) newPSCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&limit, "limit", 10, "max number of runs")
 	cmd.Flags().BoolVar(&all, "all", false, "show all retained runs")
+	cmd.Flags().StringVar(&statusFilter, "status", "", "comma-separated run statuses to include")
 	cmd.Flags().BoolVar(&watch, "watch", false, "refresh continuously")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "refresh interval when --watch is enabled")
 	return cmd
@@ -1806,17 +1813,16 @@ rascal retry run_abc123 --debug=false
 			if run.Status != state.StatusFailed && run.Status != state.StatusCanceled {
 				return &cliError{Code: exitInput, Message: "retry only supports failed or canceled runs"}
 			}
-			payload := map[string]any{
-				"task_id":     run.TaskID,
-				"repo":        run.Repo,
-				"task":        run.Task,
-				"base_branch": run.BaseBranch,
-				"trigger":     "retry",
-			}
-			if cmd.Flags().Changed("debug") {
-				payload["debug"] = debug
-			}
-			resp, err := a.client.doJSON(http.MethodPost, "/v1/tasks", payload)
+			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
+			path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+				TaskID:     run.TaskID,
+				Repo:       run.Repo,
+				Task:       run.Task,
+				BaseBranch: run.BaseBranch,
+				Trigger:    "retry",
+				Debug:      debugValue,
+			})
+			resp, err := a.client.doJSON(http.MethodPost, path, payload)
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 			}
@@ -2450,6 +2456,49 @@ func psStatusLabel(run state.Run) string {
 	}
 }
 
+const allowedPSStatusValues = "queued, running, awaiting_feedback, succeeded, failed, canceled"
+
+func parsePSStatusFilter(raw string) (map[state.RunStatus]struct{}, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	out := make(map[state.RunStatus]struct{})
+	for _, part := range strings.Split(raw, ",") {
+		status := strings.ToLower(strings.TrimSpace(part))
+		switch status {
+		case "queued":
+			out[state.StatusQueued] = struct{}{}
+		case "running":
+			out[state.StatusRunning] = struct{}{}
+		case "awaiting_feedback":
+			out[state.StatusReview] = struct{}{}
+		case "succeeded":
+			out[state.StatusSucceeded] = struct{}{}
+		case "failed":
+			out[state.StatusFailed] = struct{}{}
+		case "canceled":
+			out[state.StatusCanceled] = struct{}{}
+		default:
+			return nil, fmt.Errorf("invalid --status value %q; allowed values: %s", strings.TrimSpace(part), allowedPSStatusValues)
+		}
+	}
+	return out, nil
+}
+
+func filterRunsByStatus(runs []state.Run, statuses map[state.RunStatus]struct{}) []state.Run {
+	if len(statuses) == 0 {
+		return runs
+	}
+	filtered := make([]state.Run, 0, len(runs))
+	for _, run := range runs {
+		if _, ok := statuses[state.CanonicalRunStatus(run.Status)]; ok {
+			filtered = append(filtered, run)
+		}
+	}
+	return filtered
+}
+
 func psPRLabel(run state.Run) string {
 	prStatus := effectivePRStatus(run)
 	if run.PRNumber <= 0 {
@@ -2833,6 +2882,53 @@ func parseIssueRef(input string) (string, int, error) {
 		return "", 0, fmt.Errorf("invalid repo in %q", input)
 	}
 	return repo, issue, nil
+}
+
+type createTaskPayloadInput struct {
+	TaskID      string
+	Repo        string
+	Task        string
+	BaseBranch  string
+	Trigger     string
+	IssueNumber int
+	Debug       *bool
+}
+
+func optionalBoolFlagValue(cmd *cobra.Command, name string, value bool) *bool {
+	if !cmd.Flags().Changed(name) {
+		return nil
+	}
+	v := value
+	return &v
+}
+
+func buildCreateTaskPayload(input createTaskPayloadInput) (string, map[string]any) {
+	if input.IssueNumber > 0 {
+		payload := map[string]any{
+			"repo":         input.Repo,
+			"issue_number": input.IssueNumber,
+		}
+		if input.Debug != nil {
+			payload["debug"] = *input.Debug
+		}
+		return "/v1/tasks/issue", payload
+	}
+
+	payload := map[string]any{
+		"repo":        input.Repo,
+		"task":        input.Task,
+		"base_branch": input.BaseBranch,
+	}
+	if strings.TrimSpace(input.TaskID) != "" {
+		payload["task_id"] = input.TaskID
+	}
+	if strings.TrimSpace(input.Trigger) != "" {
+		payload["trigger"] = input.Trigger
+	}
+	if input.Debug != nil {
+		payload["debug"] = *input.Debug
+	}
+	return "/v1/tasks", payload
 }
 
 func (c apiClient) doJSON(method, path string, payload any) (*http.Response, error) {

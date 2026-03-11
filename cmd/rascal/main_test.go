@@ -49,6 +49,107 @@ func TestFirstNonEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildCreateTaskPayloadForRun(t *testing.T) {
+	t.Parallel()
+
+	path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+		Repo:       "owner/repo",
+		Task:       "Fix flaky tests",
+		BaseBranch: "main",
+	})
+
+	if path != "/v1/tasks" {
+		t.Fatalf("path = %q, want /v1/tasks", path)
+	}
+	if payload["repo"] != "owner/repo" {
+		t.Fatalf("repo = %v, want owner/repo", payload["repo"])
+	}
+	if payload["task"] != "Fix flaky tests" {
+		t.Fatalf("task = %v, want Fix flaky tests", payload["task"])
+	}
+	if payload["base_branch"] != "main" {
+		t.Fatalf("base_branch = %v, want main", payload["base_branch"])
+	}
+	if _, ok := payload["task_id"]; ok {
+		t.Fatalf("did not expect task_id in run payload")
+	}
+	if _, ok := payload["trigger"]; ok {
+		t.Fatalf("did not expect trigger in run payload")
+	}
+	if _, ok := payload["issue_number"]; ok {
+		t.Fatalf("did not expect issue_number in run payload")
+	}
+	if _, ok := payload["debug"]; ok {
+		t.Fatalf("did not expect debug in run payload when unset")
+	}
+}
+
+func TestBuildCreateTaskPayloadForRetry(t *testing.T) {
+	t.Parallel()
+
+	debug := false
+	path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+		TaskID:     "task_1",
+		Repo:       "owner/repo",
+		Task:       "Retry task",
+		BaseBranch: "main",
+		Trigger:    "retry",
+		Debug:      &debug,
+	})
+
+	if path != "/v1/tasks" {
+		t.Fatalf("path = %q, want /v1/tasks", path)
+	}
+	if payload["task_id"] != "task_1" {
+		t.Fatalf("task_id = %v, want task_1", payload["task_id"])
+	}
+	if payload["trigger"] != "retry" {
+		t.Fatalf("trigger = %v, want retry", payload["trigger"])
+	}
+	if payload["debug"] != false {
+		t.Fatalf("debug = %v, want false", payload["debug"])
+	}
+}
+
+func TestBuildCreateTaskPayloadForIssue(t *testing.T) {
+	t.Parallel()
+
+	debug := true
+	path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+		Repo:        "owner/repo",
+		IssueNumber: 42,
+		Task:        "ignored",
+		BaseBranch:  "ignored",
+		Trigger:     "ignored",
+		Debug:       &debug,
+	})
+
+	if path != "/v1/tasks/issue" {
+		t.Fatalf("path = %q, want /v1/tasks/issue", path)
+	}
+	if payload["repo"] != "owner/repo" {
+		t.Fatalf("repo = %v, want owner/repo", payload["repo"])
+	}
+	if payload["issue_number"] != 42 {
+		t.Fatalf("issue_number = %v, want 42", payload["issue_number"])
+	}
+	if payload["debug"] != true {
+		t.Fatalf("debug = %v, want true", payload["debug"])
+	}
+	if _, ok := payload["task_id"]; ok {
+		t.Fatalf("did not expect task_id in issue payload")
+	}
+	if _, ok := payload["task"]; ok {
+		t.Fatalf("did not expect task in issue payload")
+	}
+	if _, ok := payload["base_branch"]; ok {
+		t.Fatalf("did not expect base_branch in issue payload")
+	}
+	if _, ok := payload["trigger"]; ok {
+		t.Fatalf("did not expect trigger in issue payload")
+	}
+}
+
 func TestDecodeServerErrorIncludesRequestID(t *testing.T) {
 	t.Parallel()
 
@@ -580,6 +681,9 @@ func TestPSDefaults(t *testing.T) {
 	if got := psCmd.Flags().Lookup("all").DefValue; got != "false" {
 		t.Fatalf("ps default all = %q, want false", got)
 	}
+	if got := psCmd.Flags().Lookup("status").DefValue; got != "" {
+		t.Fatalf("ps default status = %q, want empty", got)
+	}
 }
 
 func TestPSUsesDefaultLimitQuery(t *testing.T) {
@@ -696,6 +800,126 @@ func TestPSAllCannotBeCombinedWithLimit(t *testing.T) {
 	}
 }
 
+func TestParsePSStatusFilter(t *testing.T) {
+	got, err := parsePSStatusFilter(" Running,awaiting_feedback,FAILED,canceled ")
+	if err != nil {
+		t.Fatalf("parsePSStatusFilter unexpected error: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("expected 4 statuses, got %d", len(got))
+	}
+	for _, status := range []state.RunStatus{
+		state.StatusRunning,
+		state.StatusReview,
+		state.StatusFailed,
+		state.StatusCanceled,
+	} {
+		if _, ok := got[status]; !ok {
+			t.Fatalf("expected normalized status %q to be present", status)
+		}
+	}
+}
+
+func TestParsePSStatusFilterInvalidValue(t *testing.T) {
+	_, err := parsePSStatusFilter("running,not_real")
+	if err == nil {
+		t.Fatal("expected parsePSStatusFilter to fail")
+	}
+	if !strings.Contains(err.Error(), `invalid --status value "not_real"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "allowed values: queued, running, awaiting_feedback, succeeded, failed, canceled") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPSStatusFilterRendersOnlyMatchingRuns(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/v1/runs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{
+			{
+				"id":         "run_queued",
+				"status":     "queued",
+				"repo":       "owner/repo",
+				"created_at": "2026-03-08T13:55:00Z",
+			},
+			{
+				"id":         "run_running",
+				"status":     "running",
+				"repo":       "owner/repo",
+				"created_at": "2026-03-08T13:56:00Z",
+			},
+			{
+				"id":         "run_review",
+				"status":     "review",
+				"repo":       "owner/repo",
+				"created_at": "2026-03-08T13:57:00Z",
+			},
+		}}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "table",
+	}
+
+	cmd := a.newPSCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--status", "running,AWAITING_FEEDBACK"})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("ps --status execute: %v", err)
+	}
+	if strings.Contains(stdout, "run_queued") {
+		t.Fatalf("expected queued run to be filtered out, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "run_running") {
+		t.Fatalf("expected running run to remain, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "run_review") {
+		t.Fatalf("expected awaiting_feedback alias to include review run, got:\n%s", stdout)
+	}
+}
+
+func TestPSStatusFilterInvalidValueReturnsInputError(t *testing.T) {
+	a := &app{
+		cfg: config.ClientConfig{
+			APIToken: "test-token",
+		},
+	}
+	cmd := a.newPSCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--status", "running,unknown"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid --status")
+	}
+	if !strings.Contains(err.Error(), `invalid --status value "unknown"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestPSStatusAndPRLabels(t *testing.T) {
 	run := state.Run{Status: state.StatusReview, PRNumber: 77}
 	if got := psStatusLabel(run); got != "review" {
@@ -808,6 +1032,68 @@ func TestPSRendersIssueColumn(t *testing.T) {
 	}
 	if strings.Contains(lines[2], "#") {
 		t.Fatalf("expected blank issue column for non-issue run, got:\n%s", lines[2])
+	}
+}
+
+func TestRunCreatesTaskPayload(t *testing.T) {
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/v1/tasks" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"run": map[string]any{"id": "run_new", "status": "queued"},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "json",
+	}
+
+	cmd := a.newRunCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--repo", "owner/repo", "--task", "Fix flaky tests"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("run --repo --task: %v", err)
+	}
+
+	if payload["repo"] != "owner/repo" {
+		t.Fatalf("unexpected repo payload: %v", payload["repo"])
+	}
+	if payload["task"] != "Fix flaky tests" {
+		t.Fatalf("unexpected task payload: %v", payload["task"])
+	}
+	if payload["base_branch"] != "main" {
+		t.Fatalf("expected default base_branch main, got: %v", payload["base_branch"])
+	}
+	if _, ok := payload["debug"]; ok {
+		t.Fatalf("did not expect debug payload unless flag is set, got: %v", payload["debug"])
 	}
 }
 

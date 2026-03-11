@@ -119,7 +119,7 @@ func NewRunID() (string, error) {
 
 func (s *Store) UpsertTask(in UpsertTaskInput) (Task, error) {
 	in.ID = strings.TrimSpace(in.ID)
-	in.Repo = strings.TrimSpace(in.Repo)
+	in.Repo = NormalizeRepo(in.Repo)
 	in.AgentBackend = agent.NormalizeBackend(string(in.AgentBackend))
 	if in.ID == "" || in.Repo == "" {
 		return Task{}, fmt.Errorf("task id and repo are required")
@@ -158,7 +158,7 @@ func (s *Store) GetTask(taskID string) (Task, bool) {
 
 func (s *Store) FindTaskByPR(repo string, prNumber int) (Task, bool) {
 	row, err := s.q.FindTaskByPR(context.Background(), sqlitegen.FindTaskByPRParams{
-		Repo:     strings.TrimSpace(repo),
+		Repo:     NormalizeRepo(repo),
 		PrNumber: int64(prNumber),
 	})
 	if err != nil {
@@ -293,7 +293,7 @@ func (s *Store) IsTaskCompleted(taskID string) bool {
 func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	in.ID = strings.TrimSpace(in.ID)
 	in.TaskID = strings.TrimSpace(in.TaskID)
-	in.Repo = strings.TrimSpace(in.Repo)
+	in.Repo = NormalizeRepo(in.Repo)
 	in.AgentBackend = agent.NormalizeBackend(string(in.AgentBackend))
 	if in.ID == "" || in.TaskID == "" || in.Repo == "" {
 		return Run{}, fmt.Errorf("id, task_id and repo are required")

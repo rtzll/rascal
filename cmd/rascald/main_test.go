@@ -1835,6 +1835,45 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 
 }
 
+func TestMergedPRMatchesRepositoryCaseInsensitively(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	taskID := "owner/repo#123"
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 55}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_case_insensitive_merge",
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Task:        "await merge",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		IssueNumber: 55,
+		PRNumber:    55,
+	})
+	if err != nil {
+		t.Fatalf("add awaiting run: %v", err)
+	}
+	markRunReview(t, s, run.ID)
+
+	payload := []byte(`{"action":"closed","pull_request":{"number":55,"merged":true},"repository":{"full_name":"Owner/Repo"},"sender":{"login":"dev"}}`)
+	req := webhookRequest(t, payload, "pull_request", "delivery-merged-mixed-case", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for mixed-case merged pr event, got %d", rec.Code)
+	}
+
+	waitFor(t, time.Second, func() bool { return s.store.IsTaskCompleted(taskID) }, "task marked completed")
+	waitFor(t, time.Second, func() bool {
+		updated, ok := s.store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusSucceeded
+	}, "awaiting-feedback run marked succeeded on merge")
+}
+
 func TestPullRequestClosedIgnoresUnmanagedPR(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
@@ -3106,6 +3145,44 @@ func TestHandleCreateTaskAcceptsDebugFalse(t *testing.T) {
 	}
 	if out.Run.Debug {
 		t.Fatal("expected debug=false when explicitly requested")
+	}
+}
+
+func TestHandleCreateIssueTaskNormalizesRepositoryCase(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/tasks/issue",
+		strings.NewReader(`{"repo":"Owner/Repo","issue_number":7}`),
+	)
+	rec := httptest.NewRecorder()
+	s.handleCreateIssueTask(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var out struct {
+		Run state.Run `json:"run"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Run.Repo != "owner/repo" {
+		t.Fatalf("run repo = %q, want owner/repo", out.Run.Repo)
+	}
+	if out.Run.TaskID != "owner/repo#7" {
+		t.Fatalf("run task id = %q, want owner/repo#7", out.Run.TaskID)
+	}
+
+	task, ok := s.store.GetTask("owner/repo#7")
+	if !ok {
+		t.Fatal("expected normalized task to be persisted")
+	}
+	if task.Repo != "owner/repo" {
+		t.Fatalf("task repo = %q, want owner/repo", task.Repo)
 	}
 }
 
