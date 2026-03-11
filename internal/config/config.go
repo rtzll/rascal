@@ -93,9 +93,6 @@ func LoadServerConfig() ServerConfig {
 }
 
 func (c ServerConfig) Ensure() error {
-	if legacyImage := strings.TrimSpace(os.Getenv("RASCAL_RUNNER_IMAGE")); legacyImage != "" && strings.TrimSpace(os.Getenv("RASCAL_RUNNER_IMAGE_GOOSE")) == "" {
-		return fmt.Errorf("RASCAL_RUNNER_IMAGE is legacy-only; set explicit RASCAL_RUNNER_IMAGE_GOOSE and RASCAL_RUNNER_IMAGE_CODEX values instead")
-	}
 	if c.DataDir == "" {
 		return fmt.Errorf("data directory cannot be empty")
 	}

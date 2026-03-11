@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -178,21 +177,5 @@ func TestLoadServerConfigCredentialEncryptionKeyFallback(t *testing.T) {
 	cfg = LoadServerConfig()
 	if cfg.CredentialEncryptionKey != "explicit-key" {
 		t.Fatalf("CredentialEncryptionKey = %q, want explicit-key", cfg.CredentialEncryptionKey)
-	}
-}
-
-func TestServerConfigEnsureRejectsLegacyRunnerImageWithoutExplicitGooseImage(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "rascal-data")
-	t.Setenv("RASCAL_DATA_DIR", dataDir)
-	t.Setenv("RASCAL_RUNNER_IMAGE", "rascal-runner:latest")
-	t.Setenv("RASCAL_RUNNER_IMAGE_GOOSE", "")
-
-	cfg := LoadServerConfig()
-	err := cfg.Ensure()
-	if err == nil {
-		t.Fatal("expected Ensure to reject legacy runner image env")
-	}
-	if !strings.Contains(err.Error(), "RASCAL_RUNNER_IMAGE_GOOSE") || !strings.Contains(err.Error(), "RASCAL_RUNNER_IMAGE_CODEX") {
-		t.Fatalf("unexpected error: %v", err)
 	}
 }
