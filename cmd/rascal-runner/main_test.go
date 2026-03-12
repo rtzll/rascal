@@ -307,8 +307,8 @@ func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
 	if cfg.GoosePathRoot != filepath.Join(metaDir, "goose") {
 		t.Fatalf("goose path root = %q, want %q", cfg.GoosePathRoot, filepath.Join(metaDir, "goose"))
 	}
-	if cfg.PersistentInstructionsPath != filepath.Join(metaDir, "persistent_instructions.md") {
-		t.Fatalf("persistent instructions path = %q, want %q", cfg.PersistentInstructionsPath, filepath.Join(metaDir, "persistent_instructions.md"))
+	if cfg.PersistentInstructionsPath != filepath.Join("/rascal-meta", "persistent_instructions.md") {
+		t.Fatalf("persistent instructions path = %q, want %q", cfg.PersistentInstructionsPath, filepath.Join("/rascal-meta", "persistent_instructions.md"))
 	}
 }
 
@@ -1353,6 +1353,7 @@ func TestRunEndToEndWithFakeCommands(t *testing.T) {
 	writeExe(t, filepath.Join(binDir, "git"), fmt.Sprintf(`#!/usr/bin/env bash
 set -eu
 state_dir=%q
+printf '%%s\n' "$*" >> "$state_dir/git.log"
 
 if [ "$#" -ge 1 ] && [ "$1" = "-C" ]; then
   shift
@@ -1371,11 +1372,7 @@ case "$cmd" in
     mkdir -p "$target/.git"
     exit 0
     ;;
-  fetch|pull|checkout|add|commit|push)
-    exit 0
-    ;;
-  status)
-    printf ' M touched.txt\n'
+  fetch|pull|checkout|config)
     exit 0
     ;;
   rev-parse)
@@ -1408,6 +1405,7 @@ esac
 	writeExe(t, filepath.Join(binDir, "gh"), fmt.Sprintf(`#!/usr/bin/env bash
 set -eu
 state_dir=%q
+printf '%%s\n' "$*" >> "$state_dir/gh.log"
 cmd="$1"
 shift
 
@@ -1423,28 +1421,7 @@ case "$cmd" in
     shift
     case "$sub" in
       view)
-        if [ -f "$state_dir/pr_created" ]; then
-          printf '{"number":77,"url":"https://github.com/owner/repo/pull/77"}\n'
-          exit 0
-        fi
         exit 1
-        ;;
-      create)
-        has_label=false
-        while [ "$#" -gt 0 ]; do
-          if [ "$1" = "--label" ] && [ "$#" -ge 2 ] && [ "$2" = "rascal" ]; then
-            has_label=true
-            break
-          fi
-          shift
-        done
-        if [ "$has_label" != true ]; then
-          echo "expected gh pr create to include --label rascal" >&2
-          exit 1
-        fi
-        : > "$state_dir/pr_created"
-        printf 'https://github.com/owner/repo/pull/77\n'
-        exit 0
         ;;
     esac
     ;;
@@ -1470,7 +1447,7 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
 
-	if err := worker.Run(); err != nil {
+	if err := runWithArgs(osExecutor{}, nil); err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
 
@@ -1495,26 +1472,32 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 	if meta.ExitCode != 0 {
 		t.Fatalf("expected exit_code=0, got %d", meta.ExitCode)
 	}
-	if meta.PRNumber != 77 {
-		t.Fatalf("expected pr_number=77, got %d", meta.PRNumber)
+	if meta.PRNumber != 0 {
+		t.Fatalf("expected pr_number=0 when agent does not open a PR, got %d", meta.PRNumber)
 	}
-	if meta.PRURL != "https://github.com/owner/repo/pull/77" {
+	if meta.PRURL != "" {
 		t.Fatalf("unexpected pr_url: %q", meta.PRURL)
 	}
 	if meta.HeadSHA != "0123456789abcdef0123456789abcdef01234567" {
 		t.Fatalf("unexpected head_sha: %q", meta.HeadSHA)
 	}
 
-	prBodyData, err := os.ReadFile(filepath.Join(metaDir, "pr_body.md"))
+	gitLogData, err := os.ReadFile(filepath.Join(stateDir, "git.log"))
 	if err != nil {
-		t.Fatalf("read pr_body.md: %v", err)
+		t.Fatalf("read git.log: %v", err)
 	}
-	prBody := string(prBodyData)
-	if !strings.Contains(prBody, "<details><summary>Agent Details</summary>") {
-		t.Fatalf("expected agent details block in pr body:\n%s", prBody)
+	gitLog := string(gitLogData)
+	for _, disallowed := range []string{" add ", " commit ", " push "} {
+		if strings.Contains(" "+gitLog+" ", disallowed) {
+			t.Fatalf("runner should not perform %q itself, git log:\n%s", strings.TrimSpace(disallowed), gitLog)
+		}
 	}
-	if !strings.Contains(prBody, "Rascal run `run_fake` completed in ") || !strings.Contains(prBody, "· 321 tokens") {
-		t.Fatalf("expected token summary in pr body:\n%s", prBody)
+	ghLogData, err := os.ReadFile(filepath.Join(stateDir, "gh.log"))
+	if err != nil {
+		t.Fatalf("read gh.log: %v", err)
+	}
+	if strings.Contains(string(ghLogData), "pr create") {
+		t.Fatalf("runner should not create PRs automatically, gh log:\n%s", string(ghLogData))
 	}
 }
 
@@ -1692,148 +1675,131 @@ func TestRunWithExecutorFailsWhenRequiredCommandMissing(t *testing.T) {
 	}
 }
 
-func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
+func TestCapabilityPublishUsesAllowedHeadBranch(t *testing.T) {
 	metaDir := filepath.Join(t.TempDir(), "meta")
 	workRoot := filepath.Join(t.TempDir(), "work")
 	repoDir := filepath.Join(workRoot, "repo")
-	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir repo git dir: %v", err)
-	}
 	if err := os.MkdirAll(metaDir, 0o755); err != nil {
 		t.Fatalf("mkdir meta dir: %v", err)
 	}
 
-	t.Setenv("RASCAL_RUN_ID", "run_pr_create_fail")
-	t.Setenv("RASCAL_TASK_ID", "task_pr_create_fail")
+	t.Setenv("RASCAL_RUN_ID", "run_publish")
+	t.Setenv("RASCAL_TASK_ID", "task_publish")
 	t.Setenv("RASCAL_REPO", "owner/repo")
 	t.Setenv("GH_TOKEN", "token")
-	t.Setenv("RASCAL_INSTRUCTION", "Address PR feedback")
-	t.Setenv("RASCAL_AGENT_RUNTIME", "goose")
+	t.Setenv("RASCAL_HEAD_BRANCH", "rascal/publish")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
 
+	var gotDir string
+	var gotName string
+	var gotArgs []string
 	ex := fakeExecutor{
-		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
-			if name == "gh" && len(args) >= 2 && args[0] == "api" && args[1] == "user" {
-				return `{"login":"rascalbot"}`, nil
-			}
-			if name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "view" {
-				return "", errors.New("not found")
-			}
-			if name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "create" {
-				return "", errors.New("create failed")
-			}
-			if name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain" {
-				return " M changed.txt\n", nil
-			}
-			if name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--left-right" && args[2] == "--count" {
-				return "0 1", nil
-			}
+		combinedFn: func(dir string, _ []string, name string, args ...string) (string, error) {
+			gotDir = dir
+			gotName = name
+			gotArgs = append([]string(nil), args...)
 			return "", nil
 		},
-		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, _ ...string) error {
-			if name == "goose" {
-				if _, err := io.WriteString(stdout, `{"event":"message","usage":{"total_tokens":7}}`+"\n"); err != nil {
-					return fmt.Errorf("write fake goose output: %w", err)
-				}
-			}
-			return nil
-		},
 	}
 
-	err := worker.RunWithExecutor(ex)
-	if err == nil || !strings.Contains(err.Error(), "stage pr_create: gh pr create failed") {
-		t.Fatalf("expected pr create failure, got: %v", err)
+	if err := runWithArgs(ex, []string{"capability", "publish", "--force-with-lease"}); err != nil {
+		t.Fatalf("runWithArgs returned error: %v", err)
 	}
-
-	metaData, readErr := os.ReadFile(filepath.Join(metaDir, "meta.json"))
-	if readErr != nil {
-		t.Fatalf("read meta.json: %v", readErr)
+	if gotDir != repoDir {
+		t.Fatalf("command dir = %q, want %q", gotDir, repoDir)
 	}
-	var meta struct {
-		ExitCode int    `json:"exit_code"`
-		Error    string `json:"error"`
+	if gotName != "git" {
+		t.Fatalf("command name = %q, want git", gotName)
 	}
-	if err := json.Unmarshal(metaData, &meta); err != nil {
-		t.Fatalf("decode meta: %v", err)
-	}
-	if meta.ExitCode == 0 {
-		t.Fatalf("expected non-zero exit code in meta, got %d", meta.ExitCode)
-	}
-	if !strings.Contains(meta.Error, "stage pr_create: gh pr create failed") {
-		t.Fatalf("expected gh pr create failure in meta error, got %q", meta.Error)
+	wantArgs := []string{"push", "--force-with-lease", "origin", "HEAD:rascal/publish"}
+	if strings.Join(gotArgs, " ") != strings.Join(wantArgs, " ") {
+		t.Fatalf("command args = %q, want %q", gotArgs, wantArgs)
 	}
 }
 
-func TestRunWithExecutorFailsWhenAgentProducesNoCommitsAheadOfBase(t *testing.T) {
+func TestCapabilityPRCreatesPullRequest(t *testing.T) {
 	metaDir := filepath.Join(t.TempDir(), "meta")
 	workRoot := filepath.Join(t.TempDir(), "work")
 	repoDir := filepath.Join(workRoot, "repo")
-	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir repo git dir: %v", err)
-	}
 	if err := os.MkdirAll(metaDir, 0o755); err != nil {
 		t.Fatalf("mkdir meta dir: %v", err)
 	}
 
-	t.Setenv("RASCAL_RUN_ID", "run_no_branch_diff")
-	t.Setenv("RASCAL_TASK_ID", "task_no_branch_diff")
+	t.Setenv("RASCAL_RUN_ID", "run_pr_cap")
+	t.Setenv("RASCAL_TASK_ID", "task_pr_cap")
 	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("RASCAL_BASE_BRANCH", "main")
+	t.Setenv("RASCAL_HEAD_BRANCH", "rascal/pr-cap")
 	t.Setenv("GH_TOKEN", "token")
-	t.Setenv("RASCAL_INSTRUCTION", "Address PR feedback")
-	t.Setenv("RASCAL_AGENT_RUNTIME", "goose")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
 
+	var calls []string
 	ex := fakeExecutor{
 		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
-			if name == "gh" && len(args) >= 2 && args[0] == "api" && args[1] == "user" {
-				return `{"login":"rascalbot"}`, nil
-			}
 			if name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "view" {
+				calls = append(calls, name+" "+strings.Join(args, " "))
 				return "", errors.New("not found")
 			}
-			if name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain" {
-				return "", nil
-			}
-			if name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--left-right" && args[2] == "--count" {
-				return "0 0", nil
+			if name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "create" {
+				calls = append(calls, name+" "+strings.Join(args, " "))
+				return "https://github.com/owner/repo/pull/55", nil
 			}
 			return "", nil
 		},
-		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, _ ...string) error {
-			if name == "goose" {
-				if _, err := io.WriteString(stdout, `{"event":"message","usage":{"total_tokens":7}}`+"\n"); err != nil {
-					return fmt.Errorf("write fake goose output: %w", err)
-				}
-			}
-			return nil
+	}
+
+	if err := runWithArgs(ex, []string{"capability", "pr", "--title", "feat(rascal): capability test", "--body", "body"}); err != nil {
+		t.Fatalf("runWithArgs returned error: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 gh calls, got %d: %v", len(calls), calls)
+	}
+	if !strings.Contains(calls[1], "gh pr create --repo owner/repo --base main --head rascal/pr-cap --title feat(rascal): capability test --body body --label rascal") {
+		t.Fatalf("unexpected create call: %s", calls[1])
+	}
+}
+
+func TestCapabilityCommentUsesResponseTarget(t *testing.T) {
+	metaDir := filepath.Join(t.TempDir(), "meta")
+	workRoot := filepath.Join(t.TempDir(), "work")
+	repoDir := filepath.Join(workRoot, "repo")
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatalf("mkdir meta dir: %v", err)
+	}
+	bodyPath := filepath.Join(metaDir, "comment.md")
+	if err := os.WriteFile(bodyPath, []byte("ship it"), 0o644); err != nil {
+		t.Fatalf("write comment body: %v", err)
+	}
+	targetPath := filepath.Join(metaDir, "response_target.json")
+	if err := os.WriteFile(targetPath, []byte(`{"repo":"owner/repo","issue_number":42,"trigger":"pr_review_thread","review_thread_id":9}`), 0o644); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+
+	t.Setenv("RASCAL_RUN_ID", "run_comment_cap")
+	t.Setenv("RASCAL_TASK_ID", "task_comment_cap")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_META_DIR", metaDir)
+	t.Setenv("RASCAL_WORK_ROOT", workRoot)
+	t.Setenv("RASCAL_REPO_DIR", repoDir)
+
+	var gotCall string
+	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			gotCall = name + " " + strings.Join(args, " ")
+			return "", nil
 		},
 	}
 
-	err := worker.RunWithExecutor(ex)
-	if err == nil || !strings.Contains(err.Error(), "stage check_branch_diff: agent produced no commits ahead of main") {
-		t.Fatalf("expected no-branch-diff failure, got: %v", err)
+	if err := runWithArgs(ex, []string{"capability", "comment", "--body-file", bodyPath}); err != nil {
+		t.Fatalf("runWithArgs returned error: %v", err)
 	}
-
-	metaData, readErr := os.ReadFile(filepath.Join(metaDir, "meta.json"))
-	if readErr != nil {
-		t.Fatalf("read meta.json: %v", readErr)
-	}
-	var meta struct {
-		ExitCode int    `json:"exit_code"`
-		Error    string `json:"error"`
-	}
-	if err := json.Unmarshal(metaData, &meta); err != nil {
-		t.Fatalf("decode meta: %v", err)
-	}
-	if meta.ExitCode == 0 {
-		t.Fatalf("expected non-zero exit code in meta, got %d", meta.ExitCode)
-	}
-	if !strings.Contains(meta.Error, "stage check_branch_diff: agent produced no commits ahead of main") {
-		t.Fatalf("expected branch diff failure in meta error, got %q", meta.Error)
+	if !strings.Contains(gotCall, "gh api --method POST repos/owner/repo/issues/42/comments -f body=ship it") {
+		t.Fatalf("unexpected comment call: %s", gotCall)
 	}
 }
 

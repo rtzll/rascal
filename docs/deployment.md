@@ -94,8 +94,8 @@ This allows fast cutover while the next slot adopts supervision.
 
 - Container entrypoint script is intentionally minimal (`runner/entrypoint.sh`).
 - It only executes `/usr/local/bin/rascal-runner`.
-- Task workflow behavior (git/agent/PR/meta handling) is implemented in Go in
-  `cmd/rascal-runner`.
+- Task execution, capability mediation, and metadata handling are implemented
+  in Go in `cmd/rascal-runner` and `internal/worker`.
 
 ## Overlap Safety (Both Slots Alive Briefly)
 

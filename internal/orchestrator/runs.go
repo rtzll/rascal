@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,7 +128,7 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 		return state.Run{}, fmt.Errorf("set run requester: %w", err)
 	}
 
-	if err := s.WriteRunFiles(run); err != nil {
+	if err := s.WriteRunFiles(run, req.ResponseTarget); err != nil {
 		if _, transErr := s.SM.Transition(run.ID, state.StatusFailed, WithError(err.Error())); transErr != nil {
 			log.Printf("run %s fail on write run files failed: %v", run.ID, transErr)
 		}
@@ -143,22 +144,12 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 	return run, nil
 }
 
-func (s *Server) WriteRunFiles(run state.Run) (err error) {
+func (s *Server) WriteRunFiles(run state.Run, target *RunResponseTarget) (err error) {
 	if err := os.MkdirAll(filepath.Join(run.RunDir, "codex"), 0o755); err != nil {
 		return fmt.Errorf("create codex run directory: %w", err)
 	}
 
-	ctxPayload := RunContextFile{
-		RunID:       run.ID,
-		TaskID:      run.TaskID,
-		Repo:        run.Repo,
-		Instruction: run.Instruction,
-		Trigger:     run.Trigger.String(),
-		IssueNumber: run.IssueNumber,
-		PRNumber:    run.PRNumber,
-		Context:     run.Context,
-		Debug:       run.Debug,
-	}
+	ctxPayload := buildInstructionContext(run, target)
 	ctxData, err := json.MarshalIndent(ctxPayload, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal run context: %w", err)
@@ -167,7 +158,7 @@ func (s *Server) WriteRunFiles(run state.Run) (err error) {
 		return fmt.Errorf("write run context file: %w", err)
 	}
 
-	instructions := InstructionText(run)
+	instructions := InstructionText(run, target)
 	if err := os.WriteFile(filepath.Join(run.RunDir, "instructions.md"), []byte(instructions), 0o644); err != nil {
 		return fmt.Errorf("write run instructions: %w", err)
 	}
@@ -194,15 +185,53 @@ func (s *Server) WriteRunFiles(run state.Run) (err error) {
 }
 
 type RunContextFile struct {
-	RunID       string `json:"run_id"`
-	TaskID      string `json:"task_id"`
-	Repo        string `json:"repo"`
-	Instruction string `json:"instruction"`
-	Trigger     string `json:"trigger"`
-	IssueNumber int    `json:"issue_number"`
-	PRNumber    int    `json:"pr_number"`
-	Context     string `json:"context"`
-	Debug       bool   `json:"debug"`
+	RunID                 string               `json:"run_id"`
+	TaskID                string               `json:"task_id"`
+	Repo                  string               `json:"repo"`
+	Instruction           string               `json:"instruction"`
+	Trigger               string               `json:"trigger"`
+	BaseBranch            string               `json:"base_branch,omitempty"`
+	HeadBranch            string               `json:"head_branch,omitempty"`
+	IssueNumber           int                  `json:"issue_number"`
+	PRNumber              int                  `json:"pr_number"`
+	Context               string               `json:"context"`
+	Debug                 bool                 `json:"debug"`
+	GitHubRepliesExpected bool                 `json:"github_replies_expected"`
+	Capabilities          RunContextCapability `json:"capabilities"`
+}
+
+type RunContextCapability struct {
+	Publish       RunPublishCapability `json:"publish"`
+	PullRequest   RunPRCapability      `json:"pull_request"`
+	GitHubComment RunCommentCapability `json:"github_comment"`
+}
+
+type RunPublishCapability struct {
+	Available  bool   `json:"available"`
+	Command    string `json:"command"`
+	Remote     string `json:"remote,omitempty"`
+	AllowedRef string `json:"allowed_ref,omitempty"`
+}
+
+type RunPRCapability struct {
+	Available     bool   `json:"available"`
+	Command       string `json:"command"`
+	Repo          string `json:"repo,omitempty"`
+	BaseBranch    string `json:"base_branch,omitempty"`
+	HeadBranch    string `json:"head_branch,omitempty"`
+	ExistingPR    int    `json:"existing_pr,omitempty"`
+	DefaultLabel  string `json:"default_label,omitempty"`
+	GitHubReplies bool   `json:"github_replies"`
+}
+
+type RunCommentCapability struct {
+	Available        bool   `json:"available"`
+	Command          string `json:"command"`
+	Repo             string `json:"repo,omitempty"`
+	IssueNumber      int    `json:"issue_number,omitempty"`
+	ReviewThreadID   int64  `json:"review_thread_id,omitempty"`
+	ReplyExpected    bool   `json:"reply_expected,omitempty"`
+	RequestedTrigger string `json:"requested_trigger,omitempty"`
 }
 
 func (s *Server) WriteRunResponseTarget(run state.Run, target *RunResponseTarget) error {
@@ -240,7 +269,7 @@ func (s *Server) WriteRunResponseTarget(run state.Run, target *RunResponseTarget
 	return nil
 }
 
-func InstructionText(run state.Run) string {
+func InstructionText(run state.Run, target *RunResponseTarget) string {
 	var b strings.Builder
 	_, _ = fmt.Fprintf(&b, `# Rascal Run Instructions
 
@@ -262,27 +291,59 @@ Repository: %s
 	b.WriteString(`
 
 `)
-	if shouldIncludeGitContext(run) {
-		b.WriteString(`## Git Context
+	b.WriteString(`## Execution Context
 
-- Remote: ` + "`origin`" + `
-- Base branch: ` + "`" + strings.TrimSpace(run.BaseBranch) + "`" + `
-- Head branch: ` + "`" + strings.TrimSpace(run.HeadBranch) + "`" + `
+- Trigger: ` + "`" + strings.TrimSpace(run.Trigger.String()) + "`" + `
 - The repository is already cloned and checked out.
-- You may use ` + "`git`" + ` and ` + "`gh`" + ` directly.
-- Push only to ` + "`origin`" + ` branch ` + "`" + strings.TrimSpace(run.HeadBranch) + "`" + `.
-- If you rewrite history, you must run ` + "`git push --force-with-lease origin HEAD:" + strings.TrimSpace(run.HeadBranch) + "`" + `.
-- Otherwise run ` + "`git push origin HEAD:" + strings.TrimSpace(run.HeadBranch) + "`" + `.
-- Do not push to any other branch.
 `)
-		if requiresAgentManagedPublish(run) {
-			b.WriteString(`
-- If the request involves rebasing, merge conflict resolution, or other history rewriting, do not rely on the harness to publish those changes for you. Perform the required ` + "`git push`" + ` yourself before finishing.
-`)
-		}
-		b.WriteString(`
+	if strings.TrimSpace(run.BaseBranch) != "" {
+		b.WriteString(`- Base branch: ` + "`" + strings.TrimSpace(run.BaseBranch) + "`" + `
 `)
 	}
+	if strings.TrimSpace(run.HeadBranch) != "" {
+		_, _ = fmt.Fprintf(&b, "- Head branch: `%s`\n", strings.TrimSpace(run.HeadBranch))
+		_, _ = fmt.Fprintf(&b, "- Allowed publish ref: `origin/%s`\n", strings.TrimSpace(run.HeadBranch))
+	}
+	if expectsGitHubReply(run, target) {
+		b.WriteString(`- GitHub replies expected: ` + "`yes`" + `
+`)
+	} else {
+		b.WriteString(`- GitHub replies expected: ` + "`no`" + `
+`)
+	}
+	b.WriteString(`
+## Capabilities
+
+- Local repo manipulation is normal agent work: edit files, run tests, inspect git state, commit, amend, rebase, and resolve conflicts locally.
+`)
+	if hasPublishCapability(run) {
+		_, _ = fmt.Fprintf(&b, "- `publish`: run `rascal-runner capability publish` to update `origin/%s`.\n", strings.TrimSpace(run.HeadBranch))
+		b.WriteString("- If you rewrite history, use `rascal-runner capability publish --force-with-lease`.\n")
+	} else {
+		b.WriteString("- `publish`: unavailable for this run.\n")
+	}
+	if hasPRCapability(run) {
+		b.WriteString("- `pr`: run `rascal-runner capability pr --title ... --body-file ...` to create or update the pull request for `" + strings.TrimSpace(run.HeadBranch) + "` against `" + strings.TrimSpace(run.BaseBranch) + "`.\n")
+	} else {
+		b.WriteString("- `pr`: unavailable for this run.\n")
+	}
+	if repo, issueNumber, ok := capabilityCommentTarget(run, target); ok {
+		b.WriteString("- `comment`: run `rascal-runner capability comment --body-file ...` to post on `" + repo + "#" + strconv.Itoa(issueNumber) + "`.\n")
+	} else {
+		b.WriteString("- `comment`: unavailable for this run.\n")
+	}
+	b.WriteString("- Rascal records final metadata after the run, but it does not commit, publish, create PRs, or reply on GitHub for you.\n")
+	b.WriteString(`
+## Constraints
+
+- Do not ask for interactive input.
+- Do not require MCP tools.
+- Keep changes minimal and scoped to the requested task.
+- Run ` + "`make lint`" + ` and ` + "`make test`" + ` before finishing if those targets exist.
+- If one of those commands does not exist or cannot run, explain exactly why and run the closest equivalent checks instead.
+- If you make changes, write /rascal-meta/commit_message.txt using a conventional commit title on the first line.
+- Optionally add a commit body after a blank line in /rascal-meta/commit_message.txt.
+`)
 	if strings.TrimSpace(run.Context) != "" {
 		b.WriteString(`
 ## Additional Context
@@ -317,12 +378,112 @@ func PersistentInstructionText(run state.Run) string {
 `
 }
 
-func shouldIncludeGitContext(run state.Run) bool {
-	return run.PRNumber > 0 && strings.TrimSpace(run.BaseBranch) != "" && strings.TrimSpace(run.HeadBranch) != ""
+func buildInstructionContext(run state.Run, target *RunResponseTarget) RunContextFile {
+	ctx := RunContextFile{
+		RunID:                 run.ID,
+		TaskID:                run.TaskID,
+		Repo:                  run.Repo,
+		Instruction:           run.Instruction,
+		Trigger:               run.Trigger.String(),
+		BaseBranch:            run.BaseBranch,
+		HeadBranch:            run.HeadBranch,
+		IssueNumber:           run.IssueNumber,
+		PRNumber:              run.PRNumber,
+		Context:               run.Context,
+		Debug:                 run.Debug,
+		GitHubRepliesExpected: expectsGitHubReply(run, target),
+		Capabilities: RunContextCapability{
+			Publish: RunPublishCapability{
+				Available:  hasPublishCapability(run),
+				Command:    "rascal-runner capability publish",
+				Remote:     "origin",
+				AllowedRef: run.HeadBranch,
+			},
+			PullRequest: RunPRCapability{
+				Available:     hasPRCapability(run),
+				Command:       "rascal-runner capability pr --title ... --body-file ...",
+				Repo:          run.Repo,
+				BaseBranch:    run.BaseBranch,
+				HeadBranch:    run.HeadBranch,
+				ExistingPR:    run.PRNumber,
+				DefaultLabel:  "rascal",
+				GitHubReplies: expectsGitHubReply(run, target),
+			},
+			GitHubComment: RunCommentCapability{
+				Available: false,
+				Command:   "rascal-runner capability comment --body-file ...",
+			},
+		},
+	}
+	if repo, issueNumber, ok := capabilityCommentTarget(run, target); ok {
+		ctx.Capabilities.GitHubComment = RunCommentCapability{
+			Available:        true,
+			Command:          "rascal-runner capability comment --body-file ...",
+			Repo:             repo,
+			IssueNumber:      issueNumber,
+			ReviewThreadID:   responseTargetReviewThreadID(target),
+			ReplyExpected:    expectsGitHubReply(run, target),
+			RequestedTrigger: responseTargetTrigger(target),
+		}
+	}
+	return ctx
 }
 
-func requiresAgentManagedPublish(run state.Run) bool {
-	return runtrigger.Normalize(run.Trigger.String()).IsComment()
+func hasPublishCapability(run state.Run) bool {
+	return strings.TrimSpace(run.HeadBranch) != ""
+}
+
+func hasPRCapability(run state.Run) bool {
+	return strings.TrimSpace(run.BaseBranch) != "" && strings.TrimSpace(run.HeadBranch) != ""
+}
+
+func capabilityCommentTarget(run state.Run, target *RunResponseTarget) (string, int, bool) {
+	if target != nil {
+		repo := strings.TrimSpace(target.Repo)
+		if repo == "" {
+			repo = strings.TrimSpace(run.Repo)
+		}
+		if repo != "" && target.IssueNumber > 0 {
+			return repo, target.IssueNumber, true
+		}
+	}
+	if strings.TrimSpace(run.Repo) == "" {
+		return "", 0, false
+	}
+	if run.PRNumber > 0 {
+		return strings.TrimSpace(run.Repo), run.PRNumber, true
+	}
+	if run.IssueNumber > 0 {
+		return strings.TrimSpace(run.Repo), run.IssueNumber, true
+	}
+	return "", 0, false
+}
+
+func expectsGitHubReply(run state.Run, target *RunResponseTarget) bool {
+	if target == nil {
+		return runtrigger.Normalize(run.Trigger.String()).IsComment()
+	}
+	if target.IssueNumber > 0 || target.ReviewThreadID > 0 {
+		switch runtrigger.Normalize(run.Trigger.String()) {
+		case runtrigger.NamePRComment, runtrigger.NamePRReview, runtrigger.NamePRReviewComment, runtrigger.NamePRReviewThread, runtrigger.NameIssueEdited:
+			return true
+		}
+	}
+	return false
+}
+
+func responseTargetReviewThreadID(target *RunResponseTarget) int64 {
+	if target == nil {
+		return 0
+	}
+	return target.ReviewThreadID
+}
+
+func responseTargetTrigger(target *RunResponseTarget) string {
+	if target == nil {
+		return ""
+	}
+	return strings.TrimSpace(target.Trigger.String())
 }
 
 func BuildHeadBranch(taskID, task, runID string) string {
