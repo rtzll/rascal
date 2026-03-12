@@ -2727,6 +2727,30 @@ Repository: %s
 	b.WriteString(run.Task)
 	b.WriteString(`
 
+`)
+	if shouldIncludeGitContext(run) {
+		b.WriteString(`## Git Context
+
+- Remote: ` + "`origin`" + `
+- Base branch: ` + "`" + strings.TrimSpace(run.BaseBranch) + "`" + `
+- Head branch: ` + "`" + strings.TrimSpace(run.HeadBranch) + "`" + `
+- The repository is already cloned and checked out.
+- You may use ` + "`git`" + ` and ` + "`gh`" + ` directly.
+- Push only to ` + "`origin`" + ` branch ` + "`" + strings.TrimSpace(run.HeadBranch) + "`" + `.
+- If you rewrite history, you must run ` + "`git push --force-with-lease origin HEAD:" + strings.TrimSpace(run.HeadBranch) + "`" + `.
+- Otherwise run ` + "`git push origin HEAD:" + strings.TrimSpace(run.HeadBranch) + "`" + `.
+- Do not push to any other branch.
+- Before finishing, ensure the remote branch is updated and the working tree is clean.
+`)
+		if requiresAgentManagedPublish(run) {
+			b.WriteString(`
+- If the request involves rebasing, merge conflict resolution, or other history rewriting, do not rely on the harness to publish those changes for you. Perform the required ` + "`git push`" + ` yourself before finishing.
+`)
+		}
+		b.WriteString(`
+`)
+	}
+	b.WriteString(`
 ## Constraints
 
 - Do not ask for interactive input.
@@ -2747,6 +2771,19 @@ Repository: %s
 `)
 	}
 	return b.String()
+}
+
+func shouldIncludeGitContext(run state.Run) bool {
+	return run.PRNumber > 0 && strings.TrimSpace(run.BaseBranch) != "" && strings.TrimSpace(run.HeadBranch) != ""
+}
+
+func requiresAgentManagedPublish(run state.Run) bool {
+	switch strings.TrimSpace(run.Trigger) {
+	case "pr_comment", "pr_review", "pr_review_comment", "pr_review_thread":
+		return true
+	default:
+		return false
+	}
 }
 
 func buildHeadBranch(taskID, task, runID string) string {

@@ -27,6 +27,58 @@ import (
 	"github.com/rtzll/rascal/internal/state"
 )
 
+func TestInstructionTextPRGitContext(t *testing.T) {
+	run := state.Run{
+		ID:          "run_abc123",
+		TaskID:      "task_xyz789",
+		Repo:        "acme/widgets",
+		Task:        "Address PR #137 feedback",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/task-xyz789",
+		Trigger:     "pr_comment",
+		IssueNumber: 42,
+		PRNumber:    137,
+		Context:     "Please rebase this on main and fix the conflicts.",
+	}
+
+	got := instructionText(run)
+
+	for _, want := range []string{
+		"## Git Context",
+		"- Remote: `origin`",
+		"- Base branch: `main`",
+		"- Head branch: `rascal/task-xyz789`",
+		"- You may use `git` and `gh` directly.",
+		"- Push only to `origin` branch `rascal/task-xyz789`.",
+		"`git push --force-with-lease origin HEAD:rascal/task-xyz789`",
+		"`git push origin HEAD:rascal/task-xyz789`",
+		"do not rely on the harness to publish those changes for you",
+		"## Additional Context",
+		"Please rebase this on main and fix the conflicts.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("instructionText() missing %q\nfull text:\n%s", want, got)
+		}
+	}
+}
+
+func TestInstructionTextNonPRRunOmitsGitContext(t *testing.T) {
+	run := state.Run{
+		ID:         "run_abc123",
+		TaskID:     "task_xyz789",
+		Repo:       "acme/widgets",
+		Task:       "Fix flaky test",
+		BaseBranch: "main",
+		HeadBranch: "rascal/fix-flaky-test",
+		Trigger:    "issue",
+	}
+
+	got := instructionText(run)
+	if strings.Contains(got, "## Git Context") {
+		t.Fatalf("instructionText() unexpectedly included Git Context\nfull text:\n%s", got)
+	}
+}
+
 var (
 	testStateTemplateOnce sync.Once
 	testStateTemplatePath string
