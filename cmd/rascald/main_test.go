@@ -1671,6 +1671,40 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 	if err != nil {
 		t.Fatalf("seed thread run: %v", err)
 	}
+	if err := os.MkdirAll(threadRun.RunDir, 0o755); err != nil {
+		t.Fatalf("create thread run dir: %v", err)
+	}
+	if err := s.writeRunResponseTarget(threadRun, &runResponseTarget{
+		Repo:           repo,
+		IssueNumber:    prNum,
+		Trigger:        "pr_review_thread",
+		ReviewThreadID: 13,
+	}); err != nil {
+		t.Fatalf("write thread run target: %v", err)
+	}
+	otherThreadRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:       "queued_review_thread_other",
+		TaskID:   taskID,
+		Repo:     repo,
+		Task:     "Address another unresolved review thread",
+		Trigger:  "pr_review_thread",
+		RunDir:   filepath.Join(t.TempDir(), "queued_review_thread_other"),
+		PRNumber: prNum,
+	})
+	if err != nil {
+		t.Fatalf("seed other thread run: %v", err)
+	}
+	if err := os.MkdirAll(otherThreadRun.RunDir, 0o755); err != nil {
+		t.Fatalf("create other thread run dir: %v", err)
+	}
+	if err := s.writeRunResponseTarget(otherThreadRun, &runResponseTarget{
+		Repo:           repo,
+		IssueNumber:    prNum,
+		Trigger:        "pr_review_thread",
+		ReviewThreadID: 99,
+	}); err != nil {
+		t.Fatalf("write other thread run target: %v", err)
+	}
 	otherRun, err := s.store.AddRun(state.CreateRunInput{
 		ID:       "queued_pr_comment",
 		TaskID:   taskID,
@@ -1698,6 +1732,14 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 	}
 	if updatedThreadRun.Status != state.StatusCanceled {
 		t.Fatalf("thread run status = %s, want %s", updatedThreadRun.Status, state.StatusCanceled)
+	}
+
+	updatedOtherThreadRun, ok := s.store.GetRun(otherThreadRun.ID)
+	if !ok {
+		t.Fatalf("missing run %s", otherThreadRun.ID)
+	}
+	if updatedOtherThreadRun.Status != state.StatusQueued {
+		t.Fatalf("non-matching thread run status = %s, want %s", updatedOtherThreadRun.Status, state.StatusQueued)
 	}
 
 	updatedOtherRun, ok := s.store.GetRun(otherRun.ID)
@@ -1746,6 +1788,44 @@ func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 	}
 	if target.Trigger != "pr_comment" {
 		t.Fatalf("target trigger = %q, want pr_comment", target.Trigger)
+	}
+	if target.ReviewThreadID != 0 {
+		t.Fatalf("target review_thread_id = %d, want 0", target.ReviewThreadID)
+	}
+}
+
+func TestCreateAndQueueRunWritesReviewThreadResponseTarget(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	run, err := s.createAndQueueRun(runRequest{
+		TaskID:   "owner/repo#100",
+		Repo:     "owner/repo",
+		Task:     "Address PR #100 unresolved review thread",
+		Trigger:  "pr_review_thread",
+		PRNumber: 100,
+		ResponseTarget: &runResponseTarget{
+			RequestedBy:    " bob ",
+			ReviewThreadID: 42,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	target, ok, err := loadRunResponseTarget(run.RunDir)
+	if err != nil {
+		t.Fatalf("load run response target: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected run response target file")
+	}
+	if target.ReviewThreadID != 42 {
+		t.Fatalf("target review_thread_id = %d, want 42", target.ReviewThreadID)
+	}
+	if target.RequestedBy != "bob" {
+		t.Fatalf("target requested_by = %q, want bob", target.RequestedBy)
 	}
 }
 
