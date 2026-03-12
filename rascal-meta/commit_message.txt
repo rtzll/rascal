@@ -1,5 +1,0 @@
-refactor(state): centralize CreateRunInput default helpers
-
-Add state-level default helpers on CreateRunInput and reuse them in Store.AddRun.
-Simplify rascald run creation to defer state-owned defaulting for debug/base branch,
-and add a store test asserting base branch/trigger/debug defaults.
