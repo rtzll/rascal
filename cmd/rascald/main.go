@@ -63,6 +63,7 @@ var durationComponentPattern = regexp.MustCompile(`(?i)(\d+)\s*(d(?:ays?)?|h(?:o
 
 type githubClient interface {
 	GetIssue(ctx context.Context, repo string, issueNumber int) (ghapi.IssueData, error)
+	GetPullRequest(ctx context.Context, repo string, pullNumber int) (ghapi.PullRequest, error)
 	AddIssueReaction(ctx context.Context, repo string, issueNumber int, content string) error
 	RemoveIssueReactions(ctx context.Context, repo string, issueNumber int) error
 	AddIssueCommentReaction(ctx context.Context, repo string, commentID int64, content string) error
@@ -1109,6 +1110,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			return nil
 		}
 		s.addIssueCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
+		baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.Issue.Number, "", "")
 
 		_, err := s.createAndQueueRun(runRequest{
 			TaskID:      task.ID,
@@ -1119,8 +1121,8 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			PRNumber:    ev.Issue.Number,
 			PRStatus:    state.PRStatusOpen,
 			Context:     strings.TrimSpace(ev.Comment.Body),
-			BaseBranch:  s.defaultBaseBranchForTask(task.ID),
-			HeadBranch:  s.defaultHeadBranchForTask(task.ID),
+			BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
+			HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
 			Debug:       boolPtr(true),
 			ResponseTarget: &runResponseTarget{
 				Repo:        ev.Repository.FullName,
@@ -1149,6 +1151,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			return nil
 		}
 		s.addPullRequestReviewReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ev.Review.ID, ghapi.ReactionEyes)
+		baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.PullRequest.Number, ev.PullRequest.Base.Ref, ev.PullRequest.Head.Ref)
 
 		contextText := strings.TrimSpace(ev.Review.Body)
 		if contextText == "" {
@@ -1163,8 +1166,8 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			PRNumber:    ev.PullRequest.Number,
 			PRStatus:    state.PRStatusOpen,
 			Context:     contextText,
-			BaseBranch:  s.defaultBaseBranchForTask(task.ID),
-			HeadBranch:  s.defaultHeadBranchForTask(task.ID),
+			BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
+			HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
 			Debug:       boolPtr(true),
 			ResponseTarget: &runResponseTarget{
 				Repo:        ev.Repository.FullName,
@@ -1199,6 +1202,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			return nil
 		}
 		s.addPullRequestReviewCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
+		baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.PullRequest.Number, ev.PullRequest.Base.Ref, ev.PullRequest.Head.Ref)
 
 		contextText := strings.TrimSpace(ev.Comment.Body)
 		if location := formatReviewCommentLocation(ev.Comment.Path, ev.Comment.StartLine, ev.Comment.Line); location != "" {
@@ -1219,8 +1223,8 @@ Inline comment location: %s`, contextText, location)
 			PRNumber:    ev.PullRequest.Number,
 			PRStatus:    state.PRStatusOpen,
 			Context:     contextText,
-			BaseBranch:  s.defaultBaseBranchForTask(task.ID),
-			HeadBranch:  s.defaultHeadBranchForTask(task.ID),
+			BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
+			HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
 			Debug:       boolPtr(true),
 			ResponseTarget: &runResponseTarget{
 				Repo:        ev.Repository.FullName,
@@ -1247,6 +1251,7 @@ Inline comment location: %s`, contextText, location)
 			if !ok {
 				return nil
 			}
+			baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.PullRequest.Number, ev.PullRequest.Base.Ref, ev.PullRequest.Head.Ref)
 			_, err := s.createAndQueueRun(runRequest{
 				TaskID:      task.ID,
 				Repo:        ev.Repository.FullName,
@@ -1256,8 +1261,8 @@ Inline comment location: %s`, contextText, location)
 				PRNumber:    ev.PullRequest.Number,
 				PRStatus:    state.PRStatusOpen,
 				Context:     reviewThreadContext(ev.Thread),
-				BaseBranch:  s.defaultBaseBranchForTask(task.ID),
-				HeadBranch:  s.defaultHeadBranchForTask(task.ID),
+				BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
+				HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
 				Debug:       boolPtr(true),
 				ResponseTarget: &runResponseTarget{
 					Repo:           ev.Repository.FullName,
@@ -2540,11 +2545,49 @@ func (s *server) defaultBaseBranchForTask(taskID string) string {
 	return "main"
 }
 
+func (s *server) firstKnownBaseBranch(taskID, preferred string) string {
+	if preferred = strings.TrimSpace(preferred); preferred != "" {
+		return preferred
+	}
+	return s.defaultBaseBranchForTask(taskID)
+}
+
 func (s *server) defaultHeadBranchForTask(taskID string) string {
 	if run, ok := s.store.LastRunForTask(taskID); ok && run.HeadBranch != "" {
 		return run.HeadBranch
 	}
 	return ""
+}
+
+func (s *server) firstKnownHeadBranch(taskID, preferred string) string {
+	if preferred = strings.TrimSpace(preferred); preferred != "" {
+		return preferred
+	}
+	return s.defaultHeadBranchForTask(taskID)
+}
+
+func (s *server) resolvePRBranches(ctx context.Context, repo string, prNumber int, baseBranch, headBranch string) (string, string) {
+	baseBranch = strings.TrimSpace(baseBranch)
+	headBranch = strings.TrimSpace(headBranch)
+	if baseBranch != "" && headBranch != "" {
+		return baseBranch, headBranch
+	}
+	if s.gh == nil || strings.TrimSpace(repo) == "" || prNumber <= 0 {
+		return baseBranch, headBranch
+	}
+
+	pr, err := s.gh.GetPullRequest(ctx, repo, prNumber)
+	if err != nil {
+		log.Printf("resolve PR branches repo=%s pr=%d failed: %v", repo, prNumber, err)
+		return baseBranch, headBranch
+	}
+	if baseBranch == "" {
+		baseBranch = strings.TrimSpace(pr.Base.Ref)
+	}
+	if headBranch == "" {
+		headBranch = strings.TrimSpace(pr.Head.Ref)
+	}
+	return baseBranch, headBranch
 }
 
 func issueHasLabel(labels []ghapi.Label, name string) bool {

@@ -160,6 +160,8 @@ type fakeGitHubClient struct {
 
 	issueData ghapi.IssueData
 	issueErr  error
+	pullData  ghapi.PullRequest
+	pullErr   error
 
 	issueReactions []postedIssueReaction
 	removedIssues  []string
@@ -384,6 +386,13 @@ func (f *fakeGitHubClient) GetIssue(_ context.Context, _ string, _ int) (ghapi.I
 		return ghapi.IssueData{}, f.issueErr
 	}
 	return f.issueData, nil
+}
+
+func (f *fakeGitHubClient) GetPullRequest(_ context.Context, _ string, _ int) (ghapi.PullRequest, error) {
+	if f.pullErr != nil {
+		return ghapi.PullRequest{}, f.pullErr
+	}
+	return f.pullData, nil
 }
 
 func (f *fakeGitHubClient) addIssueReaction(repo string, issueNumber int, content string) {
@@ -1348,6 +1357,60 @@ func TestHandleWebhookIssueCommentIgnoresUnmanagedPR(t *testing.T) {
 	}
 }
 
+func TestHandleWebhookIssueCommentResolvesPRBranchWithoutPriorRun(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	const (
+		repo     = "owner/repo"
+		taskID   = "owner/repo#96"
+		issueNum = 96
+		prNum    = 96
+	)
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	s.gh = &fakeGitHubClient{
+		pullData: ghapi.PullRequest{
+			Number: prNum,
+			Base: struct {
+				Ref string `json:"ref"`
+			}{Ref: "main"},
+			Head: struct {
+				Ref string `json:"ref"`
+			}{Ref: "add-goreleaser"},
+		},
+	}
+
+	payload := []byte(`{"action":"created","issue":{"number":96,"pull_request":{}},"comment":{"id":101,"body":"please address review notes","user":{"login":"alice"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-resolve-branch", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var got state.Run
+	waitFor(t, time.Second, func() bool {
+		runs := s.store.ListRuns(20)
+		for _, run := range runs {
+			if run.Trigger == "pr_comment" {
+				got = run
+				return true
+			}
+		}
+		return false
+	}, "pr_comment run created with resolved branch")
+
+	if got.BaseBranch != "main" {
+		t.Fatalf("base branch = %q, want main", got.BaseBranch)
+	}
+	if got.HeadBranch != "add-goreleaser" {
+		t.Fatalf("head branch = %q, want add-goreleaser", got.HeadBranch)
+	}
+}
+
 func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
@@ -1417,6 +1480,49 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 	}
 	if got.Context != "review state: changes_requested" {
 		t.Fatalf("context = %q, want review state fallback", got.Context)
+	}
+}
+
+func TestHandleWebhookPullRequestReviewUsesPayloadPRBranchesWithoutPriorRun(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	const (
+		repo     = "owner/repo"
+		taskID   = "owner/repo#97"
+		issueNum = 23
+		prNum    = 97
+	)
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	payload := []byte(`{"action":"submitted","review":{"id":303,"body":"needs a small fix","state":"changes_requested","user":{"login":"bob"}},"pull_request":{"number":97,"base":{"ref":"main"},"head":{"ref":"add-goreleaser"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"bob"}}`)
+	req := webhookRequest(t, payload, "pull_request_review", "delivery-review-payload-branch", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var got state.Run
+	waitFor(t, time.Second, func() bool {
+		runs := s.store.ListRuns(20)
+		for _, run := range runs {
+			if run.Trigger == "pr_review" {
+				got = run
+				return true
+			}
+		}
+		return false
+	}, "pr_review run created with payload branch")
+
+	if got.BaseBranch != "main" {
+		t.Fatalf("base branch = %q, want main", got.BaseBranch)
+	}
+	if got.HeadBranch != "add-goreleaser" {
+		t.Fatalf("head branch = %q, want add-goreleaser", got.HeadBranch)
 	}
 }
 

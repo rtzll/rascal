@@ -99,6 +99,33 @@ func (c *APIClient) GetIssue(ctx context.Context, repo string, issueNumber int) 
 	}, nil
 }
 
+func (c *APIClient) GetPullRequest(ctx context.Context, repo string, pullNumber int) (PullRequest, error) {
+	if pullNumber <= 0 {
+		return PullRequest{}, fmt.Errorf("pull number must be positive")
+	}
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return PullRequest{}, err
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, name, pullNumber)
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return PullRequest{}, err
+	}
+	defer closeResponseBody(resp)
+
+	if resp.StatusCode >= 300 {
+		return PullRequest{}, fmt.Errorf("github get pull request failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
+	}
+
+	var out PullRequest
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return PullRequest{}, fmt.Errorf("decode pull request: %w", err)
+	}
+	return out, nil
+}
+
 func (c *APIClient) EnsureLabel(ctx context.Context, repo, name, color, description string) error {
 	owner, repoName, err := splitRepo(repo)
 	if err != nil {

@@ -48,6 +48,41 @@ func TestLabelExists(t *testing.T) {
 	})
 }
 
+func TestGetPullRequest(t *testing.T) {
+	t.Run("returns base and head refs", func(t *testing.T) {
+		client := newGitHubMockClient(t,
+			githubRoute(http.MethodGet, "/repos/owner/repo/pulls/42", func(w http.ResponseWriter, _ *http.Request) {
+				writeJSONResponse(t, w, http.StatusOK, map[string]any{
+					"number": 42,
+					"base":   map[string]any{"ref": "main"},
+					"head":   map[string]any{"ref": "feature/fix-readme"},
+				})
+			}),
+		)
+		pr, err := client.GetPullRequest(context.Background(), "owner/repo", 42)
+		if err != nil {
+			t.Fatalf("GetPullRequest returned error: %v", err)
+		}
+		if pr.Number != 42 {
+			t.Fatalf("pr number = %d, want 42", pr.Number)
+		}
+		if pr.Base.Ref != "main" {
+			t.Fatalf("base ref = %q, want main", pr.Base.Ref)
+		}
+		if pr.Head.Ref != "feature/fix-readme" {
+			t.Fatalf("head ref = %q, want feature/fix-readme", pr.Head.Ref)
+		}
+	})
+
+	t.Run("rejects invalid pull number", func(t *testing.T) {
+		client := NewAPIClient("token")
+		_, err := client.GetPullRequest(context.Background(), "owner/repo", 0)
+		if err == nil || !strings.Contains(err.Error(), "pull number must be positive") {
+			t.Fatalf("expected pull number error, got: %v", err)
+		}
+	})
+}
+
 func TestFindWebhookByURL(t *testing.T) {
 	client := newGitHubMockClient(t,
 		githubRoute(http.MethodGet, "/repos/owner/repo/hooks", func(w http.ResponseWriter, _ *http.Request) {
