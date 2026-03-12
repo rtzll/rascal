@@ -128,7 +128,10 @@ jobs:
           fi
 
       - name: Deploy
+        env:
+          RASCAL_BUILD_COMMIT: ${{ github.sha }}
         run: |
+          export RASCAL_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           go build -o ./bin/rascal ./cmd/rascal
           ./bin/rascal deploy \
             --host "${DEPLOY_HOST}" \
