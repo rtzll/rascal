@@ -1,21 +1,45 @@
 package worker
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/rtzll/rascal/internal/runsummary"
 )
 
-func resolveGitIdentity(ex CommandExecutor) (string, string, error) {
-	out, err := runCommand(ex, "", nil, "gh", "api", "user")
+type publishService struct {
+	server    *http.Server
+	listener  net.Listener
+	endpoint  string
+	authToken string
+}
+
+type publishRequest struct {
+	Source         string `json:"source"`
+	Branch         string `json:"branch"`
+	ForceWithLease bool   `json:"force_with_lease"`
+}
+
+type publishResponse struct {
+	Branch         string `json:"branch"`
+	Scope          string `json:"scope"`
+	ForceWithLease bool   `json:"force_with_lease"`
+}
+
+func resolveGitIdentity(ex CommandExecutor, githubToken string) (string, string, error) {
+	out, err := runCommand(ex, "", githubAuthEnv(githubToken), "gh", "api", "user")
 	if err != nil {
 		return "", "", fmt.Errorf("query GitHub user: %w", err)
 	}
@@ -36,6 +60,9 @@ func checkoutRepo(ex CommandExecutor, cfg Config) error {
 	repoURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", cfg.GitHubToken, cfg.Repo)
 	if _, err := os.Stat(filepath.Join(cfg.RepoDir, ".git")); err == nil {
 		log.Printf("[%s] repo already present, refreshing", nowUTC())
+		if _, err := runCommand(ex, "", nil, "git", "-C", cfg.RepoDir, "remote", "set-url", "origin", repoURL); err != nil {
+			return fmt.Errorf("reset origin url: %w", err)
+		}
 		if _, err := runCommand(ex, "", nil, "git", "-C", cfg.RepoDir, "fetch", "--all", "--prune"); err != nil {
 			return fmt.Errorf("refresh existing checkout: %w", err)
 		}
@@ -63,18 +90,259 @@ func checkoutRepo(ex CommandExecutor, cfg Config) error {
 		if err != nil {
 			return fmt.Errorf("checkout head branch %s: %w", cfg.HeadBranch, err)
 		}
-		return nil
+		return configurePushAccess(ex, cfg)
 	}
 	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "ls-remote", "--exit-code", "--heads", "origin", cfg.HeadBranch); err == nil {
 		_, err = runCommand(ex, cfg.RepoDir, nil, "git", "checkout", "-b", cfg.HeadBranch, "origin/"+cfg.HeadBranch)
 		if err != nil {
 			return fmt.Errorf("checkout remote head branch %s: %w", cfg.HeadBranch, err)
 		}
-		return nil
+		return configurePushAccess(ex, cfg)
 	}
 	_, err := runCommand(ex, cfg.RepoDir, nil, "git", "checkout", "-b", cfg.HeadBranch)
 	if err != nil {
 		return fmt.Errorf("create head branch %s: %w", cfg.HeadBranch, err)
+	}
+	return configurePushAccess(ex, cfg)
+}
+
+func configurePushAccess(ex CommandExecutor, cfg Config) error {
+	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "remote", "set-url", "--push", "origin", "no_push://rascal-disabled"); err != nil {
+		return fmt.Errorf("disable direct git push: %w", err)
+	}
+	return nil
+}
+
+func githubAuthEnv(githubToken string) []string {
+	githubToken = strings.TrimSpace(githubToken)
+	if githubToken == "" {
+		return nil
+	}
+	return []string{"GH_TOKEN=" + githubToken}
+}
+
+func publishAgentEnv(cfg Config, publishSvc *publishService) []string {
+	env := []string{
+		"RASCAL_PUBLISH_SCOPE=" + strings.TrimSpace(cfg.PublishScope),
+		"RASCAL_PUBLISH_BRANCHES=" + strings.Join(cfg.PublishBranches, ","),
+	}
+	if publishSvc == nil {
+		return env
+	}
+	env = append(env,
+		"RASCAL_PUBLISH_ENDPOINT="+publishSvc.endpoint,
+		"RASCAL_PUBLISH_AUTH_TOKEN="+publishSvc.authToken,
+	)
+	return env
+}
+
+func scrubAgentGitHubAuth() error {
+	if err := os.Unsetenv("GH_TOKEN"); err != nil {
+		return fmt.Errorf("unset GH_TOKEN: %w", err)
+	}
+	if err := os.Unsetenv("GITHUB_TOKEN"); err != nil {
+		return fmt.Errorf("unset GITHUB_TOKEN: %w", err)
+	}
+	return nil
+}
+
+func startPublishService(cfg Config) (*publishService, error) {
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, fmt.Errorf("generate publish auth token: %w", err)
+	}
+	authToken := hex.EncodeToString(tokenBytes)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("listen on publish socket: %w", err)
+	}
+
+	mux := http.NewServeMux()
+	svc := &publishService{
+		listener:  listener,
+		endpoint:  "http://" + listener.Addr().String(),
+		authToken: authToken,
+	}
+	mux.HandleFunc("/publish", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if subtleAuthHeaderMismatch(r.Header.Get("Authorization"), authToken) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var req publishRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json body", http.StatusBadRequest)
+			return
+		}
+		source := strings.TrimSpace(req.Source)
+		if source == "" {
+			source = "HEAD"
+		}
+		branch := strings.TrimSpace(req.Branch)
+		if branch == "" {
+			branch = strings.TrimSpace(cfg.HeadBranch)
+		}
+		if err := validatePublishBranch(cfg, branch); err != nil {
+			log.Printf("[%s] publish_denied scope=%s branch=%s force_with_lease=%t error=%v", nowUTC(), strings.TrimSpace(cfg.PublishScope), branch, req.ForceWithLease, err)
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		if err := runPublish(cfg, source, branch, req.ForceWithLease); err != nil {
+			log.Printf("[%s] publish_failed scope=%s branch=%s force_with_lease=%t error=%v", nowUTC(), strings.TrimSpace(cfg.PublishScope), branch, req.ForceWithLease, err)
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		log.Printf("[%s] publish_succeeded scope=%s branch=%s force_with_lease=%t", nowUTC(), strings.TrimSpace(cfg.PublishScope), branch, req.ForceWithLease)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(publishResponse{
+			Branch:         branch,
+			Scope:          strings.TrimSpace(cfg.PublishScope),
+			ForceWithLease: req.ForceWithLease,
+		}); err != nil {
+			log.Printf("[%s] publish_response_write_failed branch=%s error=%v", nowUTC(), branch, err)
+		}
+	})
+	svc.server = &http.Server{Handler: mux}
+	go func() {
+		if err := svc.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("[%s] publish service stopped unexpectedly: %v", nowUTC(), err)
+		}
+	}()
+	return svc, nil
+}
+
+func (s *publishService) Close() error {
+	if s == nil || s.server == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("shutdown publish service: %w", err)
+	}
+	return nil
+}
+
+func subtleAuthHeaderMismatch(headerValue, authToken string) bool {
+	expected := "Bearer " + strings.TrimSpace(authToken)
+	if len(headerValue) != len(expected) {
+		return true
+	}
+	return !strings.EqualFold(headerValue[:7], "Bearer ") || !constantTimeEqual(headerValue, expected)
+}
+
+func constantTimeEqual(left, right string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	var diff byte
+	for i := range left {
+		diff |= left[i] ^ right[i]
+	}
+	return diff == 0
+}
+
+func validatePublishBranch(cfg Config, branch string) error {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return fmt.Errorf("publish branch is required")
+	}
+	switch strings.TrimSpace(cfg.PublishScope) {
+	case "", "branch_scoped", "task_scoped":
+		for _, allowed := range cfg.PublishBranches {
+			if strings.TrimSpace(allowed) == branch {
+				return nil
+			}
+		}
+		return fmt.Errorf("publish to branch %q is not allowed for scope %q", branch, firstNonEmptyValue(cfg.PublishScope, "branch_scoped"))
+	case "repo_maintainer":
+		if branch == strings.TrimSpace(cfg.BaseBranch) {
+			return fmt.Errorf("publish to protected base branch %q is not allowed for repo_maintainer scope", branch)
+		}
+		return nil
+	case "unrestricted":
+		return nil
+	default:
+		return fmt.Errorf("unsupported publish scope %q", cfg.PublishScope)
+	}
+}
+
+func runPublish(cfg Config, source, branch string, forceWithLease bool) error {
+	authURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", cfg.GitHubToken, cfg.Repo)
+	args := []string{"-C", cfg.RepoDir, "-c", "remote.origin.pushurl=" + authURL, "push"}
+	if forceWithLease {
+		args = append(args, "--force-with-lease")
+	}
+	args = append(args, "origin", source+":"+branch)
+	cmd := exec.Command("git", args...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.TrimSpace(string(output))
+		if text == "" {
+			return fmt.Errorf("git push failed: %w", err)
+		}
+		return fmt.Errorf("git push failed: %w (%s)", err, text)
+	}
+	localSHA, err := gitRefSHA(cfg.RepoDir, source)
+	if err != nil {
+		return fmt.Errorf("resolve pushed ref %q: %w", source, err)
+	}
+	if err := exec.Command("git", "-C", cfg.RepoDir, "update-ref", "refs/remotes/origin/"+branch, localSHA).Run(); err != nil {
+		return fmt.Errorf("update remote-tracking ref for %s: %w", branch, err)
+	}
+	return nil
+}
+
+func gitRefSHA(repoDir, ref string) (string, error) {
+	out, err := exec.Command("git", "-C", repoDir, "rev-parse", ref).CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err != nil {
+		if text == "" {
+			return "", fmt.Errorf("git rev-parse %s: %w", ref, err)
+		}
+		return "", fmt.Errorf("git rev-parse %s: %w (%s)", ref, err, text)
+	}
+	return text, nil
+}
+
+func ensureWorkspaceClean(ex CommandExecutor, cfg Config) error {
+	statusOut, err := runCommand(ex, cfg.RepoDir, nil, "git", "status", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("git status --porcelain: %w", err)
+	}
+	if strings.TrimSpace(statusOut) != "" {
+		return fmt.Errorf("working tree is dirty; commit, stash, or discard changes before finishing")
+	}
+	return nil
+}
+
+func ensurePublishedState(ex CommandExecutor, cfg Config) error {
+	switch strings.TrimSpace(cfg.PublishScope) {
+	case "repo_maintainer", "unrestricted":
+		return nil
+	}
+	localSHA, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-parse", "HEAD")
+	if err != nil {
+		return fmt.Errorf("git rev-parse HEAD: %w", err)
+	}
+	remoteHeadRef := "refs/remotes/origin/" + strings.TrimSpace(cfg.HeadBranch)
+	if remoteSHA, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-parse", "--verify", remoteHeadRef); err == nil {
+		if strings.TrimSpace(remoteSHA) != strings.TrimSpace(localSHA) {
+			return fmt.Errorf("head branch %q is not published; use rascal-publish before finishing", cfg.HeadBranch)
+		}
+		return nil
+	}
+	baseRef := "refs/remotes/origin/" + strings.TrimSpace(cfg.BaseBranch)
+	baseSHA, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-parse", "--verify", baseRef)
+	if err != nil {
+		return nil
+	}
+	if strings.TrimSpace(baseSHA) != strings.TrimSpace(localSHA) {
+		return fmt.Errorf("head branch %q has unpublished commits; use rascal-publish before finishing", cfg.HeadBranch)
 	}
 	return nil
 }
@@ -138,7 +406,7 @@ func firstNonEmptyLine(s string) string {
 }
 
 func loadPRView(ex CommandExecutor, cfg Config) (prView, bool, error) {
-	out, err := runCommand(ex, cfg.RepoDir, nil, "gh", "pr", "view", cfg.HeadBranch, "--repo", cfg.Repo, "--json", "number,url")
+	out, err := runCommand(ex, cfg.RepoDir, githubAuthEnv(cfg.GitHubToken), "gh", "pr", "view", cfg.HeadBranch, "--repo", cfg.Repo, "--json", "number,url")
 	if err != nil {
 		return prView{}, false, nil
 	}
@@ -147,22 +415,6 @@ func loadPRView(ex CommandExecutor, cfg Config) (prView, bool, error) {
 		return prView{}, false, fmt.Errorf("decode gh pr view output: %w", err)
 	}
 	return view, true, nil
-}
-
-func branchAheadOfBase(ex CommandExecutor, cfg Config) (bool, error) {
-	out, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-list", "--left-right", "--count", "origin/"+cfg.BaseBranch+"...HEAD")
-	if err != nil {
-		return false, fmt.Errorf("compare branch with origin/%s: %w", cfg.BaseBranch, err)
-	}
-	parts := strings.Fields(out)
-	if len(parts) != 2 {
-		return false, fmt.Errorf("unexpected git rev-list output: %q", strings.TrimSpace(out))
-	}
-	ahead, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return false, fmt.Errorf("parse ahead count %q: %w", parts[1], err)
-	}
-	return ahead > 0, nil
 }
 
 func RunStage(name string, fn func() error) error {

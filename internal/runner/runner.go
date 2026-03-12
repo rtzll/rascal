@@ -13,21 +13,23 @@ import (
 
 // Spec defines the input contract for a single run.
 type Spec struct {
-	RunID        string
-	TaskID       string
-	Repo         string
-	Instruction  string
-	AgentRuntime runtime.Runtime
-	RunnerImage  string
-	BaseBranch   string
-	HeadBranch   string
-	Trigger      runtrigger.Name
-	Debug        bool
-	RunDir       string
-	IssueNumber  int
-	PRNumber     int
-	Context      string
-	TaskSession  TaskSessionSpec
+	RunID           string
+	TaskID          string
+	Repo            string
+	Instruction     string
+	AgentRuntime    runtime.Runtime
+	RunnerImage     string
+	BaseBranch      string
+	HeadBranch      string
+	PublishScope    string
+	PublishBranches []string
+	Trigger         runtrigger.Name
+	Debug           bool
+	RunDir          string
+	IssueNumber     int
+	PRNumber        int
+	Context         string
+	TaskSession     TaskSessionSpec
 }
 
 var ErrExecutionNotFound = errors.New("execution handle not found")

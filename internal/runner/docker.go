@@ -114,6 +114,8 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		"RASCAL_AGENT_RUNTIME":       agentRuntime.String(),
 		"RASCAL_BASE_BRANCH":         spec.BaseBranch,
 		"RASCAL_HEAD_BRANCH":         spec.HeadBranch,
+		"RASCAL_PUBLISH_SCOPE":       strings.TrimSpace(spec.PublishScope),
+		"RASCAL_PUBLISH_BRANCHES":    strings.Join(spec.PublishBranches, ","),
 		"RASCAL_TRIGGER":             spec.Trigger.String(),
 		"RASCAL_GOOSE_DEBUG":         strconv.FormatBool(spec.Debug),
 		"RASCAL_CONTEXT":             spec.Context,

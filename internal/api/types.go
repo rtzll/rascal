@@ -17,13 +17,15 @@ type ServiceStatusResponse struct {
 }
 
 type CreateTaskRequest struct {
-	TaskID       string           `json:"task_id,omitempty"`
-	Repo         string           `json:"repo"`
-	Instruction  string           `json:"instruction"`
-	AgentRuntime *runtime.Runtime `json:"agent_runtime,omitempty"`
-	BaseBranch   string           `json:"base_branch"`
-	Trigger      runtrigger.Name  `json:"trigger,omitempty"`
-	Debug        *bool            `json:"debug,omitempty"`
+	TaskID          string             `json:"task_id,omitempty"`
+	Repo            string             `json:"repo"`
+	Instruction     string             `json:"instruction"`
+	AgentRuntime    *runtime.Runtime   `json:"agent_runtime,omitempty"`
+	BaseBranch      string             `json:"base_branch"`
+	PublishScope    state.PublishScope `json:"publish_scope,omitempty"`
+	PublishBranches []string           `json:"publish_branches,omitempty"`
+	Trigger         runtrigger.Name    `json:"trigger,omitempty"`
+	Debug           *bool              `json:"debug,omitempty"`
 }
 
 func (r *CreateTaskRequest) UnmarshalJSON(data []byte) error {
@@ -43,10 +45,12 @@ func (r *CreateTaskRequest) UnmarshalJSON(data []byte) error {
 }
 
 type CreateIssueTaskRequest struct {
-	Repo         string           `json:"repo"`
-	IssueNumber  int              `json:"issue_number"`
-	AgentRuntime *runtime.Runtime `json:"agent_runtime,omitempty"`
-	Debug        *bool            `json:"debug,omitempty"`
+	Repo            string             `json:"repo"`
+	IssueNumber     int                `json:"issue_number"`
+	AgentRuntime    *runtime.Runtime   `json:"agent_runtime,omitempty"`
+	PublishScope    state.PublishScope `json:"publish_scope,omitempty"`
+	PublishBranches []string           `json:"publish_branches,omitempty"`
+	Debug           *bool              `json:"debug,omitempty"`
 }
 
 type RunResponse struct {

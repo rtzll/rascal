@@ -251,6 +251,12 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.HeadBranch != "rascal/run_1" {
 		t.Fatalf("expected default head branch, got %q", cfg.HeadBranch)
 	}
+	if cfg.PublishScope != "branch_scoped" {
+		t.Fatalf("expected default publish scope branch_scoped, got %q", cfg.PublishScope)
+	}
+	if len(cfg.PublishBranches) != 1 || cfg.PublishBranches[0] != "rascal/run_1" {
+		t.Fatalf("expected default publish branches to include head branch, got %#v", cfg.PublishBranches)
+	}
 	if cfg.IssueNumber != 7 {
 		t.Fatalf("expected issue number 7, got %d", cfg.IssueNumber)
 	}
@@ -286,6 +292,7 @@ func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
 	t.Setenv("GOOSE_PATH_ROOT", "")
+	t.Setenv("GOOSE_MOIM_MESSAGE_FILE", "")
 	t.Setenv("RASCAL_TASK_SESSION_MODE", "")
 	t.Setenv("RASCAL_TASK_SESSION_RESUME", "")
 	t.Setenv("RASCAL_TASK_SESSION_KEY", "")
@@ -440,7 +447,7 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 		},
 	}
 
-	if _, _, err := worker.RunGooseCodex(ex, cfg); err != nil {
+	if _, _, err := worker.RunGooseCodex(ex, cfg, nil); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -491,7 +498,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 		},
 	}
 
-	if _, _, err := worker.RunGooseCodex(ex, cfg); err != nil {
+	if _, _, err := worker.RunGooseCodex(ex, cfg, nil); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -544,7 +551,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 		},
 	}
 
-	if _, _, err := worker.RunGooseCodex(ex, cfg); err != nil {
+	if _, _, err := worker.RunGooseCodex(ex, cfg, nil); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -615,7 +622,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 		},
 	}
 
-	if _, _, err := worker.RunGooseCodex(ex, cfg); err != nil {
+	if _, _, err := worker.RunGooseCodex(ex, cfg, nil); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	if len(calls) != 2 {
@@ -698,7 +705,7 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 		},
 	}
 
-	_, _, err := worker.RunGooseCodex(ex, cfg)
+	_, _, err := worker.RunGooseCodex(ex, cfg, nil)
 	if err == nil {
 		t.Fatal("expected runGoose to fail")
 	}
@@ -758,7 +765,7 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 		},
 	}
 
-	if _, _, err := worker.RunGooseCodex(ex, cfg); err != nil {
+	if _, _, err := worker.RunGooseCodex(ex, cfg, nil); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -823,7 +830,7 @@ func TestRunCodexFreshSession(t *testing.T) {
 		},
 	}
 
-	output, sessionID, err := worker.RunCodex(ex, cfg)
+	output, sessionID, err := worker.RunCodex(ex, cfg, nil)
 	if err != nil {
 		t.Fatalf("runCodex returned error: %v", err)
 	}
@@ -933,7 +940,7 @@ func TestRunCodexResumeSession(t *testing.T) {
 		},
 	}
 
-	_, sessionID, err := worker.RunCodex(ex, cfg)
+	_, sessionID, err := worker.RunCodex(ex, cfg, nil)
 	if err != nil {
 		t.Fatalf("runCodex returned error: %v", err)
 	}
@@ -1009,7 +1016,7 @@ func TestRunCodexSkipsRecordedUsageWhenSessionUsageInvalid(t *testing.T) {
 		},
 	}
 
-	if _, _, err := worker.RunCodex(ex, cfg); err != nil {
+	if _, _, err := worker.RunCodex(ex, cfg, nil); err != nil {
 		t.Fatalf("runCodex returned error: %v", err)
 	}
 	if _, ok, err := runsummary.ReadRecordedTokenUsage(filepath.Join(root, runsummary.RecordedTokenUsageFile)); err != nil {
@@ -1065,7 +1072,7 @@ func TestRunClaudeFreshSession(t *testing.T) {
 		},
 	}
 
-	output, sessionID, err := worker.RunClaude(ex, cfg)
+	output, sessionID, err := worker.RunClaude(ex, cfg, nil)
 	if err != nil {
 		t.Fatalf("RunClaude returned error: %v", err)
 	}
@@ -1141,7 +1148,7 @@ func TestRunClaudeResumeSession(t *testing.T) {
 		},
 	}
 
-	_, sessionID, err := worker.RunClaude(ex, cfg)
+	_, sessionID, err := worker.RunClaude(ex, cfg, nil)
 	if err != nil {
 		t.Fatalf("RunClaude returned error: %v", err)
 	}
@@ -1185,7 +1192,7 @@ func TestRunClaudeNoTokenFile(t *testing.T) {
 		},
 	}
 
-	_, _, err := worker.RunClaude(ex, cfg)
+	_, _, err := worker.RunClaude(ex, cfg, nil)
 	if err != nil {
 		t.Fatalf("RunClaude returned error: %v", err)
 	}
@@ -1274,7 +1281,7 @@ func TestRunGooseClaudeFreshSession(t *testing.T) {
 		},
 	}
 
-	output, _, err := worker.RunGooseClaude(ex, cfg)
+	output, _, err := worker.RunGooseClaude(ex, cfg, nil)
 	if err != nil {
 		t.Fatalf("RunGooseClaude returned error: %v", err)
 	}
@@ -1326,7 +1333,7 @@ func TestRunGooseClaudeNoTokenFile(t *testing.T) {
 		},
 	}
 
-	_, _, err := worker.RunGooseClaude(ex, cfg)
+	_, _, err := worker.RunGooseClaude(ex, cfg, nil)
 	if err != nil {
 		t.Fatalf("RunGooseClaude returned error: %v", err)
 	}
@@ -1371,15 +1378,23 @@ case "$cmd" in
     mkdir -p "$target/.git"
     exit 0
     ;;
-  fetch|pull|checkout|add|commit|push)
+  fetch|pull|checkout|config)
+    exit 0
+    ;;
+  remote)
     exit 0
     ;;
   status)
-    printf ' M touched.txt\n'
     exit 0
     ;;
   rev-parse)
     if [ "$#" -ge 1 ] && [ "$1" = "--verify" ]; then
+      case "$2" in
+        refs/remotes/origin/rascal/run_fake|refs/remotes/origin/main)
+          printf '0123456789abcdef0123456789abcdef01234567\n'
+          exit 0
+          ;;
+      esac
       exit 1
     fi
     if [ "$#" -ge 1 ] && [ "$1" = "HEAD" ]; then
@@ -1423,27 +1438,7 @@ case "$cmd" in
     shift
     case "$sub" in
       view)
-        if [ -f "$state_dir/pr_created" ]; then
-          printf '{"number":77,"url":"https://github.com/owner/repo/pull/77"}\n'
-          exit 0
-        fi
-        exit 1
-        ;;
-      create)
-        has_label=false
-        while [ "$#" -gt 0 ]; do
-          if [ "$1" = "--label" ] && [ "$#" -ge 2 ] && [ "$2" = "rascal" ]; then
-            has_label=true
-            break
-          fi
-          shift
-        done
-        if [ "$has_label" != true ]; then
-          echo "expected gh pr create to include --label rascal" >&2
-          exit 1
-        fi
-        : > "$state_dir/pr_created"
-        printf 'https://github.com/owner/repo/pull/77\n'
+        printf '{"number":77,"url":"https://github.com/owner/repo/pull/77"}\n'
         exit 0
         ;;
     esac
@@ -1504,18 +1499,6 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 	if meta.HeadSHA != "0123456789abcdef0123456789abcdef01234567" {
 		t.Fatalf("unexpected head_sha: %q", meta.HeadSHA)
 	}
-
-	prBodyData, err := os.ReadFile(filepath.Join(metaDir, "pr_body.md"))
-	if err != nil {
-		t.Fatalf("read pr_body.md: %v", err)
-	}
-	prBody := string(prBodyData)
-	if !strings.Contains(prBody, "<details><summary>Agent Details</summary>") {
-		t.Fatalf("expected agent details block in pr body:\n%s", prBody)
-	}
-	if !strings.Contains(prBody, "Rascal run `run_fake` completed in ") || !strings.Contains(prBody, "· 321 tokens") {
-		t.Fatalf("expected token summary in pr body:\n%s", prBody)
-	}
 }
 
 func TestRunWithExecutorUsesCodexBackend(t *testing.T) {
@@ -1556,9 +1539,9 @@ func TestRunWithExecutorUsesCodexBackend(t *testing.T) {
 			case name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "view":
 				return `{"number":88,"url":"https://github.com/owner/repo/pull/88"}`, nil
 			case name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain":
-				return " M changed.txt\n", nil
-			case name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--left-right" && args[2] == "--count":
-				return "0 1", nil
+				return "", nil
+			case name == "git" && len(args) >= 3 && args[0] == "rev-parse" && args[1] == "--verify":
+				return "0123456789abcdef0123456789abcdef01234567", nil
 			case name == "git" && len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
 				return "0123456789abcdef0123456789abcdef01234567", nil
 			default:
@@ -1692,7 +1675,7 @@ func TestRunWithExecutorFailsWhenRequiredCommandMissing(t *testing.T) {
 	}
 }
 
-func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
+func TestRunWithExecutorSetsMetaErrorOnDirtyWorkspace(t *testing.T) {
 	metaDir := filepath.Join(t.TempDir(), "meta")
 	workRoot := filepath.Join(t.TempDir(), "work")
 	repoDir := filepath.Join(workRoot, "repo")
@@ -1709,6 +1692,7 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_INSTRUCTION", "Address PR feedback")
 	t.Setenv("RASCAL_AGENT_RUNTIME", "goose")
+	t.Setenv("RASCAL_HEAD_BRANCH", "rascal/run_no_branch_diff")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
@@ -1718,17 +1702,8 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 			if name == "gh" && len(args) >= 2 && args[0] == "api" && args[1] == "user" {
 				return `{"login":"rascalbot"}`, nil
 			}
-			if name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "view" {
-				return "", errors.New("not found")
-			}
-			if name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "create" {
-				return "", errors.New("create failed")
-			}
 			if name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain" {
 				return " M changed.txt\n", nil
-			}
-			if name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--left-right" && args[2] == "--count" {
-				return "0 1", nil
 			}
 			return "", nil
 		},
@@ -1743,8 +1718,8 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 	}
 
 	err := worker.RunWithExecutor(ex)
-	if err == nil || !strings.Contains(err.Error(), "stage pr_create: gh pr create failed") {
-		t.Fatalf("expected pr create failure, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "stage finalize_workspace: working tree is dirty") {
+		t.Fatalf("expected dirty workspace failure, got: %v", err)
 	}
 
 	metaData, readErr := os.ReadFile(filepath.Join(metaDir, "meta.json"))
@@ -1761,12 +1736,12 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 	if meta.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit code in meta, got %d", meta.ExitCode)
 	}
-	if !strings.Contains(meta.Error, "stage pr_create: gh pr create failed") {
-		t.Fatalf("expected gh pr create failure in meta error, got %q", meta.Error)
+	if !strings.Contains(meta.Error, "stage finalize_workspace: working tree is dirty") {
+		t.Fatalf("expected dirty workspace failure in meta error, got %q", meta.Error)
 	}
 }
 
-func TestRunWithExecutorFailsWhenAgentProducesNoCommitsAheadOfBase(t *testing.T) {
+func TestRunWithExecutorFailsWhenHeadBranchHasUnpublishedCommits(t *testing.T) {
 	metaDir := filepath.Join(t.TempDir(), "meta")
 	workRoot := filepath.Join(t.TempDir(), "work")
 	repoDir := filepath.Join(workRoot, "repo")
@@ -1783,6 +1758,7 @@ func TestRunWithExecutorFailsWhenAgentProducesNoCommitsAheadOfBase(t *testing.T)
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_INSTRUCTION", "Address PR feedback")
 	t.Setenv("RASCAL_AGENT_RUNTIME", "goose")
+	t.Setenv("RASCAL_HEAD_BRANCH", "rascal/run_no_branch_diff")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
@@ -1798,8 +1774,14 @@ func TestRunWithExecutorFailsWhenAgentProducesNoCommitsAheadOfBase(t *testing.T)
 			if name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain" {
 				return "", nil
 			}
-			if name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--left-right" && args[2] == "--count" {
-				return "0 0", nil
+			if name == "git" && len(args) >= 3 && args[0] == "rev-parse" && args[1] == "--verify" && args[2] == "refs/remotes/origin/rascal/run_no_branch_diff" {
+				return "", errors.New("missing remote head")
+			}
+			if name == "git" && len(args) >= 3 && args[0] == "rev-parse" && args[1] == "--verify" && args[2] == "refs/remotes/origin/main" {
+				return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil
+			}
+			if name == "git" && len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD" {
+				return "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", nil
 			}
 			return "", nil
 		},
@@ -1814,8 +1796,8 @@ func TestRunWithExecutorFailsWhenAgentProducesNoCommitsAheadOfBase(t *testing.T)
 	}
 
 	err := worker.RunWithExecutor(ex)
-	if err == nil || !strings.Contains(err.Error(), "stage check_branch_diff: agent produced no commits ahead of main") {
-		t.Fatalf("expected no-branch-diff failure, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "stage finalize_workspace: head branch \"rascal/run_no_branch_diff\" has unpublished commits") {
+		t.Fatalf("expected unpublished-commits failure, got: %v", err)
 	}
 
 	metaData, readErr := os.ReadFile(filepath.Join(metaDir, "meta.json"))
@@ -1832,8 +1814,8 @@ func TestRunWithExecutorFailsWhenAgentProducesNoCommitsAheadOfBase(t *testing.T)
 	if meta.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit code in meta, got %d", meta.ExitCode)
 	}
-	if !strings.Contains(meta.Error, "stage check_branch_diff: agent produced no commits ahead of main") {
-		t.Fatalf("expected branch diff failure in meta error, got %q", meta.Error)
+	if !strings.Contains(meta.Error, "stage finalize_workspace: head branch \"rascal/run_no_branch_diff\" has unpublished commits") {
+		t.Fatalf("expected unpublished-commits failure in meta error, got %q", meta.Error)
 	}
 }
 

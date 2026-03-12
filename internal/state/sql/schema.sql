@@ -33,6 +33,8 @@ CREATE TABLE runs (
   pr_url TEXT NOT NULL DEFAULT '',
   pr_status TEXT NOT NULL DEFAULT 'none',
   head_sha TEXT NOT NULL DEFAULT '',
+  publish_scope TEXT NOT NULL DEFAULT 'branch_scoped',
+  publish_branches TEXT NOT NULL DEFAULT '[]',
   context TEXT NOT NULL DEFAULT '',
   error TEXT NOT NULL DEFAULT '',
   status_reason TEXT NOT NULL DEFAULT '',

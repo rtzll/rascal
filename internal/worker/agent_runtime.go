@@ -20,20 +20,20 @@ type gooseSessionInfo struct {
 	Name string `json:"name"`
 }
 
-func runAgent(ex CommandExecutor, cfg Config) (string, string, error) {
+func runAgent(ex CommandExecutor, cfg Config, publishSvc *publishService) (string, string, error) {
 	switch configuredAgentRuntime(cfg) {
 	case runtime.RuntimeCodex:
-		return RunCodex(ex, cfg)
+		return RunCodex(ex, cfg, publishSvc)
 	case runtime.RuntimeClaude:
-		return RunClaude(ex, cfg)
+		return RunClaude(ex, cfg, publishSvc)
 	case runtime.RuntimeGooseClaude:
-		return RunGooseClaude(ex, cfg)
+		return RunGooseClaude(ex, cfg, publishSvc)
 	default:
-		return RunGooseCodex(ex, cfg)
+		return RunGooseCodex(ex, cfg, publishSvc)
 	}
 }
 
-func RunGooseCodex(ex CommandExecutor, cfg Config) (string, string, error) {
+func RunGooseCodex(ex CommandExecutor, cfg Config, publishSvc *publishService) (string, string, error) {
 	sessionID := configuredRuntimeSessionID(cfg)
 	sessionMode := configuredSessionMode(cfg)
 	sessionKey := configuredSessionKey(cfg)
@@ -60,14 +60,14 @@ func RunGooseCodex(ex CommandExecutor, cfg Config) (string, string, error) {
 	)
 
 	firstAttemptArgs := GooseRunArgs(cfg, resume)
-	if err := RunGooseOnce(ex, cfg, firstAttemptArgs); err != nil {
+	if err := RunGooseOnce(ex, cfg, publishSvc, firstAttemptArgs); err != nil {
 		if resume && IsSessionResumeFailure(err, cfg.GooseLogPath) {
 			log.Printf("[%s] goose session resume failed; falling back to fresh session name=%s reason=%s", nowUTC(), sessionID, strings.TrimSpace(err.Error()))
 			if resetErr := ResetGooseSessionRoot(cfg.GoosePathRoot); resetErr != nil {
 				log.Printf("[%s] goose session reset warning: %v", nowUTC(), resetErr)
 			}
 			fallbackArgs := GooseRunArgs(cfg, false)
-			if retryErr := RunGooseOnce(ex, cfg, fallbackArgs); retryErr != nil {
+			if retryErr := RunGooseOnce(ex, cfg, publishSvc, fallbackArgs); retryErr != nil {
 				if writeErr := ensureGooseLogHasError(cfg.GooseLogPath); writeErr != nil {
 					log.Printf("[%s] goose fallback log write warning: %v", nowUTC(), writeErr)
 				}
@@ -108,7 +108,7 @@ func GooseRunArgs(cfg Config, resume bool) []string {
 	return args
 }
 
-func RunGooseOnce(ex CommandExecutor, cfg Config, args []string) (err error) {
+func RunGooseOnce(ex CommandExecutor, cfg Config, publishSvc *publishService, args []string) (err error) {
 	logFile, err := os.OpenFile(cfg.GooseLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open goose log: %w", err)
@@ -119,7 +119,7 @@ func RunGooseOnce(ex CommandExecutor, cfg Config, args []string) (err error) {
 		}
 	}()
 
-	env := []string{}
+	env := publishAgentEnv(cfg, publishSvc)
 	if cfg.GooseDebug {
 		env = append(env, "GOOSE_CODEX_DEBUG=1")
 	}
@@ -129,7 +129,7 @@ func RunGooseOnce(ex CommandExecutor, cfg Config, args []string) (err error) {
 	return nil
 }
 
-func RunCodex(ex CommandExecutor, cfg Config) (output string, sessionID string, err error) {
+func RunCodex(ex CommandExecutor, cfg Config, publishSvc *publishService) (output string, sessionID string, err error) {
 	if err := ensureCodexHome(cfg); err != nil {
 		return "", "", fmt.Errorf("ensure codex home: %w", err)
 	}
@@ -165,7 +165,7 @@ func RunCodex(ex CommandExecutor, cfg Config) (output string, sessionID string, 
 		}
 	}()
 
-	if err := ex.RunWithInput(cfg.RepoDir, nil, strings.NewReader(string(instructions)), logFile, logFile, "codex", args...); err != nil {
+	if err := ex.RunWithInput(cfg.RepoDir, publishAgentEnv(cfg, publishSvc), strings.NewReader(string(instructions)), logFile, logFile, "codex", args...); err != nil {
 		sessionID, discoverErr := discoverLatestCodexSessionID(cfg.CodexHome)
 		if discoverErr != nil {
 			log.Printf("[%s] codex session discovery warning: %v", nowUTC(), discoverErr)
@@ -204,7 +204,7 @@ func CodexRunArgs(cfg Config) []string {
 	return args
 }
 
-func RunClaude(ex CommandExecutor, cfg Config) (output string, sessionID string, err error) {
+func RunClaude(ex CommandExecutor, cfg Config, publishSvc *publishService) (output string, sessionID string, err error) {
 	token, err := loadClaudeOAuthToken(cfg)
 	if err != nil {
 		return "", "", fmt.Errorf("load claude oauth token: %w", err)
@@ -240,7 +240,7 @@ func RunClaude(ex CommandExecutor, cfg Config) (output string, sessionID string,
 		}
 	}()
 
-	env := []string{}
+	env := publishAgentEnv(cfg, publishSvc)
 	if token != "" {
 		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+token)
 	}
@@ -280,7 +280,7 @@ func loadClaudeOAuthToken(cfg Config) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
-func RunGooseClaude(ex CommandExecutor, cfg Config) (string, string, error) {
+func RunGooseClaude(ex CommandExecutor, cfg Config, publishSvc *publishService) (string, string, error) {
 	token, err := loadClaudeOAuthToken(cfg)
 	if err != nil {
 		return "", "", fmt.Errorf("load claude oauth token: %w", err)
@@ -317,14 +317,14 @@ func RunGooseClaude(ex CommandExecutor, cfg Config) (string, string, error) {
 	}
 
 	firstAttemptArgs := GooseRunArgs(cfg, resume)
-	if err := runGooseClaudeOnce(ex, cfg, firstAttemptArgs, env); err != nil {
+	if err := runGooseClaudeOnce(ex, cfg, publishSvc, firstAttemptArgs, env); err != nil {
 		if resume && IsSessionResumeFailure(err, cfg.GooseLogPath) {
 			log.Printf("[%s] goose-claude session resume failed; falling back to fresh session name=%s reason=%s", nowUTC(), sessionID, strings.TrimSpace(err.Error()))
 			if resetErr := ResetGooseSessionRoot(cfg.GoosePathRoot); resetErr != nil {
 				log.Printf("[%s] goose-claude session reset warning: %v", nowUTC(), resetErr)
 			}
 			fallbackArgs := GooseRunArgs(cfg, false)
-			if retryErr := runGooseClaudeOnce(ex, cfg, fallbackArgs, env); retryErr != nil {
+			if retryErr := runGooseClaudeOnce(ex, cfg, publishSvc, fallbackArgs, env); retryErr != nil {
 				if writeErr := ensureGooseLogHasError(cfg.GooseLogPath); writeErr != nil {
 					log.Printf("[%s] goose-claude fallback log write warning: %v", nowUTC(), writeErr)
 				}
@@ -348,7 +348,7 @@ func RunGooseClaude(ex CommandExecutor, cfg Config) (string, string, error) {
 	return string(data), sessionID, nil
 }
 
-func runGooseClaudeOnce(ex CommandExecutor, cfg Config, args, extraEnv []string) (err error) {
+func runGooseClaudeOnce(ex CommandExecutor, cfg Config, publishSvc *publishService, args, extraEnv []string) (err error) {
 	logFile, err := os.OpenFile(cfg.GooseLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open goose-claude log: %w", err)
@@ -359,7 +359,7 @@ func runGooseClaudeOnce(ex CommandExecutor, cfg Config, args, extraEnv []string)
 		}
 	}()
 
-	env := append([]string{}, extraEnv...)
+	env := append(publishAgentEnv(cfg, publishSvc), extraEnv...)
 	if cfg.GooseDebug {
 		env = append(env, "GOOSE_CODEX_DEBUG=1")
 	}

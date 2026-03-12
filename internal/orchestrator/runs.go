@@ -23,6 +23,8 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 	req.TaskID = strings.TrimSpace(req.TaskID)
 	req.BaseBranch = strings.TrimSpace(req.BaseBranch)
 	req.HeadBranch = strings.TrimSpace(req.HeadBranch)
+	req.PublishScope = state.NormalizePublishScope(req.PublishScope)
+	req.PublishBranches = normalizePublishBranches(req.PublishBranches)
 	req.Context = strings.TrimSpace(req.Context)
 	req.CreatedByUserID = strings.TrimSpace(req.CreatedByUserID)
 	if req.Repo == "" || req.Instruction == "" {
@@ -87,6 +89,14 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 			req.HeadBranch = BuildHeadBranch(req.TaskID, req.Instruction, runID)
 		}
 	}
+	switch req.PublishScope {
+	case state.PublishScopeBranchScoped:
+		req.PublishBranches = []string{req.HeadBranch}
+	case state.PublishScopeTaskScoped:
+		req.PublishBranches = appendIfMissing(req.PublishBranches, req.HeadBranch)
+	default:
+		req.PublishBranches = nil
+	}
 
 	runDir := filepath.Join(s.Config.DataDir, "runs", runID)
 
@@ -105,20 +115,22 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 	}
 
 	run, err := s.Store.AddRun(state.CreateRunInput{
-		ID:           runID,
-		TaskID:       req.TaskID,
-		Repo:         req.Repo,
-		Instruction:  req.Instruction,
-		AgentRuntime: effectiveRuntime,
-		BaseBranch:   req.BaseBranch,
-		HeadBranch:   req.HeadBranch,
-		Trigger:      req.Trigger,
-		RunDir:       runDir,
-		IssueNumber:  req.IssueNumber,
-		PRNumber:     req.PRNumber,
-		PRStatus:     req.PRStatus,
-		Context:      req.Context,
-		Debug:        boolPtr(debugEnabled),
+		ID:              runID,
+		TaskID:          req.TaskID,
+		Repo:            req.Repo,
+		Instruction:     req.Instruction,
+		AgentRuntime:    effectiveRuntime,
+		BaseBranch:      req.BaseBranch,
+		HeadBranch:      req.HeadBranch,
+		Trigger:         req.Trigger,
+		RunDir:          runDir,
+		IssueNumber:     req.IssueNumber,
+		PRNumber:        req.PRNumber,
+		PRStatus:        req.PRStatus,
+		PublishScope:    req.PublishScope,
+		PublishBranches: req.PublishBranches,
+		Context:         req.Context,
+		Debug:           boolPtr(debugEnabled),
 	})
 	if err != nil {
 		return state.Run{}, fmt.Errorf("persist run: %w", err)
@@ -268,18 +280,17 @@ Repository: %s
 - Remote: ` + "`origin`" + `
 - Base branch: ` + "`" + strings.TrimSpace(run.BaseBranch) + "`" + `
 - Head branch: ` + "`" + strings.TrimSpace(run.HeadBranch) + "`" + `
+- Publish scope: ` + "`" + string(state.NormalizePublishScope(run.PublishScope)) + "`" + `
+- Allowed publish branches: ` + formatPublishBranchesForInstruction(run.PublishBranches) + `
 - The repository is already cloned and checked out.
-- You may use ` + "`git`" + ` and ` + "`gh`" + ` directly.
-- Push only to ` + "`origin`" + ` branch ` + "`" + strings.TrimSpace(run.HeadBranch) + "`" + `.
-- If you rewrite history, you must run ` + "`git push --force-with-lease origin HEAD:" + strings.TrimSpace(run.HeadBranch) + "`" + `.
-- Otherwise run ` + "`git push origin HEAD:" + strings.TrimSpace(run.HeadBranch) + "`" + `.
-- Do not push to any other branch.
+- You may inspect and mutate local git state freely.
+- Git commit identity is preconfigured for you.
+- Rascal will not auto-commit, auto-push, or auto-create a PR after the agent finishes.
+- Publish branch updates with ` + "`rascal-publish push --branch " + strings.TrimSpace(run.HeadBranch) + "`" + `.
+- If you rewrite history, publish with ` + "`rascal-publish push --force-with-lease --branch " + strings.TrimSpace(run.HeadBranch) + "`" + `.
+- Do not attempt to publish outside the declared scope.
+- Before finishing, ensure the working tree is clean and publish any branch updates you want Rascal to retain.
 `)
-		if requiresAgentManagedPublish(run) {
-			b.WriteString(`
-- If the request involves rebasing, merge conflict resolution, or other history rewriting, do not rely on the harness to publish those changes for you. Perform the required ` + "`git push`" + ` yourself before finishing.
-`)
-		}
 		b.WriteString(`
 `)
 	}
@@ -318,11 +329,55 @@ func PersistentInstructionText(run state.Run) string {
 }
 
 func shouldIncludeGitContext(run state.Run) bool {
-	return run.PRNumber > 0 && strings.TrimSpace(run.BaseBranch) != "" && strings.TrimSpace(run.HeadBranch) != ""
+	return strings.TrimSpace(run.BaseBranch) != "" && strings.TrimSpace(run.HeadBranch) != ""
 }
 
-func requiresAgentManagedPublish(run state.Run) bool {
-	return runtrigger.Normalize(run.Trigger.String()).IsComment()
+func normalizePublishBranches(branches []string) []string {
+	if len(branches) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(branches))
+	out := make([]string, 0, len(branches))
+	for _, branch := range branches {
+		branch = strings.TrimSpace(branch)
+		if branch == "" {
+			continue
+		}
+		if _, ok := seen[branch]; ok {
+			continue
+		}
+		seen[branch] = struct{}{}
+		out = append(out, branch)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func appendIfMissing(values []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return normalizePublishBranches(values)
+	}
+	for _, existing := range values {
+		if strings.TrimSpace(existing) == value {
+			return normalizePublishBranches(values)
+		}
+	}
+	return append(normalizePublishBranches(values), value)
+}
+
+func formatPublishBranchesForInstruction(branches []string) string {
+	branches = normalizePublishBranches(branches)
+	if len(branches) == 0 {
+		return "`(none)`"
+	}
+	quoted := make([]string, 0, len(branches))
+	for _, branch := range branches {
+		quoted = append(quoted, "`"+branch+"`")
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func BuildHeadBranch(taskID, task, runID string) string {
