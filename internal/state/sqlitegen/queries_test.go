@@ -128,7 +128,7 @@ func TestQueriesCoverage(t *testing.T) {
 		AgentBackend: "goose",
 		BaseBranch:   "main",
 		HeadBranch:   "rascal/task-1-run-2",
-		Trigger:      "cli",
+		Trigger:      "pr_review_thread",
 		Debug:        true,
 		Status:       "queued",
 		RunDir:       "/tmp/run_2",
@@ -281,6 +281,40 @@ func TestQueriesCoverage(t *testing.T) {
 	}
 	if taskWithQueue.PendingInput == 0 {
 		t.Fatal("expected task_1 pending_input=true with queued runs")
+	}
+
+	if rows, err := q.SetRunResponseTarget(ctx, SetRunResponseTargetParams{
+		ResponseTargetRepo:           "owner/repo",
+		ResponseTargetIssueNumber:    77,
+		ResponseTargetRequestedBy:    "alice",
+		ResponseTargetTrigger:        "pr_review_thread",
+		ResponseTargetReviewThreadID: 99,
+		UpdatedAt:                    later + 22,
+		ID:                           run2.ID,
+	}); err != nil {
+		t.Fatalf("SetRunResponseTarget: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected SetRunResponseTarget rows=1, got %d", rows)
+	}
+	target, err := q.GetRunResponseTarget(ctx, run2.ID)
+	if err != nil {
+		t.Fatalf("GetRunResponseTarget: %v", err)
+	}
+	if target.ResponseTargetReviewThreadID != 99 {
+		t.Fatalf("response_target_review_thread_id = %d, want 99", target.ResponseTargetReviewThreadID)
+	}
+	if rows, err := q.CancelQueuedReviewThreadRuns(ctx, CancelQueuedReviewThreadRunsParams{
+		Error:                        "review thread resolved",
+		UpdatedAt:                    later + 22,
+		CompletedAt:                  sql.NullInt64{Int64: later + 22, Valid: true},
+		TaskID:                       "task_1",
+		Repo:                         "owner/repo",
+		PrNumber:                     77,
+		ResponseTargetReviewThreadID: 99,
+	}); err != nil {
+		t.Fatalf("CancelQueuedReviewThreadRuns: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expected CancelQueuedReviewThreadRuns rows=1, got %d", rows)
 	}
 
 	if err := q.CancelQueuedRuns(ctx, CancelQueuedRunsParams{Error: "stop", UpdatedAt: later + 23, CompletedAt: sql.NullInt64{Int64: later + 23, Valid: true}, TaskID: "task_1"}); err != nil {

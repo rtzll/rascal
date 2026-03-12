@@ -1567,14 +1567,14 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if err := s.store.SetRunCreatedByUser(run.ID, req.CreatedByUserID); err != nil {
 		return state.Run{}, fmt.Errorf("set run requester: %w", err)
 	}
+	if err := s.writeRunResponseTarget(run, req.ResponseTarget); err != nil {
+		s.setRunStatusBestEffort(run.ID, state.StatusFailed, err.Error())
+		return state.Run{}, fmt.Errorf("prepare run response target: %w", err)
+	}
 
 	if err := s.writeRunFiles(run); err != nil {
 		s.setRunStatusBestEffort(run.ID, state.StatusFailed, err.Error())
 		return state.Run{}, fmt.Errorf("prepare run files: %w", err)
-	}
-	if err := s.writeRunResponseTarget(run, req.ResponseTarget); err != nil {
-		s.setRunStatusBestEffort(run.ID, state.StatusFailed, err.Error())
-		return state.Run{}, fmt.Errorf("prepare run response target: %w", err)
 	}
 	s.scheduleRuns(run.TaskID)
 	return run, nil
@@ -1627,21 +1627,30 @@ func (s *server) writeRunFiles(run state.Run) (err error) {
 }
 
 func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget) error {
-	if target == nil {
-		return nil
-	}
 	out := runResponseTarget{
-		Repo:           strings.TrimSpace(target.Repo),
-		IssueNumber:    target.IssueNumber,
-		RequestedBy:    strings.TrimSpace(target.RequestedBy),
-		Trigger:        strings.TrimSpace(target.Trigger),
-		ReviewThreadID: target.ReviewThreadID,
+		Repo:        strings.TrimSpace(run.Repo),
+		IssueNumber: run.IssueNumber,
+		Trigger:     strings.TrimSpace(run.Trigger),
+	}
+	if run.PRNumber > 0 {
+		out.IssueNumber = run.PRNumber
+	}
+	if target != nil {
+		out.Repo = strings.TrimSpace(target.Repo)
+		out.IssueNumber = target.IssueNumber
+		out.RequestedBy = strings.TrimSpace(target.RequestedBy)
+		out.Trigger = strings.TrimSpace(target.Trigger)
+		out.ReviewThreadID = target.ReviewThreadID
 	}
 	if out.Repo == "" {
 		out.Repo = strings.TrimSpace(run.Repo)
 	}
 	if out.IssueNumber <= 0 {
-		out.IssueNumber = run.PRNumber
+		if run.PRNumber > 0 {
+			out.IssueNumber = run.PRNumber
+		} else {
+			out.IssueNumber = run.IssueNumber
+		}
 	}
 	if out.Trigger == "" {
 		out.Trigger = strings.TrimSpace(run.Trigger)
@@ -1649,14 +1658,14 @@ func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget
 	if out.Repo == "" || out.IssueNumber <= 0 {
 		return nil
 	}
-
-	data, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode run response target: %w", err)
-	}
-	path := filepath.Join(run.RunDir, runResponseTargetFile)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write run response target: %w", err)
+	if err := s.store.SetRunResponseTarget(run.ID, state.RunResponseTarget{
+		Repo:           out.Repo,
+		IssueNumber:    out.IssueNumber,
+		RequestedBy:    out.RequestedBy,
+		Trigger:        out.Trigger,
+		ReviewThreadID: out.ReviewThreadID,
+	}); err != nil {
+		return fmt.Errorf("persist run response target: %w", err)
 	}
 	return nil
 }
@@ -2597,7 +2606,7 @@ func reviewThreadContext(thread ghapi.ReviewThread) string {
 
 func (s *server) cancelQueuedReviewThreadRuns(taskID, repo string, prNumber int, reviewThreadID int64, reason string) {
 	taskID = strings.TrimSpace(taskID)
-	repo = strings.TrimSpace(repo)
+	repo = state.NormalizeRepo(repo)
 	reason = strings.TrimSpace(reason)
 	if taskID == "" || repo == "" || prNumber <= 0 || reviewThreadID <= 0 {
 		return
@@ -2605,13 +2614,19 @@ func (s *server) cancelQueuedReviewThreadRuns(taskID, repo string, prNumber int,
 	if reason == "" {
 		reason = "canceled"
 	}
+	if _, err := s.store.CancelQueuedReviewThreadRuns(taskID, repo, prNumber, reviewThreadID, reason); err != nil {
+		log.Printf("cancel queued review-thread runs for task %s failed: %v", taskID, err)
+	}
 	for _, run := range s.store.ListRuns(10000) {
 		if run.TaskID != taskID || run.Repo != repo || run.PRNumber != prNumber || run.Trigger != "pr_review_thread" || run.Status != state.StatusQueued {
 			continue
 		}
-		target, ok, err := loadRunResponseTarget(run.RunDir)
+		if _, ok := s.store.GetRunResponseTarget(run.ID); ok {
+			continue
+		}
+		target, ok, err := loadLegacyRunResponseTarget(run.RunDir)
 		if err != nil {
-			log.Printf("run %s load response target for review thread cancellation failed: %v", run.ID, err)
+			log.Printf("run %s load legacy response target for review thread cancellation failed: %v", run.ID, err)
 			continue
 		}
 		if !ok || target.ReviewThreadID != reviewThreadID {
@@ -3129,7 +3144,7 @@ func tailRunAgentLog(runDir string, lines int) ([]string, string) {
 	return agentLines, ""
 }
 
-func loadRunResponseTarget(runDir string) (runResponseTarget, bool, error) {
+func loadLegacyRunResponseTarget(runDir string) (runResponseTarget, bool, error) {
 	path := filepath.Join(strings.TrimSpace(runDir), runResponseTargetFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -3146,6 +3161,32 @@ func loadRunResponseTarget(runDir string) (runResponseTarget, bool, error) {
 	target.RequestedBy = strings.TrimSpace(target.RequestedBy)
 	target.Trigger = strings.TrimSpace(target.Trigger)
 	return target, true, nil
+}
+
+func writeLegacyRunResponseTarget(runDir string, target runResponseTarget) error {
+	data, err := json.MarshalIndent(target, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode run response target: %w", err)
+	}
+	path := filepath.Join(strings.TrimSpace(runDir), runResponseTargetFile)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write run response target: %w", err)
+	}
+	return nil
+}
+
+func (s *server) loadRunResponseTarget(run state.Run) (runResponseTarget, bool, error) {
+	target, ok := s.store.GetRunResponseTarget(run.ID)
+	if ok {
+		return runResponseTarget{
+			Repo:           target.Repo,
+			IssueNumber:    target.IssueNumber,
+			RequestedBy:    target.RequestedBy,
+			Trigger:        target.Trigger,
+			ReviewThreadID: target.ReviewThreadID,
+		}, true, nil
+	}
+	return loadLegacyRunResponseTarget(run.RunDir)
 }
 
 func runCommentMarkerPath(runDir, markerFile string) string {
@@ -3275,7 +3316,7 @@ func (s *server) postRunStartCommentBestEffort(run state.Run, sessionMode agent.
 		return
 	}
 
-	target, ok, err := loadRunResponseTarget(run.RunDir)
+	target, ok, err := s.loadRunResponseTarget(run)
 	if err != nil {
 		log.Printf("failed to load run response target for %s: %v", run.ID, err)
 	}
@@ -3316,7 +3357,7 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 		return
 	}
 
-	target, ok, err := loadRunResponseTarget(run.RunDir)
+	target, ok, err := s.loadRunResponseTarget(run)
 	if err != nil {
 		log.Printf("failed to load run response target for %s: %v", run.ID, err)
 		return
@@ -3372,7 +3413,7 @@ func (s *server) postRunFailureCommentBestEffort(run state.Run) {
 		return
 	}
 
-	target, ok, err := loadRunResponseTarget(run.RunDir)
+	target, ok, err := s.loadRunResponseTarget(run)
 	if err != nil {
 		log.Printf("failed to load run response target for %s: %v", run.ID, err)
 	}

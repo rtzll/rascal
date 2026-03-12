@@ -75,6 +75,43 @@ func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (ActiveRu
 	return i, err
 }
 
+const cancelQueuedReviewThreadRuns = `-- name: CancelQueuedReviewThreadRuns :execrows
+UPDATE runs
+SET status = 'canceled', error = ?, updated_at = ?, completed_at = ?
+WHERE task_id = ?
+  AND repo = ?
+  AND pr_number = ?
+  AND trigger = 'pr_review_thread'
+  AND status = 'queued'
+  AND response_target_review_thread_id = ?
+`
+
+type CancelQueuedReviewThreadRunsParams struct {
+	Error                        string        `json:"error"`
+	UpdatedAt                    int64         `json:"updated_at"`
+	CompletedAt                  sql.NullInt64 `json:"completed_at"`
+	TaskID                       string        `json:"task_id"`
+	Repo                         string        `json:"repo"`
+	PrNumber                     int64         `json:"pr_number"`
+	ResponseTargetReviewThreadID int64         `json:"response_target_review_thread_id"`
+}
+
+func (q *Queries) CancelQueuedReviewThreadRuns(ctx context.Context, arg CancelQueuedReviewThreadRunsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, cancelQueuedReviewThreadRuns,
+		arg.Error,
+		arg.UpdatedAt,
+		arg.CompletedAt,
+		arg.TaskID,
+		arg.Repo,
+		arg.PrNumber,
+		arg.ResponseTargetReviewThreadID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const cancelQueuedRuns = `-- name: CancelQueuedRuns :exec
 UPDATE runs
 SET status = 'canceled', error = ?, updated_at = ?, completed_at = ?
@@ -973,6 +1010,33 @@ func (q *Queries) GetRunLease(ctx context.Context, runID string) (RunLease, erro
 		&i.OwnerID,
 		&i.HeartbeatAt,
 		&i.LeaseExpiresAt,
+	)
+	return i, err
+}
+
+const getRunResponseTarget = `-- name: GetRunResponseTarget :one
+SELECT response_target_repo, response_target_issue_number, response_target_requested_by, response_target_trigger, response_target_review_thread_id
+FROM runs
+WHERE id = ?
+`
+
+type GetRunResponseTargetRow struct {
+	ResponseTargetRepo           string `json:"response_target_repo"`
+	ResponseTargetIssueNumber    int64  `json:"response_target_issue_number"`
+	ResponseTargetRequestedBy    string `json:"response_target_requested_by"`
+	ResponseTargetTrigger        string `json:"response_target_trigger"`
+	ResponseTargetReviewThreadID int64  `json:"response_target_review_thread_id"`
+}
+
+func (q *Queries) GetRunResponseTarget(ctx context.Context, id string) (GetRunResponseTargetRow, error) {
+	row := q.db.QueryRowContext(ctx, getRunResponseTarget, id)
+	var i GetRunResponseTargetRow
+	err := row.Scan(
+		&i.ResponseTargetRepo,
+		&i.ResponseTargetIssueNumber,
+		&i.ResponseTargetRequestedBy,
+		&i.ResponseTargetTrigger,
+		&i.ResponseTargetReviewThreadID,
 	)
 	return i, err
 }
@@ -2021,6 +2085,44 @@ type SetRunCredentialIDParams struct {
 
 func (q *Queries) SetRunCredentialID(ctx context.Context, arg SetRunCredentialIDParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setRunCredentialID, arg.CredentialID, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setRunResponseTarget = `-- name: SetRunResponseTarget :execrows
+UPDATE runs
+SET
+  response_target_repo = ?1,
+  response_target_issue_number = ?2,
+  response_target_requested_by = ?3,
+  response_target_trigger = ?4,
+  response_target_review_thread_id = ?5,
+  updated_at = ?6
+WHERE id = ?7
+`
+
+type SetRunResponseTargetParams struct {
+	ResponseTargetRepo           string `json:"response_target_repo"`
+	ResponseTargetIssueNumber    int64  `json:"response_target_issue_number"`
+	ResponseTargetRequestedBy    string `json:"response_target_requested_by"`
+	ResponseTargetTrigger        string `json:"response_target_trigger"`
+	ResponseTargetReviewThreadID int64  `json:"response_target_review_thread_id"`
+	UpdatedAt                    int64  `json:"updated_at"`
+	ID                           string `json:"id"`
+}
+
+func (q *Queries) SetRunResponseTarget(ctx context.Context, arg SetRunResponseTargetParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setRunResponseTarget,
+		arg.ResponseTargetRepo,
+		arg.ResponseTargetIssueNumber,
+		arg.ResponseTargetRequestedBy,
+		arg.ResponseTargetTrigger,
+		arg.ResponseTargetReviewThreadID,
+		arg.UpdatedAt,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}

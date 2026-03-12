@@ -1822,12 +1822,9 @@ func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	target, ok, err := loadRunResponseTarget(run.RunDir)
-	if err != nil {
-		t.Fatalf("load run response target: %v", err)
-	}
+	target, ok := s.store.GetRunResponseTarget(run.ID)
 	if !ok {
-		t.Fatal("expected run response target file")
+		t.Fatal("expected sqlite-backed run response target")
 	}
 	if target.Repo != "owner/repo" {
 		t.Fatalf("target repo = %q, want owner/repo", target.Repo)
@@ -1843,6 +1840,63 @@ func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 	}
 	if target.ReviewThreadID != 0 {
 		t.Fatalf("target review_thread_id = %d, want 0", target.ReviewThreadID)
+	}
+	if _, err := os.Stat(filepath.Join(run.RunDir, runResponseTargetFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no response target sidecar for new runs, stat err=%v", err)
+	}
+}
+
+func TestHandleWebhookPullRequestReviewThreadResolvedFallsBackToLegacyResponseTarget(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	const (
+		taskID = "owner/repo#16"
+		repo   = "owner/repo"
+		prNum  = 16
+	)
+	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: 47, PRNumber: prNum}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	threadRun, err := s.store.AddRun(state.CreateRunInput{
+		ID:       "queued_review_thread_legacy",
+		TaskID:   taskID,
+		Repo:     repo,
+		Task:     "Address unresolved review thread",
+		Trigger:  "pr_review_thread",
+		RunDir:   filepath.Join(t.TempDir(), "queued_review_thread_legacy"),
+		PRNumber: prNum,
+	})
+	if err != nil {
+		t.Fatalf("seed legacy thread run: %v", err)
+	}
+	if err := os.MkdirAll(threadRun.RunDir, 0o755); err != nil {
+		t.Fatalf("create legacy thread run dir: %v", err)
+	}
+	if err := writeLegacyRunResponseTarget(threadRun.RunDir, runResponseTarget{
+		Repo:           repo,
+		IssueNumber:    prNum,
+		Trigger:        "pr_review_thread",
+		ReviewThreadID: 13,
+	}); err != nil {
+		t.Fatalf("write legacy thread run target: %v", err)
+	}
+
+	payload := []byte(`{"action":"resolved","thread":{"id":13,"path":"cmd/rascald/main.go","line":800},"pull_request":{"number":16},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	req := webhookRequest(t, payload, "pull_request_review_thread", "delivery-review-thread-resolved-legacy", "")
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	updatedThreadRun, ok := s.store.GetRun(threadRun.ID)
+	if !ok {
+		t.Fatalf("missing run %s", threadRun.ID)
+	}
+	if updatedThreadRun.Status != state.StatusCanceled {
+		t.Fatalf("legacy thread run status = %s, want %s", updatedThreadRun.Status, state.StatusCanceled)
 	}
 }
 
@@ -1866,18 +1920,61 @@ func TestCreateAndQueueRunWritesReviewThreadResponseTarget(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	target, ok, err := loadRunResponseTarget(run.RunDir)
-	if err != nil {
-		t.Fatalf("load run response target: %v", err)
-	}
+	target, ok := s.store.GetRunResponseTarget(run.ID)
 	if !ok {
-		t.Fatal("expected run response target file")
+		t.Fatal("expected sqlite-backed run response target")
 	}
 	if target.ReviewThreadID != 42 {
 		t.Fatalf("target review_thread_id = %d, want 42", target.ReviewThreadID)
 	}
 	if target.RequestedBy != "bob" {
 		t.Fatalf("target requested_by = %q, want bob", target.RequestedBy)
+	}
+	if _, err := os.Stat(filepath.Join(run.RunDir, runResponseTargetFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no response target sidecar for new runs, stat err=%v", err)
+	}
+}
+
+func TestLoadRunResponseTargetFallsBackToLegacyFile(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_legacy_target",
+		TaskID:     "owner/repo#101",
+		Repo:       "owner/repo",
+		Task:       "Address PR #101 feedback",
+		BaseBranch: "main",
+		HeadBranch: "rascal/pr-101",
+		Trigger:    "pr_comment",
+		RunDir:     t.TempDir(),
+		PRNumber:   101,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := writeLegacyRunResponseTarget(run.RunDir, runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 101,
+		RequestedBy: "alice",
+		Trigger:     "pr_comment",
+	}); err != nil {
+		t.Fatalf("write legacy response target: %v", err)
+	}
+
+	target, ok, err := s.loadRunResponseTarget(run)
+	if err != nil {
+		t.Fatalf("load run response target: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected legacy response target fallback")
+	}
+	if target.RequestedBy != "alice" {
+		t.Fatalf("target requested_by = %q, want alice", target.RequestedBy)
+	}
+	if target.IssueNumber != 101 {
+		t.Fatalf("target issue_number = %d, want 101", target.IssueNumber)
 	}
 }
 

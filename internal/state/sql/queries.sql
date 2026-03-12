@@ -120,6 +120,22 @@ SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, tr
 FROM runs
 WHERE id = ?;
 
+-- name: GetRunResponseTarget :one
+SELECT response_target_repo, response_target_issue_number, response_target_requested_by, response_target_trigger, response_target_review_thread_id
+FROM runs
+WHERE id = ?;
+
+-- name: SetRunResponseTarget :execrows
+UPDATE runs
+SET
+  response_target_repo = sqlc.arg(response_target_repo),
+  response_target_issue_number = sqlc.arg(response_target_issue_number),
+  response_target_requested_by = sqlc.arg(response_target_requested_by),
+  response_target_trigger = sqlc.arg(response_target_trigger),
+  response_target_review_thread_id = sqlc.arg(response_target_review_thread_id),
+  updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id);
+
 -- name: ListRuns :many
 SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
 FROM runs
@@ -176,6 +192,16 @@ WHERE id = ?;
 UPDATE runs
 SET status = 'canceled', error = ?, updated_at = ?, completed_at = ?
 WHERE task_id = ? AND status = 'queued';
+
+-- name: CancelQueuedReviewThreadRuns :execrows
+UPDATE runs
+SET status = 'canceled', error = ?, updated_at = ?, completed_at = ?
+WHERE task_id = ?
+  AND repo = ?
+  AND pr_number = ?
+  AND trigger = 'pr_review_thread'
+  AND status = 'queued'
+  AND response_target_review_thread_id = ?;
 
 -- name: ClaimRunStart :execrows
 UPDATE runs

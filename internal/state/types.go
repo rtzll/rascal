@@ -117,6 +117,14 @@ type Run struct {
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
+type RunResponseTarget struct {
+	Repo           string `json:"repo,omitempty"`
+	IssueNumber    int    `json:"issue_number,omitempty"`
+	RequestedBy    string `json:"requested_by,omitempty"`
+	Trigger        string `json:"trigger,omitempty"`
+	ReviewThreadID int64  `json:"review_thread_id,omitempty"`
+}
+
 type Task struct {
 	ID           string        `json:"id"`
 	Repo         string        `json:"repo"`

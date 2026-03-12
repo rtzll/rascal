@@ -410,6 +410,71 @@ func (s *Store) GetRun(id string) (Run, bool) {
 	return fromDBRun(row), true
 }
 
+func normalizeRunResponseTarget(target RunResponseTarget) RunResponseTarget {
+	target.Repo = NormalizeRepo(target.Repo)
+	target.IssueNumber = max(target.IssueNumber, 0)
+	target.RequestedBy = strings.TrimSpace(target.RequestedBy)
+	target.Trigger = strings.TrimSpace(target.Trigger)
+	if target.ReviewThreadID < 0 {
+		target.ReviewThreadID = 0
+	}
+	return target
+}
+
+func hasRunResponseTarget(target RunResponseTarget) bool {
+	return target.Repo != "" ||
+		target.IssueNumber > 0 ||
+		target.RequestedBy != "" ||
+		target.Trigger != "" ||
+		target.ReviewThreadID > 0
+}
+
+func (s *Store) SetRunResponseTarget(runID string, target RunResponseTarget) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id is required")
+	}
+	target = normalizeRunResponseTarget(target)
+
+	rows, err := s.q.SetRunResponseTarget(context.Background(), sqlitegen.SetRunResponseTargetParams{
+		ResponseTargetRepo:           target.Repo,
+		ResponseTargetIssueNumber:    int64(target.IssueNumber),
+		ResponseTargetRequestedBy:    target.RequestedBy,
+		ResponseTargetTrigger:        target.Trigger,
+		ResponseTargetReviewThreadID: target.ReviewThreadID,
+		UpdatedAt:                    time.Now().UTC().UnixNano(),
+		ID:                           runID,
+	})
+	if err != nil {
+		return fmt.Errorf("set response target for run %q: %w", runID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("run %q not found", runID)
+	}
+	return nil
+}
+
+func (s *Store) GetRunResponseTarget(runID string) (RunResponseTarget, bool) {
+	row, err := s.q.GetRunResponseTarget(context.Background(), strings.TrimSpace(runID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RunResponseTarget{}, false
+		}
+		return RunResponseTarget{}, false
+	}
+	target := normalizeRunResponseTarget(RunResponseTarget{
+		Repo:           row.ResponseTargetRepo,
+		IssueNumber:    int(row.ResponseTargetIssueNumber),
+		RequestedBy:    row.ResponseTargetRequestedBy,
+		Trigger:        row.ResponseTargetTrigger,
+		ReviewThreadID: row.ResponseTargetReviewThreadID,
+	})
+	if !hasRunResponseTarget(target) {
+		return RunResponseTarget{}, false
+	}
+	return target, true
+}
+
 func (s *Store) ListRuns(limit int) []Run {
 	if limit <= 0 {
 		limit = s.maxRuns
@@ -949,6 +1014,28 @@ func (s *Store) CancelQueuedRuns(taskID, reason string) error {
 		return fmt.Errorf("cancel queued runs for task %q: %w", strings.TrimSpace(taskID), err)
 	}
 	return nil
+}
+
+func (s *Store) CancelQueuedReviewThreadRuns(taskID, repo string, prNumber int, reviewThreadID int64, reason string) (int64, error) {
+	taskID = strings.TrimSpace(taskID)
+	repo = NormalizeRepo(repo)
+	if taskID == "" || repo == "" || prNumber <= 0 || reviewThreadID <= 0 {
+		return 0, nil
+	}
+	now := time.Now().UTC().UnixNano()
+	rows, err := s.q.CancelQueuedReviewThreadRuns(context.Background(), sqlitegen.CancelQueuedReviewThreadRunsParams{
+		Error:                        reason,
+		UpdatedAt:                    now,
+		CompletedAt:                  sql.NullInt64{Int64: now, Valid: true},
+		TaskID:                       taskID,
+		Repo:                         repo,
+		PrNumber:                     int64(prNumber),
+		ResponseTargetReviewThreadID: reviewThreadID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("cancel queued review-thread runs for task %q: %w", taskID, err)
+	}
+	return rows, nil
 }
 
 // DeliverySeen returns true if the delivery was already processed.

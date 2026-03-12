@@ -230,6 +230,103 @@ func TestStoreAllowsRecoveryTransitionRunningToQueued(t *testing.T) {
 	}
 }
 
+func TestStoreRunResponseTargetLifecycle(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-review", Repo: "owner/repo", PRNumber: 77}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	run1, err := store.AddRun(CreateRunInput{
+		ID:         "run_review_thread_1",
+		TaskID:     "task-review",
+		Repo:       "owner/repo",
+		Task:       "thread one",
+		BaseBranch: "main",
+		HeadBranch: "rascal/task-review-1",
+		Trigger:    "pr_review_thread",
+		RunDir:     "/tmp/run_review_thread_1",
+		PRNumber:   77,
+	})
+	if err != nil {
+		t.Fatalf("add run1: %v", err)
+	}
+	run2, err := store.AddRun(CreateRunInput{
+		ID:         "run_review_thread_2",
+		TaskID:     "task-review",
+		Repo:       "owner/repo",
+		Task:       "thread two",
+		BaseBranch: "main",
+		HeadBranch: "rascal/task-review-2",
+		Trigger:    "pr_review_thread",
+		RunDir:     "/tmp/run_review_thread_2",
+		PRNumber:   77,
+	})
+	if err != nil {
+		t.Fatalf("add run2: %v", err)
+	}
+
+	if err := store.SetRunResponseTarget(run1.ID, RunResponseTarget{
+		Repo:           "Owner/Repo",
+		IssueNumber:    77,
+		RequestedBy:    "alice",
+		Trigger:        "pr_review_thread",
+		ReviewThreadID: 13,
+	}); err != nil {
+		t.Fatalf("set run1 response target: %v", err)
+	}
+	if err := store.SetRunResponseTarget(run2.ID, RunResponseTarget{
+		Repo:           "owner/repo",
+		IssueNumber:    77,
+		RequestedBy:    "bob",
+		Trigger:        "pr_review_thread",
+		ReviewThreadID: 99,
+	}); err != nil {
+		t.Fatalf("set run2 response target: %v", err)
+	}
+
+	target, ok := store.GetRunResponseTarget(run1.ID)
+	if !ok {
+		t.Fatal("expected run1 response target")
+	}
+	if target.Repo != "owner/repo" {
+		t.Fatalf("target repo = %q, want owner/repo", target.Repo)
+	}
+	if target.RequestedBy != "alice" {
+		t.Fatalf("target requested_by = %q, want alice", target.RequestedBy)
+	}
+	if target.ReviewThreadID != 13 {
+		t.Fatalf("target review_thread_id = %d, want 13", target.ReviewThreadID)
+	}
+
+	rows, err := store.CancelQueuedReviewThreadRuns("task-review", "owner/repo", 77, 13, "review thread resolved")
+	if err != nil {
+		t.Fatalf("cancel queued review-thread runs: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("canceled rows = %d, want 1", rows)
+	}
+
+	gotRun1, ok := store.GetRun(run1.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run1.ID)
+	}
+	if gotRun1.Status != StatusCanceled {
+		t.Fatalf("run1 status = %s, want %s", gotRun1.Status, StatusCanceled)
+	}
+	gotRun2, ok := store.GetRun(run2.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run2.ID)
+	}
+	if gotRun2.Status != StatusQueued {
+		t.Fatalf("run2 status = %s, want %s", gotRun2.Status, StatusQueued)
+	}
+}
+
 func TestStoreRejectsInvalidRunStatusTransition(t *testing.T) {
 	t.Parallel()
 
