@@ -29,6 +29,7 @@ type StartCommentInput struct {
 	RequestedBy       string
 	Trigger           string
 	Backend           string
+	RunnerCommit      string
 	BaseBranch        string
 	HeadBranch        string
 	SessionMode       string
@@ -191,6 +192,9 @@ func BuildStartComment(in StartCommentInput) string {
 	}
 	if backend := strings.TrimSpace(in.Backend); backend != "" {
 		details = append(details, fmt.Sprintf("- Backend: `%s`", backend))
+	}
+	if runnerCommit := strings.TrimSpace(in.RunnerCommit); runnerCommit != "" {
+		details = append(details, fmt.Sprintf("- Runner commit: `%s`", runnerCommit))
 	}
 	if baseBranch := strings.TrimSpace(in.BaseBranch); baseBranch != "" || strings.TrimSpace(in.HeadBranch) != "" {
 		details = append(details, fmt.Sprintf("- Branches: `%s` -> `%s`", defaultString(baseBranch, "(default)"), defaultString(strings.TrimSpace(in.HeadBranch), "(default)")))

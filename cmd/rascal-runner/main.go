@@ -165,12 +165,16 @@ func runWithExecutor(ex commandExecutor) error {
 	started := time.Now().UTC()
 
 	meta := runner.Meta{
-		RunID:      cfg.RunID,
-		TaskID:     cfg.TaskID,
-		Repo:       cfg.Repo,
-		BaseBranch: cfg.BaseBranch,
-		HeadBranch: cfg.HeadBranch,
-		ExitCode:   1,
+		RunID:       cfg.RunID,
+		TaskID:      cfg.TaskID,
+		Repo:        cfg.Repo,
+		BaseBranch:  cfg.BaseBranch,
+		HeadBranch:  cfg.HeadBranch,
+		BuildCommit: strings.TrimSpace(buildCommit),
+		ExitCode:    1,
+	}
+	if err := runner.WriteMeta(cfg.MetaPath, meta); err != nil {
+		log.Printf("[%s] failed to write initial meta: %v", nowUTC(), err)
 	}
 	defer func() {
 		if err := runner.WriteMeta(cfg.MetaPath, meta); err != nil {

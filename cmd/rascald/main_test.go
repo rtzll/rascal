@@ -3143,6 +3143,62 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 	}
 }
 
+func TestPostRunStartCommentIncludesRunnerBuildCommit(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_start_comment_commit",
+		TaskID:      "owner/repo#85",
+		Repo:        "owner/repo",
+		Task:        "Investigate issue #85",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/issue-85",
+		Trigger:     "issue_label",
+		RunDir:      t.TempDir(),
+		IssueNumber: 85,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	now := time.Now().UTC()
+	run.StartedAt = &now
+	if err := runner.WriteMeta(filepath.Join(run.RunDir, "meta.json"), runner.Meta{
+		RunID:       run.ID,
+		TaskID:      run.TaskID,
+		Repo:        run.Repo,
+		BaseBranch:  run.BaseBranch,
+		HeadBranch:  run.HeadBranch,
+		BuildCommit: "deadbee",
+		ExitCode:    1,
+	}); err != nil {
+		t.Fatalf("write meta: %v", err)
+	}
+	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 85,
+		RequestedBy: "alice",
+		Trigger:     "issue_label",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+
+	s.postRunStartCommentBestEffort(run, agent.SessionModeAll, false)
+
+	comments := fakeGH.postedComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted start comment, got %d", len(comments))
+	}
+	if !strings.Contains(comments[0].body, "- Runner commit: `deadbee`") {
+		t.Fatalf("expected runner commit in start comment, got:\n%s", comments[0].body)
+	}
+}
+
 func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})

@@ -965,13 +965,17 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 		t.Fatalf("read meta.json: %v", err)
 	}
 	var meta struct {
-		ExitCode int    `json:"exit_code"`
-		PRNumber int    `json:"pr_number"`
-		PRURL    string `json:"pr_url"`
-		HeadSHA  string `json:"head_sha"`
+		BuildCommit string `json:"build_commit"`
+		ExitCode    int    `json:"exit_code"`
+		PRNumber    int    `json:"pr_number"`
+		PRURL       string `json:"pr_url"`
+		HeadSHA     string `json:"head_sha"`
 	}
 	if err := json.Unmarshal(metaData, &meta); err != nil {
 		t.Fatalf("decode meta.json: %v", err)
+	}
+	if meta.BuildCommit != "unknown" {
+		t.Fatalf("unexpected build_commit: %q", meta.BuildCommit)
 	}
 	if meta.ExitCode != 0 {
 		t.Fatalf("expected exit_code=0, got %d", meta.ExitCode)

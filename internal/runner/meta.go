@@ -13,6 +13,7 @@ type Meta struct {
 	Repo           string `json:"repo"`
 	BaseBranch     string `json:"base_branch"`
 	HeadBranch     string `json:"head_branch"`
+	BuildCommit    string `json:"build_commit,omitempty"`
 	PRNumber       int    `json:"pr_number"`
 	PRURL          string `json:"pr_url"`
 	HeadSHA        string `json:"head_sha"`

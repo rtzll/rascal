@@ -3455,6 +3455,7 @@ func buildRunStartComment(run state.Run, target runResponseTarget, requestedBy s
 		RequestedBy:       requestedBy,
 		Trigger:           firstNonEmpty(strings.TrimSpace(target.Trigger), run.Trigger),
 		Backend:           run.AgentBackend.String(),
+		RunnerCommit:      loadRunBuildCommit(run.RunDir),
 		BaseBranch:        run.BaseBranch,
 		HeadBranch:        run.HeadBranch,
 		SessionMode:       string(sessionMode),
@@ -3465,6 +3466,24 @@ func buildRunStartComment(run state.Run, target runResponseTarget, requestedBy s
 		QueueDelaySeconds: queueDelaySeconds,
 	})
 	return runStartCommentBodyMarker + "\n\n" + body
+}
+
+func loadRunBuildCommit(runDir string) string {
+	if strings.TrimSpace(runDir) == "" {
+		return ""
+	}
+	metaPath := filepath.Join(runDir, "meta.json")
+	deadline := time.Now().UTC().Add(250 * time.Millisecond)
+	for {
+		meta, err := runner.ReadMeta(metaPath)
+		if err == nil {
+			return strings.TrimSpace(meta.BuildCommit)
+		}
+		if !time.Now().UTC().Before(deadline) {
+			return ""
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 func firstNonEmpty(values ...string) string {

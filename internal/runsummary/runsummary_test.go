@@ -276,6 +276,7 @@ func TestBuildStartComment(t *testing.T) {
 			RequestedBy:       "alice",
 			Trigger:           "issue_label",
 			Backend:           "codex",
+			RunnerCommit:      "abc1234",
 			BaseBranch:        "main",
 			HeadBranch:        "rascal/fix-flaky-test-abc123",
 			SessionMode:       "all",
@@ -293,6 +294,9 @@ func TestBuildStartComment(t *testing.T) {
 		}
 		if !strings.Contains(body, "- Requested by: `alice`") {
 			t.Fatalf("expected requester in details, got:\n%s", body)
+		}
+		if !strings.Contains(body, "- Runner commit: `abc1234`") {
+			t.Fatalf("expected runner commit in details, got:\n%s", body)
 		}
 		if !strings.Contains(body, "- Queue delay: `18s`") {
 			t.Fatalf("expected queue delay in details, got:\n%s", body)
