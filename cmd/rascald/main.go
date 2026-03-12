@@ -113,10 +113,11 @@ type runRequest struct {
 }
 
 type runResponseTarget struct {
-	Repo        string `json:"repo"`
-	IssueNumber int    `json:"issue_number"`
-	RequestedBy string `json:"requested_by,omitempty"`
-	Trigger     string `json:"trigger"`
+	Repo           string `json:"repo"`
+	IssueNumber    int    `json:"issue_number"`
+	RequestedBy    string `json:"requested_by,omitempty"`
+	Trigger        string `json:"trigger"`
+	ReviewThreadID int64  `json:"review_thread_id,omitempty"`
 }
 
 type runCommentMarker struct {
@@ -1258,10 +1259,11 @@ Inline comment location: %s`, contextText, location)
 				HeadBranch:  s.defaultHeadBranchForTask(task.ID),
 				Debug:       boolPtr(true),
 				ResponseTarget: &runResponseTarget{
-					Repo:        ev.Repository.FullName,
-					IssueNumber: ev.PullRequest.Number,
-					RequestedBy: strings.TrimSpace(ev.Sender.Login),
-					Trigger:     "pr_review_thread",
+					Repo:           ev.Repository.FullName,
+					IssueNumber:    ev.PullRequest.Number,
+					RequestedBy:    strings.TrimSpace(ev.Sender.Login),
+					Trigger:        "pr_review_thread",
+					ReviewThreadID: ev.Thread.ID,
 				},
 			})
 			if errors.Is(err, errTaskCompleted) {
@@ -1273,7 +1275,7 @@ Inline comment location: %s`, contextText, location)
 			if !ok {
 				return nil
 			}
-			s.cancelQueuedPRTriggerRuns(task.ID, ev.Repository.FullName, ev.PullRequest.Number, "pr_review_thread", "review thread resolved")
+			s.cancelQueuedReviewThreadRuns(task.ID, ev.Repository.FullName, ev.PullRequest.Number, ev.Thread.ID, "review thread resolved")
 			return nil
 		default:
 			return nil
@@ -1628,10 +1630,11 @@ func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget
 		return nil
 	}
 	out := runResponseTarget{
-		Repo:        strings.TrimSpace(target.Repo),
-		IssueNumber: target.IssueNumber,
-		RequestedBy: strings.TrimSpace(target.RequestedBy),
-		Trigger:     strings.TrimSpace(target.Trigger),
+		Repo:           strings.TrimSpace(target.Repo),
+		IssueNumber:    target.IssueNumber,
+		RequestedBy:    strings.TrimSpace(target.RequestedBy),
+		Trigger:        strings.TrimSpace(target.Trigger),
+		ReviewThreadID: target.ReviewThreadID,
 	}
 	if out.Repo == "" {
 		out.Repo = strings.TrimSpace(run.Repo)
@@ -2583,19 +2586,26 @@ func reviewThreadContext(thread ghapi.ReviewThread) string {
 	return "review thread marked unresolved"
 }
 
-func (s *server) cancelQueuedPRTriggerRuns(taskID, repo string, prNumber int, trigger, reason string) {
+func (s *server) cancelQueuedReviewThreadRuns(taskID, repo string, prNumber int, reviewThreadID int64, reason string) {
 	taskID = strings.TrimSpace(taskID)
 	repo = strings.TrimSpace(repo)
-	trigger = strings.TrimSpace(trigger)
 	reason = strings.TrimSpace(reason)
-	if taskID == "" || repo == "" || prNumber <= 0 || trigger == "" {
+	if taskID == "" || repo == "" || prNumber <= 0 || reviewThreadID <= 0 {
 		return
 	}
 	if reason == "" {
 		reason = "canceled"
 	}
 	for _, run := range s.store.ListRuns(10000) {
-		if run.TaskID != taskID || run.Repo != repo || run.PRNumber != prNumber || run.Trigger != trigger || run.Status != state.StatusQueued {
+		if run.TaskID != taskID || run.Repo != repo || run.PRNumber != prNumber || run.Trigger != "pr_review_thread" || run.Status != state.StatusQueued {
+			continue
+		}
+		target, ok, err := loadRunResponseTarget(run.RunDir)
+		if err != nil {
+			log.Printf("run %s load response target for review thread cancellation failed: %v", run.ID, err)
+			continue
+		}
+		if !ok || target.ReviewThreadID != reviewThreadID {
 			continue
 		}
 		s.setRunStatusBestEffort(run.ID, state.StatusCanceled, reason)
