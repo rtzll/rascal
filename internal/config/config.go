@@ -29,6 +29,8 @@ type ServerConfig struct {
 	RunnerImage             string
 	RunnerImageGoose        string
 	RunnerImageCodex        string
+	RunnerMemory            string
+	RunnerMemorySwap        string
 	RunnerMaxAttempts       int
 	CredentialStrategy      string
 	CredentialLeaseTTL      time.Duration
@@ -75,6 +77,8 @@ func LoadServerConfig() ServerConfig {
 		AgentBackend:            loadAgentBackend(),
 		RunnerImageGoose:        envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", defaults.GooseRunnerImageTag),
 		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
+		RunnerMemory:            strings.TrimSpace(os.Getenv("RASCAL_RUNNER_DOCKER_MEMORY")),
+		RunnerMemorySwap:        strings.TrimSpace(os.Getenv("RASCAL_RUNNER_DOCKER_MEMORY_SWAP")),
 		RunnerMaxAttempts:       envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
 		CredentialStrategy:      envOrDefault("RASCAL_CREDENTIAL_STRATEGY", "requester_own_then_shared"),
 		CredentialLeaseTTL:      envDurationOrDefault("RASCAL_CREDENTIAL_LEASE_TTL", 90*time.Second),

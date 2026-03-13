@@ -677,6 +677,14 @@ func (s *Store) CountRunLeasesByOwner(ownerID string) int {
 	return int(count)
 }
 
+func (s *Store) CountRunLeases() int {
+	count, err := s.q.CountRunLeases(context.Background())
+	if err != nil {
+		return 0
+	}
+	return int(count)
+}
+
 func (s *Store) UpsertRunExecution(exec RunExecution) (RunExecution, error) {
 	exec.RunID = strings.TrimSpace(exec.RunID)
 	exec.Backend = strings.TrimSpace(exec.Backend)

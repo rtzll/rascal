@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,9 +21,11 @@ import (
 
 // DockerLauncher runs a task inside a Docker container.
 type DockerLauncher struct {
-	DefaultImage string
-	Image        string
-	GitHubToken  string
+	DefaultImage      string
+	Image             string
+	GitHubToken       string
+	DefaultMemory     string
+	DefaultMemorySwap string
 }
 
 const (
@@ -158,6 +162,16 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		"--label", fmt.Sprintf("rascal.task_id=%s", spec.TaskID),
 		"--label", fmt.Sprintf("rascal.repo=%s", spec.Repo),
 	}
+	if memory := strings.TrimSpace(spec.MemoryLimit); memory != "" {
+		args = append(args, "--memory", memory)
+	} else if memory := strings.TrimSpace(l.DefaultMemory); memory != "" {
+		args = append(args, "--memory", memory)
+	}
+	if memorySwap := strings.TrimSpace(spec.MemorySwap); memorySwap != "" {
+		args = append(args, "--memory-swap", memorySwap)
+	} else if memorySwap := strings.TrimSpace(l.DefaultMemorySwap); memorySwap != "" {
+		args = append(args, "--memory-swap", memorySwap)
+	}
 	envKeys := make([]string, 0, len(envPairs))
 	for k := range envPairs {
 		envKeys = append(envKeys, k)
@@ -217,30 +231,44 @@ func (l DockerLauncher) Inspect(ctx context.Context, handle ExecutionHandle) (Ex
 	if target == "" {
 		return ExecutionState{}, fmt.Errorf("execution target is required")
 	}
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "--type", "container", "--format", "{{.State.Running}} {{.State.ExitCode}}", target)
+	cmd := exec.CommandContext(ctx,
+		"docker",
+		"inspect",
+		"--type",
+		"container",
+		"--format",
+		`{{json .State}}`,
+		target,
+	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if dockerNotFoundOutput(err, out) {
 			return ExecutionState{}, ErrExecutionNotFound
 		}
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return ExecutionState{}, context.Canceled
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ExecutionState{}, fmt.Errorf("inspect docker container %s: %w", target, ctxErr)
 		}
 		return ExecutionState{}, fmt.Errorf("inspect docker container %s: %w", target, unwrapSyscallError(err))
 	}
-	parts := strings.Fields(strings.TrimSpace(string(out)))
-	if len(parts) < 2 {
-		return ExecutionState{}, fmt.Errorf("unexpected docker inspect output for %s: %q", target, strings.TrimSpace(string(out)))
+	var raw struct {
+		Running   bool   `json:"Running"`
+		ExitCode  int    `json:"ExitCode"`
+		OOMKilled bool   `json:"OOMKilled"`
+		Error     string `json:"Error"`
 	}
-	running := parts[0] == "true"
-	if running {
+	if err := json.Unmarshal(bytes.TrimSpace(out), &raw); err != nil {
+		return ExecutionState{}, fmt.Errorf("parse docker inspect output for %s: %w", target, err)
+	}
+	if raw.Running {
 		return ExecutionState{Running: true}, nil
 	}
-	exitCode, convErr := strconv.Atoi(parts[1])
-	if convErr != nil {
-		return ExecutionState{}, fmt.Errorf("parse docker exit code %q: %w", parts[1], convErr)
-	}
-	return ExecutionState{Running: false, ExitCode: &exitCode}, nil
+	exitCode := raw.ExitCode
+	return ExecutionState{
+		Running:   false,
+		ExitCode:  &exitCode,
+		OOMKilled: raw.OOMKilled,
+		Error:     strings.TrimSpace(raw.Error),
+	}, nil
 }
 
 func firstNonEmptySessionPath(values ...string) string {
@@ -270,8 +298,8 @@ func (l DockerLauncher) Stop(ctx context.Context, handle ExecutionHandle, timeou
 		if dockerNotFoundOutput(err, out) {
 			return ErrExecutionNotFound
 		}
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return context.Canceled
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("stop docker container %s: %w", target, ctxErr)
 		}
 		return fmt.Errorf("stop docker container %s: %w", target, unwrapSyscallError(err))
 	}
@@ -289,8 +317,8 @@ func (l DockerLauncher) Remove(ctx context.Context, handle ExecutionHandle) erro
 		if dockerNotFoundOutput(err, out) {
 			return nil
 		}
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return context.Canceled
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("remove docker container %s: %w", target, ctxErr)
 		}
 		return fmt.Errorf("remove docker container %s: %w", target, unwrapSyscallError(err))
 	}

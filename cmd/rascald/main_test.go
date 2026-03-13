@@ -22,6 +22,7 @@ import (
 	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/credentials"
+	credentialstrategies "github.com/rtzll/rascal/internal/credentials/strategies"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/state"
@@ -107,12 +108,20 @@ type stubbornLauncher struct {
 	stopped  bool
 }
 
+type blockingInspectLauncher struct {
+	mu       sync.Mutex
+	nextExec int
+	specs    map[string]runner.Spec
+}
+
 type fakeRunResult struct {
-	PRNumber int
-	PRURL    string
-	HeadSHA  string
-	ExitCode int
-	Error    string
+	PRNumber   int
+	PRURL      string
+	HeadSHA    string
+	ExitCode   int
+	Error      string
+	OOMKilled  bool
+	StateError string
 }
 
 type fakeExecution struct {
@@ -254,7 +263,12 @@ func (f *fakeLauncher) Inspect(_ context.Context, handle runner.ExecutionHandle)
 		execRec.finalized = true
 	}
 	exitCode := execRec.result.ExitCode
-	return runner.ExecutionState{Running: false, ExitCode: &exitCode}, nil
+	return runner.ExecutionState{
+		Running:   false,
+		ExitCode:  &exitCode,
+		OOMKilled: execRec.result.OOMKilled,
+		Error:     strings.TrimSpace(execRec.result.StateError),
+	}, nil
 }
 
 func (f *fakeLauncher) Stop(_ context.Context, handle runner.ExecutionHandle, _ time.Duration) error {
@@ -340,7 +354,12 @@ func (l *stubbornLauncher) Inspect(_ context.Context, _ runner.ExecutionHandle) 
 		return runner.ExecutionState{}, err
 	}
 	exitCode := res.ExitCode
-	return runner.ExecutionState{Running: false, ExitCode: &exitCode}, nil
+	return runner.ExecutionState{
+		Running:   false,
+		ExitCode:  &exitCode,
+		OOMKilled: res.OOMKilled,
+		Error:     strings.TrimSpace(res.StateError),
+	}, nil
 }
 
 func (l *stubbornLauncher) Stop(_ context.Context, _ runner.ExecutionHandle, _ time.Duration) error {
@@ -359,6 +378,36 @@ func (l *stubbornLauncher) Stop(_ context.Context, _ runner.ExecutionHandle, _ t
 }
 
 func (l *stubbornLauncher) Remove(_ context.Context, _ runner.ExecutionHandle) error {
+	return nil
+}
+
+func (l *blockingInspectLauncher) StartDetached(_ context.Context, spec runner.Spec) (runner.ExecutionHandle, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.specs == nil {
+		l.specs = make(map[string]runner.Spec)
+	}
+	l.nextExec++
+	handle := runner.ExecutionHandle{
+		Backend: "fake",
+		ID:      fmt.Sprintf("blocking-exec-%d", l.nextExec),
+		Name:    "blocking-" + spec.RunID,
+	}
+	l.specs[handle.ID] = spec
+	l.specs[handle.Name] = spec
+	return handle, nil
+}
+
+func (l *blockingInspectLauncher) Inspect(ctx context.Context, _ runner.ExecutionHandle) (runner.ExecutionState, error) {
+	<-ctx.Done()
+	return runner.ExecutionState{}, fmt.Errorf("blocking inspect: %w", ctx.Err())
+}
+
+func (l *blockingInspectLauncher) Stop(_ context.Context, _ runner.ExecutionHandle, _ time.Duration) error {
+	return nil
+}
+
+func (l *blockingInspectLauncher) Remove(_ context.Context, _ runner.ExecutionHandle) error {
 	return nil
 }
 
@@ -2129,6 +2178,128 @@ func TestCreateAndQueueRunRespectsGlobalConcurrencyLimit(t *testing.T) {
 	}, "second run to complete")
 }
 
+func TestCreateAndQueueRunRespectsGlobalConcurrencyAcrossInstances(t *testing.T) {
+	t.Parallel()
+	waitCh := make(chan struct{})
+	dataDir := t.TempDir()
+	statePath := filepath.Join(dataDir, "state.db")
+	launcherA := &fakeLauncher{waitCh: waitCh}
+	launcherB := &fakeLauncher{waitCh: waitCh}
+	s1 := newTestServerWithPaths(t, launcherA, dataDir, statePath, "instance-a")
+	s2 := newTestServerWithPaths(t, launcherB, dataDir, statePath, "instance-b")
+	s1.maxConcurrent = 1
+	s2.maxConcurrent = 1
+	defer waitForServerIdle(t, s1)
+	defer waitForServerIdle(t, s2)
+
+	_, err := s1.createAndQueueRun(runRequest{TaskID: "task-a", Repo: "owner/repo", Task: "first"})
+	if err != nil {
+		t.Fatalf("create first run: %v", err)
+	}
+	second, err := s2.createAndQueueRun(runRequest{TaskID: "task-b", Repo: "owner/repo", Task: "second"})
+	if err != nil {
+		t.Fatalf("create second run: %v", err)
+	}
+
+	waitFor(t, time.Second, func() bool {
+		return launcherA.Calls()+launcherB.Calls() == 1
+	}, "only one run starts across instances while global slot is full")
+	if calls := launcherA.Calls() + launcherB.Calls(); calls != 1 {
+		t.Fatalf("launcher calls = %d, want 1", calls)
+	}
+
+	r2, ok := s2.store.GetRun(second.ID)
+	if !ok {
+		t.Fatalf("missing second run %s", second.ID)
+	}
+	if r2.Status != state.StatusQueued {
+		t.Fatalf("expected second run queued, got %s", r2.Status)
+	}
+
+	close(waitCh)
+	waitFor(t, 2*time.Second, func() bool {
+		return launcherA.Calls()+launcherB.Calls() == 2
+	}, "second run to start after first completes")
+	waitFor(t, 2*time.Second, func() bool {
+		r, ok := s1.store.GetRun(second.ID)
+		return ok && r.Status == state.StatusSucceeded
+	}, "second run to complete across instances")
+}
+
+func TestSupervisionInspectTimeoutStillRenewsCredentialLease(t *testing.T) {
+	t.Parallel()
+	launcher := &blockingInspectLauncher{}
+	s := newTestServer(t, launcher)
+	s.supervisorInterval = 5 * time.Millisecond
+	s.supervisorInspectTimeout = 10 * time.Millisecond
+	s.cfg.CredentialRenewEvery = 10 * time.Millisecond
+	defer func() {
+		s.beginDrain()
+		s.stopRunSupervisors()
+		waitForServerIdle(t, s)
+	}()
+
+	cipher, err := credentials.NewAESCipher("test-secret")
+	if err != nil {
+		t.Fatalf("new cipher: %v", err)
+	}
+	strategy, err := credentialstrategies.ByName("requester_own_then_shared")
+	if err != nil {
+		t.Fatalf("strategy: %v", err)
+	}
+	s.cipher = cipher
+	s.broker = credentials.NewBroker(s.store, strategy, cipher, 40*time.Millisecond)
+
+	if _, err := s.store.UpsertUser(state.UpsertUserInput{ID: "owner", ExternalLogin: "owner", Role: state.UserRoleUser}); err != nil {
+		t.Fatalf("upsert owner: %v", err)
+	}
+	blob, err := cipher.Encrypt([]byte(`{"token":"run-token"}`))
+	if err != nil {
+		t.Fatalf("encrypt auth blob: %v", err)
+	}
+	if _, err := s.store.CreateCodexCredential(state.CreateCodexCredentialInput{
+		ID:                "cred-owner",
+		OwnerUserID:       "owner",
+		Scope:             "personal",
+		EncryptedAuthBlob: blob,
+		Weight:            1,
+		Status:            "active",
+	}); err != nil {
+		t.Fatalf("create credential: %v", err)
+	}
+
+	run, err := s.createAndQueueRun(runRequest{
+		Repo:            "owner/repo",
+		Task:            "inspect timeout keeps renewing credential lease",
+		CreatedByUserID: "owner",
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_ = waitForRunExecution(t, s, run.ID)
+
+	time.Sleep(120 * time.Millisecond)
+
+	lease, ok, err := s.store.GetActiveCredentialLeaseByRunID(run.ID)
+	if err != nil {
+		t.Fatalf("get active credential lease: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected active credential lease for %s", run.ID)
+	}
+	if !lease.ExpiresAt.After(time.Now().UTC()) {
+		t.Fatalf("expected credential lease expiry to advance past now, got %s", lease.ExpiresAt.Format(time.RFC3339Nano))
+	}
+
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if updated.Status != state.StatusRunning {
+		t.Fatalf("run status = %s, want running", updated.Status)
+	}
+}
+
 func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	t.Parallel()
 	waitCh := make(chan struct{})
@@ -3727,6 +3898,59 @@ func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
 			return false
 		}
 	}, "run cleanup after canceled run")
+}
+
+func TestFinalizeDetachedRunPreservesOOMFailureOverCredentialLeaseLoss(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:         "run_oom_preserved",
+		TaskID:     "task_oom_preserved",
+		Repo:       "owner/repo",
+		Task:       "preserve oom failure",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set run running: %v", err)
+	}
+	execRec, err := s.store.UpsertRunExecution(state.RunExecution{
+		RunID:         run.ID,
+		Backend:       "fake",
+		ContainerName: "rascal-run_oom_preserved",
+		ContainerID:   "oom-exec",
+		Status:        "exited",
+		ExitCode:      137,
+	})
+	if err != nil {
+		t.Fatalf("upsert run execution: %v", err)
+	}
+	if err := s.store.RequestRunCancel(run.ID, "credential lease lost", "broker"); err != nil {
+		t.Fatalf("request run cancel: %v", err)
+	}
+
+	exitCode := 137
+	s.finalizeDetachedRun(run.ID, execRec, runner.ExecutionState{
+		Running:   false,
+		ExitCode:  &exitCode,
+		OOMKilled: true,
+	})
+
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if updated.Status != state.StatusFailed {
+		t.Fatalf("status = %s, want failed", updated.Status)
+	}
+	if !strings.Contains(updated.Error, "OOM-killed") {
+		t.Fatalf("expected OOM failure, got %q", updated.Error)
+	}
 }
 
 func TestCancelActiveRunsUsesDrainReason(t *testing.T) {

@@ -91,3 +91,18 @@ Rascal uses encrypted stored credentials for Codex runs.
 Operators can manage stored credentials with `rascal auth credentials ...`.
 Bootstrap and deploy flows can seed an initial shared credential with
 `--codex-auth ~/.codex/auth.json`.
+
+## Runner Memory Settings
+
+- `RASCAL_RUNNER_DOCKER_MEMORY`
+  Optional Docker `--memory` limit applied to each run container.
+  Example: `2g`
+
+- `RASCAL_RUNNER_DOCKER_MEMORY_SWAP`
+  Optional Docker `--memory-swap` limit applied to each run container.
+  Example: `3g`
+
+On small hosts, set both values explicitly so a single run cannot consume all
+available RAM. A practical starting point is `RASCAL_RUNNER_DOCKER_MEMORY=2g`
+and `RASCAL_RUNNER_DOCKER_MEMORY_SWAP=3g` on a 4 GB host, then adjust after
+observing steady-state headroom.

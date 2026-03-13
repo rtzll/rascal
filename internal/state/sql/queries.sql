@@ -341,6 +341,10 @@ SELECT COUNT(*)
 FROM run_leases
 WHERE owner_id = ?;
 
+-- name: CountRunLeases :one
+SELECT COUNT(*)
+FROM run_leases;
+
 -- name: UpsertRunExecution :exec
 INSERT INTO run_executions (
   run_id,

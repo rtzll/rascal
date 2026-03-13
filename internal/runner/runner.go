@@ -17,6 +17,8 @@ type Spec struct {
 	Task         string
 	AgentBackend agent.Backend
 	RunnerImage  string
+	MemoryLimit  string
+	MemorySwap   string
 	BaseBranch   string
 	HeadBranch   string
 	Trigger      string
@@ -43,8 +45,10 @@ type ExecutionHandle struct {
 }
 
 type ExecutionState struct {
-	Running  bool
-	ExitCode *int
+	Running   bool
+	ExitCode  *int
+	OOMKilled bool
+	Error     string
 }
 
 func ExecutionHandleForRun(runID string) ExecutionHandle {
@@ -72,10 +76,15 @@ type Launcher interface {
 	Remove(ctx context.Context, handle ExecutionHandle) error
 }
 
-func NewLauncher(mode, image, githubToken string) Launcher {
+func NewLauncher(mode, image, githubToken, memoryLimit, memorySwap string) Launcher {
 	switch mode {
 	case "docker":
-		return DockerLauncher{DefaultImage: image, GitHubToken: githubToken}
+		return DockerLauncher{
+			DefaultImage:      image,
+			GitHubToken:       githubToken,
+			DefaultMemory:     memoryLimit,
+			DefaultMemorySwap: memorySwap,
+		}
 	default:
 		return NoopLauncher{}
 	}

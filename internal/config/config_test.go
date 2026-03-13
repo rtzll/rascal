@@ -179,3 +179,16 @@ func TestLoadServerConfigCredentialEncryptionKeyFallback(t *testing.T) {
 		t.Fatalf("CredentialEncryptionKey = %q, want explicit-key", cfg.CredentialEncryptionKey)
 	}
 }
+
+func TestLoadServerConfigRunnerMemoryLimits(t *testing.T) {
+	t.Setenv("RASCAL_RUNNER_DOCKER_MEMORY", "2g")
+	t.Setenv("RASCAL_RUNNER_DOCKER_MEMORY_SWAP", "3g")
+
+	cfg := LoadServerConfig()
+	if cfg.RunnerMemory != "2g" {
+		t.Fatalf("RunnerMemory = %q, want 2g", cfg.RunnerMemory)
+	}
+	if cfg.RunnerMemorySwap != "3g" {
+		t.Fatalf("RunnerMemorySwap = %q, want 3g", cfg.RunnerMemorySwap)
+	}
+}

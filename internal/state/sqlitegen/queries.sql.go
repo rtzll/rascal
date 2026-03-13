@@ -483,6 +483,18 @@ func (q *Queries) CountDeliveries(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countRunLeases = `-- name: CountRunLeases :one
+SELECT COUNT(*)
+FROM run_leases
+`
+
+func (q *Queries) CountRunLeases(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRunLeases)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRunLeasesByOwner = `-- name: CountRunLeasesByOwner :one
 SELECT COUNT(*)
 FROM run_leases

@@ -573,6 +573,9 @@ func TestStoreRunLeaseLifecycle(t *testing.T) {
 	if got := store.CountRunLeasesByOwner("instance-a"); got != 1 {
 		t.Fatalf("expected owner lease count 1, got %d", got)
 	}
+	if got := store.CountRunLeases(); got != 1 {
+		t.Fatalf("expected total lease count 1, got %d", got)
+	}
 	lease, ok := store.GetRunLease("run_lease_1")
 	if !ok {
 		t.Fatal("expected run lease to exist")
@@ -598,6 +601,9 @@ func TestStoreRunLeaseLifecycle(t *testing.T) {
 	}
 	if got := store.CountRunLeasesByOwner("instance-a"); got != 0 {
 		t.Fatalf("expected owner lease count 0 after delete, got %d", got)
+	}
+	if got := store.CountRunLeases(); got != 0 {
+		t.Fatalf("expected total lease count 0 after delete, got %d", got)
 	}
 	if _, ok := store.GetRunLease("run_lease_1"); ok {
 		t.Fatal("expected run lease to be deleted")

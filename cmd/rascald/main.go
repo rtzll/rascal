@@ -41,6 +41,7 @@ var errServerDraining = errors.New("orchestrator is draining")
 
 const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
+const defaultSupervisorInspectTimeout = 5 * time.Second
 const runResponseTargetFile = "response_target.json"
 const runStartCommentMarkerFile = "start_comment_posted.json"
 const runCompletionCommentMarkerFile = "completion_comment_posted.json"
@@ -89,11 +90,12 @@ type server struct {
 	resumeTimer   *time.Timer
 	resumeAt      time.Time
 
-	supervisorInterval time.Duration
-	retryBackoff       func(attempt int) time.Duration
-	stopSupervisors    bool
-	beforeSupervise    func(runID string)
-	afterRunCleanup    func(runID string)
+	supervisorInterval       time.Duration
+	supervisorInspectTimeout time.Duration
+	retryBackoff             func(attempt int) time.Duration
+	stopSupervisors          bool
+	beforeSupervise          func(runID string)
+	afterRunCleanup          func(runID string)
 }
 
 type runRequest struct {
@@ -199,7 +201,7 @@ func main() {
 	s := &server{
 		cfg:           cfg,
 		store:         store,
-		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImageForBackend(cfg.AgentBackend), cfg.GitHubToken),
+		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImageForBackend(cfg.AgentBackend), cfg.GitHubToken, cfg.RunnerMemory, cfg.RunnerMemorySwap),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
 		broker:        credentials.NewBroker(store, allocStrategy, cipher, cfg.CredentialLeaseTTL),
 		cipher:        cipher,
@@ -318,6 +320,7 @@ func (s *server) recoverRunningRuns() {
 
 func (s *server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 	handle := runExecutionHandle(execRec)
+	log.Printf("recover run %s adopting detached execution backend=%s container=%s", run.ID, execRec.Backend, firstNonEmpty(execRec.ContainerID, execRec.ContainerName))
 	inspectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	execState, err := s.launcher.Inspect(inspectCtx, handle)
@@ -354,7 +357,7 @@ func (s *server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 	if _, err := s.store.UpdateRunExecutionState(run.ID, "exited", exitCode, time.Now().UTC()); err != nil {
 		log.Printf("recover run %s update execution exited state failed: %v", run.ID, err)
 	}
-	s.finalizeDetachedRun(run.ID, execRec, exitCode)
+	s.finalizeDetachedRun(run.ID, execRec, execState)
 }
 
 func (s *server) failRunForMissingExecution(run state.Run, reason string) {
@@ -1849,6 +1852,8 @@ func (s *server) executeRun(runID string) {
 		Task:         run.Task,
 		AgentBackend: run.AgentBackend,
 		RunnerImage:  s.cfg.RunnerImageForBackend(run.AgentBackend),
+		MemoryLimit:  s.cfg.RunnerMemory,
+		MemorySwap:   s.cfg.RunnerMemorySwap,
 		BaseBranch:   run.BaseBranch,
 		HeadBranch:   run.HeadBranch,
 		Trigger:      run.Trigger,
@@ -1984,6 +1989,7 @@ func (s *server) superviseRun(ctx context.Context, runID string, execRec state.R
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			now := time.Now().UTC()
 			if time.Now().UTC().Before(nextRenewAt) {
 				// Continue with inspect/cancel handling on every tick.
 			} else {
@@ -1999,7 +2005,10 @@ func (s *server) superviseRun(ctx context.Context, runID string, execRec state.R
 				}
 				nextRenewAt = time.Now().UTC().Add(renewEvery)
 			}
-			if credentialLeaseID != "" && !time.Now().UTC().Before(nextCredentialRenewAt) {
+			if credentialLeaseID != "" && !now.Before(nextCredentialRenewAt) {
+				if stall := now.Sub(nextCredentialRenewAt); stall > credentialRenewEvery {
+					log.Printf("run %s credential lease renewal delayed by %s (interval %s)", runID, stall.Round(time.Millisecond), credentialRenewEvery)
+				}
 				if err := s.broker.Renew(ctx, credentialLeaseID); err != nil {
 					log.Printf("run %s credential lease renew failed: %v", runID, err)
 					if cancelErr := s.store.RequestRunCancel(runID, "credential lease lost", "broker"); cancelErr != nil {
@@ -2018,8 +2027,7 @@ func (s *server) superviseRun(ctx context.Context, runID string, execRec state.R
 				nextCredentialRenewAt = time.Now().UTC().Add(credentialRenewEvery)
 			}
 
-			now := time.Now().UTC()
-			execState, err := s.launcher.Inspect(ctx, handle)
+			execState, err := s.inspectExecution(ctx, runID, handle, "supervision")
 			if errors.Is(err, runner.ErrExecutionNotFound) {
 				run, ok := s.store.GetRun(runID)
 				if ok {
@@ -2028,7 +2036,7 @@ func (s *server) superviseRun(ctx context.Context, runID string, execRec state.R
 				return
 			}
 			if err != nil {
-				if !errors.Is(err, context.Canceled) {
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 					log.Printf("run %s inspect failed: %v", runID, err)
 				}
 				continue
@@ -2062,13 +2070,13 @@ func (s *server) superviseRun(ctx context.Context, runID string, execRec state.R
 			if _, err := s.store.UpdateRunExecutionState(runID, "exited", exitCode, now); err != nil {
 				log.Printf("run %s update execution exited state failed: %v", runID, err)
 			}
-			s.finalizeDetachedRun(runID, execRec, exitCode)
+			s.finalizeDetachedRun(runID, execRec, execState)
 			return
 		}
 	}
 }
 
-func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, observedExitCode int) {
+func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, execState runner.ExecutionState) {
 	run, ok := s.store.GetRun(runID)
 	if !ok {
 		s.cleanupDetachedExecution(runID, execRec)
@@ -2083,6 +2091,10 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 
 	metaPath := filepath.Join(run.RunDir, "meta.json")
 	meta, metaErr := runner.ReadMeta(metaPath)
+	observedExitCode := 0
+	if execState.ExitCode != nil {
+		observedExitCode = *execState.ExitCode
+	}
 	if metaErr != nil {
 		meta = runner.Meta{
 			RunID:      run.ID,
@@ -2101,6 +2113,11 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	}
 	if meta.ExitCode == 0 && observedExitCode != 0 {
 		meta.ExitCode = observedExitCode
+	}
+	if execState.OOMKilled {
+		meta.Error = formatExecutionFailure(execState, meta.ExitCode)
+	} else if strings.TrimSpace(meta.Error) == "" && observedExitCode != 0 {
+		meta.Error = formatExecutionFailure(execState, meta.ExitCode)
 	}
 	if strings.TrimSpace(meta.AgentSessionID) != "" {
 		existing, _ := s.store.GetTaskAgentSession(run.TaskID)
@@ -2162,8 +2179,12 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	if reason, canceled := s.pendingRunCancelReason(runID); canceled && status == state.StatusFailed {
 		// Cancellation should explain a stopped execution, but it should not
 		// overwrite a successful terminal result that raced with the request.
-		status = state.StatusCanceled
-		errText = reason
+		if shouldPreserveFailureStatus(reason, errText, execState) {
+			log.Printf("run %s preserving failed status despite cancel request %q", runID, reason)
+		} else {
+			status = state.StatusCanceled
+			errText = reason
+		}
 	}
 	tokenUsage, hasTokenUsage, tokenUsageErr := loadRunTokenUsage(run)
 	if tokenUsageErr != nil {
@@ -2212,6 +2233,38 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	}
 	s.cleanupDetachedExecution(runID, execRec)
 	s.finishRun(updated)
+}
+
+func (s *server) inspectExecution(ctx context.Context, runID string, handle runner.ExecutionHandle, purpose string) (runner.ExecutionState, error) {
+	inspectCtx, cancel := context.WithTimeout(ctx, s.supervisorInspectDeadline())
+	defer cancel()
+	execState, err := s.launcher.Inspect(inspectCtx, handle)
+	if errors.Is(err, context.DeadlineExceeded) {
+		log.Printf("run %s %s inspect timed out after %s", runID, purpose, s.supervisorInspectDeadline())
+	}
+	if err != nil {
+		return execState, fmt.Errorf("%s inspect for run %s: %w", purpose, runID, err)
+	}
+	return execState, nil
+}
+
+func formatExecutionFailure(execState runner.ExecutionState, exitCode int) string {
+	exitText := fmt.Sprintf("docker runner failed with exit code %d", exitCode)
+	if execState.OOMKilled {
+		exitText = fmt.Sprintf("runner container OOM-killed (exit code %d)", exitCode)
+	}
+	if detail := strings.TrimSpace(execState.Error); detail != "" {
+		return exitText + ": " + detail
+	}
+	return exitText
+}
+
+func shouldPreserveFailureStatus(cancelReason, errText string, execState runner.ExecutionState) bool {
+	if execState.OOMKilled {
+		return true
+	}
+	text := strings.ToLower(strings.TrimSpace(cancelReason + " " + errText + " " + execState.Error))
+	return strings.Contains(text, "oom")
 }
 
 func (s *server) cleanupDetachedExecution(runID string, execRec state.RunExecution) {
@@ -2425,7 +2478,7 @@ func (s *server) scheduleRuns(preferredTaskID string) {
 			log.Printf("run scheduling paused until %s: %s", pauseUntil.Format(time.RFC3339), pauseReason)
 			return
 		}
-		atCapacity := s.activeRunCount() >= s.concurrencyLimit()
+		atCapacity := s.globalActiveRunCount() >= s.concurrencyLimit()
 		draining := s.isDraining()
 		if draining || atCapacity {
 			return
@@ -2925,6 +2978,13 @@ func (s *server) supervisorTick() time.Duration {
 	return runSupervisorTick
 }
 
+func (s *server) supervisorInspectDeadline() time.Duration {
+	if s != nil && s.supervisorInspectTimeout > 0 {
+		return s.supervisorInspectTimeout
+	}
+	return defaultSupervisorInspectTimeout
+}
+
 func (s *server) startRetryBackoff(attempt int) time.Duration {
 	if s != nil && s.retryBackoff != nil {
 		if backoff := s.retryBackoff(attempt); backoff > 0 {
@@ -2983,6 +3043,10 @@ func (s *server) waitForNoActiveRuns(timeout time.Duration) error {
 
 func (s *server) activeRunCount() int {
 	return s.store.CountRunLeasesByOwner(s.instanceID)
+}
+
+func (s *server) globalActiveRunCount() int {
+	return s.store.CountRunLeases()
 }
 
 func (s *server) cancelRunningTaskRuns(taskID, reason string) {

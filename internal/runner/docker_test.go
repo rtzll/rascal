@@ -97,6 +97,58 @@ exit 0
 	}
 }
 
+func TestDockerLauncherStartDetachedAppliesMemoryLimits(t *testing.T) {
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "docker_calls.log")
+	fakeDocker := filepath.Join(tmp, "docker")
+	script := `#!/bin/sh
+set -eu
+echo "$@" >> "` + logPath + `"
+if [ "${1:-}" = "run" ]; then
+  echo "container-memory"
+fi
+exit 0
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+oldPath)
+
+	runDir := filepath.Join(tmp, "run")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("create run dir: %v", err)
+	}
+
+	launcher := DockerLauncher{
+		Image:             "rascal-runner:latest",
+		DefaultMemory:     "2g",
+		DefaultMemorySwap: "3g",
+	}
+	if _, err := launcher.StartDetached(context.Background(), Spec{
+		RunID:      "run_memory",
+		TaskID:     "task_memory",
+		Repo:       "owner/repo",
+		Task:       "memory limits",
+		BaseBranch: "main",
+		RunDir:     runDir,
+	}); err != nil {
+		t.Fatalf("start detached: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker call log: %v", err)
+	}
+	logText := string(data)
+	for _, want := range []string{"--memory 2g", "--memory-swap 3g"} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("expected %q in docker call log:\n%s", want, logText)
+		}
+	}
+}
+
 func TestDockerLauncherInspectStopAndRemove(t *testing.T) {
 	tmp := t.TempDir()
 	logPath := filepath.Join(tmp, "docker_calls.log")
@@ -108,11 +160,15 @@ cmd="${1:-}"
 target="${6:-}"
 if [ "$cmd" = "inspect" ]; then
   if [ "$target" = "running-id" ]; then
-    echo "true 0"
+    echo '{"Running":true,"ExitCode":0,"OOMKilled":false,"Error":""}'
     exit 0
   fi
   if [ "$target" = "exited-id" ]; then
-    echo "false 17"
+    echo '{"Running":false,"ExitCode":17,"OOMKilled":false,"Error":""}'
+    exit 0
+  fi
+  if [ "$target" = "oom-id" ]; then
+    echo '{"Running":false,"ExitCode":137,"OOMKilled":true,"Error":"container killed by kernel"}'
     exit 0
   fi
   echo "Error: No such object: $target" >&2
@@ -149,6 +205,16 @@ exit 0
 	if exitedState.Running || exitedState.ExitCode == nil || *exitedState.ExitCode != 17 {
 		t.Fatalf("unexpected exited state: %+v", exitedState)
 	}
+	oomState, err := launcher.Inspect(context.Background(), ExecutionHandle{ID: "oom-id"})
+	if err != nil {
+		t.Fatalf("inspect oom container: %v", err)
+	}
+	if oomState.Running || oomState.ExitCode == nil || *oomState.ExitCode != 137 || !oomState.OOMKilled {
+		t.Fatalf("unexpected oom state: %+v", oomState)
+	}
+	if oomState.Error != "container killed by kernel" {
+		t.Fatalf("state error = %q, want container killed by kernel", oomState.Error)
+	}
 
 	if _, err := launcher.Inspect(context.Background(), ExecutionHandle{ID: "missing-id"}); !errors.Is(err, ErrExecutionNotFound) {
 		t.Fatalf("expected ErrExecutionNotFound for missing container, got %v", err)
@@ -167,7 +233,7 @@ exit 0
 	}
 	logText := string(data)
 	for _, want := range []string{
-		"inspect --type container --format {{.State.Running}} {{.State.ExitCode}} running-id",
+		"inspect --type container --format {{json .State}} running-id",
 		"stop --time 3 running-id",
 		"rm -f running-id",
 	} {

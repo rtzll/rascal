@@ -44,6 +44,17 @@ default):
 - `RASCAL_AGENT_SESSION_TTL_DAYS=14`
 - `RASCAL_RUNNER_IMAGE_GOOSE` and `RASCAL_RUNNER_IMAGE_CODEX` set the backend-specific runner images
 - `RASCAL_AGENT_BACKEND` selects which of those configured runner images is used by default
+- `RASCAL_RUNNER_DOCKER_MEMORY` and `RASCAL_RUNNER_DOCKER_MEMORY_SWAP` can cap per-run container memory on smaller hosts
+
+For low-memory hosts, configure Docker memory limits before allowing multiple
+runs. On 4 GB machines, start with `RASCAL_RUNNER_DOCKER_MEMORY=2g` and
+`RASCAL_RUNNER_DOCKER_MEMORY_SWAP=3g`, then leave at least 1 GB for
+`rascald`, Docker, Caddy, and the kernel page cache.
+
+If the host has no swap configured, add a small swapfile so short-lived spikes
+do not immediately escalate into OOM kills. Swap is not a substitute for
+container memory limits, but it gives the host more room to recover under
+pressure.
 
 ## Blue/Green Sequence
 
@@ -104,6 +115,8 @@ Additional safeguards:
 - Webhook delivery dedupe is atomic claim/finalize (no check-then-insert race).
 - Run start is DB-atomic (`queued -> running`) with task-level exclusivity, so
   two instances cannot both start work for the same queued run/task.
+- Scheduler capacity is enforced against the global run-lease count, so
+  blue/green overlap does not double effective worker capacity.
 - Detached execution handles are persisted, so startup recovery can adopt
   active runs immediately after slot rotation.
 
