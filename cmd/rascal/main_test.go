@@ -184,6 +184,137 @@ func TestEmitJSONOutput(t *testing.T) {
 	}
 }
 
+func TestDoctorJSONOutput(t *testing.T) {
+	origCheckServerHealthFn := checkServerHealthFn
+	origCheckServerHealthSSHFn := checkServerHealthSSHFn
+	origRunRemoteDoctorFn := runRemoteDoctorFn
+	t.Cleanup(func() {
+		checkServerHealthFn = origCheckServerHealthFn
+		checkServerHealthSSHFn = origCheckServerHealthSSHFn
+		runRemoteDoctorFn = origRunRemoteDoctorFn
+	})
+
+	checkServerHealthFn = func(string) (bool, string) { return true, "" }
+	checkServerHealthSSHFn = func(deployConfig) (bool, string) { return false, "unexpected ssh health call" }
+	runRemoteDoctorFn = func(deployConfig) (remoteDoctorStatus, error) {
+		t.Fatal("did not expect remote doctor call")
+		return remoteDoctorStatus{}, nil
+	}
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL:   "http://127.0.0.1:8080",
+			APIToken:    "token",
+			DefaultRepo: "owner/repo",
+			Transport:   "http",
+			SSHUser:     "root",
+			SSHPort:     22,
+		},
+		output:       "json",
+		configPath:   filepath.Join(t.TempDir(), "config.toml"),
+		serverSource: "config",
+		tokenSource:  "config",
+		repoSource:   "config",
+	}
+
+	cmd := a.newDoctorCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("doctor execute: %v", err)
+	}
+
+	var out doctorDiagnostics
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode doctor output: %v\noutput:\n%s", err, stdout)
+	}
+	if !out.ServerHealthOK {
+		t.Fatalf("expected server_health_ok=true, got false (%s)", out.ServerHealthError)
+	}
+	if out.Remote != nil {
+		t.Fatalf("expected remote to be omitted, got %+v", out.Remote)
+	}
+	if out.DefaultRepo != "owner/repo" {
+		t.Fatalf("default_repo = %q, want owner/repo", out.DefaultRepo)
+	}
+}
+
+func TestDoctorJSONOutputIncludesTypedRemoteStatus(t *testing.T) {
+	origCheckServerHealthFn := checkServerHealthFn
+	origCheckServerHealthSSHFn := checkServerHealthSSHFn
+	origRunRemoteDoctorFn := runRemoteDoctorFn
+	t.Cleanup(func() {
+		checkServerHealthFn = origCheckServerHealthFn
+		checkServerHealthSSHFn = origCheckServerHealthSSHFn
+		runRemoteDoctorFn = origRunRemoteDoctorFn
+	})
+
+	checkServerHealthFn = func(string) (bool, string) { return false, "health failed" }
+	checkServerHealthSSHFn = func(deployConfig) (bool, string) { return false, "unexpected ssh health call" }
+	runRemoteDoctorFn = func(cfg deployConfig) (remoteDoctorStatus, error) {
+		if cfg.Host != "203.0.113.10" {
+			t.Fatalf("host = %q, want 203.0.113.10", cfg.Host)
+		}
+		return remoteDoctorStatus{
+			Host:                  cfg.Host,
+			RascalService:         true,
+			ActiveSlot:            "blue",
+			DockerInstalled:       true,
+			SQLiteInstalled:       true,
+			CaddyInstalled:        true,
+			EnvFilePresent:        true,
+			AuthRuntimeSynced:     true,
+			RunnerImageConfigured: true,
+			RunnerImagePresent:    true,
+			RunnerImageGoose:      "rascal-runner-goose:latest",
+			RunnerImageCodex:      "rascal-runner-codex:latest",
+		}, nil
+	}
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://127.0.0.1:8080",
+			Transport: "http",
+			SSHUser:   "root",
+			SSHPort:   22,
+		},
+		output:     "json",
+		configPath: filepath.Join(t.TempDir(), "config.toml"),
+	}
+
+	cmd := a.newDoctorCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--host", "203.0.113.10"})
+
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("doctor execute: %v", err)
+	}
+
+	var out doctorDiagnostics
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode doctor output: %v\noutput:\n%s", err, stdout)
+	}
+	if out.Remote == nil {
+		t.Fatal("expected remote diagnostics")
+	}
+	if out.Remote.Error != "" {
+		t.Fatalf("expected empty remote error, got %q", out.Remote.Error)
+	}
+	if out.Remote.Host != "203.0.113.10" {
+		t.Fatalf("remote.host = %q, want 203.0.113.10", out.Remote.Host)
+	}
+	if !out.Remote.RascalService || out.Remote.ActiveSlot != "blue" {
+		t.Fatalf("unexpected remote status: %+v", out.Remote)
+	}
+	if out.Remote.RunnerImageGoose != "rascal-runner-goose:latest" {
+		t.Fatalf("runner_image_goose = %q, want rascal-runner-goose:latest", out.Remote.RunnerImageGoose)
+	}
+}
+
 func TestCompletionHelpContainsInstall(t *testing.T) {
 	root := newRootCmd()
 	var stdout bytes.Buffer

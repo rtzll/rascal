@@ -73,6 +73,39 @@ type cliError struct {
 	Cause     error
 }
 
+type doctorRemoteReport struct {
+	remoteDoctorStatus
+	Error string `json:"error,omitempty"`
+}
+
+type doctorDiagnostics struct {
+	ConfigPath        string              `json:"config_path"`
+	ConfigExists      bool                `json:"config_exists"`
+	ServerURL         string              `json:"server_url"`
+	Host              string              `json:"host"`
+	Domain            string              `json:"domain"`
+	Transport         string              `json:"transport"`
+	ResolvedTransport string              `json:"resolved_transport"`
+	SSHHost           string              `json:"ssh_host"`
+	EffectiveSSHHost  string              `json:"effective_ssh_host"`
+	SSHUser           string              `json:"ssh_user"`
+	SSHKey            string              `json:"ssh_key"`
+	SSHPort           int                 `json:"ssh_port"`
+	ServerSource      string              `json:"server_source"`
+	APITokenSet       bool                `json:"api_token_set"`
+	APITokenSource    string              `json:"api_token_source"`
+	DefaultRepo       string              `json:"default_repo"`
+	DefaultRepoSource string              `json:"default_repo_source"`
+	OutputFormat      string              `json:"output_format"`
+	NoColor           bool                `json:"no_color"`
+	ServerHealthOK    bool                `json:"server_health_ok"`
+	ServerHealthError string              `json:"server_health_error"`
+	Remote            *doctorRemoteReport `json:"remote,omitempty"`
+}
+
+var checkServerHealthFn = checkServerHealth
+var checkServerHealthSSHFn = checkServerHealthSSH
+
 func (e *cliError) Error() string {
 	if e == nil {
 		return ""
@@ -1517,7 +1550,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				if effectiveSSHHost == "" {
 					healthErr = "ssh transport selected but no ssh host is configured"
 				} else {
-					healthOK, healthErr = checkServerHealthSSH(deployConfig{
+					healthOK, healthErr = checkServerHealthSSHFn(deployConfig{
 						Host:       effectiveSSHHost,
 						SSHUser:    firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root"),
 						SSHKeyPath: firstNonEmpty(strings.TrimSpace(sshKey), strings.TrimSpace(a.cfg.SSHKey)),
@@ -1525,71 +1558,56 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					})
 				}
 			} else {
-				healthOK, healthErr = checkServerHealth(a.cfg.ServerURL)
+				healthOK, healthErr = checkServerHealthFn(a.cfg.ServerURL)
 			}
 			healthMessage := ""
 			if !healthOK {
 				healthMessage = healthErr
 			}
 
-			var remote map[string]any
+			var remote *doctorRemoteReport
 			if strings.TrimSpace(host) != "" {
-				remoteStatus, err := runRemoteDoctor(deployConfig{
+				remoteStatus, err := runRemoteDoctorFn(deployConfig{
 					Host:       strings.TrimSpace(host),
 					SSHUser:    firstNonEmpty(strings.TrimSpace(sshUser), "root"),
 					SSHKeyPath: strings.TrimSpace(sshKey),
 					SSHPort:    sshPort,
 				})
 				if err != nil {
-					remote = map[string]any{
-						"host":  strings.TrimSpace(host),
-						"error": err.Error(),
+					remote = &doctorRemoteReport{
+						remoteDoctorStatus: remoteDoctorStatus{
+							Host: strings.TrimSpace(host),
+						},
+						Error: err.Error(),
 					}
 				} else {
-					remote = map[string]any{
-						"host":                    remoteStatus.Host,
-						"rascal_service":          remoteStatus.RascalService,
-						"active_slot":             remoteStatus.ActiveSlot,
-						"docker_installed":        remoteStatus.DockerInstalled,
-						"sqlite_installed":        remoteStatus.SQLiteInstalled,
-						"caddy_installed":         remoteStatus.CaddyInstalled,
-						"env_file_present":        remoteStatus.EnvFilePresent,
-						"auth_runtime_synced":     remoteStatus.AuthRuntimeSynced,
-						"runner_image_configured": remoteStatus.RunnerImageConfigured,
-						"runner_image_present":    remoteStatus.RunnerImagePresent,
-						"runner_image_goose":      remoteStatus.RunnerImageGoose,
-						"runner_image_codex":      remoteStatus.RunnerImageCodex,
-						"runner_image_goose_id":   remoteStatus.RunnerImageGooseID,
-						"runner_image_codex_id":   remoteStatus.RunnerImageCodexID,
-					}
+					remote = &doctorRemoteReport{remoteDoctorStatus: remoteStatus}
 				}
 			}
 
-			diagnostics := map[string]any{
-				"config_path":         a.configPath,
-				"config_exists":       cfgExists,
-				"server_url":          a.cfg.ServerURL,
-				"host":                a.cfg.Host,
-				"domain":              a.cfg.Domain,
-				"transport":           a.cfg.Transport,
-				"resolved_transport":  resolvedTransport,
-				"ssh_host":            a.cfg.SSHHost,
-				"effective_ssh_host":  effectiveSSHHost,
-				"ssh_user":            a.cfg.SSHUser,
-				"ssh_key":             a.cfg.SSHKey,
-				"ssh_port":            a.cfg.SSHPort,
-				"server_source":       a.serverSource,
-				"api_token_set":       strings.TrimSpace(a.cfg.APIToken) != "",
-				"api_token_source":    a.tokenSource,
-				"default_repo":        a.cfg.DefaultRepo,
-				"default_repo_source": a.repoSource,
-				"output_format":       a.output,
-				"no_color":            noColorRequested(a.noColor),
-				"server_health_ok":    healthOK,
-				"server_health_error": healthMessage,
-			}
-			if remote != nil {
-				diagnostics["remote"] = remote
+			diagnostics := doctorDiagnostics{
+				ConfigPath:        a.configPath,
+				ConfigExists:      cfgExists,
+				ServerURL:         a.cfg.ServerURL,
+				Host:              a.cfg.Host,
+				Domain:            a.cfg.Domain,
+				Transport:         a.cfg.Transport,
+				ResolvedTransport: resolvedTransport,
+				SSHHost:           a.cfg.SSHHost,
+				EffectiveSSHHost:  effectiveSSHHost,
+				SSHUser:           a.cfg.SSHUser,
+				SSHKey:            a.cfg.SSHKey,
+				SSHPort:           a.cfg.SSHPort,
+				ServerSource:      a.serverSource,
+				APITokenSet:       strings.TrimSpace(a.cfg.APIToken) != "",
+				APITokenSource:    a.tokenSource,
+				DefaultRepo:       a.cfg.DefaultRepo,
+				DefaultRepoSource: a.repoSource,
+				OutputFormat:      a.output,
+				NoColor:           noColorRequested(a.noColor),
+				ServerHealthOK:    healthOK,
+				ServerHealthError: healthMessage,
+				Remote:            remote,
 			}
 			return a.emit(diagnostics, func() error {
 				a.println("local config")
@@ -1627,25 +1645,25 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				}
 				if remote != nil {
 					a.println("remote server")
-					if errText, ok := remote["error"].(string); ok && strings.TrimSpace(errText) != "" {
-						a.println("remote (%s): error: %s", strings.TrimSpace(host), errText)
+					if strings.TrimSpace(remote.Error) != "" {
+						a.println("remote (%s): error: %s", strings.TrimSpace(host), remote.Error)
 					} else {
-						activeSlot := strings.TrimSpace(fmt.Sprintf("%v", remote["active_slot"]))
-						if activeSlot == "" || activeSlot == "<nil>" {
+						activeSlot := strings.TrimSpace(remote.ActiveSlot)
+						if activeSlot == "" {
 							activeSlot = "unknown"
 						}
 						a.println("remote (%s): rascal=%v slot=%v docker=%v sqlite=%v caddy=%v env=%v auth_synced=%v codex_auth=%v runner_image_configured=%v runner_image=%v",
-							remote["host"], remote["rascal_service"], activeSlot, remote["docker_installed"], remote["sqlite_installed"], remote["caddy_installed"], remote["env_file_present"], remote["auth_runtime_synced"], remote["codex_auth_present"], remote["runner_image_configured"], remote["runner_image_present"])
-						if gooseImage := strings.TrimSpace(fmt.Sprintf("%v", remote["runner_image_goose"])); gooseImage != "" && gooseImage != "<nil>" {
+							remote.Host, remote.RascalService, activeSlot, remote.DockerInstalled, remote.SQLiteInstalled, remote.CaddyInstalled, remote.EnvFilePresent, remote.AuthRuntimeSynced, false, remote.RunnerImageConfigured, remote.RunnerImagePresent)
+						if gooseImage := strings.TrimSpace(remote.RunnerImageGoose); gooseImage != "" {
 							a.println("remote goose runner image: %s", gooseImage)
 						}
-						if gooseImageID := strings.TrimSpace(fmt.Sprintf("%v", remote["runner_image_goose_id"])); gooseImageID != "" && gooseImageID != "<nil>" {
+						if gooseImageID := strings.TrimSpace(remote.RunnerImageGooseID); gooseImageID != "" {
 							a.println("remote goose runner image id: %s", gooseImageID)
 						}
-						if codexImage := strings.TrimSpace(fmt.Sprintf("%v", remote["runner_image_codex"])); codexImage != "" && codexImage != "<nil>" {
+						if codexImage := strings.TrimSpace(remote.RunnerImageCodex); codexImage != "" {
 							a.println("remote codex runner image: %s", codexImage)
 						}
-						if codexImageID := strings.TrimSpace(fmt.Sprintf("%v", remote["runner_image_codex_id"])); codexImageID != "" && codexImageID != "<nil>" {
+						if codexImageID := strings.TrimSpace(remote.RunnerImageCodexID); codexImageID != "" {
 							a.println("remote codex runner image id: %s", codexImageID)
 						}
 					}
@@ -1660,12 +1678,12 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					a.println("hint: set local API token: `rascal config set api_token <token>`")
 				}
 				if remote != nil {
-					if synced, ok := remote["auth_runtime_synced"].(bool); ok && !synced {
+					if strings.TrimSpace(remote.Error) == "" && !remote.AuthRuntimeSynced {
 						targetUser := firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root")
 						targetHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
 						a.println("hint: remote rascal.env changed after service start; restart active slot: `ssh %s@%s 'slot=$(cat /etc/rascal/active_slot 2>/dev/null || echo blue); systemctl restart rascal@$slot'`", targetUser, targetHost)
 					}
-					if configured, ok := remote["runner_image_configured"].(bool); ok && !configured {
+					if strings.TrimSpace(remote.Error) == "" && !remote.RunnerImageConfigured {
 						targetUser := firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root")
 						targetHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
 						a.println("hint: remote rascal.env must set explicit runner images: `ssh %s@%s 'printf \"RASCAL_RUNNER_IMAGE_GOOSE=rascal-runner-goose:latest\\nRASCAL_RUNNER_IMAGE_CODEX=rascal-runner-codex:latest\\n\" >> /etc/rascal/rascal.env'`", targetUser, targetHost)
