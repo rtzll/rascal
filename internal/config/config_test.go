@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rtzll/rascal/internal/cost"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtime"
 )
@@ -221,6 +222,27 @@ func TestLoadServerConfigNormalizesRunnerMode(t *testing.T) {
 	}
 	if cfg.RunnerMode != runner.ModeDocker {
 		t.Fatalf("RunnerMode = %q, want docker", cfg.RunnerMode)
+	}
+}
+
+func TestLoadServerConfigCostPolicies(t *testing.T) {
+	t.Setenv("RASCAL_COST_POLICIES_JSON", `[{"scope":"global","daily_token_budget":1000,"soft_limit_tokens":800,"soft_action":"warn","hard_action":"reject"},{"scope":"repo","match":"Owner/Repo","daily_token_budget":200,"hard_action":"defer"}]`)
+
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
+	if len(cfg.CostPolicies) != 2 {
+		t.Fatalf("len(CostPolicies) = %d, want 2", len(cfg.CostPolicies))
+	}
+	if cfg.CostPolicies[0].Scope != cost.ScopeGlobal {
+		t.Fatalf("global scope = %q, want global", cfg.CostPolicies[0].Scope)
+	}
+	if cfg.CostPolicies[1].Match != "owner/repo" {
+		t.Fatalf("repo match = %q, want owner/repo", cfg.CostPolicies[1].Match)
+	}
+	if cfg.CostPolicies[1].HardAction != cost.ActionDefer {
+		t.Fatalf("repo hard action = %q, want defer", cfg.CostPolicies[1].HardAction)
 	}
 }
 

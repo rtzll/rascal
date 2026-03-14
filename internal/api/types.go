@@ -23,7 +23,16 @@ type CreateTaskRequest struct {
 	AgentRuntime *runtime.Runtime `json:"agent_runtime,omitempty"`
 	BaseBranch   string           `json:"base_branch"`
 	Trigger      runtrigger.Name  `json:"trigger,omitempty"`
+	ExecutionProfile string       `json:"execution_profile,omitempty"`
 	Debug        *bool            `json:"debug,omitempty"`
+}
+
+type CreateIssueTaskRequest struct {
+	Repo             string           `json:"repo"`
+	IssueNumber      int              `json:"issue_number"`
+	AgentRuntime     *runtime.Runtime `json:"agent_runtime,omitempty"`
+	ExecutionProfile string           `json:"execution_profile,omitempty"`
+	Debug            *bool            `json:"debug,omitempty"`
 }
 
 func (r *CreateTaskRequest) UnmarshalJSON(data []byte) error {
@@ -42,19 +51,20 @@ func (r *CreateTaskRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type CreateIssueTaskRequest struct {
-	Repo         string           `json:"repo"`
-	IssueNumber  int              `json:"issue_number"`
-	AgentRuntime *runtime.Runtime `json:"agent_runtime,omitempty"`
-	Debug        *bool            `json:"debug,omitempty"`
-}
-
 type RunResponse struct {
 	Run state.Run `json:"run" toml:"run"`
 }
 
 type RunsResponse struct {
 	Runs []state.Run `json:"runs" toml:"runs"`
+}
+
+type RunUsageRunsResponse struct {
+	Runs []state.RunUsageRecord `json:"runs" toml:"runs"`
+}
+
+type RunUsageSummaryResponse struct {
+	Summaries []state.RunUsageSummary `json:"summaries" toml:"summaries"`
 }
 
 type TaskResponse struct {

@@ -9,12 +9,13 @@ rascal run --repo OWNER/REPO --instruction "Refactor parser" --output json
 rascal run --issue OWNER/REPO#123
 
 Flags:
-  -b, --base-branch string   base branch (default "main")
-      --debug                stream detailed agent execution logs (use --debug=false to reduce verbosity) (default true)
-  -h, --help                 help for run
-  -t, --instruction string   instruction text
-      --issue string         issue reference in OWNER/REPO#NUMBER form
-  -R, --repo string          repository in OWNER/REPO form
+  -b, --base-branch string         base branch (default "main")
+      --debug                      stream detailed agent execution logs (use --debug=false to reduce verbosity) (default true)
+      --execution-profile string   execution profile: default|cheap|priority (default "default")
+  -h, --help                       help for run
+  -t, --instruction string         instruction text
+      --issue string               issue reference in OWNER/REPO#NUMBER form
+  -R, --repo string                repository in OWNER/REPO form
 
 Global Flags:
       --api-token string         orchestrator API token

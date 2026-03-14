@@ -337,6 +337,8 @@ func newRootCmd() *cobra.Command {
 	runCmd.GroupID = "runs"
 	psCmd := a.newPSCmd()
 	psCmd.GroupID = "runs"
+	usageCmd := a.newUsageCmd()
+	usageCmd.GroupID = "runs"
 	openCmd := a.newOpenCmd()
 	openCmd.GroupID = "runs"
 	retryCmd := a.newRetryCmd()
@@ -363,6 +365,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(authCmd)
 	root.AddCommand(runCmd)
 	root.AddCommand(psCmd)
+	root.AddCommand(usageCmd)
 	root.AddCommand(openCmd)
 	root.AddCommand(retryCmd)
 	root.AddCommand(cancelCmd)
@@ -899,7 +902,7 @@ rascal deploy --host "$SERVER_IP" --codex-auth ~/.codex/auth.json
 }
 
 func (a *app) newRunCmd() *cobra.Command {
-	var repo, instruction, baseBranch, issueRef string
+	var repo, instruction, baseBranch, issueRef, executionProfile string
 	var debug bool
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -925,9 +928,10 @@ rascal run --issue OWNER/REPO#123
 				}
 				debugValue := optionalBoolFlagValue(cmd, "debug", debug)
 				req := buildCreateTaskPayload(createTaskPayloadInput{
-					Repo:        repo,
-					IssueNumber: issueNumber,
-					Debug:       debugValue,
+					Repo:             repo,
+					IssueNumber:      issueNumber,
+					ExecutionProfile: state.NormalizeExecutionProfile(executionProfile),
+					Debug:            debugValue,
 				})
 				resp, err := req.send(a.client, http.MethodPost)
 				if err != nil {
@@ -956,10 +960,11 @@ rascal run --issue OWNER/REPO#123
 
 			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
 			req := buildCreateTaskPayload(createTaskPayloadInput{
-				Repo:        repo,
-				Instruction: instruction,
-				BaseBranch:  baseBranch,
-				Debug:       debugValue,
+				Repo:             repo,
+				Instruction:      instruction,
+				BaseBranch:       baseBranch,
+				ExecutionProfile: state.NormalizeExecutionProfile(executionProfile),
+				Debug:            debugValue,
 			})
 			resp, err := req.send(a.client, http.MethodPost)
 			if err != nil {
@@ -986,6 +991,7 @@ rascal run --issue OWNER/REPO#123
 	cmd.Flags().StringVarP(&instruction, "instruction", "t", "", "instruction text")
 	cmd.Flags().StringVarP(&baseBranch, "base-branch", "b", "main", "base branch")
 	cmd.Flags().StringVar(&issueRef, "issue", "", "issue reference in OWNER/REPO#NUMBER form")
+	cmd.Flags().StringVar(&executionProfile, "execution-profile", string(state.ExecutionProfileDefault), "execution profile: default|cheap|priority")
 	cmd.Flags().BoolVar(&debug, "debug", true, "stream detailed agent execution logs (use --debug=false to reduce verbosity)")
 	return cmd
 }
@@ -1028,18 +1034,19 @@ func (a *app) newPSCmd() *cobra.Command {
 			render := func(runs []state.Run) error {
 				return emit(a, api.RunsResponse{Runs: runs}, func() error {
 					tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-					if _, err := fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tISSUE\tPR\tCREATED (UTC)"); err != nil {
+					if _, err := fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tISSUE\tPR\tTOKENS\tCREATED (UTC)"); err != nil {
 						return fmt.Errorf("write runs table header: %w", err)
 					}
 					for _, run := range runs {
 						if _, err := fmt.Fprintf(
 							tw,
-							"%s\t%s\t%s\t%s\t%s\t%s\n",
+							"%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 							run.ID,
 							string(run.Status),
 							run.Repo,
 							psIssueLabel(run),
 							psPRLabel(run),
+							firstNonEmpty(run.TokenSummary, "-"),
 							psCreatedLabel(run.CreatedAt),
 						); err != nil {
 							return fmt.Errorf("write runs table row: %w", err)
@@ -1091,6 +1098,130 @@ func (a *app) newPSCmd() *cobra.Command {
 	cmd.Flags().StringVar(&statusFilter, "status", "", "comma-separated run statuses to include")
 	cmd.Flags().BoolVar(&watch, "watch", false, "refresh continuously")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "refresh interval when --watch is enabled")
+	return cmd
+}
+
+func (a *app) newUsageCmd() *cobra.Command {
+	var (
+		repo    string
+		backend string
+		status  string
+		since   string
+		until   string
+		limit   int
+	)
+	buildQuery := func() string {
+		values := url.Values{}
+		if strings.TrimSpace(repo) != "" {
+			values.Set("repo", strings.TrimSpace(repo))
+		}
+		if strings.TrimSpace(backend) != "" {
+			values.Set("backend", strings.TrimSpace(backend))
+		}
+		if strings.TrimSpace(status) != "" {
+			values.Set("status", strings.TrimSpace(status))
+		}
+		if strings.TrimSpace(since) != "" {
+			values.Set("since", strings.TrimSpace(since))
+		}
+		if strings.TrimSpace(until) != "" {
+			values.Set("until", strings.TrimSpace(until))
+		}
+		if limit > 0 {
+			values.Set("limit", strconv.Itoa(limit))
+		}
+		if encoded := values.Encode(); encoded != "" {
+			return "?" + encoded
+		}
+		return ""
+	}
+	cmd := &cobra.Command{
+		Use:   "usage",
+		Short: "Inspect persisted token usage",
+	}
+	runsCmd := &cobra.Command{
+		Use:   "runs",
+		Short: "List run-level token usage",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if err := a.requireServerAuth(); err != nil {
+				return err
+			}
+			runs, err := a.fetchUsageRuns(buildQuery())
+			if err != nil {
+				return err
+			}
+			return emit(a, api.RunUsageRunsResponse{Runs: runs}, func() error {
+				tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+				if _, err := fmt.Fprintln(tw, "RUN ID\tREPO\tBACKEND\tMODEL\tTOKENS\tSTATUS\tCOMPLETED (UTC)"); err != nil {
+					return fmt.Errorf("write usage runs header: %w", err)
+				}
+				for _, run := range runs {
+					if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+						run.RunID,
+						run.Repo,
+						run.Backend,
+						firstNonEmpty(run.Model, "-"),
+						tokenSummary(run.TotalTokens),
+						run.Status,
+						usageCompletedLabel(run.CompletedAt),
+					); err != nil {
+						return fmt.Errorf("write usage runs row: %w", err)
+					}
+				}
+				return tw.Flush()
+			})
+		},
+	}
+	summaryCmd := &cobra.Command{
+		Use:   "summary",
+		Short: "Summarize token usage by repo/backend/model",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if err := a.requireServerAuth(); err != nil {
+				return err
+			}
+			summaries, err := a.fetchUsageSummary(buildQuery())
+			if err != nil {
+				return err
+			}
+			return emit(a, api.RunUsageSummaryResponse{Summaries: summaries}, func() error {
+				tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+				if _, err := fmt.Fprintln(tw, "REPO\tBACKEND\tMODEL\tPROFILE\tRUNS\tTOKENS"); err != nil {
+					return fmt.Errorf("write usage summary header: %w", err)
+				}
+				for _, item := range summaries {
+					if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n",
+						item.Repo,
+						item.Backend,
+						firstNonEmpty(item.Model, "-"),
+						item.ExecutionProfile,
+						item.RunCount,
+						tokenSummary(item.TotalTokens),
+					); err != nil {
+						return fmt.Errorf("write usage summary row: %w", err)
+					}
+				}
+				return tw.Flush()
+			})
+		},
+	}
+	repoCmd := &cobra.Command{
+		Use:   "repo OWNER/REPO",
+		Short: "Summarize token usage for one repository",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			repo = args[0]
+			return summaryCmd.RunE(summaryCmd, nil)
+		},
+	}
+	for _, sub := range []*cobra.Command{runsCmd, summaryCmd, repoCmd} {
+		sub.Flags().StringVar(&repo, "repo", "", "filter by repository")
+		sub.Flags().StringVar(&backend, "backend", "", "filter by backend")
+		sub.Flags().StringVar(&status, "status", "", "filter by run status")
+		sub.Flags().StringVar(&since, "since", "", "filter from RFC3339 time")
+		sub.Flags().StringVar(&until, "until", "", "filter until RFC3339 time")
+		sub.Flags().IntVar(&limit, "limit", 50, "max rows for run-level usage")
+	}
+	cmd.AddCommand(runsCmd, summaryCmd, repoCmd)
 	return cmd
 }
 
@@ -1713,6 +1844,7 @@ rascal open run_abc123 --print
 
 func (a *app) newRetryCmd() *cobra.Command {
 	var debug bool
+	var executionProfile string
 	cmd := &cobra.Command{
 		Use:     "retry <run_id>",
 		Aliases: []string{"rerun"},
@@ -1737,12 +1869,13 @@ rascal retry run_abc123 --debug=false
 			}
 			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
 			req := buildCreateTaskPayload(createTaskPayloadInput{
-				TaskID:      run.TaskID,
-				Repo:        run.Repo,
-				Instruction: run.Instruction,
-				BaseBranch:  run.BaseBranch,
-				Trigger:     runtrigger.NameRetry,
-				Debug:       debugValue,
+				TaskID:           run.TaskID,
+				Repo:             run.Repo,
+				Instruction:      firstNonEmpty(strings.TrimSpace(run.Instruction), strings.TrimSpace(run.Task)),
+				BaseBranch:       run.BaseBranch,
+				Trigger:          runtrigger.NameRetry,
+				ExecutionProfile: state.NormalizeExecutionProfile(firstNonEmpty(strings.TrimSpace(executionProfile), string(run.ExecutionProfile))),
+				Debug:            debugValue,
 			})
 			resp, err := req.send(a.client, http.MethodPost)
 			if err != nil {
@@ -1762,6 +1895,7 @@ rascal retry run_abc123 --debug=false
 			})
 		},
 	}
+	cmd.Flags().StringVar(&executionProfile, "execution-profile", "", "override execution profile: default|cheap|priority")
 	cmd.Flags().BoolVar(&debug, "debug", true, "stream detailed agent execution logs (use --debug=false to reduce verbosity)")
 	return cmd
 }
@@ -2326,6 +2460,38 @@ func (a *app) fetchRuns(limit int, all bool) ([]state.Run, error) {
 	return out.Runs, nil
 }
 
+func (a *app) fetchUsageRuns(query string) ([]state.RunUsageRecord, error) {
+	resp, err := a.client.do(http.MethodGet, "/v1/usage/runs"+query, nil)
+	if err != nil {
+		return nil, &cliError{Code: exitServer, Message: "request failed", Cause: err}
+	}
+	defer closeWithLog("close usage runs response body", resp.Body)
+	if resp.StatusCode >= 300 {
+		return nil, decodeServerError(resp)
+	}
+	var out api.RunUsageRunsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+	}
+	return out.Runs, nil
+}
+
+func (a *app) fetchUsageSummary(query string) ([]state.RunUsageSummary, error) {
+	resp, err := a.client.do(http.MethodGet, "/v1/usage/summary"+query, nil)
+	if err != nil {
+		return nil, &cliError{Code: exitServer, Message: "request failed", Cause: err}
+	}
+	defer closeWithLog("close usage summary response body", resp.Body)
+	if resp.StatusCode >= 300 {
+		return nil, decodeServerError(resp)
+	}
+	var out api.RunUsageSummaryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+	}
+	return out.Summaries, nil
+}
+
 func (a *app) fetchRun(runID string) (state.Run, error) {
 	resp, err := a.client.do(http.MethodGet, "/v1/runs/"+runID, nil)
 	if err != nil {
@@ -2370,6 +2536,27 @@ func parsePSStatusFilter(raw string) (map[state.RunStatus]struct{}, error) {
 		}
 	}
 	return out, nil
+}
+
+func usageCompletedLabel(at *time.Time) string {
+	if at == nil || at.IsZero() {
+		return "-"
+	}
+	return at.UTC().Format("2006-01-02 15:04:05")
+}
+
+func tokenSummary(total int64) string {
+	if total <= 0 {
+		return "-"
+	}
+	switch {
+	case total >= 1_000_000:
+		return fmt.Sprintf("%.2fM", float64(total)/1_000_000)
+	case total >= 1_000:
+		return fmt.Sprintf("%dK", total/1_000)
+	default:
+		return strconv.FormatInt(total, 10)
+	}
 }
 
 func filterRunsByStatus(runs []state.Run, statuses map[state.RunStatus]struct{}) []state.Run {
@@ -2811,13 +2998,14 @@ func parseIssueRef(input string) (string, int, error) {
 }
 
 type createTaskPayloadInput struct {
-	TaskID      string
-	Repo        string
-	Instruction string
-	BaseBranch  string
-	Trigger     runtrigger.Name
-	IssueNumber int
-	Debug       *bool
+	TaskID           string
+	Repo             string
+	Instruction      string
+	BaseBranch       string
+	Trigger          runtrigger.Name
+	IssueNumber      int
+	ExecutionProfile state.ExecutionProfile
+	Debug            *bool
 }
 
 type createTaskRequestPayload struct {
@@ -2848,8 +3036,9 @@ func optionalBoolFlagValue(cmd *cobra.Command, name string, value bool) *bool {
 func buildCreateTaskPayload(input createTaskPayloadInput) createTaskRequestPayload {
 	if input.IssueNumber > 0 {
 		payload := api.CreateIssueTaskRequest{
-			Repo:        input.Repo,
-			IssueNumber: input.IssueNumber,
+			Repo:             input.Repo,
+			IssueNumber:      input.IssueNumber,
+			ExecutionProfile: string(state.NormalizeExecutionProfile(string(input.ExecutionProfile))),
 		}
 		if input.Debug != nil {
 			payload.Debug = input.Debug
@@ -2861,9 +3050,10 @@ func buildCreateTaskPayload(input createTaskPayloadInput) createTaskRequestPaylo
 	}
 
 	payload := api.CreateTaskRequest{
-		Repo:        input.Repo,
-		Instruction: input.Instruction,
-		BaseBranch:  input.BaseBranch,
+		Repo:             input.Repo,
+		Instruction:      input.Instruction,
+		BaseBranch:       input.BaseBranch,
+		ExecutionProfile: string(state.NormalizeExecutionProfile(string(input.ExecutionProfile))),
 	}
 	if strings.TrimSpace(input.TaskID) != "" {
 		payload.TaskID = input.TaskID

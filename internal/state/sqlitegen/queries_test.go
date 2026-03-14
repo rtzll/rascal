@@ -215,18 +215,20 @@ func TestQueriesCoverage(t *testing.T) {
 	}
 
 	if rows, err := q.ClaimRunStart(ctx, ClaimRunStartParams{
-		UpdatedAt: later + 20,
-		StartedAt: sql.NullInt64{Int64: later + 20, Valid: true},
-		ID:        run1.ID,
+		UpdatedAt:  later + 20,
+		StartedAt:  sql.NullInt64{Int64: later + 20, Valid: true},
+		ID:         run1.ID,
+		EligibleAt: sql.NullInt64{Int64: later + 20, Valid: true},
 	}); err != nil {
 		t.Fatalf("ClaimRunStart run_1: %v", err)
 	} else if rows != 1 {
 		t.Fatalf("expected run_1 claim rows=1, got %d", rows)
 	}
 	if rows, err := q.ClaimRunStart(ctx, ClaimRunStartParams{
-		UpdatedAt: later + 21,
-		StartedAt: sql.NullInt64{Int64: later + 21, Valid: true},
-		ID:        run2.ID,
+		UpdatedAt:  later + 21,
+		StartedAt:  sql.NullInt64{Int64: later + 21, Valid: true},
+		ID:         run2.ID,
+		EligibleAt: sql.NullInt64{Int64: later + 21, Valid: true},
 	}); err != nil {
 		t.Fatalf("ClaimRunStart run_2 while run_1 active: %v", err)
 	} else if rows != 0 {
@@ -299,16 +301,27 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatalf("InsertRun run_3: %v", err)
 	}
 
-	claimedNext, err := q.ClaimNextQueuedRunForTask(ctx, ClaimNextQueuedRunForTaskParams{
-		UpdatedAt: later + 22,
-		StartedAt: sql.NullInt64{Int64: later + 22, Valid: true},
-		TaskID:    "task_2",
+	claimedNext, err := q.PeekNextQueuedRunForTask(ctx, PeekNextQueuedRunForTaskParams{
+		TaskID:     "task_2",
+		EligibleAt: sql.NullInt64{Int64: later + 22, Valid: true},
 	})
 	if err != nil {
-		t.Fatalf("ClaimNextQueuedRunForTask: %v", err)
+		t.Fatalf("PeekNextQueuedRunForTask: %v", err)
 	}
 	if claimedNext.ID != "run_3" {
 		t.Fatalf("expected run_3 claim, got %s", claimedNext.ID)
+	}
+	rows, err := q.ClaimRunStart(ctx, ClaimRunStartParams{
+		UpdatedAt:  later + 22,
+		StartedAt:  sql.NullInt64{Int64: later + 22, Valid: true},
+		ID:         claimedNext.ID,
+		EligibleAt: sql.NullInt64{Int64: later + 22, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("ClaimRunStart: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("expected one claimed row, got %d", rows)
 	}
 	taskWithQueue, err := q.GetTask(ctx, "task_1")
 	if err != nil {

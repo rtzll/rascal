@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rtzll/rascal/internal/cost"
 	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/defaults"
 	"github.com/rtzll/rascal/internal/runner"
@@ -46,6 +48,7 @@ type ServerConfig struct {
 	CredentialEncryptionKey string
 	TaskSession             TaskSessionConfig
 	MaxRuns                 int
+	CostPolicies            []cost.Policy
 }
 
 // ClientConfig controls rascal CLI behavior.
@@ -105,6 +108,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		CredentialEncryptionKey: firstNonEmptyEnv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "RASCAL_API_TOKEN"),
 		TaskSession:             taskSession,
 		MaxRuns:                 200,
+		CostPolicies:            loadCostPolicies(),
 	}
 	cfg.RunnerImage = cfg.RunnerImageForRuntime(cfg.AgentRuntime)
 	return cfg, nil
@@ -130,6 +134,26 @@ func (c ServerConfig) Ensure() error {
 		}
 	}
 	return nil
+}
+
+func loadCostPolicies() []cost.Policy {
+	raw := strings.TrimSpace(os.Getenv("RASCAL_COST_POLICIES_JSON"))
+	if raw == "" {
+		return nil
+	}
+	var policies []cost.Policy
+	if err := json.Unmarshal([]byte(raw), &policies); err != nil {
+		return nil
+	}
+	out := make([]cost.Policy, 0, len(policies))
+	for _, policy := range policies {
+		policy = policy.Normalized()
+		if err := policy.Validate(); err != nil {
+			continue
+		}
+		out = append(out, policy)
+	}
+	return out
 }
 
 func (c ServerConfig) RunnerImageForRuntime(rt runtime.Runtime) string {

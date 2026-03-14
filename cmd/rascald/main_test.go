@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/config"
+	"github.com/rtzll/rascal/internal/cost"
 	"github.com/rtzll/rascal/internal/credentials"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/orchestrator"
@@ -3084,6 +3085,13 @@ func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 	if !strings.Contains(usage.RawUsageJSON, `"reasoning_tokens":10`) {
 		t.Fatalf("expected raw usage json, got %q", usage.RawUsageJSON)
 	}
+	summaryData, err := os.ReadFile(filepath.Join(run.RunDir, orchestrator.RunCostSummaryFile))
+	if err != nil {
+		t.Fatalf("read cost summary: %v", err)
+	}
+	if !strings.Contains(string(summaryData), "Total tokens: 150") {
+		t.Fatalf("expected token summary artifact, got:\n%s", string(summaryData))
+	}
 }
 
 func TestExecuteRunPersistsRecordedCodexRunTokenUsage(t *testing.T) {
@@ -3537,6 +3545,155 @@ func TestScheduleRunsResumesAfterPauseDeadline(t *testing.T) {
 	}
 
 	waitFor(t, 2*time.Second, func() bool { return launcher.Calls() == 1 }, "scheduler resume after pause deadline")
+}
+
+func TestScheduleRunsDefersQueuedRunWhenBudgetExceeded(t *testing.T) {
+	t.Parallel()
+	launcher := &fakeRunner{}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	s.CostEvaluator = cost.NewEvaluator([]cost.Policy{
+		{Scope: cost.ScopeRepo, Match: "owner/repo", DailyTokenBudget: 100, HardAction: cost.ActionDefer},
+	}, orchestrator.StoreUsageCounter{Store: s.Store})
+
+	seedBudgetUsage(t, s, "task-budget-used", "run_budget_used", "owner/repo", 150)
+	run, err := s.Store.AddRun(state.CreateRunInput{
+		ID:               "run_budget_deferred",
+		TaskID:           "task-budget-queued",
+		Repo:             "owner/repo",
+		Task:             "defer this run",
+		BaseBranch:       "main",
+		RunDir:           t.TempDir(),
+		ExecutionProfile: state.ExecutionProfileCheap,
+	})
+	if err != nil {
+		t.Fatalf("add queued run: %v", err)
+	}
+
+	s.ScheduleRuns("")
+
+	updated, ok := s.Store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if updated.Status != state.StatusQueued {
+		t.Fatalf("status = %s, want queued", updated.Status)
+	}
+	if updated.AdmissionDecision != state.AdmissionDecisionDefer {
+		t.Fatalf("admission decision = %q, want defer", updated.AdmissionDecision)
+	}
+	if updated.AdmissionNextEligible == nil {
+		t.Fatal("expected next eligible time for deferred run")
+	}
+	if calls := launcher.Calls(); calls != 0 {
+		t.Fatalf("launcher calls = %d, want 0", calls)
+	}
+	data, err := os.ReadFile(filepath.Join(run.RunDir, orchestrator.RunCostSummaryFile))
+	if err != nil {
+		t.Fatalf("read cost summary: %v", err)
+	}
+	if !strings.Contains(string(data), "Admission decision: defer") {
+		t.Fatalf("expected defer summary, got:\n%s", string(data))
+	}
+}
+
+func TestScheduleRunsRejectsQueuedRunWhenBudgetExceededWithoutCancelingRunningRun(t *testing.T) {
+	t.Parallel()
+	launcher := &fakeRunner{}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	s.CostEvaluator = cost.NewEvaluator([]cost.Policy{
+		{Scope: cost.ScopeRepo, Match: "owner/repo", DailyTokenBudget: 100, HardAction: cost.ActionReject},
+	}, orchestrator.StoreUsageCounter{Store: s.Store})
+
+	running, err := s.Store.AddRun(state.CreateRunInput{
+		ID:         "run_already_running",
+		TaskID:     "task-running",
+		Repo:       "owner/repo",
+		Task:       "still running",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add running run: %v", err)
+	}
+	if _, err := s.Store.SetRunStatus(running.ID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	seedBudgetUsage(t, s, "task-budget-used-2", "run_budget_used_2", "owner/repo", 150)
+	rejected, err := s.Store.AddRun(state.CreateRunInput{
+		ID:         "run_budget_rejected",
+		TaskID:     "task-budget-rejected",
+		Repo:       "owner/repo",
+		Task:       "reject this run",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add rejected run: %v", err)
+	}
+
+	s.ScheduleRuns("")
+
+	runningAfter, ok := s.Store.GetRun(running.ID)
+	if !ok {
+		t.Fatalf("missing running run %s", running.ID)
+	}
+	if runningAfter.Status != state.StatusRunning {
+		t.Fatalf("running status = %s, want running", runningAfter.Status)
+	}
+	rejectedAfter, ok := s.Store.GetRun(rejected.ID)
+	if !ok {
+		t.Fatalf("missing rejected run %s", rejected.ID)
+	}
+	if rejectedAfter.Status != state.StatusCanceled {
+		t.Fatalf("rejected status = %s, want canceled", rejectedAfter.Status)
+	}
+	if rejectedAfter.AdmissionDecision != state.AdmissionDecisionReject {
+		t.Fatalf("admission decision = %q, want reject", rejectedAfter.AdmissionDecision)
+	}
+	if !strings.Contains(rejectedAfter.Error, "reject policy") {
+		t.Fatalf("expected reject reason, got %q", rejectedAfter.Error)
+	}
+	if _, err := s.Store.SetRunStatus(running.ID, state.StatusSucceeded, ""); err != nil {
+		t.Fatalf("set running run succeeded for cleanup: %v", err)
+	}
+}
+
+func seedBudgetUsage(t *testing.T, s *orchestrator.Server, taskID, runID, repo string, totalTokens int64) {
+	t.Helper()
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo}); err != nil {
+		t.Fatalf("upsert task %s: %v", taskID, err)
+	}
+	run, err := s.Store.AddRun(state.CreateRunInput{
+		ID:         runID,
+		TaskID:     taskID,
+		Repo:       repo,
+		Task:       "seed usage",
+		BaseBranch: "main",
+		RunDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("add seed run %s: %v", runID, err)
+	}
+	if _, err := s.Store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+		t.Fatalf("set seed run running: %v", err)
+	}
+	if _, err := s.Store.SetRunStatus(run.ID, state.StatusSucceeded, ""); err != nil {
+		t.Fatalf("set seed run succeeded: %v", err)
+	}
+	if _, err := s.Store.UpsertRunTokenUsage(state.RunTokenUsage{
+		RunID:       run.ID,
+		Backend:     "codex",
+		Provider:    "openai",
+		Model:       "gpt-5",
+		TotalTokens: totalTokens,
+		CapturedAt:  time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("upsert seed usage: %v", err)
+	}
 }
 
 func TestParseUsageLimitRetryAtSupportsAbsoluteTimestampWithZone(t *testing.T) {

@@ -100,6 +100,10 @@ INSERT INTO runs (
   debug,
   status,
   run_dir,
+  execution_profile,
+  admission_decision,
+  admission_reason,
+  admission_next_eligible_at,
   issue_number,
   pr_number,
   pr_url,
@@ -113,35 +117,35 @@ INSERT INTO runs (
   started_at,
   completed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at;
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, execution_profile, admission_decision, admission_reason, admission_next_eligible_at, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at;
 
 -- name: GetRun :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, execution_profile, admission_decision, admission_reason, admission_next_eligible_at, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?;
 
 -- name: ListRuns :many
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, execution_profile, admission_decision, admission_reason, admission_next_eligible_at, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 ORDER BY seq DESC
 LIMIT ?;
 
 -- name: ListRunningRuns :many
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, execution_profile, admission_decision, admission_reason, admission_next_eligible_at, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE status = 'running'
 ORDER BY seq DESC;
 
 -- name: LastRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, execution_profile, admission_decision, admission_reason, admission_next_eligible_at, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ?
 ORDER BY seq DESC
 LIMIT 1;
 
 -- name: ActiveRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, execution_profile, admission_decision, admission_reason, admission_next_eligible_at, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ? AND status IN ('queued', 'running')
 ORDER BY seq DESC
@@ -160,6 +164,10 @@ SET
   debug = ?,
   status = ?,
   run_dir = ?,
+  execution_profile = ?,
+  admission_decision = ?,
+  admission_reason = ?,
+  admission_next_eligible_at = ?,
   issue_number = ?,
   pr_number = ?,
   pr_url = ?,
@@ -184,6 +192,7 @@ UPDATE runs
 SET status = 'running', error = '', status_reason = '', updated_at = ?, started_at = ?
 WHERE id = ?
   AND status = 'queued'
+  AND COALESCE(admission_next_eligible_at, 0) <= sqlc.arg(eligible_at)
   AND NOT EXISTS (
     SELECT 1
     FROM runs AS other
@@ -192,116 +201,44 @@ WHERE id = ?
       AND other.id <> runs.id
   );
 
--- name: ClaimNextQueuedRunForTask :one
-UPDATE runs
-SET status = 'running', error = '', status_reason = '', updated_at = sqlc.arg(updated_at), started_at = sqlc.arg(started_at)
-WHERE id = (
-  SELECT r.id
-  FROM runs AS r
-  WHERE r.status = 'queued'
-    AND r.task_id = sqlc.arg(task_id)
-    AND NOT EXISTS (
-      SELECT 1
-      FROM runs AS other
-      WHERE other.task_id = r.task_id
-        AND other.status = 'running'
-    )
-    AND NOT EXISTS (
-      SELECT 1
-      FROM run_cancels AS rc
-      WHERE rc.run_id = r.id
-    )
-  ORDER BY r.created_at ASC, r.seq ASC
-  LIMIT 1
-)
-  AND status = 'queued'
+-- name: PeekNextQueuedRunForTask :one
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, execution_profile, admission_decision, admission_reason, admission_next_eligible_at, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+FROM runs AS r
+WHERE r.status = 'queued'
+  AND r.task_id = sqlc.arg(task_id)
+  AND COALESCE(r.admission_next_eligible_at, 0) <= sqlc.arg(eligible_at)
   AND NOT EXISTS (
     SELECT 1
     FROM runs AS other
-    WHERE other.task_id = runs.task_id
+    WHERE other.task_id = r.task_id
       AND other.status = 'running'
-      AND other.id <> runs.id
   )
-RETURNING
-  seq,
-  id,
-  task_id,
-  repo,
-  task,
-  agent_runtime,
-  base_branch,
-  head_branch,
-  trigger,
-  debug,
-  status,
-  run_dir,
-  issue_number,
-  pr_number,
-  pr_url,
-  pr_status,
-  head_sha,
-  context,
-  error,
-  status_reason,
-  created_at,
-  updated_at,
-  started_at,
-  completed_at;
+  AND NOT EXISTS (
+    SELECT 1
+    FROM run_cancels AS rc
+    WHERE rc.run_id = r.id
+  )
+ORDER BY r.created_at ASC, r.seq ASC
+LIMIT 1;
 
--- name: ClaimNextQueuedRun :one
-UPDATE runs
-SET status = 'running', error = '', status_reason = '', updated_at = sqlc.arg(updated_at), started_at = sqlc.arg(started_at)
-WHERE id = (
-  SELECT r.id
-  FROM runs AS r
-  WHERE r.status = 'queued'
-    AND NOT EXISTS (
-      SELECT 1
-      FROM runs AS other
-      WHERE other.task_id = r.task_id
-        AND other.status = 'running'
-    )
-    AND NOT EXISTS (
-      SELECT 1
-      FROM run_cancels AS rc
-      WHERE rc.run_id = r.id
-    )
-  ORDER BY r.created_at ASC, r.seq ASC
-  LIMIT 1
-)
-  AND status = 'queued'
+-- name: PeekNextQueuedRun :one
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, execution_profile, admission_decision, admission_reason, admission_next_eligible_at, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+FROM runs AS r
+WHERE r.status = 'queued'
+  AND COALESCE(r.admission_next_eligible_at, 0) <= sqlc.arg(eligible_at)
   AND NOT EXISTS (
     SELECT 1
     FROM runs AS other
-    WHERE other.task_id = runs.task_id
+    WHERE other.task_id = r.task_id
       AND other.status = 'running'
-      AND other.id <> runs.id
   )
-RETURNING
-  seq,
-  id,
-  task_id,
-  repo,
-  task,
-  agent_runtime,
-  base_branch,
-  head_branch,
-  trigger,
-  debug,
-  status,
-  run_dir,
-  issue_number,
-  pr_number,
-  pr_url,
-  pr_status,
-  head_sha,
-  context,
-  error,
-  status_reason,
-  created_at,
-  updated_at,
-  started_at,
-  completed_at;
+  AND NOT EXISTS (
+    SELECT 1
+    FROM run_cancels AS rc
+    WHERE rc.run_id = r.id
+  )
+ORDER BY r.created_at ASC, r.seq ASC
+LIMIT 1;
 
 -- name: TrimOldRuns :exec
 DELETE FROM runs
@@ -446,6 +383,75 @@ SELECT
   updated_at
 FROM run_token_usage
 WHERE run_id = ?;
+
+-- name: ListRunUsage :many
+SELECT
+  r.id AS run_id,
+  r.repo,
+  u.backend,
+  u.provider,
+  u.model,
+  r.status,
+  r.execution_profile,
+  u.total_tokens,
+  u.input_tokens,
+  u.output_tokens,
+  u.cached_input_tokens,
+  u.reasoning_output_tokens,
+  r.created_at,
+  r.completed_at,
+  u.captured_at
+FROM run_token_usage AS u
+JOIN runs AS r ON r.id = u.run_id
+WHERE u.captured_at >= sqlc.arg(since)
+  AND u.captured_at < sqlc.arg(until)
+  AND (sqlc.narg(repo) IS NULL OR r.repo = sqlc.narg(repo))
+  AND (sqlc.narg(backend) IS NULL OR u.backend = sqlc.narg(backend))
+  AND (sqlc.narg(provider) IS NULL OR u.provider = sqlc.narg(provider))
+  AND (sqlc.narg(model) IS NULL OR u.model = sqlc.narg(model))
+  AND (sqlc.narg(status) IS NULL OR r.status = sqlc.narg(status))
+  AND (sqlc.narg(trigger) IS NULL OR r.trigger = sqlc.narg(trigger))
+ORDER BY u.captured_at DESC, r.seq DESC
+LIMIT sqlc.arg(limit);
+
+-- name: SummarizeRunUsage :many
+SELECT
+  r.repo,
+  u.backend,
+  u.provider,
+  u.model,
+  r.execution_profile,
+  COUNT(*) AS run_count,
+  COALESCE(SUM(u.total_tokens), 0) AS total_tokens,
+  COALESCE(SUM(u.input_tokens), 0) AS input_tokens,
+  COALESCE(SUM(u.output_tokens), 0) AS output_tokens,
+  COALESCE(SUM(u.cached_input_tokens), 0) AS cached_input_tokens,
+  COALESCE(SUM(u.reasoning_output_tokens), 0) AS reasoning_output_tokens
+FROM run_token_usage AS u
+JOIN runs AS r ON r.id = u.run_id
+WHERE u.captured_at >= sqlc.arg(since)
+  AND u.captured_at < sqlc.arg(until)
+  AND (sqlc.narg(repo) IS NULL OR r.repo = sqlc.narg(repo))
+  AND (sqlc.narg(backend) IS NULL OR u.backend = sqlc.narg(backend))
+  AND (sqlc.narg(provider) IS NULL OR u.provider = sqlc.narg(provider))
+  AND (sqlc.narg(model) IS NULL OR u.model = sqlc.narg(model))
+  AND (sqlc.narg(status) IS NULL OR r.status = sqlc.narg(status))
+  AND (sqlc.narg(trigger) IS NULL OR r.trigger = sqlc.narg(trigger))
+GROUP BY r.repo, u.backend, u.provider, u.model, r.execution_profile
+ORDER BY total_tokens DESC, run_count DESC, r.repo ASC, u.backend ASC, u.provider ASC, u.model ASC;
+
+-- name: SumRunTokenUsage :one
+SELECT COALESCE(SUM(u.total_tokens), 0) AS total_tokens
+FROM run_token_usage AS u
+JOIN runs AS r ON r.id = u.run_id
+WHERE u.captured_at >= sqlc.arg(since)
+  AND u.captured_at < sqlc.arg(until)
+  AND (sqlc.narg(repo) IS NULL OR r.repo = sqlc.narg(repo))
+  AND (sqlc.narg(backend) IS NULL OR u.backend = sqlc.narg(backend))
+  AND (sqlc.narg(provider) IS NULL OR u.provider = sqlc.narg(provider))
+  AND (sqlc.narg(model) IS NULL OR u.model = sqlc.narg(model))
+  AND (sqlc.narg(status) IS NULL OR r.status = sqlc.narg(status))
+  AND (sqlc.narg(trigger) IS NULL OR r.trigger = sqlc.narg(trigger));
 
 -- name: UpsertRunCancel :exec
 INSERT INTO run_cancels (run_id, reason, source, requested_at)

@@ -540,6 +540,7 @@ func loadRunTokenUsage(run state.Run) (state.RunTokenUsage, bool, error) {
 		}
 		return state.RunTokenUsage{
 			RunID:                 run.ID,
+			Backend:               run.AgentRuntime,
 			AgentRuntime:          run.AgentRuntime,
 			Provider:              usage.Provider,
 			Model:                 usage.Model,
@@ -571,6 +572,7 @@ func loadRunTokenUsage(run state.Run) (state.RunTokenUsage, bool, error) {
 
 	return state.RunTokenUsage{
 		RunID:                 run.ID,
+		Backend:               run.AgentRuntime,
 		AgentRuntime:          run.AgentRuntime,
 		Provider:              usage.Provider,
 		Model:                 usage.Model,
@@ -582,6 +584,48 @@ func loadRunTokenUsage(run state.Run) (state.RunTokenUsage, bool, error) {
 		RawUsageJSON:          usage.RawUsageJSON,
 		CapturedAt:            time.Now().UTC(),
 	}, true, nil
+}
+
+func (s *Server) writeRunCostSummaryBestEffort(run state.Run) {
+	lines := []string{
+		fmt.Sprintf("Run: %s", run.ID),
+		fmt.Sprintf("Repo: %s", run.Repo),
+		fmt.Sprintf("Backend: %s", run.AgentRuntime),
+		fmt.Sprintf("Execution profile: %s", run.ExecutionProfile),
+		fmt.Sprintf("Status: %s", run.Status),
+	}
+	if run.AdmissionDecision != "" {
+		lines = append(lines, fmt.Sprintf("Admission decision: %s", run.AdmissionDecision))
+	}
+	if strings.TrimSpace(run.AdmissionReason) != "" {
+		lines = append(lines, "Admission reason: "+strings.TrimSpace(run.AdmissionReason))
+	}
+	if run.AdmissionNextEligible != nil {
+		lines = append(lines, "Next eligible at: "+run.AdmissionNextEligible.UTC().Format(time.RFC3339))
+	}
+	if usage, ok := s.Store.GetRunTokenUsage(run.ID); ok {
+		lines = append(lines,
+			fmt.Sprintf("Provider: %s", firstNonEmpty(usage.Provider, "(unknown)")),
+			fmt.Sprintf("Model: %s", firstNonEmpty(usage.Model, "(unknown)")),
+			fmt.Sprintf("Total tokens: %d", usage.TotalTokens),
+		)
+		if usage.InputTokens != nil {
+			lines = append(lines, fmt.Sprintf("Input tokens: %d", *usage.InputTokens))
+		}
+		if usage.OutputTokens != nil {
+			lines = append(lines, fmt.Sprintf("Output tokens: %d", *usage.OutputTokens))
+		}
+		if usage.CachedInputTokens != nil {
+			lines = append(lines, fmt.Sprintf("Cached input tokens: %d", *usage.CachedInputTokens))
+		}
+		if usage.ReasoningOutputTokens != nil {
+			lines = append(lines, fmt.Sprintf("Reasoning output tokens: %d", *usage.ReasoningOutputTokens))
+		}
+	}
+	path := filepath.Join(run.RunDir, RunCostSummaryFile)
+	if err := writeFileAtomically(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		log.Printf("run %s write cost summary failed: %v", run.ID, err)
+	}
 }
 
 func buildRunFailureComment(run state.Run, target RunResponseTarget) (string, error) {

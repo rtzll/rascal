@@ -25,11 +25,15 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 	req.HeadBranch = strings.TrimSpace(req.HeadBranch)
 	req.Context = strings.TrimSpace(req.Context)
 	req.CreatedByUserID = strings.TrimSpace(req.CreatedByUserID)
+	req.ExecutionProfile = state.NormalizeExecutionProfile(string(req.ExecutionProfile))
 	if req.Repo == "" || req.Instruction == "" {
 		return state.Run{}, fmt.Errorf("repo and task are required")
 	}
 	if req.CreatedByUserID == "" {
 		req.CreatedByUserID = "system"
+	}
+	if req.ExecutionProfile == "" {
+		req.ExecutionProfile = state.ExecutionProfileDefault
 	}
 	if req.Trigger == "" {
 		req.Trigger = runtrigger.NameCLI
@@ -118,6 +122,7 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 		PRNumber:     req.PRNumber,
 		PRStatus:     req.PRStatus,
 		Context:      req.Context,
+		ExecutionProfile: req.ExecutionProfile,
 		Debug:        boolPtr(debugEnabled),
 	})
 	if err != nil {
@@ -149,15 +154,16 @@ func (s *Server) WriteRunFiles(run state.Run) (err error) {
 	}
 
 	ctxPayload := RunContextFile{
-		RunID:       run.ID,
-		TaskID:      run.TaskID,
-		Repo:        run.Repo,
-		Instruction: run.Instruction,
-		Trigger:     run.Trigger.String(),
-		IssueNumber: run.IssueNumber,
-		PRNumber:    run.PRNumber,
-		Context:     run.Context,
-		Debug:       run.Debug,
+		RunID:            run.ID,
+		TaskID:           run.TaskID,
+		Repo:             run.Repo,
+		Instruction:      run.Instruction,
+		Trigger:          run.Trigger.String(),
+		IssueNumber:      run.IssueNumber,
+		PRNumber:         run.PRNumber,
+		Context:          run.Context,
+		ExecutionProfile: string(run.ExecutionProfile),
+		Debug:            run.Debug,
 	}
 	ctxData, err := json.MarshalIndent(ctxPayload, "", "  ")
 	if err != nil {
@@ -194,15 +200,16 @@ func (s *Server) WriteRunFiles(run state.Run) (err error) {
 }
 
 type RunContextFile struct {
-	RunID       string `json:"run_id"`
-	TaskID      string `json:"task_id"`
-	Repo        string `json:"repo"`
-	Instruction string `json:"instruction"`
-	Trigger     string `json:"trigger"`
-	IssueNumber int    `json:"issue_number"`
-	PRNumber    int    `json:"pr_number"`
-	Context     string `json:"context"`
-	Debug       bool   `json:"debug"`
+	RunID            string `json:"run_id"`
+	TaskID           string `json:"task_id"`
+	Repo             string `json:"repo"`
+	Instruction      string `json:"instruction"`
+	Trigger          string `json:"trigger"`
+	IssueNumber      int    `json:"issue_number"`
+	PRNumber         int    `json:"pr_number"`
+	Context          string `json:"context"`
+	ExecutionProfile string `json:"execution_profile,omitempty"`
+	Debug            bool   `json:"debug"`
 }
 
 func (s *Server) WriteRunResponseTarget(run state.Run, target *RunResponseTarget) error {

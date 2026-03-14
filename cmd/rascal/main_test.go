@@ -1184,10 +1184,10 @@ func TestPSRendersIssueColumn(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("expected header plus two rows, got:\n%s", stdout)
 	}
-	if got := strings.Fields(lines[0]); strings.Join(got, " ") != "RUN ID STATUS REPO ISSUE PR CREATED (UTC)" {
+	if got := strings.Fields(lines[0]); strings.Join(got, " ") != "RUN ID STATUS REPO ISSUE PR TOKENS CREATED (UTC)" {
 		t.Fatalf("unexpected header fields: %q", got)
 	}
-	if got := strings.Fields(lines[1]); strings.Join(got, " ") != "run_issue failed owner/repo #119 - 2026-03-08 13:56" {
+	if got := strings.Fields(lines[1]); strings.Join(got, " ") != "run_issue failed owner/repo #119 - - 2026-03-08 13:56" {
 		t.Fatalf("unexpected issue-backed row fields: %q", got)
 	}
 	if !strings.Contains(lines[2], "run_no_issue") || !strings.Contains(lines[2], "owner/repo") || !strings.Contains(lines[2], "2026-03-08 13:57") {
@@ -1256,6 +1256,9 @@ func TestRunCreatesTaskPayload(t *testing.T) {
 	if payload.Debug != nil {
 		t.Fatalf("did not expect debug payload unless flag is set, got: %v", payload.Debug)
 	}
+	if payload.ExecutionProfile != "default" {
+		t.Fatalf("expected default execution_profile, got: %v", payload.ExecutionProfile)
+	}
 }
 
 func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
@@ -1312,6 +1315,42 @@ func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
 	}
 	if payload.Debug != nil {
 		t.Fatalf("did not expect debug payload unless flag is set, got: %v", payload.Debug)
+	}
+	if payload.ExecutionProfile != "default" {
+		t.Fatalf("expected default execution_profile, got: %v", payload.ExecutionProfile)
+	}
+}
+
+func TestUsageRunsUsesEndpoint(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"runs": []map[string]any{
+				{"run_id": "run_1", "repo": "owner/repo", "backend": "codex", "model": "gpt-5", "total_tokens": 150, "status": "succeeded", "captured_at": time.Now().UTC()},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg:    config.ClientConfig{ServerURL: srv.URL, APIToken: "test-token", Transport: "http"},
+		client: apiClient{baseURL: srv.URL, token: "test-token", http: srv.Client(), transport: "http"},
+		output: "json",
+	}
+
+	cmd := a.newUsageCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"runs", "--repo", "owner/repo", "--backend", "codex"})
+	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
+		t.Fatalf("usage runs execute: %v", err)
+	}
+	if gotPath != "/v1/usage/runs?backend=codex&limit=50&repo=owner%2Frepo" {
+		t.Fatalf("unexpected usage path: %s", gotPath)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/rtzll/rascal/internal/api"
 	"github.com/rtzll/rascal/internal/config"
+	"github.com/rtzll/rascal/internal/cost"
 	"github.com/rtzll/rascal/internal/credentials"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/runner"
@@ -31,6 +32,7 @@ var ErrServerDraining = errServerDraining
 const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
 const RunResponseTargetFile = "response_target.json"
+const RunCostSummaryFile = "cost_summary.txt"
 const runStartCommentMarkerFile = "start_comment_posted.json"
 const runCompletionCommentMarkerFile = "completion_comment_posted.json"
 const runFailureCommentMarkerFile = "failure_comment_posted.json"
@@ -83,6 +85,10 @@ type Server struct {
 	InstanceID    string
 	resumeTimer   *time.Timer
 	resumeAt      time.Time
+	budgetTimer   *time.Timer
+	budgetAt      time.Time
+
+	CostEvaluator *cost.Evaluator
 
 	SupervisorInterval time.Duration
 	RetryBackoff       func(attempt int) time.Duration
@@ -103,6 +109,7 @@ type RunRequest struct {
 	PRNumber        int
 	PRStatus        state.PRStatus
 	Context         string
+	ExecutionProfile state.ExecutionProfile
 	Debug           *bool
 	CreatedByUserID string
 
@@ -130,6 +137,18 @@ type RunFailureSummary struct {
 	Reason   string
 }
 
+type StoreUsageCounter struct {
+	Store *state.Store
+}
+
+func (c StoreUsageCounter) TokensUsed(filter state.RunUsageFilter) (int64, error) {
+	total, err := c.Store.SumRunTokenUsage(filter)
+	if err != nil {
+		return 0, fmt.Errorf("sum run token usage: %w", err)
+	}
+	return total, nil
+}
+
 type createTaskRequest = api.CreateTaskRequest
 type createIssueTaskRequest = api.CreateIssueTaskRequest
 type createCredentialRequest = api.CreateCredentialRequest
@@ -150,6 +169,7 @@ func NewServer(cfg config.ServerConfig, store *state.Store, r runner.Runner, gh 
 		runCancels:    make(map[string]context.CancelFunc),
 		MaxConcurrent: defaultMaxConcurrent(),
 		InstanceID:    instanceID,
+		CostEvaluator: cost.NewEvaluator(cfg.CostPolicies, StoreUsageCounter{Store: store}),
 	}
 }
 
