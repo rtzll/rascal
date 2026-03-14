@@ -124,6 +124,34 @@ type configUnsetOutput struct {
 	ConfigPath string      `json:"config_path"`
 }
 
+type bootstrapPlanResolved struct {
+	Repo                      string `json:"repo"`
+	Host                      string `json:"host"`
+	Domain                    string `json:"domain"`
+	ServerURL                 string `json:"server_url"`
+	ServerURLSource           string `json:"server_url_source"`
+	DeployEnabled             bool   `json:"deploy_enabled"`
+	ProvisionNewHost          bool   `json:"provision_new_host"`
+	WebhookEnabled            bool   `json:"webhook_enabled"`
+	WriteConfig               bool   `json:"write_config"`
+	SSHUser                   string `json:"ssh_user"`
+	SSHPort                   int    `json:"ssh_port"`
+	APITokenPresent           bool   `json:"api_token_present"`
+	GitHubAdminTokenPresent   bool   `json:"github_admin_token_present"`
+	GitHubRuntimeTokenPresent bool   `json:"github_runtime_token_present"`
+	WebhookSecretPresent      bool   `json:"webhook_secret_present"`
+	HCloudTokenPresent        bool   `json:"hcloud_token_present"`
+	CodexAuthPath             string `json:"codex_auth_path"`
+}
+
+type bootstrapPlanOutput struct {
+	Status   string                `json:"status"`
+	Ready    bool                  `json:"ready"`
+	Actions  []string              `json:"actions"`
+	Missing  []string              `json:"missing"`
+	Resolved bootstrapPlanResolved `json:"resolved"`
+}
+
 type doctorDiagnostics struct {
 	ConfigPath        string              `json:"config_path"`
 	ConfigExists      bool                `json:"config_exists"`
@@ -701,29 +729,29 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			}
 			if printPlan {
 				ready := len(missing) == 0
-				planOut := map[string]any{
-					"status":  "bootstrap_plan",
-					"ready":   ready,
-					"actions": actions,
-					"missing": missing,
-					"resolved": map[string]any{
-						"repo":                         repo,
-						"host":                         host,
-						"domain":                       domain,
-						"server_url":                   resolvedServerURL,
-						"server_url_source":            resolvedServerURLSource,
-						"deploy_enabled":               shouldDeploy,
-						"provision_new_host":           willProvision,
-						"webhook_enabled":              !skipWebhook,
-						"write_config":                 writeConfig,
-						"ssh_user":                     firstNonEmpty(sshUser, "root"),
-						"ssh_port":                     sshPort,
-						"api_token_present":            strings.TrimSpace(apiToken) != "",
-						"github_admin_token_present":   strings.TrimSpace(githubAdminToken) != "",
-						"github_runtime_token_present": strings.TrimSpace(githubRuntimeToken) != "",
-						"webhook_secret_present":       strings.TrimSpace(webhookSecret) != "",
-						"hcloud_token_present":         strings.TrimSpace(hcloudToken) != "",
-						"codex_auth_path":              codexAuthPath,
+				planOut := bootstrapPlanOutput{
+					Status:  "bootstrap_plan",
+					Ready:   ready,
+					Actions: actions,
+					Missing: missing,
+					Resolved: bootstrapPlanResolved{
+						Repo:                      repo,
+						Host:                      host,
+						Domain:                    domain,
+						ServerURL:                 resolvedServerURL,
+						ServerURLSource:           resolvedServerURLSource,
+						DeployEnabled:             shouldDeploy,
+						ProvisionNewHost:          willProvision,
+						WebhookEnabled:            !skipWebhook,
+						WriteConfig:               writeConfig,
+						SSHUser:                   firstNonEmpty(sshUser, "root"),
+						SSHPort:                   sshPort,
+						APITokenPresent:           strings.TrimSpace(apiToken) != "",
+						GitHubAdminTokenPresent:   strings.TrimSpace(githubAdminToken) != "",
+						GitHubRuntimeTokenPresent: strings.TrimSpace(githubRuntimeToken) != "",
+						WebhookSecretPresent:      strings.TrimSpace(webhookSecret) != "",
+						HCloudTokenPresent:        strings.TrimSpace(hcloudToken) != "",
+						CodexAuthPath:             codexAuthPath,
 					},
 				}
 				return a.emit(planOut, func() error {

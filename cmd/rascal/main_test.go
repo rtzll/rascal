@@ -529,33 +529,31 @@ func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
 		t.Fatalf("bootstrap --print-plan failed: %v", err)
 	}
 
-	var out map[string]any
+	var out bootstrapPlanOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
 	}
-	if out["status"] != "bootstrap_plan" {
-		t.Fatalf("unexpected status: %v", out["status"])
+	if out.Status != "bootstrap_plan" {
+		t.Fatalf("unexpected status: %v", out.Status)
 	}
-	if ready, ok := out["ready"].(bool); !ok || ready {
-		t.Fatalf("expected ready=false, got %v", out["ready"])
+	if out.Ready {
+		t.Fatalf("expected ready=false, got %v", out.Ready)
 	}
-	missing := anySliceToStrings(out["missing"])
-	if !containsSubstring(missing, "GitHub admin token is required") {
-		t.Fatalf("missing list should include admin token requirement, got %v", missing)
+	if !containsSubstring(out.Missing, "GitHub admin token is required") {
+		t.Fatalf("missing list should include admin token requirement, got %v", out.Missing)
 	}
-	if !containsSubstring(missing, "GitHub runtime token is required") {
-		t.Fatalf("missing list should include runtime token requirement, got %v", missing)
+	if !containsSubstring(out.Missing, "GitHub runtime token is required") {
+		t.Fatalf("missing list should include runtime token requirement, got %v", out.Missing)
 	}
-	if !containsSubstring(missing, "codex auth file not found") {
-		t.Fatalf("missing list should include codex auth file check, got %v", missing)
+	if !containsSubstring(out.Missing, "codex auth file not found") {
+		t.Fatalf("missing list should include codex auth file check, got %v", out.Missing)
 	}
 
-	actions := anySliceToStrings(out["actions"])
-	if !containsExact(actions, "deploy rascald to 203.0.113.10 over SSH") {
-		t.Fatalf("actions should include deploy step, got %v", actions)
+	if !containsExact(out.Actions, "deploy rascald to 203.0.113.10 over SSH") {
+		t.Fatalf("actions should include deploy step, got %v", out.Actions)
 	}
-	if !containsExact(actions, "configure GitHub webhook and label for owner/repo") {
-		t.Fatalf("actions should include webhook step, got %v", actions)
+	if !containsExact(out.Actions, "configure GitHub webhook and label for owner/repo") {
+		t.Fatalf("actions should include webhook step, got %v", out.Actions)
 	}
 }
 
@@ -589,26 +587,20 @@ func TestBootstrapPrintPlanReadyForProvisionFlow(t *testing.T) {
 		t.Fatalf("bootstrap --print-plan failed: %v", err)
 	}
 
-	var out map[string]any
+	var out bootstrapPlanOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
 	}
-	if ready, ok := out["ready"].(bool); !ok || !ready {
-		t.Fatalf("expected ready=true, got %v", out["ready"])
+	if !out.Ready {
+		t.Fatalf("expected ready=true, got %v", out.Ready)
 	}
-	missing := anySliceToStrings(out["missing"])
-	if len(missing) != 0 {
-		t.Fatalf("expected no missing prerequisites, got %v", missing)
+	if len(out.Missing) != 0 {
+		t.Fatalf("expected no missing prerequisites, got %v", out.Missing)
 	}
-
-	resolved, ok := out["resolved"].(map[string]any)
-	if !ok {
-		t.Fatalf("resolved section missing: %v", out["resolved"])
-	}
-	if got := resolved["server_url"]; got != "http://<provisioned-host>:8080" {
+	if got := out.Resolved.ServerURL; got != "http://<provisioned-host>:8080" {
 		t.Fatalf("unexpected server_url: %v", got)
 	}
-	if got := resolved["server_url_source"]; got != "provisioned_host" {
+	if got := out.Resolved.ServerURLSource; got != "provisioned_host" {
 		t.Fatalf("unexpected server_url_source: %v", got)
 	}
 }
@@ -643,16 +635,15 @@ func TestBootstrapPrintPlanUsesCanonicalRuntimeTokenEnv(t *testing.T) {
 		t.Fatalf("bootstrap --print-plan failed: %v", err)
 	}
 
-	var out map[string]any
+	var out bootstrapPlanOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
 	}
-	if ready, ok := out["ready"].(bool); !ok || !ready {
-		t.Fatalf("expected ready=true, got %v", out["ready"])
+	if !out.Ready {
+		t.Fatalf("expected ready=true, got %v", out.Ready)
 	}
-	missing := anySliceToStrings(out["missing"])
-	if len(missing) != 0 {
-		t.Fatalf("expected no missing prerequisites, got %v", missing)
+	if len(out.Missing) != 0 {
+		t.Fatalf("expected no missing prerequisites, got %v", out.Missing)
 	}
 }
 
@@ -687,16 +678,15 @@ func TestBootstrapPrintPlanIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
 		t.Fatalf("bootstrap --print-plan failed: %v", err)
 	}
 
-	var out map[string]any
+	var out bootstrapPlanOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
 	}
-	if ready, ok := out["ready"].(bool); !ok || ready {
-		t.Fatalf("expected ready=false, got %v", out["ready"])
+	if out.Ready {
+		t.Fatalf("expected ready=false, got %v", out.Ready)
 	}
-	missing := anySliceToStrings(out["missing"])
-	if !containsSubstring(missing, "GitHub runtime token is required") {
-		t.Fatalf("missing list should include runtime token requirement, got %v", missing)
+	if !containsSubstring(out.Missing, "GitHub runtime token is required") {
+		t.Fatalf("missing list should include runtime token requirement, got %v", out.Missing)
 	}
 }
 
@@ -2272,20 +2262,6 @@ func normalizeHelpOutput(s string) string {
 		s = strings.ReplaceAll(s, home, "$HOME")
 	}
 	return strings.TrimSpace(s) + "\n"
-}
-
-func anySliceToStrings(v any) []string {
-	raw, ok := v.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(raw))
-	for _, item := range raw {
-		if s, ok := item.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 func containsSubstring(items []string, needle string) bool {
