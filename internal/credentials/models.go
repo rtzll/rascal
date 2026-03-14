@@ -3,6 +3,7 @@ package credentials
 import (
 	"time"
 
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/state"
 )
 
@@ -16,7 +17,7 @@ type Lease struct {
 	CredentialID string
 	RunID        string
 	UserID       string
-	Strategy     string
+	Strategy     credentialstrategy.Name
 	AcquiredAt   time.Time
 	ExpiresAt    time.Time
 	AuthBlob     []byte

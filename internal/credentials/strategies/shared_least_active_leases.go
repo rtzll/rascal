@@ -4,12 +4,15 @@ import (
 	"cmp"
 
 	"github.com/rtzll/rascal/internal/credentials"
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/state"
 )
 
 type SharedLeastActiveLeases struct{}
 
-func (SharedLeastActiveLeases) Name() string { return "shared_least_active_leases" }
+func (SharedLeastActiveLeases) Name() credentialstrategy.Name {
+	return credentialstrategy.NameSharedLeastActiveLeases
+}
 
 func (SharedLeastActiveLeases) Select(_ credentials.AcquireRequest, candidates []credentials.CredentialState) (string, error) {
 	shared := filter(cloneAndSort(candidates, func(a, b credentials.CredentialState) int {

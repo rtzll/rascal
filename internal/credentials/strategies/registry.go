@@ -2,22 +2,26 @@ package strategies
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/rtzll/rascal/internal/credentials"
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 )
 
-func ByName(name string) (credentials.AllocationStrategy, error) {
-	switch strings.TrimSpace(strings.ToLower(name)) {
-	case "", "requester_own_then_shared":
+func ByName(name credentialstrategy.Name) (credentials.AllocationStrategy, error) {
+	normalized, err := credentialstrategy.ParseName(name.String())
+	if err != nil {
+		return nil, fmt.Errorf("parse credential strategy %q: %w", name, err)
+	}
+	switch normalized {
+	case credentialstrategy.NameRequesterOwnThenShared:
 		return RequesterOwnThenShared{}, nil
-	case "shared_least_active_leases":
+	case credentialstrategy.NameSharedLeastActiveLeases:
 		return SharedLeastActiveLeases{}, nil
-	case "shared_weighted_usage":
+	case credentialstrategy.NameSharedWeightedUsage:
 		return SharedWeightedUsage{}, nil
-	case "priority_burst":
+	case credentialstrategy.NamePriorityBurst:
 		return PriorityBurst{}, nil
-	case "hybrid_reserve_plus_pool":
+	case credentialstrategy.NameHybridReservePlusPool:
 		return HybridReservePlusPool{}, nil
 	default:
 		return nil, fmt.Errorf("unknown credential strategy %q", name)

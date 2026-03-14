@@ -4,12 +4,15 @@ import (
 	"cmp"
 
 	"github.com/rtzll/rascal/internal/credentials"
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/state"
 )
 
 type HybridReservePlusPool struct{}
 
-func (HybridReservePlusPool) Name() string { return "hybrid_reserve_plus_pool" }
+func (HybridReservePlusPool) Name() credentialstrategy.Name {
+	return credentialstrategy.NameHybridReservePlusPool
+}
 
 func (HybridReservePlusPool) Select(req credentials.AcquireRequest, candidates []credentials.CredentialState) (string, error) {
 	sorted := cloneAndSort(candidates, func(a, b credentials.CredentialState) int {

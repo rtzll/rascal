@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rtzll/rascal/internal/credentials"
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 )
 
 func TestRequesterOwnThenSharedSelectsPersonalFirst(t *testing.T) {
@@ -102,5 +103,11 @@ func TestHybridReservePlusPoolUsesSharedAfterReserve(t *testing.T) {
 	}
 	if got != "shared-a" {
 		t.Fatalf("credential_id = %s, want shared-a", got)
+	}
+}
+
+func TestByNameRejectsUnknownStrategy(t *testing.T) {
+	if _, err := ByName(credentialstrategy.Name("unknown")); err == nil {
+		t.Fatal("expected error for unknown strategy")
 	}
 }

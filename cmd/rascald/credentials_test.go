@@ -14,6 +14,7 @@ import (
 
 	"github.com/rtzll/rascal/internal/credentials"
 	credentialstrategies "github.com/rtzll/rascal/internal/credentials/strategies"
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/state"
 )
 
@@ -33,7 +34,7 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	strategy, err := credentialstrategies.ByName("requester_own_then_shared")
+	strategy, err := credentialstrategies.ByName(credentialstrategy.NameRequesterOwnThenShared)
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
 	}
@@ -181,7 +182,7 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	strategy, err := credentialstrategies.ByName("requester_own_then_shared")
+	strategy, err := credentialstrategies.ByName(credentialstrategy.NameRequesterOwnThenShared)
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
 	}
@@ -256,7 +257,7 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	strategy, err := credentialstrategies.ByName("requester_own_then_shared")
+	strategy, err := credentialstrategies.ByName(credentialstrategy.NameRequesterOwnThenShared)
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
 	}

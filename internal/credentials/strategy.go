@@ -1,9 +1,13 @@
 package credentials
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rtzll/rascal/internal/credentialstrategy"
+)
 
 type AllocationStrategy interface {
-	Name() string
+	Name() credentialstrategy.Name
 	Select(req AcquireRequest, candidates []CredentialState) (credentialID string, err error)
 }
 

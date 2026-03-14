@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/defaults"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/spf13/viper"
@@ -37,7 +38,7 @@ type ServerConfig struct {
 	RunnerImageGoose        string
 	RunnerImageCodex        string
 	RunnerMaxAttempts       int
-	CredentialStrategy      string
+	CredentialStrategy      credentialstrategy.Name
 	CredentialLeaseTTL      time.Duration
 	CredentialRenewEvery    time.Duration
 	CredentialEncryptionKey string
@@ -78,7 +79,7 @@ func LoadServerConfig() ServerConfig {
 		RunnerImageGoose:        envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", defaults.GooseRunnerImageTag),
 		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
 		RunnerMaxAttempts:       envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
-		CredentialStrategy:      envOrDefault("RASCAL_CREDENTIAL_STRATEGY", "requester_own_then_shared"),
+		CredentialStrategy:      credentialstrategy.NormalizeName(envOrDefault("RASCAL_CREDENTIAL_STRATEGY", credentialstrategy.DefaultName.String())),
 		CredentialLeaseTTL:      envDurationOrDefault("RASCAL_CREDENTIAL_LEASE_TTL", 90*time.Second),
 		CredentialRenewEvery:    envDurationOrDefault("RASCAL_CREDENTIAL_RENEW_INTERVAL", 30*time.Second),
 		CredentialEncryptionKey: firstNonEmptyEnv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "RASCAL_API_TOKEN"),

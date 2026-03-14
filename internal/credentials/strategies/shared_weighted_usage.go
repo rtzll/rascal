@@ -5,12 +5,15 @@ import (
 	"math"
 
 	"github.com/rtzll/rascal/internal/credentials"
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/state"
 )
 
 type SharedWeightedUsage struct{}
 
-func (SharedWeightedUsage) Name() string { return "shared_weighted_usage" }
+func (SharedWeightedUsage) Name() credentialstrategy.Name {
+	return credentialstrategy.NameSharedWeightedUsage
+}
 
 func (SharedWeightedUsage) Select(_ credentials.AcquireRequest, candidates []credentials.CredentialState) (string, error) {
 	shared := filter(cloneAndSort(candidates, func(a, b credentials.CredentialState) int {

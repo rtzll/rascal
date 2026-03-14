@@ -10,6 +10,7 @@ import (
 
 	"github.com/rtzll/rascal/internal/credentials"
 	credentialstrategies "github.com/rtzll/rascal/internal/credentials/strategies"
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/state"
 )
 
@@ -53,7 +54,7 @@ func TestBrokerAcquireOwnThenShared(t *testing.T) {
 	createCredential(t, store, c, "cred-personal", "u1", state.CredentialScopePersonal)
 	createCredential(t, store, c, "cred-shared", "", state.CredentialScopeShared)
 
-	strategy, err := credentialstrategies.ByName("requester_own_then_shared")
+	strategy, err := credentialstrategies.ByName(credentialstrategy.NameRequesterOwnThenShared)
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestBrokerRenewReleaseAndExpiryReclaim(t *testing.T) {
 		t.Fatalf("new cipher: %v", err)
 	}
 	createCredential(t, store, c, "cred-shared", "", state.CredentialScopeShared)
-	strategy, err := credentialstrategies.ByName("shared_least_active_leases")
+	strategy, err := credentialstrategies.ByName(credentialstrategy.NameSharedLeastActiveLeases)
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestBrokerConcurrentAcquireAllowsCredentialReuse(t *testing.T) {
 		t.Fatalf("new cipher: %v", err)
 	}
 	createCredential(t, store, c, "cred-shared", "", state.CredentialScopeShared)
-	strategy, err := credentialstrategies.ByName("priority_burst")
+	strategy, err := credentialstrategies.ByName(credentialstrategy.NamePriorityBurst)
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
 	}
@@ -181,7 +182,7 @@ func TestBrokerSkipsCooldownCredentials(t *testing.T) {
 		t.Fatalf("set cooldown: %v", err)
 	}
 
-	strategy, err := credentialstrategies.ByName("shared_least_active_leases")
+	strategy, err := credentialstrategies.ByName(credentialstrategy.NameSharedLeastActiveLeases)
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
 	}

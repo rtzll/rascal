@@ -4,12 +4,15 @@ import (
 	"cmp"
 
 	"github.com/rtzll/rascal/internal/credentials"
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/state"
 )
 
 type PriorityBurst struct{}
 
-func (PriorityBurst) Name() string { return "priority_burst" }
+func (PriorityBurst) Name() credentialstrategy.Name {
+	return credentialstrategy.NamePriorityBurst
+}
 
 func (PriorityBurst) Select(_ credentials.AcquireRequest, candidates []credentials.CredentialState) (string, error) {
 	sorted := cloneAndSort(candidates, func(a, b credentials.CredentialState) int {

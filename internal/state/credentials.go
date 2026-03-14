@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/state/sqlitegen"
 )
 
@@ -136,7 +137,7 @@ type CredentialLease struct {
 	CredentialID string
 	RunID        string
 	UserID       string
-	Strategy     string
+	Strategy     credentialstrategy.Name
 	AcquiredAt   time.Time
 	ExpiresAt    time.Time
 	ReleasedAt   *time.Time
@@ -182,7 +183,7 @@ type CreateCredentialLeaseInput struct {
 	CredentialID string
 	RunID        string
 	UserID       string
-	Strategy     string
+	Strategy     credentialstrategy.Name
 	AcquiredAt   time.Time
 	ExpiresAt    time.Time
 	Now          time.Time
@@ -552,12 +553,9 @@ func (s *Store) TryCreateCredentialLease(in CreateCredentialLeaseInput) (bool, e
 	in.CredentialID = strings.TrimSpace(in.CredentialID)
 	in.RunID = strings.TrimSpace(in.RunID)
 	in.UserID = strings.TrimSpace(in.UserID)
-	in.Strategy = strings.TrimSpace(in.Strategy)
+	in.Strategy = credentialstrategy.NormalizeName(in.Strategy.String())
 	if in.ID == "" || in.CredentialID == "" || in.RunID == "" || in.UserID == "" {
 		return false, fmt.Errorf("id, credential_id, run_id and user_id are required")
-	}
-	if in.Strategy == "" {
-		in.Strategy = "requester_own_then_shared"
 	}
 	if in.AcquiredAt.IsZero() {
 		in.AcquiredAt = time.Now().UTC()
@@ -573,7 +571,7 @@ func (s *Store) TryCreateCredentialLease(in CreateCredentialLeaseInput) (bool, e
 		CredentialID: in.CredentialID,
 		RunID:        in.RunID,
 		UserID:       in.UserID,
-		Strategy:     in.Strategy,
+		Strategy:     in.Strategy.String(),
 		AcquiredAt:   in.AcquiredAt.UTC().UnixNano(),
 		ExpiresAt:    in.ExpiresAt.UTC().UnixNano(),
 		Now:          sql.NullInt64{Int64: in.Now.UTC().UnixNano(), Valid: true},
@@ -725,7 +723,7 @@ func fromDBCredentialLease(row sqlitegen.CredentialLease) CredentialLease {
 		CredentialID: row.CredentialID,
 		RunID:        row.RunID,
 		UserID:       row.UserID,
-		Strategy:     row.Strategy,
+		Strategy:     credentialstrategy.NormalizeName(row.Strategy),
 		AcquiredAt:   time.Unix(0, row.AcquiredAt).UTC(),
 		ExpiresAt:    time.Unix(0, row.ExpiresAt).UTC(),
 		ReleasedAt:   fromNullTime(row.ReleasedAt),

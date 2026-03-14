@@ -4,12 +4,15 @@ import (
 	"cmp"
 
 	"github.com/rtzll/rascal/internal/credentials"
+	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/state"
 )
 
 type RequesterOwnThenShared struct{}
 
-func (RequesterOwnThenShared) Name() string { return "requester_own_then_shared" }
+func (RequesterOwnThenShared) Name() credentialstrategy.Name {
+	return credentialstrategy.NameRequesterOwnThenShared
+}
 
 func (RequesterOwnThenShared) Select(req credentials.AcquireRequest, candidates []credentials.CredentialState) (string, error) {
 	sorted := cloneAndSort(candidates, func(a, b credentials.CredentialState) int {
