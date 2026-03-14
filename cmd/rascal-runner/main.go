@@ -459,10 +459,10 @@ func loadConfig() (config, error) {
 	backendSessionID := firstSetEnvValue("RASCAL_GOOSE_SESSION_NAME", "RASCAL_AGENT_SESSION_ID")
 	if agentSessionResume {
 		if agentSessionKey == "" {
-			agentSessionKey = runner.GooseSessionTaskKey(repo, taskID)
+			agentSessionKey = runner.SessionTaskKey(repo, taskID)
 		}
 		if backendSessionID == "" && agentBackend == agent.BackendGoose {
-			backendSessionID = runner.GooseSessionName(repo, taskID)
+			backendSessionID = runner.SessionName(repo, taskID)
 		}
 	}
 	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))

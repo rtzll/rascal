@@ -5,51 +5,51 @@ import (
 	"testing"
 )
 
-func TestNormalizeGooseSessionMode(t *testing.T) {
+func TestNormalizeSessionMode(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
-		"":         GooseSessionModeOff,
-		"off":      GooseSessionModeOff,
-		"pr-only":  GooseSessionModePROnly,
-		"PR-ONLY":  GooseSessionModePROnly,
-		"all":      GooseSessionModeAll,
-		"unknown":  GooseSessionModeOff,
-		"  all  ":  GooseSessionModeAll,
-		" pr-only": GooseSessionModePROnly,
+		"":         SessionModeOff,
+		"off":      SessionModeOff,
+		"pr-only":  SessionModePROnly,
+		"PR-ONLY":  SessionModePROnly,
+		"all":      SessionModeAll,
+		"unknown":  SessionModeOff,
+		"  all  ":  SessionModeAll,
+		" pr-only": SessionModePROnly,
 	}
 	for in, want := range tests {
-		if got := NormalizeGooseSessionMode(in); got != want {
-			t.Fatalf("NormalizeGooseSessionMode(%q) = %q, want %q", in, got, want)
+		if got := NormalizeSessionMode(in); got != want {
+			t.Fatalf("NormalizeSessionMode(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
 
-func TestGooseSessionEnabled(t *testing.T) {
+func TestSessionEnabled(t *testing.T) {
 	t.Parallel()
 
-	if GooseSessionEnabled(GooseSessionModeOff, "pr_comment") {
+	if SessionEnabled(SessionModeOff, "pr_comment") {
 		t.Fatal("off mode should never enable sessions")
 	}
-	if !GooseSessionEnabled(GooseSessionModeAll, "issue_label") {
+	if !SessionEnabled(SessionModeAll, "issue_label") {
 		t.Fatal("all mode should enable sessions for all triggers")
 	}
 	for _, trigger := range []string{"pr_comment", "pr_review", "pr_review_comment", "pr_review_thread", "retry", "issue_edited"} {
-		if !GooseSessionEnabled(GooseSessionModePROnly, trigger) {
+		if !SessionEnabled(SessionModePROnly, trigger) {
 			t.Fatalf("pr-only mode should enable trigger %q", trigger)
 		}
 	}
-	if GooseSessionEnabled(GooseSessionModePROnly, "issue_label") {
+	if SessionEnabled(SessionModePROnly, "issue_label") {
 		t.Fatal("pr-only mode should not enable issue_label")
 	}
 }
 
-func TestGooseSessionTaskKeyStableAndBounded(t *testing.T) {
+func TestSessionTaskKeyStableAndBounded(t *testing.T) {
 	t.Parallel()
 
-	a := GooseSessionTaskKey("Owner/Repo", "owner/repo#123")
-	b := GooseSessionTaskKey("Owner/Repo", "owner/repo#123")
-	c := GooseSessionTaskKey("Owner/Repo", "owner/repo#124")
+	a := SessionTaskKey("Owner/Repo", "owner/repo#123")
+	b := SessionTaskKey("Owner/Repo", "owner/repo#123")
+	c := SessionTaskKey("Owner/Repo", "owner/repo#124")
 
 	if a != b {
 		t.Fatalf("expected stable key, got %q vs %q", a, b)
@@ -68,10 +68,10 @@ func TestGooseSessionTaskKeyStableAndBounded(t *testing.T) {
 	}
 }
 
-func TestGooseSessionNameBounded(t *testing.T) {
+func TestSessionNameBounded(t *testing.T) {
 	t.Parallel()
 
-	name := GooseSessionName(strings.Repeat("repo-", 20), strings.Repeat("task-", 20))
+	name := SessionName(strings.Repeat("repo-", 20), strings.Repeat("task-", 20))
 	if !strings.HasPrefix(name, "rascal-") {
 		t.Fatalf("expected name prefix rascal-, got %q", name)
 	}

@@ -129,7 +129,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
 		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
 		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
-		envPairs["RASCAL_GOOSE_SESSION_MODE"] = NormalizeGooseSessionMode(string(sessionMode))
+		envPairs["RASCAL_GOOSE_SESSION_MODE"] = NormalizeSessionMode(string(sessionMode))
 		envPairs["RASCAL_GOOSE_SESSION_RESUME"] = strconv.FormatBool(sessionResume)
 		envPairs["RASCAL_GOOSE_SESSION_KEY"] = sessionKey
 		envPairs["RASCAL_GOOSE_SESSION_NAME"] = backendSessionID
