@@ -24,6 +24,7 @@ import (
 	"github.com/rtzll/rascal/internal/credentials"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/runner"
+	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
 
@@ -3573,6 +3574,23 @@ func TestHandleCreateTaskAcceptsDebugFalse(t *testing.T) {
 	}
 }
 
+func TestHandleCreateTaskRejectsInvalidTrigger(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/tasks",
+		strings.NewReader(`{"repo":"owner/repo","task":"bad trigger","trigger":"issue"}`),
+	)
+	rec := httptest.NewRecorder()
+	s.handleCreateTask(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
 func TestHandleCreateIssueTaskNormalizesRepositoryCase(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
@@ -4115,7 +4133,7 @@ func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
 		Task:        run.Task,
 		BaseBranch:  run.BaseBranch,
 		HeadBranch:  run.HeadBranch,
-		Trigger:     run.Trigger,
+		Trigger:     runtrigger.Normalize(run.Trigger),
 		RunDir:      run.RunDir,
 		IssueNumber: run.IssueNumber,
 		PRNumber:    run.PRNumber,

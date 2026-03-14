@@ -1,9 +1,8 @@
 package runner
 
 import (
-	"strings"
-
 	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 const (
@@ -20,8 +19,8 @@ func NormalizeSessionMode(mode string) string {
 	return string(agent.NormalizeSessionMode(mode))
 }
 
-func SessionEnabled(mode, trigger string) bool {
-	return agent.SessionEnabled(agent.NormalizeSessionMode(mode), strings.TrimSpace(trigger))
+func SessionEnabled(mode string, trigger runtrigger.Name) bool {
+	return agent.SessionEnabled(agent.NormalizeSessionMode(mode), trigger)
 }
 
 func SessionTaskKey(repo, taskID string) string {
@@ -36,7 +35,7 @@ func NormalizeGooseSessionMode(mode string) string {
 	return NormalizeSessionMode(mode)
 }
 
-func GooseSessionEnabled(mode, trigger string) bool {
+func GooseSessionEnabled(mode string, trigger runtrigger.Name) bool {
 	return SessionEnabled(mode, trigger)
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runsummary"
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 const (
@@ -53,7 +54,7 @@ type config struct {
 	BaseBranch  string
 	HeadBranch  string
 	IssueNumber int
-	Trigger     string
+	Trigger     runtrigger.Name
 	GitHubToken string
 
 	MetaDir          string
@@ -427,9 +428,9 @@ func loadConfig() (config, error) {
 		issueNumber = n
 	}
 
-	trigger := strings.TrimSpace(os.Getenv("RASCAL_TRIGGER"))
-	if trigger == "" {
-		trigger = "cli"
+	trigger, err := runtrigger.ParseOrDefault(os.Getenv("RASCAL_TRIGGER"), runtrigger.NameCLI)
+	if err != nil {
+		return config{}, fmt.Errorf("invalid RASCAL_TRIGGER: %w", err)
 	}
 
 	metaDir := firstNonEmptyValue(strings.TrimSpace(os.Getenv("RASCAL_META_DIR")), defaultMetaDir)

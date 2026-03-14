@@ -3,6 +3,8 @@ package runner
 import (
 	"strings"
 	"testing"
+
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 func TestNormalizeSessionMode(t *testing.T) {
@@ -28,18 +30,25 @@ func TestNormalizeSessionMode(t *testing.T) {
 func TestSessionEnabled(t *testing.T) {
 	t.Parallel()
 
-	if SessionEnabled(SessionModeOff, "pr_comment") {
+	if SessionEnabled(SessionModeOff, runtrigger.NamePRComment) {
 		t.Fatal("off mode should never enable sessions")
 	}
-	if !SessionEnabled(SessionModeAll, "issue_label") {
+	if !SessionEnabled(SessionModeAll, runtrigger.NameIssueLabel) {
 		t.Fatal("all mode should enable sessions for all triggers")
 	}
-	for _, trigger := range []string{"pr_comment", "pr_review", "pr_review_comment", "pr_review_thread", "retry", "issue_edited"} {
+	for _, trigger := range []runtrigger.Name{
+		runtrigger.NamePRComment,
+		runtrigger.NamePRReview,
+		runtrigger.NamePRReviewComment,
+		runtrigger.NamePRReviewThread,
+		runtrigger.NameRetry,
+		runtrigger.NameIssueEdited,
+	} {
 		if !SessionEnabled(SessionModePROnly, trigger) {
 			t.Fatalf("pr-only mode should enable trigger %q", trigger)
 		}
 	}
-	if SessionEnabled(SessionModePROnly, "issue_label") {
+	if SessionEnabled(SessionModePROnly, runtrigger.NameIssueLabel) {
 		t.Fatal("pr-only mode should not enable issue_label")
 	}
 }

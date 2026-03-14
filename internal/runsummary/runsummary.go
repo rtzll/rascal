@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 const agentDetailsSummary = "Agent Details"
@@ -27,7 +29,7 @@ type CompletionCommentInput struct {
 type StartCommentInput struct {
 	RunID             string
 	RequestedBy       string
-	Trigger           string
+	Trigger           runtrigger.Name
 	Backend           string
 	RunnerCommit      string
 	BaseBranch        string
@@ -187,7 +189,7 @@ func BuildStartComment(in StartCommentInput) string {
 	if requestedBy := strings.TrimSpace(in.RequestedBy); requestedBy != "" {
 		details = append(details, fmt.Sprintf("- Requested by: `%s`", requestedBy))
 	}
-	if trigger := strings.TrimSpace(in.Trigger); trigger != "" {
+	if trigger := strings.TrimSpace(in.Trigger.String()); trigger != "" {
 		details = append(details, fmt.Sprintf("- Trigger: `%s`", trigger))
 	}
 	if backend := strings.TrimSpace(in.Backend); backend != "" {
@@ -239,10 +241,10 @@ func RunDurationSeconds(created time.Time, started, completed *time.Time) int64 
 }
 
 func startCommentHeadline(in StartCommentInput) string {
-	switch strings.TrimSpace(in.Trigger) {
-	case "pr_comment", "pr_review", "pr_review_comment":
+	switch trigger := runtrigger.Normalize(in.Trigger.String()); {
+	case trigger == runtrigger.NamePRComment || trigger == runtrigger.NamePRReview || trigger == runtrigger.NamePRReviewComment:
 		return fmt.Sprintf("Rascal started run `%s` to address new PR feedback.", strings.TrimSpace(in.RunID))
-	case "issue_label", "issue_edited", "issue_reopened", "issue_api":
+	case trigger.IsIssue():
 		return fmt.Sprintf("Rascal started run `%s` for this issue.", strings.TrimSpace(in.RunID))
 	default:
 		return fmt.Sprintf("Rascal started run `%s`.", strings.TrimSpace(in.RunID))

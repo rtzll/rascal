@@ -12,6 +12,7 @@ import (
 
 	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/runner"
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 type fakeExecutor struct {
@@ -251,7 +252,7 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.IssueNumber != 7 {
 		t.Fatalf("expected issue number 7, got %d", cfg.IssueNumber)
 	}
-	if cfg.Trigger != "cli" {
+	if cfg.Trigger != runtrigger.NameCLI {
 		t.Fatalf("expected default trigger cli, got %q", cfg.Trigger)
 	}
 	if cfg.AgentSession.Mode != agent.SessionModeOff {
@@ -367,6 +368,22 @@ func TestLoadConfigRejectsInvalidAgentSessionMode(t *testing.T) {
 		t.Fatal("loadConfig error = nil, want error")
 	}
 	if !strings.Contains(err.Error(), "invalid agent session mode") {
+		t.Fatalf("loadConfig error = %q", err.Error())
+	}
+}
+
+func TestLoadConfigRejectsInvalidTrigger(t *testing.T) {
+	t.Setenv("RASCAL_RUN_ID", "run_invalid_trigger")
+	t.Setenv("RASCAL_TASK_ID", "task_invalid_trigger")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_TRIGGER", "issue")
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("loadConfig error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "invalid RASCAL_TRIGGER") {
 		t.Fatalf("loadConfig error = %q", err.Error())
 	}
 }

@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 func TestNormalizeBackend(t *testing.T) {
@@ -138,15 +140,15 @@ func TestSessionEnabled(t *testing.T) {
 	tests := []struct {
 		name    string
 		mode    SessionMode
-		trigger string
+		trigger runtrigger.Name
 		want    bool
 	}{
-		{name: "off mode", mode: SessionModeOff, trigger: "pr_comment", want: false},
-		{name: "all mode", mode: SessionModeAll, trigger: "issue_label", want: true},
-		{name: "pr only supported trigger", mode: SessionModePROnly, trigger: "pr_review_comment", want: true},
-		{name: "pr only retry trigger", mode: SessionModePROnly, trigger: "retry", want: true},
-		{name: "pr only trimmed unsupported trigger", mode: SessionModePROnly, trigger: " issue_label ", want: false},
-		{name: "unknown mode defaults off", mode: SessionMode("custom"), trigger: "pr_comment", want: false},
+		{name: "off mode", mode: SessionModeOff, trigger: runtrigger.NamePRComment, want: false},
+		{name: "all mode", mode: SessionModeAll, trigger: runtrigger.NameIssueLabel, want: true},
+		{name: "pr only supported trigger", mode: SessionModePROnly, trigger: runtrigger.NamePRReviewComment, want: true},
+		{name: "pr only retry trigger", mode: SessionModePROnly, trigger: runtrigger.NameRetry, want: true},
+		{name: "pr only unsupported trigger", mode: SessionModePROnly, trigger: runtrigger.NameIssueLabel, want: false},
+		{name: "unknown mode defaults off", mode: SessionMode("custom"), trigger: runtrigger.NamePRComment, want: false},
 	}
 
 	for _, tt := range tests {

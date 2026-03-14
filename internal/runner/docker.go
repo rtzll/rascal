@@ -107,7 +107,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		"RASCAL_AGENT_BACKEND":        backend.String(),
 		"RASCAL_BASE_BRANCH":          spec.BaseBranch,
 		"RASCAL_HEAD_BRANCH":          spec.HeadBranch,
-		"RASCAL_TRIGGER":              spec.Trigger,
+		"RASCAL_TRIGGER":              spec.Trigger.String(),
 		"RASCAL_GOOSE_DEBUG":          strconv.FormatBool(spec.Debug),
 		"RASCAL_CONTEXT":              spec.Context,
 		"RASCAL_CONTEXT_JSON":         containerContextJSONPath,

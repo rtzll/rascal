@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 // Spec defines the input contract for a single run.
@@ -20,7 +21,7 @@ type Spec struct {
 	RunnerImage  string
 	BaseBranch   string
 	HeadBranch   string
-	Trigger      string
+	Trigger      runtrigger.Name
 	Debug        bool
 	RunDir       string
 	IssueNumber  int

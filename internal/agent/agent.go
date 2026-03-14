@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 type Backend string
@@ -66,17 +68,12 @@ func ParseSessionMode(raw string) (SessionMode, error) {
 	}
 }
 
-func SessionEnabled(mode SessionMode, trigger string) bool {
+func SessionEnabled(mode SessionMode, trigger runtrigger.Name) bool {
 	switch NormalizeSessionMode(string(mode)) {
 	case SessionModeAll:
 		return true
 	case SessionModePROnly:
-		switch strings.TrimSpace(trigger) {
-		case "pr_comment", "pr_review", "pr_review_comment", "pr_review_thread", "retry", "issue_edited":
-			return true
-		default:
-			return false
-		}
+		return trigger.EnablesPROnlySession()
 	default:
 		return false
 	}

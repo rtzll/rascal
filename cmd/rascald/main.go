@@ -34,6 +34,7 @@ import (
 	"github.com/rtzll/rascal/internal/logs"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runsummary"
+	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
 
@@ -103,7 +104,7 @@ type runRequest struct {
 	Task            string
 	BaseBranch      string
 	HeadBranch      string
-	Trigger         string
+	Trigger         runtrigger.Name
 	IssueNumber     int
 	PRNumber        int
 	PRStatus        state.PRStatus
@@ -115,11 +116,11 @@ type runRequest struct {
 }
 
 type runResponseTarget struct {
-	Repo           string `json:"repo"`
-	IssueNumber    int    `json:"issue_number"`
-	RequestedBy    string `json:"requested_by,omitempty"`
-	Trigger        string `json:"trigger"`
-	ReviewThreadID int64  `json:"review_thread_id,omitempty"`
+	Repo           string          `json:"repo"`
+	IssueNumber    int             `json:"issue_number"`
+	RequestedBy    string          `json:"requested_by,omitempty"`
+	Trigger        runtrigger.Name `json:"trigger"`
+	ReviewThreadID int64           `json:"review_thread_id,omitempty"`
 }
 
 type runCommentMarker struct {
@@ -520,9 +521,13 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	req.Repo = strings.TrimSpace(req.Repo)
 	req.Task = strings.TrimSpace(req.Task)
 	req.BaseBranch = strings.TrimSpace(req.BaseBranch)
-	req.Trigger = strings.TrimSpace(req.Trigger)
 	if req.Repo == "" || req.Task == "" {
 		http.Error(w, "repo and task are required", http.StatusBadRequest)
+		return
+	}
+	trigger, err := runtrigger.ParseOrDefault(req.Trigger, runtrigger.NameCLI)
+	if err != nil {
+		http.Error(w, "invalid trigger", http.StatusBadRequest)
 		return
 	}
 
@@ -531,7 +536,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Repo:            req.Repo,
 		Task:            req.Task,
 		BaseBranch:      req.BaseBranch,
-		Trigger:         req.Trigger,
+		Trigger:         trigger,
 		Debug:           req.Debug,
 		CreatedByUserID: requesterUserID(r.Context()),
 	})
@@ -589,7 +594,7 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		TaskID:          taskID,
 		Repo:            req.Repo,
 		Task:            taskText,
-		Trigger:         "issue_api",
+		Trigger:         runtrigger.NameIssueAPI,
 		IssueNumber:     req.IssueNumber,
 		Context:         ctxText,
 		Debug:           req.Debug,
@@ -598,7 +603,7 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 			Repo:        req.Repo,
 			IssueNumber: req.IssueNumber,
 			RequestedBy: requestedBy,
-			Trigger:     "issue_api",
+			Trigger:     runtrigger.NameIssueAPI,
 		},
 	})
 	if err != nil {
@@ -946,7 +951,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
 				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
-				Trigger:     "issue_label",
+				Trigger:     runtrigger.NameIssueLabel,
 				IssueNumber: ev.Issue.Number,
 				Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number),
 				Debug:       boolPtr(true),
@@ -954,7 +959,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 					Repo:        ev.Repository.FullName,
 					IssueNumber: ev.Issue.Number,
 					RequestedBy: strings.TrimSpace(ev.Sender.Login),
-					Trigger:     "issue_label",
+					Trigger:     runtrigger.NameIssueLabel,
 				},
 			})
 			if errors.Is(err, errTaskCompleted) {
@@ -979,7 +984,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
 				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
-				Trigger:     "issue_edited",
+				Trigger:     runtrigger.NameIssueEdited,
 				IssueNumber: ev.Issue.Number,
 				Context:     fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number),
 				Debug:       boolPtr(true),
@@ -987,7 +992,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 					Repo:        ev.Repository.FullName,
 					IssueNumber: ev.Issue.Number,
 					RequestedBy: strings.TrimSpace(ev.Sender.Login),
-					Trigger:     "issue_edited",
+					Trigger:     runtrigger.NameIssueEdited,
 				},
 			})
 			if errors.Is(err, errTaskCompleted) {
@@ -1033,7 +1038,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
 				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
-				Trigger:     "issue_reopened",
+				Trigger:     runtrigger.NameIssueReopened,
 				IssueNumber: ev.Issue.Number,
 				PRStatus:    state.PRStatusNone,
 				Context:     fmt.Sprintf("Triggered by issue reopen on issue #%d", ev.Issue.Number),
@@ -1042,7 +1047,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 					Repo:        ev.Repository.FullName,
 					IssueNumber: ev.Issue.Number,
 					RequestedBy: strings.TrimSpace(ev.Sender.Login),
-					Trigger:     "issue_reopened",
+					Trigger:     runtrigger.NameIssueReopened,
 				},
 			})
 			if errors.Is(err, errTaskCompleted) {
@@ -1086,7 +1091,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
 			Task:        fmt.Sprintf("Address PR #%d feedback", ev.Issue.Number),
-			Trigger:     "pr_comment",
+			Trigger:     runtrigger.NamePRComment,
 			IssueNumber: task.IssueNumber,
 			PRNumber:    ev.Issue.Number,
 			PRStatus:    state.PRStatusOpen,
@@ -1098,7 +1103,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				Repo:        ev.Repository.FullName,
 				IssueNumber: ev.Issue.Number,
 				RequestedBy: strings.TrimSpace(ev.Sender.Login),
-				Trigger:     "pr_comment",
+				Trigger:     runtrigger.NamePRComment,
 			},
 		})
 		if errors.Is(err, errTaskCompleted) {
@@ -1131,7 +1136,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
 			Task:        fmt.Sprintf("Address PR #%d review feedback", ev.PullRequest.Number),
-			Trigger:     "pr_review",
+			Trigger:     runtrigger.NamePRReview,
 			IssueNumber: task.IssueNumber,
 			PRNumber:    ev.PullRequest.Number,
 			PRStatus:    state.PRStatusOpen,
@@ -1143,7 +1148,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 				Repo:        ev.Repository.FullName,
 				IssueNumber: ev.PullRequest.Number,
 				RequestedBy: strings.TrimSpace(ev.Sender.Login),
-				Trigger:     "pr_review",
+				Trigger:     runtrigger.NamePRReview,
 			},
 		})
 		if errors.Is(err, errTaskCompleted) {
@@ -1188,7 +1193,7 @@ Inline comment location: %s`, contextText, location)
 			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
 			Task:        fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
-			Trigger:     "pr_review_comment",
+			Trigger:     runtrigger.NamePRReviewComment,
 			IssueNumber: task.IssueNumber,
 			PRNumber:    ev.PullRequest.Number,
 			PRStatus:    state.PRStatusOpen,
@@ -1200,7 +1205,7 @@ Inline comment location: %s`, contextText, location)
 				Repo:        ev.Repository.FullName,
 				IssueNumber: ev.PullRequest.Number,
 				RequestedBy: strings.TrimSpace(ev.Sender.Login),
-				Trigger:     "pr_review_comment",
+				Trigger:     runtrigger.NamePRReviewComment,
 			},
 		})
 		if errors.Is(err, errTaskCompleted) {
@@ -1226,7 +1231,7 @@ Inline comment location: %s`, contextText, location)
 				TaskID:      task.ID,
 				Repo:        ev.Repository.FullName,
 				Task:        fmt.Sprintf("Address PR #%d unresolved review thread", ev.PullRequest.Number),
-				Trigger:     "pr_review_thread",
+				Trigger:     runtrigger.NamePRReviewThread,
 				IssueNumber: task.IssueNumber,
 				PRNumber:    ev.PullRequest.Number,
 				PRStatus:    state.PRStatusOpen,
@@ -1238,7 +1243,7 @@ Inline comment location: %s`, contextText, location)
 					Repo:           ev.Repository.FullName,
 					IssueNumber:    ev.PullRequest.Number,
 					RequestedBy:    strings.TrimSpace(ev.Sender.Login),
-					Trigger:        "pr_review_thread",
+					Trigger:        runtrigger.NamePRReviewThread,
 					ReviewThreadID: ev.Thread.ID,
 				},
 			})
@@ -1461,7 +1466,12 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		req.CreatedByUserID = "system"
 	}
 	if req.Trigger == "" {
-		req.Trigger = "cli"
+		req.Trigger = runtrigger.NameCLI
+	} else {
+		req.Trigger = runtrigger.Normalize(req.Trigger.String())
+		if !req.Trigger.IsKnown() {
+			return state.Run{}, fmt.Errorf("unknown workflow trigger %q", req.Trigger)
+		}
 	}
 	if req.PRStatus == "" {
 		if req.PRNumber > 0 {
@@ -1500,7 +1510,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		}
 	}
 	if req.HeadBranch == "" {
-		if hasLastRun && (req.Trigger == "pr_comment" || req.Trigger == "pr_review") && lastRun.HeadBranch != "" {
+		if hasLastRun && (req.Trigger == runtrigger.NamePRComment || req.Trigger == runtrigger.NamePRReview) && lastRun.HeadBranch != "" {
 			req.HeadBranch = lastRun.HeadBranch
 		} else {
 			req.HeadBranch = buildHeadBranch(req.TaskID, req.Task, runID)
@@ -1531,7 +1541,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		AgentBackend: s.cfg.AgentBackend,
 		BaseBranch:   req.BaseBranch,
 		HeadBranch:   req.HeadBranch,
-		Trigger:      req.Trigger,
+		Trigger:      req.Trigger.String(),
 		RunDir:       runDir,
 		IssueNumber:  req.IssueNumber,
 		PRNumber:     req.PRNumber,
@@ -1612,7 +1622,7 @@ func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget
 		Repo:           strings.TrimSpace(target.Repo),
 		IssueNumber:    target.IssueNumber,
 		RequestedBy:    strings.TrimSpace(target.RequestedBy),
-		Trigger:        strings.TrimSpace(target.Trigger),
+		Trigger:        runtrigger.Normalize(target.Trigger.String()),
 		ReviewThreadID: target.ReviewThreadID,
 	}
 	if out.Repo == "" {
@@ -1622,7 +1632,7 @@ func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget
 		out.IssueNumber = run.PRNumber
 	}
 	if out.Trigger == "" {
-		out.Trigger = strings.TrimSpace(run.Trigger)
+		out.Trigger = runtrigger.Normalize(run.Trigger)
 	}
 	if out.Repo == "" || out.IssueNumber <= 0 {
 		return nil
@@ -1773,7 +1783,7 @@ func (s *server) executeRun(runID string) {
 		s.cleanupAgentSessionsBestEffort()
 	}
 
-	sessionResume := agent.SessionEnabled(sessionMode, run.Trigger)
+	sessionResume := agent.SessionEnabled(sessionMode, runtrigger.Normalize(run.Trigger))
 	sessionTaskKey := ""
 	sessionTaskDir := ""
 	backendSessionID := ""
@@ -1824,7 +1834,7 @@ func (s *server) executeRun(runID string) {
 		RunnerImage:  s.cfg.RunnerImageForBackend(run.AgentBackend),
 		BaseBranch:   run.BaseBranch,
 		HeadBranch:   run.HeadBranch,
-		Trigger:      run.Trigger,
+		Trigger:      runtrigger.Normalize(run.Trigger),
 		RunDir:       run.RunDir,
 		IssueNumber:  run.IssueNumber,
 		PRNumber:     run.PRNumber,
@@ -2789,12 +2799,7 @@ func shouldIncludeGitContext(run state.Run) bool {
 }
 
 func requiresAgentManagedPublish(run state.Run) bool {
-	switch strings.TrimSpace(run.Trigger) {
-	case "pr_comment", "pr_review", "pr_review_comment", "pr_review_thread":
-		return true
-	default:
-		return false
-	}
+	return runtrigger.Normalize(run.Trigger).IsComment()
 }
 
 func buildHeadBranch(taskID, task, runID string) string {
@@ -3022,12 +3027,7 @@ func (s *server) pendingRunCancelReason(runID string) (string, bool) {
 }
 
 func isCommentTriggeredRun(trigger string) bool {
-	switch strings.TrimSpace(trigger) {
-	case "pr_comment", "pr_review", "pr_review_comment", "pr_review_thread":
-		return true
-	default:
-		return false
-	}
+	return runtrigger.Normalize(trigger).IsComment()
 }
 
 func (s *server) cleanupAgentSessionsBestEffort() {
@@ -3155,7 +3155,7 @@ func loadRunResponseTarget(runDir string) (runResponseTarget, bool, error) {
 	}
 	target.Repo = strings.TrimSpace(target.Repo)
 	target.RequestedBy = strings.TrimSpace(target.RequestedBy)
-	target.Trigger = strings.TrimSpace(target.Trigger)
+	target.Trigger = runtrigger.Normalize(target.Trigger.String())
 	return target, true, nil
 }
 
@@ -3464,7 +3464,7 @@ func buildRunStartComment(run state.Run, target runResponseTarget, requestedBy s
 	body := runsummary.BuildStartComment(runsummary.StartCommentInput{
 		RunID:             run.ID,
 		RequestedBy:       requestedBy,
-		Trigger:           firstNonEmpty(strings.TrimSpace(target.Trigger), run.Trigger),
+		Trigger:           runtrigger.Normalize(firstNonEmpty(target.Trigger.String(), run.Trigger)),
 		Backend:           run.AgentBackend.String(),
 		RunnerCommit:      loadRunBuildCommit(run.RunDir),
 		BaseBranch:        run.BaseBranch,

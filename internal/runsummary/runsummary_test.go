@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 func TestParseCommitBody(t *testing.T) {
@@ -274,7 +276,7 @@ func TestBuildStartComment(t *testing.T) {
 		body := BuildStartComment(StartCommentInput{
 			RunID:             "run_abc123",
 			RequestedBy:       "alice",
-			Trigger:           "issue_label",
+			Trigger:           runtrigger.NameIssueLabel,
 			Backend:           "codex",
 			RunnerCommit:      "abc1234",
 			BaseBranch:        "main",
@@ -309,7 +311,7 @@ func TestBuildStartComment(t *testing.T) {
 	t.Run("uses PR feedback wording and compacts long task context", func(t *testing.T) {
 		body := BuildStartComment(StartCommentInput{
 			RunID:         "run_pr_feedback",
-			Trigger:       "pr_review_comment",
+			Trigger:       runtrigger.NamePRReviewComment,
 			Backend:       "codex",
 			BaseBranch:    "main",
 			HeadBranch:    "rascal/pr-77",
