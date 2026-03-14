@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/rtzll/rascal/internal/api"
 	"github.com/rtzll/rascal/internal/config"
 	deployengine "github.com/rtzll/rascal/internal/deploy"
 	"github.com/rtzll/rascal/internal/state"
@@ -932,13 +933,11 @@ rascal run --issue OWNER/REPO#123
 				if resp.StatusCode >= 300 {
 					return decodeServerError(resp)
 				}
-				var out struct {
-					Run state.Run `json:"run"`
-				}
+				var out api.RunResponse
 				if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 					return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 				}
-				return a.emit(map[string]any{"run": out.Run}, func() error {
+				return a.emit(out, func() error {
 					a.println("issue run created: %s (%s)", out.Run.ID, out.Run.Status)
 					return nil
 				})
@@ -966,13 +965,11 @@ rascal run --issue OWNER/REPO#123
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
 			}
-			var out struct {
-				Run state.Run `json:"run"`
-			}
+			var out api.RunResponse
 			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 			}
-			return a.emit(map[string]any{"run": out.Run}, func() error {
+			return a.emit(out, func() error {
 				if inferredRepo {
 					a.println("hint: using repo from git remote: %s", repo)
 				}
@@ -1025,7 +1022,7 @@ func (a *app) newPSCmd() *cobra.Command {
 			}
 
 			render := func(runs []state.Run) error {
-				return a.emit(map[string]any{"runs": runs}, func() error {
+				return a.emit(api.RunsResponse{Runs: runs}, func() error {
 					tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 					if _, err := fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tISSUE\tPR\tCREATED (UTC)"); err != nil {
 						return fmt.Errorf("write runs table header: %w", err)
@@ -1347,22 +1344,16 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	type followResponse struct {
-		Logs      string          `json:"logs"`
-		RunStatus state.RunStatus `json:"run_status"`
-		Done      bool            `json:"done"`
-	}
-
-	fetchFollow := func() (followResponse, error) {
+	fetchFollow := func() (api.RunLogsResponse, error) {
 		path := fmt.Sprintf("/v1/runs/%s/logs?lines=%d&format=json", url.PathEscape(strings.TrimSpace(runID)), lines)
 		resp, err := fetch(path)
 		if err != nil {
-			return followResponse{}, err
+			return api.RunLogsResponse{}, err
 		}
 		defer closeWithLog("close follow logs response body", resp.Body)
-		var out followResponse
+		var out api.RunLogsResponse
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-			return followResponse{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+			return api.RunLogsResponse{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 		}
 		return out, nil
 	}
@@ -1772,13 +1763,11 @@ rascal retry run_abc123 --debug=false
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
 			}
-			var out struct {
-				Run state.Run `json:"run"`
-			}
+			var out api.RunResponse
 			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 			}
-			return a.emit(map[string]any{"run": out.Run}, func() error {
+			return a.emit(out, func() error {
 				a.println("retry run created: %s (%s)", out.Run.ID, out.Run.Status)
 				return nil
 			})
@@ -1810,7 +1799,7 @@ rascal cancel run_abc123
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
 			}
-			var out map[string]any
+			var out api.RunCancelResponse
 			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 			}
@@ -1840,7 +1829,7 @@ rascal task run_abc123
 			if err != nil {
 				return err
 			}
-			return a.emit(map[string]any{"task": task}, func() error {
+			return a.emit(api.TaskResponse{Task: task}, func() error {
 				tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 				if _, err := fmt.Fprintln(tw, "TASK ID\tSTATUS\tREPO\tPR\tPENDING INPUT\tUPDATED"); err != nil {
 					return fmt.Errorf("write task table header: %w", err)
@@ -2362,9 +2351,7 @@ func (a *app) fetchRuns(limit int, all bool) ([]state.Run, error) {
 	if resp.StatusCode >= 300 {
 		return nil, decodeServerError(resp)
 	}
-	var out struct {
-		Runs []state.Run `json:"runs"`
-	}
+	var out api.RunsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 	}
@@ -2380,9 +2367,7 @@ func (a *app) fetchRun(runID string) (state.Run, error) {
 	if resp.StatusCode >= 300 {
 		return state.Run{}, decodeServerError(resp)
 	}
-	var out struct {
-		Run state.Run `json:"run"`
-	}
+	var out api.RunResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return state.Run{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 	}
@@ -2484,9 +2469,7 @@ func (a *app) fetchTask(taskID string) (state.Task, error) {
 	if resp.StatusCode >= 300 {
 		return state.Task{}, decodeServerError(resp)
 	}
-	var out struct {
-		Task state.Task `json:"task"`
-	}
+	var out api.TaskResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return state.Task{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 	}
@@ -2823,31 +2806,31 @@ func optionalBoolFlagValue(cmd *cobra.Command, name string, value bool) *bool {
 	return &v
 }
 
-func buildCreateTaskPayload(input createTaskPayloadInput) (string, map[string]any) {
+func buildCreateTaskPayload(input createTaskPayloadInput) (string, any) {
 	if input.IssueNumber > 0 {
-		payload := map[string]any{
-			"repo":         input.Repo,
-			"issue_number": input.IssueNumber,
+		payload := api.CreateIssueTaskRequest{
+			Repo:        input.Repo,
+			IssueNumber: input.IssueNumber,
 		}
 		if input.Debug != nil {
-			payload["debug"] = *input.Debug
+			payload.Debug = input.Debug
 		}
 		return "/v1/tasks/issue", payload
 	}
 
-	payload := map[string]any{
-		"repo":        input.Repo,
-		"task":        input.Task,
-		"base_branch": input.BaseBranch,
+	payload := api.CreateTaskRequest{
+		Repo:       input.Repo,
+		Task:       input.Task,
+		BaseBranch: input.BaseBranch,
 	}
 	if strings.TrimSpace(input.TaskID) != "" {
-		payload["task_id"] = input.TaskID
+		payload.TaskID = input.TaskID
 	}
 	if strings.TrimSpace(input.Trigger) != "" {
-		payload["trigger"] = input.Trigger
+		payload.Trigger = input.Trigger
 	}
 	if input.Debug != nil {
-		payload["debug"] = *input.Debug
+		payload.Debug = input.Debug
 	}
 	return "/v1/tasks", payload
 }

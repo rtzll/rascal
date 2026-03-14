@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/rtzll/rascal/internal/api"
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -61,25 +62,26 @@ func TestBuildCreateTaskPayloadForRun(t *testing.T) {
 	if path != "/v1/tasks" {
 		t.Fatalf("path = %q, want /v1/tasks", path)
 	}
-	if payload["repo"] != "owner/repo" {
-		t.Fatalf("repo = %v, want owner/repo", payload["repo"])
+	req, ok := payload.(api.CreateTaskRequest)
+	if !ok {
+		t.Fatalf("payload type = %T, want api.CreateTaskRequest", payload)
 	}
-	if payload["task"] != "Fix flaky tests" {
-		t.Fatalf("task = %v, want Fix flaky tests", payload["task"])
+	if req.Repo != "owner/repo" {
+		t.Fatalf("repo = %q, want owner/repo", req.Repo)
 	}
-	if payload["base_branch"] != "main" {
-		t.Fatalf("base_branch = %v, want main", payload["base_branch"])
+	if req.Task != "Fix flaky tests" {
+		t.Fatalf("task = %q, want Fix flaky tests", req.Task)
 	}
-	if _, ok := payload["task_id"]; ok {
+	if req.BaseBranch != "main" {
+		t.Fatalf("base_branch = %q, want main", req.BaseBranch)
+	}
+	if req.TaskID != "" {
 		t.Fatalf("did not expect task_id in run payload")
 	}
-	if _, ok := payload["trigger"]; ok {
+	if req.Trigger != "" {
 		t.Fatalf("did not expect trigger in run payload")
 	}
-	if _, ok := payload["issue_number"]; ok {
-		t.Fatalf("did not expect issue_number in run payload")
-	}
-	if _, ok := payload["debug"]; ok {
+	if req.Debug != nil {
 		t.Fatalf("did not expect debug in run payload when unset")
 	}
 }
@@ -100,14 +102,18 @@ func TestBuildCreateTaskPayloadForRetry(t *testing.T) {
 	if path != "/v1/tasks" {
 		t.Fatalf("path = %q, want /v1/tasks", path)
 	}
-	if payload["task_id"] != "task_1" {
-		t.Fatalf("task_id = %v, want task_1", payload["task_id"])
+	req, ok := payload.(api.CreateTaskRequest)
+	if !ok {
+		t.Fatalf("payload type = %T, want api.CreateTaskRequest", payload)
 	}
-	if payload["trigger"] != "retry" {
-		t.Fatalf("trigger = %v, want retry", payload["trigger"])
+	if req.TaskID != "task_1" {
+		t.Fatalf("task_id = %q, want task_1", req.TaskID)
 	}
-	if payload["debug"] != false {
-		t.Fatalf("debug = %v, want false", payload["debug"])
+	if req.Trigger != "retry" {
+		t.Fatalf("trigger = %q, want retry", req.Trigger)
+	}
+	if req.Debug == nil || *req.Debug != false {
+		t.Fatalf("debug = %v, want false", req.Debug)
 	}
 }
 
@@ -127,26 +133,18 @@ func TestBuildCreateTaskPayloadForIssue(t *testing.T) {
 	if path != "/v1/tasks/issue" {
 		t.Fatalf("path = %q, want /v1/tasks/issue", path)
 	}
-	if payload["repo"] != "owner/repo" {
-		t.Fatalf("repo = %v, want owner/repo", payload["repo"])
+	req, ok := payload.(api.CreateIssueTaskRequest)
+	if !ok {
+		t.Fatalf("payload type = %T, want api.CreateIssueTaskRequest", payload)
 	}
-	if payload["issue_number"] != 42 {
-		t.Fatalf("issue_number = %v, want 42", payload["issue_number"])
+	if req.Repo != "owner/repo" {
+		t.Fatalf("repo = %q, want owner/repo", req.Repo)
 	}
-	if payload["debug"] != true {
-		t.Fatalf("debug = %v, want true", payload["debug"])
+	if req.IssueNumber != 42 {
+		t.Fatalf("issue_number = %d, want 42", req.IssueNumber)
 	}
-	if _, ok := payload["task_id"]; ok {
-		t.Fatalf("did not expect task_id in issue payload")
-	}
-	if _, ok := payload["task"]; ok {
-		t.Fatalf("did not expect task in issue payload")
-	}
-	if _, ok := payload["base_branch"]; ok {
-		t.Fatalf("did not expect base_branch in issue payload")
-	}
-	if _, ok := payload["trigger"]; ok {
-		t.Fatalf("did not expect trigger in issue payload")
+	if req.Debug == nil || *req.Debug != true {
+		t.Fatalf("debug = %v, want true", req.Debug)
 	}
 }
 

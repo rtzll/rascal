@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/api"
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/credentials"
 	credentialstrategies "github.com/rtzll/rascal/internal/credentials/strategies"
@@ -134,38 +135,10 @@ type runFailureSummary struct {
 	Reason   string
 }
 
-type createTaskRequest struct {
-	TaskID     string `json:"task_id"`
-	Repo       string `json:"repo"`
-	Task       string `json:"task"`
-	BaseBranch string `json:"base_branch"`
-	Trigger    string `json:"trigger,omitempty"`
-	Debug      *bool  `json:"debug,omitempty"`
-}
-
-type createIssueTaskRequest struct {
-	Repo        string `json:"repo"`
-	IssueNumber int    `json:"issue_number"`
-	Debug       *bool  `json:"debug,omitempty"`
-}
-
-type createCredentialRequest struct {
-	ID          string `json:"id"`
-	OwnerUserID string `json:"owner_user_id,omitempty"`
-	Scope       string `json:"scope"`
-	AuthBlob    string `json:"auth_blob"`
-	Weight      int    `json:"weight,omitempty"`
-}
-
-type updateCredentialRequest struct {
-	OwnerUserID   *string `json:"owner_user_id,omitempty"`
-	Scope         *string `json:"scope,omitempty"`
-	AuthBlob      *string `json:"auth_blob,omitempty"`
-	Weight        *int    `json:"weight,omitempty"`
-	Status        *string `json:"status,omitempty"`
-	CooldownUntil *string `json:"cooldown_until,omitempty"`
-	LastError     *string `json:"last_error,omitempty"`
-}
+type createTaskRequest = api.CreateTaskRequest
+type createIssueTaskRequest = api.CreateIssueTaskRequest
+type createCredentialRequest = api.CreateCredentialRequest
+type updateCredentialRequest = api.UpdateCredentialRequest
 
 type requestIDKey struct{}
 type authPrincipalKey struct{}
@@ -477,7 +450,7 @@ func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "rascald", "ready": !s.isDraining()})
+	writeJSON(w, http.StatusOK, api.ServiceStatusResponse{OK: true, Service: "rascald", Ready: !s.isDraining()})
 }
 
 func (s *server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -486,10 +459,10 @@ func (s *server) handleReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.isDraining() {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "service": "rascald", "ready": false})
+		writeJSON(w, http.StatusServiceUnavailable, api.ServiceStatusResponse{OK: false, Service: "rascald", Ready: false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "rascald", "ready": true})
+	writeJSON(w, http.StatusOK, api.ServiceStatusResponse{OK: true, Service: "rascald", Ready: true})
 }
 
 func (s *server) handleListRuns(w http.ResponseWriter, r *http.Request) {
@@ -522,7 +495,7 @@ func (s *server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		limit = 0
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"runs": s.store.ListRuns(limit)})
+	writeJSON(w, http.StatusOK, api.RunsResponse{Runs: s.store.ListRuns(limit)})
 }
 
 func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
@@ -567,7 +540,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to create run: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"run": run})
+	writeJSON(w, http.StatusAccepted, api.RunResponse{Run: run})
 }
 
 func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
@@ -627,7 +600,7 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, errTaskCompleted) {
-			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
+			writeJSON(w, http.StatusConflict, api.ErrorResponse{Error: err.Error()})
 			return
 		}
 		if errors.Is(err, errServerDraining) {
@@ -637,7 +610,7 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to create run: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"run": run})
+	writeJSON(w, http.StatusAccepted, api.RunResponse{Run: run})
 }
 
 func (s *server) handleCredentials(w http.ResponseWriter, r *http.Request) {
@@ -656,14 +629,14 @@ func (s *server) handleCredentials(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to list credentials", http.StatusInternalServerError)
 			return
 		}
-		out := make([]map[string]any, 0, len(creds))
+		out := make([]api.Credential, 0, len(creds))
 		for _, credential := range creds {
 			if !s.canAccessCredential(r.Context(), credential) {
 				continue
 			}
 			out = append(out, credentialResponse(credential))
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"credentials": out})
+		writeJSON(w, http.StatusOK, api.CredentialListResponse{Credentials: out})
 	case http.MethodPost:
 		var req createCredentialRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -720,7 +693,7 @@ func (s *server) handleCredentials(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("audit event=credential_created credential_id=%s scope=%s owner_user_id=%s actor_user_id=%s", credential.ID, credential.Scope, credential.OwnerUserID, requesterUserID(r.Context()))
-		writeJSON(w, http.StatusCreated, map[string]any{"credential": credentialResponse(credential)})
+		writeJSON(w, http.StatusCreated, api.CredentialResponse{Credential: credentialResponse(credential)})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -750,14 +723,14 @@ func (s *server) handleCredentialSubresources(w http.ResponseWriter, r *http.Req
 
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"credential": credentialResponse(credential)})
+		writeJSON(w, http.StatusOK, api.CredentialResponse{Credential: credentialResponse(credential)})
 	case http.MethodDelete:
 		if err := s.store.SetCodexCredentialStatus(credential.ID, "disabled", nil, "disabled by API"); err != nil {
 			http.Error(w, "failed to disable credential", http.StatusInternalServerError)
 			return
 		}
 		log.Printf("audit event=credential_disabled credential_id=%s actor_user_id=%s", credential.ID, requesterUserID(r.Context()))
-		writeJSON(w, http.StatusOK, map[string]any{"disabled": true})
+		writeJSON(w, http.StatusOK, api.CredentialDisabledResponse{Disabled: true})
 	case http.MethodPatch:
 		var req updateCredentialRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -833,7 +806,7 @@ func (s *server) handleCredentialSubresources(w http.ResponseWriter, r *http.Req
 			return
 		}
 		log.Printf("audit event=credential_updated credential_id=%s actor_user_id=%s", credential.ID, requesterUserID(r.Context()))
-		writeJSON(w, http.StatusOK, map[string]any{"credential": credentialResponse(credential)})
+		writeJSON(w, http.StatusOK, api.CredentialResponse{Credential: credentialResponse(credential)})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -846,18 +819,8 @@ func (s *server) canAccessCredential(ctx context.Context, credential state.Codex
 	return credential.Scope == "personal" && credential.OwnerUserID == requesterUserID(ctx)
 }
 
-func credentialResponse(credential state.CodexCredential) map[string]any {
-	return map[string]any{
-		"id":             credential.ID,
-		"owner_user_id":  credential.OwnerUserID,
-		"scope":          credential.Scope,
-		"weight":         credential.Weight,
-		"status":         credential.Status,
-		"cooldown_until": credential.CooldownUntil,
-		"last_error":     credential.LastError,
-		"created_at":     credential.CreatedAt,
-		"updated_at":     credential.UpdatedAt,
-	}
+func credentialResponse(credential state.CodexCredential) api.Credential {
+	return api.CredentialFromState(credential)
 }
 
 func newCredentialID() (string, error) {
@@ -889,7 +852,7 @@ func (s *server) handleTaskSubresources(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"task": task})
+	writeJSON(w, http.StatusOK, api.TaskResponse{Task: task})
 }
 
 func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -902,7 +865,8 @@ func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.isActiveWebhookSlot() {
-		writeJSON(w, http.StatusAccepted, map[string]any{"accepted": false, "inactive_slot": true})
+		accepted := false
+		writeJSON(w, http.StatusAccepted, api.AcceptedResponse{Accepted: &accepted, InactiveSlot: true})
 		return
 	}
 
@@ -929,7 +893,7 @@ func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !claimed {
-			writeJSON(w, http.StatusOK, map[string]any{"duplicate": true})
+			writeJSON(w, http.StatusOK, api.AcceptedResponse{Duplicate: true})
 			return
 		}
 		deliveryClaim = claim
@@ -950,7 +914,8 @@ func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true})
+	accepted := true
+	writeJSON(w, http.StatusAccepted, api.AcceptedResponse{Accepted: &accepted})
 }
 
 func (s *server) processWebhookEvent(ctx context.Context, eventType string, payload []byte) error {
@@ -1363,7 +1328,7 @@ func (s *server) handleGetRun(w http.ResponseWriter, runID string) {
 		http.Error(w, "run not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"run": run})
+	writeJSON(w, http.StatusOK, api.RunResponse{Run: run})
 }
 
 func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
@@ -1374,7 +1339,8 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 	}
 	if run.Status == state.StatusSucceeded || run.Status == state.StatusFailed || run.Status == state.StatusCanceled {
 		s.clearRunCancelBestEffort(runID)
-		writeJSON(w, http.StatusOK, map[string]any{"run": run, "canceled": false, "reason": "run already completed"})
+		canceled := false
+		writeJSON(w, http.StatusOK, api.RunCancelResponse{Run: &run, Canceled: &canceled, Reason: "run already completed"})
 		return
 	}
 	if err := s.store.RequestRunCancel(runID, "canceled by user", "user"); err != nil {
@@ -1392,12 +1358,14 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 		if !s.isDraining() {
 			s.scheduleRuns(run.TaskID)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"run": updated, "canceled": true})
+		canceled := true
+		writeJSON(w, http.StatusOK, api.RunCancelResponse{Run: &updated, Canceled: &canceled})
 		return
 	}
 
 	s.stopRunExecutionBestEffort(runID, "user cancel requested")
-	writeJSON(w, http.StatusAccepted, map[string]any{"run_id": runID, "cancel_requested": true})
+	cancelRequested := true
+	writeJSON(w, http.StatusAccepted, api.RunCancelResponse{RunID: runID, CancelRequested: &cancelRequested})
 }
 
 func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID string) {
@@ -1456,10 +1424,10 @@ func (s *server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 			log.Printf("write logs response failed: %v", err)
 		}
 	case "json":
-		writeJSON(w, http.StatusOK, map[string]any{
-			"logs":       logsText,
-			"run_status": run.Status,
-			"done":       runStatusIsDone(run.Status),
+		writeJSON(w, http.StatusOK, api.RunLogsResponse{
+			Logs:      logsText,
+			RunStatus: run.Status,
+			Done:      runStatusIsDone(run.Status),
 		})
 	default:
 		http.Error(w, "invalid format", http.StatusBadRequest)

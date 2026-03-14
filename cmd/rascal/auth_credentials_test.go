@@ -251,7 +251,7 @@ func TestAuthCredentialsDisableFetchesUpdatedCredential(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode output: %v", err)
 	}
-	if !out.Disabled || out.Credential.Status != "disabled" {
+	if !out.Disabled || out.Credential == nil || out.Credential.Status != "disabled" {
 		t.Fatalf("unexpected disable output: %+v", out)
 	}
 }

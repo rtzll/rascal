@@ -10,51 +10,16 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/rtzll/rascal/internal/api"
 	"github.com/spf13/cobra"
 )
 
-type credentialRecord struct {
-	ID            string     `json:"id" toml:"id"`
-	OwnerUserID   string     `json:"owner_user_id" toml:"owner_user_id"`
-	Scope         string     `json:"scope" toml:"scope"`
-	Weight        int        `json:"weight" toml:"weight"`
-	Status        string     `json:"status" toml:"status"`
-	CooldownUntil *time.Time `json:"cooldown_until,omitempty" toml:"cooldown_until,omitempty"`
-	LastError     string     `json:"last_error,omitempty" toml:"last_error,omitempty"`
-	CreatedAt     time.Time  `json:"created_at" toml:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at" toml:"updated_at"`
-}
-
-type credentialListResponse struct {
-	Credentials []credentialRecord `json:"credentials" toml:"credentials"`
-}
-
-type credentialGetResponse struct {
-	Credential credentialRecord `json:"credential" toml:"credential"`
-}
-
-type credentialDisableResponse struct {
-	Disabled   bool             `json:"disabled" toml:"disabled"`
-	Credential credentialRecord `json:"credential" toml:"credential"`
-}
-
-type credentialCreateRequest struct {
-	ID          string `json:"id,omitempty"`
-	OwnerUserID string `json:"owner_user_id,omitempty"`
-	Scope       string `json:"scope,omitempty"`
-	AuthBlob    string `json:"auth_blob"`
-	Weight      int    `json:"weight,omitempty"`
-}
-
-type credentialUpdateRequest struct {
-	OwnerUserID   *string `json:"owner_user_id,omitempty"`
-	Scope         *string `json:"scope,omitempty"`
-	AuthBlob      *string `json:"auth_blob,omitempty"`
-	Weight        *int    `json:"weight,omitempty"`
-	Status        *string `json:"status,omitempty"`
-	CooldownUntil *string `json:"cooldown_until,omitempty"`
-	LastError     *string `json:"last_error,omitempty"`
-}
+type credentialRecord = api.Credential
+type credentialListResponse = api.CredentialListResponse
+type credentialGetResponse = api.CredentialResponse
+type credentialDisableResponse = api.CredentialDisabledResponse
+type credentialCreateRequest = api.CreateCredentialRequest
+type credentialUpdateRequest = api.UpdateCredentialRequest
 
 const bootstrapSharedCredentialID = "cred_bootstrap_shared"
 
@@ -127,12 +92,12 @@ func (a *app) newAuthCredentialsGetCmd() *cobra.Command {
 
 func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 	var (
-		id              string
-		scope           string
-		ownerUserID     string
-		weight          int
-		authFile        string
-		authBlob        string
+		id          string
+		scope       string
+		ownerUserID string
+		weight      int
+		authFile    string
+		authBlob    string
 	)
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -176,11 +141,11 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 
 func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 	var (
-		scope           string
-		ownerUserID     string
-		weight          int
-		authFile        string
-		authBlob        string
+		scope       string
+		ownerUserID string
+		weight      int
+		authFile    string
+		authBlob    string
 	)
 	cmd := &cobra.Command{
 		Use:   "update <credential-id>",
@@ -255,7 +220,7 @@ func (a *app) newAuthCredentialsDisableCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			out := credentialDisableResponse{Disabled: true, Credential: cred}
+			out := credentialDisableResponse{Disabled: true, Credential: &cred}
 			return a.emit(out, func() error {
 				return renderCredentialDetailTable(cred)
 			})
