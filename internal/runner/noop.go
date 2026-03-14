@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rtzll/rascal/internal/validation"
 )
 
 // NoopLauncher is a safe default for local development.
@@ -44,6 +46,22 @@ func (NoopLauncher) StartDetached(_ context.Context, spec Spec) (handle Executio
 	}
 	if err := WriteMeta(filepath.Join(spec.RunDir, "meta.json"), meta); err != nil {
 		return ExecutionHandle{}, err
+	}
+	report := validation.BuildReport(spec.Validation, []validation.ValidatorResult{
+		{
+			Name:    "noop",
+			Source:  "noop",
+			Status:  validation.StatusPass,
+			Summary: "Noop runner completed without executing validators.",
+		},
+	}, validation.CritiqueReport{
+		Enabled:            spec.Validation.CritiqueEnabled,
+		Ran:                false,
+		SkippedReason:      "noop runner does not execute critique",
+		TestCritiqueEnable: spec.Validation.TestCritiqueEnable,
+	}, nil)
+	if err := validation.WriteArtifacts(spec.RunDir, report); err != nil {
+		return ExecutionHandle{}, fmt.Errorf("write noop validation artifacts: %w", err)
 	}
 
 	return ExecutionHandle{

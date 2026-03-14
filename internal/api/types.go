@@ -14,18 +14,29 @@ type ServiceStatusResponse struct {
 }
 
 type CreateTaskRequest struct {
-	TaskID     string          `json:"task_id,omitempty"`
-	Repo       string          `json:"repo"`
-	Task       string          `json:"task"`
-	BaseBranch string          `json:"base_branch"`
-	Trigger    runtrigger.Name `json:"trigger,omitempty"`
-	Debug      *bool           `json:"debug,omitempty"`
+	TaskID     string               `json:"task_id,omitempty"`
+	Repo       string               `json:"repo"`
+	Task       string               `json:"task"`
+	BaseBranch string               `json:"base_branch"`
+	Trigger    runtrigger.Name      `json:"trigger,omitempty"`
+	Debug      *bool                `json:"debug,omitempty"`
+	Validation *ValidationOverrides `json:"validation,omitempty"`
 }
 
 type CreateIssueTaskRequest struct {
-	Repo        string `json:"repo"`
-	IssueNumber int    `json:"issue_number"`
-	Debug       *bool  `json:"debug,omitempty"`
+	Repo        string               `json:"repo"`
+	IssueNumber int                  `json:"issue_number"`
+	Debug       *bool                `json:"debug,omitempty"`
+	Validation  *ValidationOverrides `json:"validation,omitempty"`
+}
+
+type ValidationOverrides struct {
+	Enabled                     *bool `json:"enabled,omitempty"`
+	CritiqueEnabled             *bool `json:"critique_enabled,omitempty"`
+	TestCritiqueEnabled         *bool `json:"test_critique_enabled,omitempty"`
+	BlockOnDeterministicFailure *bool `json:"block_on_deterministic_failure,omitempty"`
+	BlockOnCritiqueBlocker      *bool `json:"block_on_critique_blocker,omitempty"`
+	BlockOnCritiqueWarning      *bool `json:"block_on_critique_warning,omitempty"`
 }
 
 type RunResponse struct {

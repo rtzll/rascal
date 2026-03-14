@@ -25,6 +25,7 @@ type CompletionCommentInput struct {
 	CommitMessage   []byte
 	DurationSeconds int64
 	TotalTokens     *int64
+	ValidationLine  string
 }
 
 type StartCommentInput struct {
@@ -111,7 +112,7 @@ func renderAgentDetailsSection(gooseOutput string) string {
 	)
 }
 
-func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection string) string {
+func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection, validationLine string) string {
 	gooseSection := renderAgentDetailsSection(gooseOutput)
 	if usage, ok := ExtractTokenUsage(gooseOutput); ok {
 		body := ""
@@ -124,6 +125,9 @@ func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection stri
 			runDuration,
 			formatTokenCount(usage.TotalTokens),
 		)
+		if strings.TrimSpace(validationLine) != "" {
+			body += "\n" + strings.TrimSpace(validationLine)
+		}
 		return body
 	}
 
@@ -132,6 +136,9 @@ func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection stri
 		body = commitBody + "\n\n" + body
 	}
 	body += "\n\n" + gooseSection + closesSection + "\n\n---\n\n" + fmt.Sprintf("Rascal run took %s", runDuration)
+	if strings.TrimSpace(validationLine) != "" {
+		body += "\n" + strings.TrimSpace(validationLine)
+	}
 	return body
 }
 
@@ -145,7 +152,7 @@ func BuildCompletionComment(in CompletionCommentInput) (string, error) {
 		closesSection = fmt.Sprintf("\n\nCloses #%d", in.IssueNumber)
 	}
 	runDuration := FormatDuration(in.DurationSeconds)
-	commentBody := BuildPRBody(in.RunID, commitBody, in.GooseOutput, runDuration, closesSection)
+	commentBody := BuildPRBody(in.RunID, commitBody, in.GooseOutput, runDuration, closesSection, in.ValidationLine)
 	if in.TotalTokens != nil && *in.TotalTokens > 0 {
 		body := ""
 		if strings.TrimSpace(commitBody) != "" {
@@ -157,6 +164,9 @@ func BuildCompletionComment(in CompletionCommentInput) (string, error) {
 			runDuration,
 			formatTokenCount(*in.TotalTokens),
 		)
+		if strings.TrimSpace(in.ValidationLine) != "" {
+			body += "\n" + strings.TrimSpace(in.ValidationLine)
+		}
 		commentBody = body
 	}
 

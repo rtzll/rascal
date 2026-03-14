@@ -149,6 +149,7 @@ func TestBuildPRBody(t *testing.T) {
 			`{"usage":{"total_tokens":123000}}`,
 			"1m 2s",
 			"",
+			"",
 		)
 		if !strings.Contains(body, "<details><summary>Agent Details</summary>") {
 			t.Fatalf("missing agent details section:\n%s", body)
@@ -168,6 +169,7 @@ func TestBuildPRBody(t *testing.T) {
 			`{"event":"x"}`,
 			"8s",
 			"\n\nCloses #12",
+			"",
 		)
 		if !strings.Contains(body, "<details><summary>Agent Details</summary>") {
 			t.Fatalf("missing agent details section:\n%s", body)
@@ -189,6 +191,7 @@ func TestBuildPRBody(t *testing.T) {
 			"",
 			"issue body\n```go\nfmt.Println(\"hi\")\n```\n<details>raw</details>\n{\"usage\":{\"total_tokens\":321}}",
 			"9s",
+			"",
 			"",
 		)
 		if !strings.Contains(body, "<details><summary>Agent Details</summary>") {
@@ -267,6 +270,22 @@ func TestBuildCompletionComment(t *testing.T) {
 		}
 		if !strings.Contains(body, "Rascal run `run_3` completed in 8s · 42K tokens") {
 			t.Fatalf("expected explicit token summary:\n%s", body)
+		}
+	})
+
+	t.Run("includes validation summary when present", func(t *testing.T) {
+		body, err := BuildCompletionComment(CompletionCommentInput{
+			RunID:           "run_4",
+			GooseOutput:     `{"event":"x"}`,
+			CommitMessage:   []byte("feat(rascal): update"),
+			DurationSeconds: 8,
+			ValidationLine:  "Validation passed: 2 pass, 0 warn, 1 finding(s).",
+		})
+		if err != nil {
+			t.Fatalf("BuildCompletionComment returned error: %v", err)
+		}
+		if !strings.Contains(body, "Validation passed: 2 pass, 0 warn, 1 finding(s).") {
+			t.Fatalf("expected validation summary:\n%s", body)
 		}
 	})
 }

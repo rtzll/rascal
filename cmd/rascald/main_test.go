@@ -26,6 +26,7 @@ import (
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
+	"github.com/rtzll/rascal/internal/validation"
 )
 
 func TestInstructionTextPRGitContext(t *testing.T) {
@@ -610,6 +611,7 @@ func newTestServerWithPaths(t *testing.T, launcher runner.Launcher, dataDir, sta
 		StatePath:            statePath,
 		MaxRuns:              200,
 		RunnerMode:           runner.ModeNoop,
+		Validation:           validation.DefaultConfig(),
 		CredentialRenewEvery: 20 * time.Millisecond,
 	}
 	if err := prepareTestStatePath(cfg.StatePath); err != nil {
@@ -2890,6 +2892,71 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	}
 }
 
+func TestExecuteRunIncludesValidationSummaryInCompletionComment(t *testing.T) {
+	t.Parallel()
+	launcher := &fakeLauncher{
+		res: fakeRunResult{
+			PRNumber: 77,
+			PRURL:    "https://example.com/pr/77",
+			HeadSHA:  "0123456789abcdef0123456789abcdef01234567",
+		},
+	}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_comment_validation_completion",
+		TaskID:      "owner/repo#77",
+		Repo:        "owner/repo",
+		Task:        "Address PR #77 feedback",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/pr-77",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		IssueNumber: 16,
+		PRNumber:    77,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 77,
+		RequestedBy: "alice",
+		Trigger:     "pr_comment",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+	report := validation.BuildReport(validation.DefaultConfig(), []validation.ValidatorResult{
+		{Name: "lint", Status: validation.StatusPass, Summary: "ok"},
+		{Name: "test", Status: validation.StatusPass, Summary: "ok"},
+	}, validation.CritiqueReport{
+		Enabled:            true,
+		Ran:                true,
+		TestCritiqueEnable: true,
+	}, []validation.Finding{
+		{Severity: validation.SeverityWarning, Category: "tests", Path: "pkg/foo.go", Rationale: "needs nearby coverage"},
+	})
+	if err := validation.WriteArtifacts(run.RunDir, report); err != nil {
+		t.Fatalf("write validation artifacts: %v", err)
+	}
+
+	s.executeRun(run.ID)
+
+	comments := fakeGH.postedComments()
+	completionComment, ok := findPostedComment(comments, runCompletionCommentBodyMarker)
+	if !ok {
+		t.Fatalf("expected completion comment, got %+v", comments)
+	}
+	if !strings.Contains(completionComment.body, "Validation passed: 2 pass, 0 warn, 1 finding(s).") {
+		t.Fatalf("expected validation summary in completion comment, got:\n%s", completionComment.body)
+	}
+}
+
 func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 	t.Parallel()
 	launcher := &fakeLauncher{
@@ -3282,6 +3349,81 @@ func TestExecuteRunPostsTerminalFailureFeedbackForCredentialLeaseFailure(t *test
 	}
 	if !strings.Contains(comments[0].body, "Reason: acquire credential lease: no credentials available") {
 		t.Fatalf("expected failure reason in comment, got body:\n%s", comments[0].body)
+	}
+}
+
+func TestExecuteRunBlocksOnValidationReportAndPostsFindings(t *testing.T) {
+	t.Parallel()
+	launcher := &fakeLauncher{
+		res: fakeRunResult{
+			ExitCode: 0,
+			HeadSHA:  "abc123",
+		},
+	}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{}
+	s.gh = fakeGH
+	s.cfg.GitHubToken = "token"
+
+	run, err := s.store.AddRun(state.CreateRunInput{
+		ID:          "run_validation_block_comment",
+		TaskID:      "owner/repo#42",
+		Repo:        "owner/repo",
+		Task:        "Investigate issue #42",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/issue-42",
+		Trigger:     "issue_label",
+		RunDir:      t.TempDir(),
+		IssueNumber: 42,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	report := validation.BuildReport(validation.DefaultConfig(), []validation.ValidatorResult{
+		{Name: "lint", Status: validation.StatusPass, Summary: "ok"},
+		{Name: "test", Status: validation.StatusPass, Summary: "ok"},
+	}, validation.CritiqueReport{
+		Enabled:            true,
+		Ran:                true,
+		TestCritiqueEnable: true,
+	}, []validation.Finding{
+		{
+			Severity:          validation.SeverityBlocker,
+			Category:          "tests",
+			Path:              "pkg/foo_test.go",
+			Rationale:         "The diff adds a skipped test, which weakens validation coverage.",
+			SuggestedFollowUp: "Remove the skip.",
+		},
+	})
+	if err := validation.WriteArtifacts(run.RunDir, report); err != nil {
+		t.Fatalf("write validation artifacts: %v", err)
+	}
+
+	s.executeRun(run.ID)
+
+	updated, ok := s.store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("missing run %s", run.ID)
+	}
+	if updated.Status != state.StatusFailed {
+		t.Fatalf("status = %s, want failed", updated.Status)
+	}
+	if !strings.Contains(updated.Error, "Validation blocked") {
+		t.Fatalf("expected validation block reason, got %q", updated.Error)
+	}
+
+	comments := fakeGH.postedComments()
+	failureComment, ok := findPostedComment(comments, runFailureCommentBodyMarker)
+	if !ok {
+		t.Fatalf("expected failure comment, got %+v", comments)
+	}
+	if !strings.Contains(failureComment.body, "Validation: Validation blocked: 0 fail, 0 warn, 1 finding(s).") {
+		t.Fatalf("expected validation summary in failure comment, got:\n%s", failureComment.body)
+	}
+	if !strings.Contains(failureComment.body, "`blocker/tests` `pkg/foo_test.go`") {
+		t.Fatalf("expected validation finding in failure comment, got:\n%s", failureComment.body)
 	}
 }
 

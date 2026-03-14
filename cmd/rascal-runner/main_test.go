@@ -13,6 +13,7 @@ import (
 	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtrigger"
+	"github.com/rtzll/rascal/internal/validation"
 )
 
 type fakeExecutor struct {
@@ -1336,6 +1337,273 @@ func TestRunStageWrapsError(t *testing.T) {
 
 	if err := runStage("ok_stage", func() error { return nil }); err != nil {
 		t.Fatalf("expected nil error on success stage, got %v", err)
+	}
+}
+
+func TestRunValidationStageDeterministicFailureSkipsCritique(t *testing.T) {
+	metaDir := t.TempDir()
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "Makefile"), []byte("test:\n\t@true\n"), 0o644); err != nil {
+		t.Fatalf("write Makefile: %v", err)
+	}
+
+	var gitCalls int
+	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			if name == "make" {
+				switch args[0] {
+				case "lint":
+					return "ok", nil
+				case "test":
+					return "--- FAIL: TestValidation\n", errors.New("exit status 2")
+				default:
+					return "make: *** No rule to make target '" + args[0] + "'. Stop.", errors.New("exit status 2")
+				}
+			}
+			if name == "git" {
+				gitCalls++
+			}
+			return "", nil
+		},
+	}
+
+	report, err := runValidationStage(ex, config{
+		MetaDir: metaDir,
+		RepoDir: repoDir,
+		Task:    "update tests",
+		Validation: validation.Config{
+			Enabled:            true,
+			CritiqueEnabled:    true,
+			TestCritiqueEnable: true,
+			Gate: validation.GatePolicy{
+				BlockOnDeterministicFailure: true,
+				BlockOnCritiqueBlocker:      true,
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "Validation blocked") {
+		t.Fatalf("expected validation gate error, got %v", err)
+	}
+	if report.Critique.Ran {
+		t.Fatal("expected critique to be skipped after deterministic failure")
+	}
+	if report.Critique.SkippedReason != "deterministic failures" {
+		t.Fatalf("unexpected critique skipped reason: %q", report.Critique.SkippedReason)
+	}
+	if gitCalls != 0 {
+		t.Fatalf("expected no git critique inspection, got %d calls", gitCalls)
+	}
+}
+
+func TestRunValidationStageCritiqueWarningDoesNotBlock(t *testing.T) {
+	metaDir := t.TempDir()
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "Makefile"), []byte("test:\n\t@true\n"), 0o644); err != nil {
+		t.Fatalf("write Makefile: %v", err)
+	}
+
+	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			switch name {
+			case "make":
+				switch args[0] {
+				case "lint", "test":
+					return "ok", nil
+				default:
+					return "make: *** No rule to make target '" + args[0] + "'. Stop.", errors.New("exit status 2")
+				}
+			case "git":
+				if len(args) >= 3 && args[0] == "diff" && args[1] == "--name-only" && args[2] == "HEAD" {
+					return "pkg/foo.go\n", nil
+				}
+				if len(args) >= 3 && args[0] == "diff" && args[1] == "--unified=0" && args[2] == "HEAD" {
+					return "", nil
+				}
+			}
+			return "", nil
+		},
+	}
+
+	report, err := runValidationStage(ex, config{
+		MetaDir: metaDir,
+		RepoDir: repoDir,
+		Task:    "update implementation",
+		Validation: validation.Config{
+			Enabled:            true,
+			CritiqueEnabled:    true,
+			TestCritiqueEnable: true,
+			Gate: validation.GatePolicy{
+				BlockOnDeterministicFailure: true,
+				BlockOnCritiqueBlocker:      true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("runValidationStage returned error: %v", err)
+	}
+	if report.Gate.Blocked {
+		t.Fatalf("did not expect warning-only critique to block: %+v", report.Gate)
+	}
+	if len(report.Findings) != 1 || report.Findings[0].Severity != validation.SeverityWarning {
+		t.Fatalf("unexpected findings: %+v", report.Findings)
+	}
+}
+
+func TestRunValidationStageCritiqueBlockerBlocks(t *testing.T) {
+	metaDir := t.TempDir()
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "Makefile"), []byte("test:\n\t@true\n"), 0o644); err != nil {
+		t.Fatalf("write Makefile: %v", err)
+	}
+
+	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			switch name {
+			case "make":
+				switch args[0] {
+				case "lint", "test":
+					return "ok", nil
+				default:
+					return "make: *** No rule to make target '" + args[0] + "'. Stop.", errors.New("exit status 2")
+				}
+			case "git":
+				if len(args) >= 3 && args[0] == "diff" && args[1] == "--name-only" && args[2] == "HEAD" {
+					return "pkg/foo_test.go\n", nil
+				}
+				if len(args) >= 3 && args[0] == "diff" && args[1] == "--unified=0" && args[2] == "HEAD" {
+					return "+++ b/pkg/foo_test.go\n+t.Skip(\"flaky\")\n", nil
+				}
+			}
+			return "", nil
+		},
+	}
+
+	report, err := runValidationStage(ex, config{
+		MetaDir: metaDir,
+		RepoDir: repoDir,
+		Task:    "tighten tests",
+		Validation: validation.Config{
+			Enabled:            true,
+			CritiqueEnabled:    true,
+			TestCritiqueEnable: true,
+			Gate: validation.GatePolicy{
+				BlockOnDeterministicFailure: true,
+				BlockOnCritiqueBlocker:      true,
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "Validation blocked") {
+		t.Fatalf("expected critique blocker to block, got %v", err)
+	}
+	if !report.Gate.Blocked {
+		t.Fatalf("expected blocked gate, got %+v", report.Gate)
+	}
+	if len(report.Findings) == 0 || report.Findings[0].Severity != validation.SeverityBlocker {
+		t.Fatalf("unexpected findings: %+v", report.Findings)
+	}
+}
+
+func TestRunWithExecutorStopsBeforePRHandoffWhenValidationBlocks(t *testing.T) {
+	metaDir := filepath.Join(t.TempDir(), "meta")
+	workRoot := filepath.Join(t.TempDir(), "work")
+	repoDir := filepath.Join(workRoot, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir repo git dir: %v", err)
+	}
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatalf("mkdir meta dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "Makefile"), []byte("test:\n\t@true\n"), 0o644); err != nil {
+		t.Fatalf("write Makefile: %v", err)
+	}
+
+	t.Setenv("RASCAL_RUN_ID", "run_validation_block")
+	t.Setenv("RASCAL_TASK_ID", "task_validation_block")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_TASK", "Tighten tests")
+	t.Setenv("RASCAL_AGENT_BACKEND", "goose")
+	t.Setenv("RASCAL_META_DIR", metaDir)
+	t.Setenv("RASCAL_WORK_ROOT", workRoot)
+	t.Setenv("RASCAL_REPO_DIR", repoDir)
+
+	var pushed bool
+	var prCreated bool
+	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			switch {
+			case name == "gh" && len(args) >= 2 && args[0] == "api" && args[1] == "user":
+				return `{"login":"rascalbot"}`, nil
+			case name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain":
+				return " M changed.txt\n", nil
+			case name == "git" && len(args) >= 2 && args[0] == "diff" && args[1] == "--name-only":
+				return "pkg/foo_test.go\n", nil
+			case name == "git" && len(args) >= 2 && args[0] == "diff" && args[1] == "--unified=0":
+				return "+++ b/pkg/foo_test.go\n+t.Skip(\"flaky\")\n", nil
+			case name == "make":
+				switch args[0] {
+				case "lint", "test":
+					return "ok", nil
+				default:
+					return "make: *** No rule to make target '" + args[0] + "'. Stop.", errors.New("exit status 2")
+				}
+			default:
+				return "", nil
+			}
+		},
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, args ...string) error {
+			switch name {
+			case "goose":
+				if _, err := io.WriteString(stdout, `{"event":"message","usage":{"total_tokens":7}}`+"\n"); err != nil {
+					return fmt.Errorf("write fake goose output: %w", err)
+				}
+				return nil
+			case "git":
+				if len(args) > 0 && args[0] == "push" {
+					pushed = true
+				}
+			case "gh":
+				if len(args) > 1 && args[0] == "pr" && args[1] == "create" {
+					prCreated = true
+				}
+			}
+			return nil
+		},
+	}
+
+	err := runWithExecutor(ex)
+	if err == nil || !strings.Contains(err.Error(), "stage validation: Validation blocked") {
+		t.Fatalf("expected validation gate failure, got %v", err)
+	}
+	if pushed {
+		t.Fatal("did not expect git push after blocked validation")
+	}
+	if prCreated {
+		t.Fatal("did not expect PR creation after blocked validation")
+	}
+
+	meta, errRead := runner.ReadMeta(filepath.Join(metaDir, "meta.json"))
+	if errRead != nil {
+		t.Fatalf("read meta: %v", errRead)
+	}
+	if !strings.Contains(meta.Error, "Validation blocked") {
+		t.Fatalf("expected validation failure in meta error, got %q", meta.Error)
+	}
+	report, errRead := validation.ReadReport(filepath.Join(metaDir, validation.DefaultJSONFile))
+	if errRead != nil {
+		t.Fatalf("read validation report: %v", errRead)
+	}
+	if !report.Gate.Blocked {
+		t.Fatalf("expected blocked validation report, got %+v", report.Gate)
 	}
 }
 

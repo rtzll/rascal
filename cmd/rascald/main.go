@@ -36,6 +36,7 @@ import (
 	"github.com/rtzll/rascal/internal/runsummary"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
+	"github.com/rtzll/rascal/internal/validation"
 )
 
 var errTaskCompleted = errors.New("task is already completed")
@@ -44,6 +45,7 @@ var errServerDraining = errors.New("orchestrator is draining")
 const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
 const runResponseTargetFile = "response_target.json"
+const runValidationConfigFile = validation.DefaultConfigFile
 const runStartCommentMarkerFile = "start_comment_posted.json"
 const runCompletionCommentMarkerFile = "completion_comment_posted.json"
 const runFailureCommentMarkerFile = "failure_comment_posted.json"
@@ -111,6 +113,7 @@ type runRequest struct {
 	Context         string
 	Debug           *bool
 	CreatedByUserID string
+	Validation      *api.ValidationOverrides
 
 	ResponseTarget *runResponseTarget
 }
@@ -539,6 +542,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Trigger:         trigger,
 		Debug:           req.Debug,
 		CreatedByUserID: requesterUserID(r.Context()),
+		Validation:      req.Validation,
 	})
 	if err != nil {
 		if errors.Is(err, errServerDraining) {
@@ -599,6 +603,7 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		Context:         ctxText,
 		Debug:           req.Debug,
 		CreatedByUserID: requesterUserID(r.Context()),
+		Validation:      req.Validation,
 		ResponseTarget: &runResponseTarget{
 			Repo:        req.Repo,
 			IssueNumber: req.IssueNumber,
@@ -1564,6 +1569,10 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		s.setRunStatusBestEffort(run.ID, state.StatusFailed, err.Error())
 		return state.Run{}, fmt.Errorf("prepare run response target: %w", err)
 	}
+	if err := s.writeRunValidationConfig(run, req.Validation); err != nil {
+		s.setRunStatusBestEffort(run.ID, state.StatusFailed, err.Error())
+		return state.Run{}, fmt.Errorf("prepare run validation config: %w", err)
+	}
 	s.scheduleRuns(run.TaskID)
 	return run, nil
 }
@@ -1659,6 +1668,57 @@ func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget
 		return fmt.Errorf("write run response target: %w", err)
 	}
 	return nil
+}
+
+func (s *server) writeRunValidationConfig(run state.Run, overrides *api.ValidationOverrides) error {
+	cfg := s.effectiveValidationConfig(overrides)
+	path := filepath.Join(run.RunDir, runValidationConfigFile)
+	if err := validation.WriteConfig(path, cfg); err != nil {
+		return fmt.Errorf("write validation config: %w", err)
+	}
+	return nil
+}
+
+func (s *server) effectiveValidationConfig(overrides *api.ValidationOverrides) validation.Config {
+	cfg := s.cfg.Validation
+	if overrides == nil {
+		return cfg
+	}
+	if overrides.Enabled != nil {
+		cfg.Enabled = *overrides.Enabled
+	}
+	if overrides.CritiqueEnabled != nil {
+		cfg.CritiqueEnabled = *overrides.CritiqueEnabled
+	}
+	if overrides.TestCritiqueEnabled != nil {
+		cfg.TestCritiqueEnable = *overrides.TestCritiqueEnabled
+	}
+	if overrides.BlockOnDeterministicFailure != nil {
+		cfg.Gate.BlockOnDeterministicFailure = *overrides.BlockOnDeterministicFailure
+	}
+	if overrides.BlockOnCritiqueBlocker != nil {
+		cfg.Gate.BlockOnCritiqueBlocker = *overrides.BlockOnCritiqueBlocker
+	}
+	if overrides.BlockOnCritiqueWarning != nil {
+		cfg.Gate.BlockOnCritiqueWarning = *overrides.BlockOnCritiqueWarning
+	}
+	if !cfg.Enabled {
+		cfg.CritiqueEnabled = false
+		cfg.TestCritiqueEnable = false
+	}
+	if !cfg.CritiqueEnabled {
+		cfg.TestCritiqueEnable = false
+	}
+	return cfg
+}
+
+func loadRunValidationConfig(runDir string, fallback validation.Config) validation.Config {
+	path := filepath.Join(strings.TrimSpace(runDir), runValidationConfigFile)
+	cfg, err := validation.ReadConfig(path)
+	if err != nil {
+		return fallback
+	}
+	return cfg
 }
 
 func (s *server) prepareRunCredentialAuth(runID, runDir, requesterUserID string) (string, error) {
@@ -1852,6 +1912,7 @@ func (s *server) executeRun(runID string) {
 		PRNumber:     run.PRNumber,
 		Context:      run.Context,
 		Debug:        run.Debug,
+		Validation:   loadRunValidationConfig(run.RunDir, s.cfg.Validation),
 		AgentSession: runner.SessionSpec{
 			Mode:             sessionMode,
 			Resume:           sessionResume,
@@ -2158,6 +2219,16 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	tokenUsage, hasTokenUsage, tokenUsageErr := loadRunTokenUsage(run)
 	if tokenUsageErr != nil {
 		log.Printf("run %s parse token usage failed: %v", run.ID, tokenUsageErr)
+	}
+	validationReport, hasValidationReport, validationErr := loadRunValidationReport(run.RunDir)
+	if validationErr != nil {
+		log.Printf("run %s load validation report failed: %v", run.ID, validationErr)
+	}
+	if hasValidationReport && validationReport.Gate.Blocked {
+		status = state.StatusFailed
+		if strings.TrimSpace(validationReport.Gate.Summary) != "" {
+			errText = strings.TrimSpace(validationReport.Gate.Summary)
+		}
 	}
 
 	now := time.Now().UTC()
@@ -3428,6 +3499,21 @@ func loadRunBuildCommit(runDir string) string {
 	}
 }
 
+func loadRunValidationReport(runDir string) (validation.Report, bool, error) {
+	if strings.TrimSpace(runDir) == "" {
+		return validation.Report{}, false, nil
+	}
+	path := filepath.Join(runDir, validation.DefaultJSONFile)
+	report, err := validation.ReadReport(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return validation.Report{}, false, nil
+		}
+		return validation.Report{}, false, fmt.Errorf("read validation report: %w", err)
+	}
+	return report, true, nil
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -3456,7 +3542,13 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 	if err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("read commit message: %w", err)
 	}
-	body, err := ghapi.RenderCompletionComment(runCompletionCommentBodyMarker, runsummary.CompletionCommentInput{
+	validationLine := ""
+	if report, ok, err := loadRunValidationReport(run.RunDir); err != nil {
+		return "", fmt.Errorf("read validation report: %w", err)
+	} else if ok {
+		validationLine = validation.SummaryLine(report)
+	}
+	body, err := runsummary.BuildCompletionComment(runsummary.CompletionCommentInput{
 		RunID:           run.ID,
 		Repo:            repo,
 		RequestedBy:     target.RequestedBy,
@@ -3466,11 +3558,12 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 		CommitMessage:   commitMessageData,
 		DurationSeconds: runsummary.RunDurationSeconds(run.CreatedAt, run.StartedAt, run.CompletedAt),
 		TotalTokens:     totalTokens,
+		ValidationLine:  validationLine,
 	})
 	if err != nil {
-		return "", fmt.Errorf("render completion comment: %w", err)
+		return "", fmt.Errorf("build run completion comment: %w", err)
 	}
-	return body, nil
+	return runCompletionCommentBodyMarker + "\n\n" + body, nil
 }
 
 func loadRunTokenUsage(run state.Run) (state.RunTokenUsage, bool, error) {
@@ -3528,13 +3621,46 @@ func buildRunFailureComment(run state.Run, target runResponseTarget) (string, er
 		header = fmt.Sprintf("@%s %s", requestedBy, header)
 	}
 
-	return ghapi.RenderFailureComment(
-		runFailureCommentBodyMarker,
-		header,
-		summary.RetryAt,
-		summary.Reason,
-		buildRunFailureDetails(run.Error, agentOutput, agentLogLabel),
-	), nil
+	parts := []string{header}
+	if summary.RetryAt != "" {
+		parts = append(parts, fmt.Sprintf("The provider said to try again at %s.", summary.RetryAt))
+	}
+	if summary.Reason != "" {
+		parts = append(parts, fmt.Sprintf("Reason: %s", summary.Reason))
+	}
+	if report, ok, err := loadRunValidationReport(run.RunDir); err == nil && ok {
+		parts = append(parts, "Validation: "+validation.SummaryLine(report))
+		if details := renderValidationFindings(report); details != "" {
+			parts = append(parts, "<details><summary>Validation Findings</summary>\n\n"+details+"\n\n</details>")
+		}
+	} else if err != nil {
+		return "", fmt.Errorf("read validation report: %w", err)
+	}
+	if details := buildRunFailureDetails(run.Error, agentOutput, agentLogLabel); details != "" {
+		parts = append(parts, "<details><summary>Failure Details</summary>\n\n```text\n"+details+"\n```\n\n</details>")
+	}
+	return runFailureCommentBodyMarker + "\n\n" + strings.Join(parts, "\n\n"), nil
+}
+
+func renderValidationFindings(report validation.Report) string {
+	if len(report.Findings) == 0 {
+		if len(report.Gate.Reasons) == 0 {
+			return ""
+		}
+		return strings.Join(report.Gate.Reasons, "\n")
+	}
+	lines := make([]string, 0, len(report.Findings))
+	for _, finding := range report.Findings {
+		line := fmt.Sprintf("- `%s/%s`", finding.Severity, finding.Category)
+		if finding.Path != "" {
+			line += " `" + finding.Path + "`"
+		}
+		if finding.Rationale != "" {
+			line += " - " + finding.Rationale
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func summarizeRunFailure(run state.Run, agentOutput string) runFailureSummary {

@@ -12,6 +12,7 @@ import (
 	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/defaults"
 	"github.com/rtzll/rascal/internal/runner"
+	"github.com/rtzll/rascal/internal/validation"
 	"github.com/spf13/viper"
 )
 
@@ -43,6 +44,7 @@ type ServerConfig struct {
 	CredentialRenewEvery    time.Duration
 	CredentialEncryptionKey string
 	AgentSession            AgentSessionConfig
+	Validation              validation.Config
 	MaxRuns                 int
 }
 
@@ -100,8 +102,19 @@ func LoadServerConfig() (ServerConfig, error) {
 		CredentialRenewEvery:    envDurationOrDefault("RASCAL_CREDENTIAL_RENEW_INTERVAL", 30*time.Second),
 		CredentialEncryptionKey: firstNonEmptyEnv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "RASCAL_API_TOKEN"),
 		AgentSession:            agentSession,
-		MaxRuns:                 200,
+		Validation: validation.Config{
+			Enabled:            envBoolOrDefault("RASCAL_VALIDATION_ENABLED", true),
+			CritiqueEnabled:    envBoolOrDefault("RASCAL_VALIDATION_CRITIQUE", true),
+			TestCritiqueEnable: envBoolOrDefault("RASCAL_VALIDATION_TEST_CRITIQUE", true),
+			Gate: validation.GatePolicy{
+				BlockOnDeterministicFailure: envBoolOrDefault("RASCAL_VALIDATION_BLOCK_ON_DETERMINISTIC_FAIL", true),
+				BlockOnCritiqueBlocker:      envBoolOrDefault("RASCAL_VALIDATION_BLOCK_ON_CRITIQUE_BLOCKER", true),
+				BlockOnCritiqueWarning:      envBoolOrDefault("RASCAL_VALIDATION_BLOCK_ON_CRITIQUE_WARNING", false),
+			},
+		},
+		MaxRuns: 200,
 	}
+	cfg.Validation = cfg.Validation.Normalize()
 	cfg.RunnerImage = cfg.RunnerImageForBackend(cfg.AgentBackend)
 	return cfg, nil
 }
@@ -276,6 +289,21 @@ func envIntOrDefault(key string, fallback int) int {
 		return fallback
 	}
 	return out
+}
+
+func envBoolOrDefault(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func envNonNegativeIntOrDefault(key string, fallback int) int {

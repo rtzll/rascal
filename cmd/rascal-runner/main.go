@@ -20,6 +20,7 @@ import (
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runsummary"
 	"github.com/rtzll/rascal/internal/runtrigger"
+	"github.com/rtzll/rascal/internal/validation"
 )
 
 const (
@@ -66,6 +67,7 @@ type config struct {
 	CommitMsgPath    string
 	AgentOutputPath  string
 	PRBodyPath       string
+	Validation       validation.Config
 
 	GooseDebug   bool
 	AgentBackend agent.Backend
@@ -246,6 +248,12 @@ func runWithExecutor(ex commandExecutor) error {
 	}); err != nil {
 		return fail(err)
 	}
+	if err := runStage("validation", func() error {
+		_, err := runValidationStage(ex, cfg)
+		return err
+	}); err != nil {
+		return fail(err)
+	}
 
 	if _, statErr := os.Stat(filepath.Join(cfg.RepoDir, "Makefile")); statErr == nil {
 		if err := runStage("verify", func() error {
@@ -338,7 +346,7 @@ func runWithExecutor(ex commandExecutor) error {
 				closesSection = fmt.Sprintf("\n\nCloses #%d", cfg.IssueNumber)
 			}
 			runDuration := runsummary.FormatDuration(int64(time.Since(started).Seconds()))
-			body := runsummary.BuildPRBody(cfg.RunID, commitBody, agentOutput, runDuration, closesSection)
+			body := runsummary.BuildPRBody(cfg.RunID, commitBody, agentOutput, runDuration, closesSection, loadValidationSummaryLine(cfg.MetaDir))
 			if err := os.WriteFile(cfg.PRBodyPath, []byte(body), 0o644); err != nil {
 				return fmt.Errorf("write pr body: %w", err)
 			}
@@ -476,7 +484,7 @@ func loadConfig() (config, error) {
 	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))
 	codexHome := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CODEX_HOME")), filepath.Join(metaDir, "codex"))
 
-	return config{
+	cfg := config{
 		RunID:            runID,
 		TaskID:           taskID,
 		Task:             strings.TrimSpace(os.Getenv("RASCAL_TASK")),
@@ -495,17 +503,35 @@ func loadConfig() (config, error) {
 		CommitMsgPath:    filepath.Join(metaDir, defaultCommitMsgFile),
 		AgentOutputPath:  filepath.Join(metaDir, defaultAgentOutputFile),
 		PRBodyPath:       filepath.Join(metaDir, defaultPRBodyFile),
-		GooseDebug:       debug,
-		AgentBackend:     agentBackend,
-		GoosePathRoot:    goosePathRoot,
-		CodexHome:        codexHome,
+		Validation: validation.Config{
+			Enabled:            parseBoolEnv(os.Getenv("RASCAL_VALIDATION_ENABLED"), true),
+			CritiqueEnabled:    parseBoolEnv(os.Getenv("RASCAL_VALIDATION_CRITIQUE"), true),
+			TestCritiqueEnable: parseBoolEnv(os.Getenv("RASCAL_VALIDATION_TEST_CRITIQUE"), true),
+			Gate: validation.GatePolicy{
+				BlockOnDeterministicFailure: parseBoolEnv(os.Getenv("RASCAL_VALIDATION_BLOCK_ON_DETERMINISTIC_FAIL"), true),
+				BlockOnCritiqueBlocker:      parseBoolEnv(os.Getenv("RASCAL_VALIDATION_BLOCK_ON_CRITIQUE_BLOCKER"), true),
+				BlockOnCritiqueWarning:      parseBoolEnv(os.Getenv("RASCAL_VALIDATION_BLOCK_ON_CRITIQUE_WARNING"), false),
+			},
+		},
+		GooseDebug:    debug,
+		AgentBackend:  agentBackend,
+		GoosePathRoot: goosePathRoot,
+		CodexHome:     codexHome,
 		AgentSession: runner.SessionSpec{
 			Mode:             agentSessionMode,
 			Resume:           agentSessionResume,
 			TaskKey:          agentSessionKey,
 			BackendSessionID: backendSessionID,
 		},
-	}, nil
+	}
+	if !cfg.Validation.Enabled {
+		cfg.Validation.CritiqueEnabled = false
+		cfg.Validation.TestCritiqueEnable = false
+	}
+	if !cfg.Validation.CritiqueEnabled {
+		cfg.Validation.TestCritiqueEnable = false
+	}
+	return cfg, nil
 }
 
 func firstNonEmptyValue(values ...string) string {

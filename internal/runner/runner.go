@@ -9,6 +9,7 @@ import (
 
 	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/runtrigger"
+	"github.com/rtzll/rascal/internal/validation"
 )
 
 // Spec defines the input contract for a single run.
@@ -28,6 +29,7 @@ type Spec struct {
 	PRNumber     int
 	Context      string
 	AgentSession SessionSpec
+	Validation   validation.Config
 }
 
 var ErrExecutionNotFound = errors.New("execution handle not found")
