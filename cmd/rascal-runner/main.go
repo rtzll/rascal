@@ -69,17 +69,9 @@ type config struct {
 	GooseDebug   bool
 	AgentBackend agent.Backend
 
-	GoosePathRoot      string
-	CodexHome          string
-	AgentSessionMode   agent.SessionMode
-	AgentSessionResume bool
-	AgentSessionKey    string
-	BackendSessionID   string
-
-	GooseSessionMode   string
-	GooseSessionResume bool
-	GooseSessionKey    string
-	GooseSessionName   string
+	GoosePathRoot string
+	CodexHome     string
+	AgentSession  runner.SessionSpec
 }
 
 type prView struct {
@@ -477,36 +469,34 @@ func loadConfig() (config, error) {
 	codexHome := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CODEX_HOME")), filepath.Join(metaDir, "codex"))
 
 	return config{
-		RunID:              runID,
-		TaskID:             taskID,
-		Task:               strings.TrimSpace(os.Getenv("RASCAL_TASK")),
-		Repo:               repo,
-		BaseBranch:         baseBranch,
-		HeadBranch:         headBranch,
-		IssueNumber:        issueNumber,
-		Trigger:            trigger,
-		GitHubToken:        ghToken,
-		MetaDir:            metaDir,
-		WorkRoot:           workRoot,
-		RepoDir:            repoDir,
-		GooseLogPath:       filepath.Join(metaDir, defaultAgentLogFile),
-		MetaPath:           filepath.Join(metaDir, defaultMetaFile),
-		InstructionsPath:   filepath.Join(metaDir, defaultInstructionsFile),
-		CommitMsgPath:      filepath.Join(metaDir, defaultCommitMsgFile),
-		AgentOutputPath:    filepath.Join(metaDir, defaultAgentOutputFile),
-		PRBodyPath:         filepath.Join(metaDir, defaultPRBodyFile),
-		GooseDebug:         debug,
-		AgentBackend:       agentBackend,
-		GoosePathRoot:      goosePathRoot,
-		CodexHome:          codexHome,
-		AgentSessionMode:   agentSessionMode,
-		AgentSessionResume: agentSessionResume,
-		AgentSessionKey:    agentSessionKey,
-		BackendSessionID:   backendSessionID,
-		GooseSessionMode:   string(agentSessionMode),
-		GooseSessionResume: agentSessionResume,
-		GooseSessionKey:    agentSessionKey,
-		GooseSessionName:   backendSessionID,
+		RunID:            runID,
+		TaskID:           taskID,
+		Task:             strings.TrimSpace(os.Getenv("RASCAL_TASK")),
+		Repo:             repo,
+		BaseBranch:       baseBranch,
+		HeadBranch:       headBranch,
+		IssueNumber:      issueNumber,
+		Trigger:          trigger,
+		GitHubToken:      ghToken,
+		MetaDir:          metaDir,
+		WorkRoot:         workRoot,
+		RepoDir:          repoDir,
+		GooseLogPath:     filepath.Join(metaDir, defaultAgentLogFile),
+		MetaPath:         filepath.Join(metaDir, defaultMetaFile),
+		InstructionsPath: filepath.Join(metaDir, defaultInstructionsFile),
+		CommitMsgPath:    filepath.Join(metaDir, defaultCommitMsgFile),
+		AgentOutputPath:  filepath.Join(metaDir, defaultAgentOutputFile),
+		PRBodyPath:       filepath.Join(metaDir, defaultPRBodyFile),
+		GooseDebug:       debug,
+		AgentBackend:     agentBackend,
+		GoosePathRoot:    goosePathRoot,
+		CodexHome:        codexHome,
+		AgentSession: runner.SessionSpec{
+			Mode:             agentSessionMode,
+			Resume:           agentSessionResume,
+			TaskKey:          agentSessionKey,
+			BackendSessionID: backendSessionID,
+		},
 	}, nil
 }
 
@@ -547,31 +537,19 @@ func configuredAgentBackend(cfg config) agent.Backend {
 }
 
 func configuredSessionMode(cfg config) agent.SessionMode {
-	if cfg.AgentSessionMode != "" {
-		return agent.NormalizeSessionMode(string(cfg.AgentSessionMode))
-	}
-	return agent.NormalizeSessionMode(cfg.GooseSessionMode)
+	return agent.NormalizeSessionMode(string(cfg.AgentSession.Mode))
 }
 
 func configuredSessionResume(cfg config) bool {
-	if cfg.AgentSessionResume {
-		return true
-	}
-	return cfg.GooseSessionResume
+	return cfg.AgentSession.Resume
 }
 
 func configuredSessionKey(cfg config) string {
-	if strings.TrimSpace(cfg.AgentSessionKey) != "" {
-		return strings.TrimSpace(cfg.AgentSessionKey)
-	}
-	return strings.TrimSpace(cfg.GooseSessionKey)
+	return strings.TrimSpace(cfg.AgentSession.TaskKey)
 }
 
 func configuredBackendSessionID(cfg config) string {
-	if strings.TrimSpace(cfg.BackendSessionID) != "" {
-		return strings.TrimSpace(cfg.BackendSessionID)
-	}
-	return strings.TrimSpace(cfg.GooseSessionName)
+	return strings.TrimSpace(cfg.AgentSession.BackendSessionID)
 }
 
 func ensureInstructions(cfg config) error {

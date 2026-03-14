@@ -254,14 +254,14 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.Trigger != "cli" {
 		t.Fatalf("expected default trigger cli, got %q", cfg.Trigger)
 	}
-	if cfg.GooseSessionMode != runner.GooseSessionModeOff {
-		t.Fatalf("expected default goose session mode off, got %q", cfg.GooseSessionMode)
+	if cfg.AgentSession.Mode != agent.SessionModeOff {
+		t.Fatalf("expected default agent session mode off, got %q", cfg.AgentSession.Mode)
 	}
-	if cfg.GooseSessionResume {
-		t.Fatal("expected default goose session resume to be false")
+	if cfg.AgentSession.Resume {
+		t.Fatal("expected default agent session resume to be false")
 	}
-	if cfg.GooseSessionName != "" {
-		t.Fatalf("expected default goose session name empty, got %q", cfg.GooseSessionName)
+	if cfg.AgentSession.BackendSessionID != "" {
+		t.Fatalf("expected default agent session name empty, got %q", cfg.AgentSession.BackendSessionID)
 	}
 }
 
@@ -322,17 +322,17 @@ func TestLoadConfigRespectsGooseSessionEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig returned error: %v", err)
 	}
-	if cfg.GooseSessionMode != runner.GooseSessionModePROnly {
-		t.Fatalf("GooseSessionMode = %q, want %q", cfg.GooseSessionMode, runner.GooseSessionModePROnly)
+	if cfg.AgentSession.Mode != agent.SessionModePROnly {
+		t.Fatalf("AgentSession.Mode = %q, want %q", cfg.AgentSession.Mode, agent.SessionModePROnly)
 	}
-	if !cfg.GooseSessionResume {
-		t.Fatal("GooseSessionResume should be true")
+	if !cfg.AgentSession.Resume {
+		t.Fatal("AgentSession.Resume should be true")
 	}
-	if cfg.GooseSessionKey != "owner-repo-3-abc123" {
-		t.Fatalf("GooseSessionKey = %q, want owner-repo-3-abc123", cfg.GooseSessionKey)
+	if cfg.AgentSession.TaskKey != "owner-repo-3-abc123" {
+		t.Fatalf("AgentSession.TaskKey = %q, want owner-repo-3-abc123", cfg.AgentSession.TaskKey)
 	}
-	if cfg.GooseSessionName != "rascal-owner-repo-3-abc123" {
-		t.Fatalf("GooseSessionName = %q, want rascal-owner-repo-3-abc123", cfg.GooseSessionName)
+	if cfg.AgentSession.BackendSessionID != "rascal-owner-repo-3-abc123" {
+		t.Fatalf("AgentSession.BackendSessionID = %q, want rascal-owner-repo-3-abc123", cfg.AgentSession.BackendSessionID)
 	}
 	if cfg.GoosePathRoot != "/rascal-goose-session" {
 		t.Fatalf("GoosePathRoot = %q, want /rascal-goose-session", cfg.GoosePathRoot)
@@ -346,7 +346,7 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 		InstructionsPath: filepath.Join(root, "instructions.md"),
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
-		GooseSessionMode: runner.GooseSessionModeOff,
+		AgentSession:     runner.SessionSpec{Mode: agent.SessionModeOff},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
@@ -381,15 +381,17 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 	root := t.TempDir()
 	cfg := config{
-		RepoDir:            root,
-		InstructionsPath:   filepath.Join(root, "instructions.md"),
-		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
-		GooseDebug:         false,
-		GooseSessionMode:   runner.GooseSessionModePROnly,
-		GooseSessionResume: true,
-		GooseSessionName:   "rascal-owner-repo-task-abc123",
-		GooseSessionKey:    "owner-repo-task-abc123",
-		GoosePathRoot:      filepath.Join(root, "goose-sessions"),
+		RepoDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		GooseDebug:       false,
+		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
+		AgentSession: runner.SessionSpec{
+			Mode:             agent.SessionModePROnly,
+			Resume:           true,
+			TaskKey:          "owner-repo-task-abc123",
+			BackendSessionID: "rascal-owner-repo-task-abc123",
+		},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
@@ -399,7 +401,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 	ex := fakeExecutor{
 		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
 			if name == "goose" && len(args) == 4 && args[0] == "session" && args[1] == "list" && args[2] == "--format" && args[3] == "json" {
-				return fmt.Sprintf(`[{"name":%q}]`, cfg.GooseSessionName), nil
+				return fmt.Sprintf(`[{"name":%q}]`, cfg.AgentSession.BackendSessionID), nil
 			}
 			return "", nil
 		},
@@ -419,7 +421,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
-	for _, want := range []string{"--name", cfg.GooseSessionName, "--resume"} {
+	for _, want := range []string{"--name", cfg.AgentSession.BackendSessionID, "--resume"} {
 		if !strings.Contains(argsText, want) {
 			t.Fatalf("expected %q in args, got %q", want, argsText)
 		}
@@ -432,15 +434,17 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 	root := t.TempDir()
 	cfg := config{
-		RepoDir:            root,
-		InstructionsPath:   filepath.Join(root, "instructions.md"),
-		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
-		GooseDebug:         false,
-		GooseSessionMode:   runner.GooseSessionModePROnly,
-		GooseSessionResume: true,
-		GooseSessionName:   "rascal-owner-repo-task-missing",
-		GooseSessionKey:    "owner-repo-task-missing",
-		GoosePathRoot:      filepath.Join(root, "goose-sessions"),
+		RepoDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		GooseDebug:       false,
+		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
+		AgentSession: runner.SessionSpec{
+			Mode:             agent.SessionModePROnly,
+			Resume:           true,
+			TaskKey:          "owner-repo-task-missing",
+			BackendSessionID: "rascal-owner-repo-task-missing",
+		},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
@@ -473,7 +477,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 	if strings.Contains(argsText, "--resume") {
 		t.Fatalf("did not expect --resume args when session is missing, got %q", argsText)
 	}
-	if !strings.Contains(argsText, "--name "+cfg.GooseSessionName) {
+	if !strings.Contains(argsText, "--name "+cfg.AgentSession.BackendSessionID) {
 		t.Fatalf("expected named fresh session args, got %q", argsText)
 	}
 }
@@ -482,15 +486,17 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 	root := t.TempDir()
 	sessionRoot := filepath.Join(root, "goose-sessions")
 	cfg := config{
-		RepoDir:            root,
-		InstructionsPath:   filepath.Join(root, "instructions.md"),
-		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
-		GooseDebug:         false,
-		GooseSessionMode:   runner.GooseSessionModePROnly,
-		GooseSessionResume: true,
-		GooseSessionName:   "rascal-owner-repo-task-abc123",
-		GooseSessionKey:    "owner-repo-task-abc123",
-		GoosePathRoot:      sessionRoot,
+		RepoDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		GooseDebug:       false,
+		GoosePathRoot:    sessionRoot,
+		AgentSession: runner.SessionSpec{
+			Mode:             agent.SessionModePROnly,
+			Resume:           true,
+			TaskKey:          "owner-repo-task-abc123",
+			BackendSessionID: "rascal-owner-repo-task-abc123",
+		},
 	}
 	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
 		t.Fatalf("mkdir session root: %v", err)
@@ -516,7 +522,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 	ex := fakeExecutor{
 		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
 			if name == "goose" && len(args) == 4 && args[0] == "session" && args[1] == "list" && args[2] == "--format" && args[3] == "json" {
-				return fmt.Sprintf(`[{"name":%q}]`, cfg.GooseSessionName), nil
+				return fmt.Sprintf(`[{"name":%q}]`, cfg.AgentSession.BackendSessionID), nil
 			}
 			return "", nil
 		},
@@ -588,15 +594,17 @@ func TestResetGooseSessionRootCreatesRootWhenMissing(t *testing.T) {
 func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 	root := t.TempDir()
 	cfg := config{
-		RepoDir:            root,
-		InstructionsPath:   filepath.Join(root, "instructions.md"),
-		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
-		GooseDebug:         false,
-		GooseSessionMode:   runner.GooseSessionModePROnly,
-		GooseSessionResume: true,
-		GooseSessionName:   "rascal-owner-repo-task-abc123",
-		GooseSessionKey:    "owner-repo-task-abc123",
-		GoosePathRoot:      filepath.Join(root, "goose-sessions"),
+		RepoDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		GooseDebug:       false,
+		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
+		AgentSession: runner.SessionSpec{
+			Mode:             agent.SessionModePROnly,
+			Resume:           true,
+			TaskKey:          "owner-repo-task-abc123",
+			BackendSessionID: "rascal-owner-repo-task-abc123",
+		},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
@@ -606,7 +614,7 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 	ex := fakeExecutor{
 		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
 			if name == "goose" && len(args) == 4 && args[0] == "session" && args[1] == "list" && args[2] == "--format" && args[3] == "json" {
-				return fmt.Sprintf(`[{"name":%q}]`, cfg.GooseSessionName), nil
+				return fmt.Sprintf(`[{"name":%q}]`, cfg.AgentSession.BackendSessionID), nil
 			}
 			return "", nil
 		},
@@ -640,15 +648,17 @@ func TestIsSessionResumeFailureDetectsMissingNamedSession(t *testing.T) {
 func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 	root := t.TempDir()
 	cfg := config{
-		RepoDir:            root,
-		InstructionsPath:   filepath.Join(root, "instructions.md"),
-		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
-		GooseDebug:         false,
-		GooseSessionMode:   runner.GooseSessionModePROnly,
-		GooseSessionResume: true,
-		GooseSessionName:   "rascal-owner-repo-task-abc123",
-		GooseSessionKey:    "owner-repo-task-abc123",
-		GoosePathRoot:      filepath.Join(root, "goose-sessions"),
+		RepoDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		GooseDebug:       false,
+		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
+		AgentSession: runner.SessionSpec{
+			Mode:             agent.SessionModePROnly,
+			Resume:           true,
+			TaskKey:          "owner-repo-task-abc123",
+			BackendSessionID: "rascal-owner-repo-task-abc123",
+		},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
@@ -767,16 +777,18 @@ func TestRunCodexResumeSession(t *testing.T) {
 	codexHome := filepath.Join(root, "codex-home")
 	sessionPath := filepath.Join(codexHome, "sessions", "2026", "03", "session.jsonl")
 	cfg := config{
-		RepoDir:            root,
-		MetaDir:            root,
-		InstructionsPath:   filepath.Join(root, "instructions.md"),
-		GooseLogPath:       filepath.Join(root, "agent.ndjson"),
-		AgentOutputPath:    filepath.Join(root, "agent_output.txt"),
-		CodexHome:          codexHome,
-		AgentBackend:       agent.BackendCodex,
-		AgentSessionMode:   agent.SessionModeAll,
-		AgentSessionResume: true,
-		BackendSessionID:   "session-abc",
+		RepoDir:          root,
+		MetaDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
+		CodexHome:        codexHome,
+		AgentBackend:     agent.BackendCodex,
+		AgentSession: runner.SessionSpec{
+			Mode:             agent.SessionModeAll,
+			Resume:           true,
+			BackendSessionID: "session-abc",
+		},
 	}
 	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
 		t.Fatalf("mkdir codex sessions: %v", err)
