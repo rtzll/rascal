@@ -26,15 +26,16 @@ type Spec struct {
 	PRNumber     int
 	Context      string
 	AgentSession SessionSpec
-
-	GooseSessionMode    string
-	GooseSessionResume  bool
-	GooseSessionTaskDir string
-	GooseSessionTaskKey string
-	GooseSessionName    string
 }
 
 var ErrExecutionNotFound = errors.New("execution handle not found")
+
+type Mode string
+
+const (
+	ModeNoop   Mode = "noop"
+	ModeDocker Mode = "docker"
+)
 
 type ExecutionHandle struct {
 	Backend string
@@ -64,6 +65,15 @@ type SessionSpec struct {
 	BackendSessionID string
 }
 
+func NormalizeMode(raw string) Mode {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(ModeDocker):
+		return ModeDocker
+	default:
+		return ModeNoop
+	}
+}
+
 // Launcher starts a run inside an execution environment (Docker in v1).
 type Launcher interface {
 	StartDetached(ctx context.Context, spec Spec) (ExecutionHandle, error)
@@ -72,9 +82,9 @@ type Launcher interface {
 	Remove(ctx context.Context, handle ExecutionHandle) error
 }
 
-func NewLauncher(mode, image, githubToken string) Launcher {
-	switch mode {
-	case "docker":
+func NewLauncher(mode Mode, image, githubToken string) Launcher {
+	switch NormalizeMode(string(mode)) {
+	case ModeDocker:
 		return DockerLauncher{DefaultImage: image, GitHubToken: githubToken}
 	default:
 		return NoopLauncher{}

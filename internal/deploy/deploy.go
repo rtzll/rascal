@@ -14,6 +14,7 @@ import (
 
 	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/defaults"
+	"github.com/rtzll/rascal/internal/runner"
 )
 
 const (
@@ -33,7 +34,7 @@ type Config struct {
 	APIToken           string
 	WebhookSecret      string
 	GitHubRuntimeToken string
-	RunnerMode         string
+	RunnerMode         runner.Mode
 	AgentBackend       agent.Backend
 	RunnerImage        string
 	RunnerImageGoose   string

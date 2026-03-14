@@ -10,8 +10,15 @@ import (
 
 	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/defaults"
+	"github.com/rtzll/rascal/internal/runner"
 	"github.com/spf13/viper"
 )
+
+type AgentSessionConfig struct {
+	Mode    agent.SessionMode
+	Root    string
+	TTLDays int
+}
 
 // ServerConfig controls rascald runtime behavior.
 type ServerConfig struct {
@@ -24,7 +31,7 @@ type ServerConfig struct {
 	GitHubToken             string
 	GitHubWebhookSecret     string
 	BotLogin                string
-	RunnerMode              string
+	RunnerMode              runner.Mode
 	AgentBackend            agent.Backend
 	RunnerImage             string
 	RunnerImageGoose        string
@@ -34,12 +41,7 @@ type ServerConfig struct {
 	CredentialLeaseTTL      time.Duration
 	CredentialRenewEvery    time.Duration
 	CredentialEncryptionKey string
-	GooseSessionMode        string
-	GooseSessionRoot        string
-	GooseSessionTTLDays     int
-	AgentSessionMode        agent.SessionMode
-	AgentSessionRoot        string
-	AgentSessionTTLDays     int
+	AgentSession            AgentSessionConfig
 	MaxRuns                 int
 }
 
@@ -71,7 +73,7 @@ func LoadServerConfig() ServerConfig {
 		GitHubToken:             strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")),
 		GitHubWebhookSecret:     strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
 		BotLogin:                strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
-		RunnerMode:              envOrDefault("RASCAL_RUNNER_MODE", "noop"),
+		RunnerMode:              runner.NormalizeMode(envOrDefault("RASCAL_RUNNER_MODE", string(runner.ModeNoop))),
 		AgentBackend:            loadAgentBackend(),
 		RunnerImageGoose:        envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", defaults.GooseRunnerImageTag),
 		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
@@ -80,15 +82,10 @@ func LoadServerConfig() ServerConfig {
 		CredentialLeaseTTL:      envDurationOrDefault("RASCAL_CREDENTIAL_LEASE_TTL", 90*time.Second),
 		CredentialRenewEvery:    envDurationOrDefault("RASCAL_CREDENTIAL_RENEW_INTERVAL", 30*time.Second),
 		CredentialEncryptionKey: firstNonEmptyEnv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "RASCAL_API_TOKEN"),
-		AgentSessionMode:        loadAgentSessionMode(),
-		AgentSessionRoot:        loadAgentSessionRoot(dataDir),
-		AgentSessionTTLDays:     loadAgentSessionTTLDays(),
+		AgentSession:            loadAgentSessionConfig(dataDir),
 		MaxRuns:                 200,
 	}
 	cfg.RunnerImage = cfg.RunnerImageForBackend(cfg.AgentBackend)
-	cfg.GooseSessionMode = string(cfg.AgentSessionMode)
-	cfg.GooseSessionRoot = cfg.AgentSessionRoot
-	cfg.GooseSessionTTLDays = cfg.AgentSessionTTLDays
 	return cfg
 }
 
@@ -124,27 +121,15 @@ func (c ServerConfig) RunnerImageForBackend(backend agent.Backend) string {
 }
 
 func (c ServerConfig) EffectiveAgentSessionMode() agent.SessionMode {
-	if raw := strings.TrimSpace(c.GooseSessionMode); raw != "" && raw != string(c.AgentSessionMode) {
-		return agent.NormalizeSessionMode(raw)
-	}
-	return agent.NormalizeSessionMode(string(c.AgentSessionMode))
+	return agent.NormalizeSessionMode(string(c.AgentSession.Mode))
 }
 
 func (c ServerConfig) EffectiveAgentSessionRoot() string {
-	if root := strings.TrimSpace(c.GooseSessionRoot); root != "" && root != strings.TrimSpace(c.AgentSessionRoot) {
-		return root
-	}
-	return strings.TrimSpace(c.AgentSessionRoot)
+	return strings.TrimSpace(c.AgentSession.Root)
 }
 
 func (c ServerConfig) EffectiveAgentSessionTTLDays() int {
-	if c.GooseSessionTTLDays != 0 && c.GooseSessionTTLDays != c.AgentSessionTTLDays {
-		return c.GooseSessionTTLDays
-	}
-	if c.GooseSessionTTLDays == 0 && c.AgentSessionTTLDays != 0 && strings.TrimSpace(c.GooseSessionRoot) != strings.TrimSpace(c.AgentSessionRoot) {
-		return 0
-	}
-	return c.AgentSessionTTLDays
+	return c.AgentSession.TTLDays
 }
 
 func (c ServerConfig) AuthEnabled() bool {
@@ -302,6 +287,14 @@ func envDurationOrDefault(key string, fallback time.Duration) time.Duration {
 
 func loadAgentBackend() agent.Backend {
 	return agent.NormalizeBackend(envOrDefault("RASCAL_AGENT_BACKEND", "codex"))
+}
+
+func loadAgentSessionConfig(dataDir string) AgentSessionConfig {
+	return AgentSessionConfig{
+		Mode:    loadAgentSessionMode(),
+		Root:    loadAgentSessionRoot(dataDir),
+		TTLDays: loadAgentSessionTTLDays(),
+	}
 }
 
 func loadAgentSessionMode() agent.SessionMode {

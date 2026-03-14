@@ -58,22 +58,10 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		return ExecutionHandle{}, fmt.Errorf("create workspace dir: %w", err)
 	}
 	sessionDir := strings.TrimSpace(spec.AgentSession.TaskDir)
-	if sessionDir == "" {
-		sessionDir = strings.TrimSpace(spec.GooseSessionTaskDir)
-	}
-	sessionResume := spec.AgentSession.Resume || spec.GooseSessionResume
+	sessionResume := spec.AgentSession.Resume
 	sessionMode := spec.AgentSession.Mode
-	if sessionMode == "" {
-		sessionMode = agent.NormalizeSessionMode(spec.GooseSessionMode)
-	}
 	sessionKey := strings.TrimSpace(spec.AgentSession.TaskKey)
-	if sessionKey == "" {
-		sessionKey = strings.TrimSpace(spec.GooseSessionTaskKey)
-	}
 	backendSessionID := strings.TrimSpace(spec.AgentSession.BackendSessionID)
-	if backendSessionID == "" {
-		backendSessionID = strings.TrimSpace(spec.GooseSessionName)
-	}
 	if sessionResume && sessionDir != "" {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 			return ExecutionHandle{}, fmt.Errorf("create agent session dir: %w", err)

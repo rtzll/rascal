@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runner"
 )
 
 func TestSaveAndLoadClientConfig(t *testing.T) {
@@ -122,15 +125,15 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 	t.Setenv("RASCAL_GOOSE_SESSION_TTL_DAYS", "")
 
 	cfg := LoadServerConfig()
-	if cfg.GooseSessionMode != "all" {
-		t.Fatalf("GooseSessionMode = %q, want all", cfg.GooseSessionMode)
+	if cfg.AgentSession.Mode != agent.SessionModeAll {
+		t.Fatalf("AgentSession.Mode = %q, want all", cfg.AgentSession.Mode)
 	}
 	wantRoot := filepath.Join(dataDir, "agent-sessions")
-	if cfg.GooseSessionRoot != wantRoot {
-		t.Fatalf("GooseSessionRoot = %q, want %q", cfg.GooseSessionRoot, wantRoot)
+	if cfg.AgentSession.Root != wantRoot {
+		t.Fatalf("AgentSession.Root = %q, want %q", cfg.AgentSession.Root, wantRoot)
 	}
-	if cfg.GooseSessionTTLDays != 14 {
-		t.Fatalf("GooseSessionTTLDays = %d, want 14", cfg.GooseSessionTTLDays)
+	if cfg.AgentSession.TTLDays != 14 {
+		t.Fatalf("AgentSession.TTLDays = %d, want 14", cfg.AgentSession.TTLDays)
 	}
 }
 
@@ -140,6 +143,9 @@ func TestLoadServerConfigDefaultsAgentBackendToCodex(t *testing.T) {
 	cfg := LoadServerConfig()
 	if cfg.AgentBackend != "codex" {
 		t.Fatalf("AgentBackend = %q, want codex", cfg.AgentBackend)
+	}
+	if cfg.RunnerMode != runner.ModeNoop {
+		t.Fatalf("RunnerMode = %q, want noop", cfg.RunnerMode)
 	}
 	if cfg.RunnerImage != "rascal-runner-codex:latest" {
 		t.Fatalf("RunnerImage = %q, want rascal-runner-codex:latest", cfg.RunnerImage)
@@ -153,14 +159,23 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	t.Setenv("RASCAL_GOOSE_SESSION_TTL_DAYS", "0")
 
 	cfg := LoadServerConfig()
-	if cfg.GooseSessionMode != "pr-only" {
-		t.Fatalf("GooseSessionMode = %q, want pr-only", cfg.GooseSessionMode)
+	if cfg.AgentSession.Mode != agent.SessionModePROnly {
+		t.Fatalf("AgentSession.Mode = %q, want pr-only", cfg.AgentSession.Mode)
 	}
-	if cfg.GooseSessionRoot != root {
-		t.Fatalf("GooseSessionRoot = %q, want %q", cfg.GooseSessionRoot, root)
+	if cfg.AgentSession.Root != root {
+		t.Fatalf("AgentSession.Root = %q, want %q", cfg.AgentSession.Root, root)
 	}
-	if cfg.GooseSessionTTLDays != 0 {
-		t.Fatalf("GooseSessionTTLDays = %d, want 0", cfg.GooseSessionTTLDays)
+	if cfg.AgentSession.TTLDays != 0 {
+		t.Fatalf("AgentSession.TTLDays = %d, want 0", cfg.AgentSession.TTLDays)
+	}
+}
+
+func TestLoadServerConfigNormalizesRunnerMode(t *testing.T) {
+	t.Setenv("RASCAL_RUNNER_MODE", "DOCKER")
+
+	cfg := LoadServerConfig()
+	if cfg.RunnerMode != runner.ModeDocker {
+		t.Fatalf("RunnerMode = %q, want docker", cfg.RunnerMode)
 	}
 }
 

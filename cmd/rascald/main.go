@@ -1834,11 +1834,6 @@ func (s *server) executeRun(runID string) {
 			TaskKey:          sessionTaskKey,
 			BackendSessionID: backendSessionID,
 		},
-		GooseSessionMode:    string(sessionMode),
-		GooseSessionResume:  sessionResume,
-		GooseSessionTaskDir: sessionTaskDir,
-		GooseSessionTaskKey: sessionTaskKey,
-		GooseSessionName:    backendSessionID,
 	}
 	log.Printf("run %s backend=%s session_mode=%s resume=%t key=%s session_id=%s", run.ID, run.AgentBackend, sessionMode, sessionResume, sessionTaskKey, backendSessionID)
 	execRec, hasExec := s.store.GetRunExecution(run.ID)

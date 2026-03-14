@@ -562,7 +562,7 @@ func newTestServerWithPaths(t *testing.T, launcher runner.Launcher, dataDir, sta
 		DataDir:              dataDir,
 		StatePath:            statePath,
 		MaxRuns:              200,
-		RunnerMode:           "noop",
+		RunnerMode:           runner.ModeNoop,
 		CredentialRenewEvery: 20 * time.Millisecond,
 	}
 	if err := prepareTestStatePath(cfg.StatePath); err != nil {
@@ -934,7 +934,7 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
-	s.cfg.AgentSessionMode = agent.SessionModeAll
+	s.cfg.AgentSession.Mode = agent.SessionModeAll
 	defer waitForServerIdle(t, s)
 
 	const taskID = "owner/repo#7"
@@ -2456,9 +2456,11 @@ func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 
 	s.cfg.AgentBackend = agent.BackendGoose
 	sessionRoot := filepath.Join(t.TempDir(), "goose-sessions")
-	s.cfg.GooseSessionMode = "pr-only"
-	s.cfg.GooseSessionRoot = sessionRoot
-	s.cfg.GooseSessionTTLDays = 0
+	s.cfg.AgentSession = config.AgentSessionConfig{
+		Mode:    agent.SessionModePROnly,
+		Root:    sessionRoot,
+		TTLDays: 0,
+	}
 
 	run, err := s.createAndQueueRun(runRequest{
 		TaskID:  "owner/repo#123",
@@ -2479,17 +2481,17 @@ func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 		t.Fatalf("expected 1 launcher call, got %d", launcher.Calls())
 	}
 	spec := launcher.specs[0]
-	if !spec.GooseSessionResume {
-		t.Fatal("expected GooseSessionResume=true for pr-only comment trigger")
+	if !spec.AgentSession.Resume {
+		t.Fatal("expected AgentSession.Resume=true for pr-only comment trigger")
 	}
-	if spec.GooseSessionTaskKey == "" {
-		t.Fatal("expected GooseSessionTaskKey to be populated")
+	if spec.AgentSession.TaskKey == "" {
+		t.Fatal("expected AgentSession.TaskKey to be populated")
 	}
-	if spec.GooseSessionName == "" {
-		t.Fatal("expected GooseSessionName to be populated")
+	if spec.AgentSession.BackendSessionID == "" {
+		t.Fatal("expected AgentSession.BackendSessionID to be populated")
 	}
-	if !strings.HasPrefix(spec.GooseSessionTaskDir, sessionRoot+string(os.PathSeparator)) {
-		t.Fatalf("unexpected GooseSessionTaskDir %q (root %q)", spec.GooseSessionTaskDir, sessionRoot)
+	if !strings.HasPrefix(spec.AgentSession.TaskDir, sessionRoot+string(os.PathSeparator)) {
+		t.Fatalf("unexpected AgentSession.TaskDir %q (root %q)", spec.AgentSession.TaskDir, sessionRoot)
 	}
 }
 
@@ -2500,9 +2502,11 @@ func TestExecuteRunDisablesGooseSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	s.cfg.AgentBackend = agent.BackendGoose
-	s.cfg.GooseSessionMode = "pr-only"
-	s.cfg.GooseSessionRoot = filepath.Join(t.TempDir(), "goose-sessions")
-	s.cfg.GooseSessionTTLDays = 0
+	s.cfg.AgentSession = config.AgentSessionConfig{
+		Mode:    agent.SessionModePROnly,
+		Root:    filepath.Join(t.TempDir(), "goose-sessions"),
+		TTLDays: 0,
+	}
 
 	run, err := s.createAndQueueRun(runRequest{
 		TaskID:  "owner/repo#124",
@@ -2523,11 +2527,11 @@ func TestExecuteRunDisablesGooseSessionSpecForNonPROnlyTrigger(t *testing.T) {
 		t.Fatalf("expected 1 launcher call, got %d", launcher.Calls())
 	}
 	spec := launcher.specs[0]
-	if spec.GooseSessionResume {
-		t.Fatal("expected GooseSessionResume=false for non PR-only trigger")
+	if spec.AgentSession.Resume {
+		t.Fatal("expected AgentSession.Resume=false for non PR-only trigger")
 	}
-	if spec.GooseSessionTaskDir != "" || spec.GooseSessionTaskKey != "" || spec.GooseSessionName != "" {
-		t.Fatalf("expected empty goose session fields when resume disabled, got dir=%q key=%q name=%q", spec.GooseSessionTaskDir, spec.GooseSessionTaskKey, spec.GooseSessionName)
+	if spec.AgentSession.TaskDir != "" || spec.AgentSession.TaskKey != "" || spec.AgentSession.BackendSessionID != "" {
+		t.Fatalf("expected empty agent session fields when resume disabled, got dir=%q key=%q name=%q", spec.AgentSession.TaskDir, spec.AgentSession.TaskKey, spec.AgentSession.BackendSessionID)
 	}
 }
 

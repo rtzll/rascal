@@ -202,21 +202,23 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
-		AgentBackend:        agent.BackendGoose,
-		RunID:               "run_1",
-		TaskID:              "owner/repo#1",
-		Repo:                "owner/repo",
-		Task:                "task",
-		BaseBranch:          "main",
-		HeadBranch:          "rascal/task-1",
-		Trigger:             "pr_comment",
-		Debug:               true,
-		RunDir:              runDir,
-		GooseSessionMode:    GooseSessionModePROnly,
-		GooseSessionResume:  true,
-		GooseSessionTaskDir: sessionDir,
-		GooseSessionTaskKey: "owner-repo-1-abc123",
-		GooseSessionName:    "rascal-owner-repo-1-abc123",
+		AgentBackend: agent.BackendGoose,
+		RunID:        "run_1",
+		TaskID:       "owner/repo#1",
+		Repo:         "owner/repo",
+		Task:         "task",
+		BaseBranch:   "main",
+		HeadBranch:   "rascal/task-1",
+		Trigger:      "pr_comment",
+		Debug:        true,
+		RunDir:       runDir,
+		AgentSession: SessionSpec{
+			Mode:             agent.SessionModePROnly,
+			Resume:           true,
+			TaskDir:          sessionDir,
+			TaskKey:          "owner-repo-1-abc123",
+			BackendSessionID: "rascal-owner-repo-1-abc123",
+		},
 	})
 	if err != nil {
 		t.Fatalf("launcher start: %v", err)
@@ -281,17 +283,19 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
-		AgentBackend:     agent.BackendGoose,
-		RunID:            "run_2",
-		TaskID:           "owner/repo#2",
-		Repo:             "owner/repo",
-		Task:             "task",
-		BaseBranch:       "main",
-		HeadBranch:       "rascal/task-2",
-		Trigger:          "issue_label",
-		Debug:            false,
-		RunDir:           runDir,
-		GooseSessionMode: GooseSessionModePROnly,
+		AgentBackend: agent.BackendGoose,
+		RunID:        "run_2",
+		TaskID:       "owner/repo#2",
+		Repo:         "owner/repo",
+		Task:         "task",
+		BaseBranch:   "main",
+		HeadBranch:   "rascal/task-2",
+		Trigger:      "issue_label",
+		Debug:        false,
+		RunDir:       runDir,
+		AgentSession: SessionSpec{
+			Mode: agent.SessionModePROnly,
+		},
 	})
 	if err != nil {
 		t.Fatalf("launcher start: %v", err)
