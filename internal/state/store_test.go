@@ -272,6 +272,60 @@ func TestStoreRejectsInvalidRunStatusTransition(t *testing.T) {
 	}
 }
 
+func TestParseCredentialScopeAndStatus(t *testing.T) {
+	t.Parallel()
+
+	if got, ok := ParseCredentialScope(" shared "); !ok || got != CredentialScopeShared {
+		t.Fatalf("ParseCredentialScope(shared) = %q, %t", got, ok)
+	}
+	if got, ok := ParseCredentialScope(""); !ok || got != CredentialScopePersonal {
+		t.Fatalf("ParseCredentialScope(empty) = %q, %t", got, ok)
+	}
+	if _, ok := ParseCredentialScope("team"); ok {
+		t.Fatal("expected invalid credential scope to be rejected")
+	}
+
+	if got, ok := ParseCredentialStatus(" cooldown "); !ok || got != CredentialStatusCooldown {
+		t.Fatalf("ParseCredentialStatus(cooldown) = %q, %t", got, ok)
+	}
+	if got, ok := ParseCredentialStatus(""); !ok || got != CredentialStatusActive {
+		t.Fatalf("ParseCredentialStatus(empty) = %q, %t", got, ok)
+	}
+	if _, ok := ParseCredentialStatus("paused"); ok {
+		t.Fatal("expected invalid credential status to be rejected")
+	}
+}
+
+func TestStoreRejectsInvalidCredentialScopeAndStatus(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	if _, err := store.CreateCodexCredential(CreateCodexCredentialInput{
+		ID:                "cred-invalid-scope",
+		Scope:             CredentialScope("team"),
+		EncryptedAuthBlob: []byte("blob"),
+	}); err == nil {
+		t.Fatal("expected invalid credential scope to fail")
+	}
+
+	if _, err := store.CreateCodexCredential(CreateCodexCredentialInput{
+		ID:                "cred-invalid-status",
+		Scope:             CredentialScopeShared,
+		Status:            CredentialStatus("paused"),
+		EncryptedAuthBlob: []byte("blob"),
+	}); err == nil {
+		t.Fatal("expected invalid credential status to fail")
+	}
+
+	if err := store.SetCodexCredentialStatus("cred-unknown", CredentialStatus("paused"), nil, "bad"); err == nil {
+		t.Fatal("expected invalid status update to fail")
+	}
+}
+
 func TestStoreUpsertRunTokenUsage(t *testing.T) {
 	t.Parallel()
 

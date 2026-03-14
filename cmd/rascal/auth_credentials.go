@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/api"
+	"github.com/rtzll/rascal/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -117,7 +118,7 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 			cred, err := a.createCredential(credentialCreateRequest{
 				ID:          strings.TrimSpace(id),
 				OwnerUserID: strings.TrimSpace(ownerUserID),
-				Scope:       resolvedScope,
+				Scope:       string(resolvedScope),
 				AuthBlob:    resolvedAuthBlob,
 				Weight:      weight,
 			})
@@ -162,7 +163,8 @@ func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				req.Scope = &resolvedScope
+				value := string(resolvedScope)
+				req.Scope = &value
 				changed = true
 			}
 			if cmd.Flags().Changed("owner-user-id") {
@@ -237,7 +239,7 @@ func (a *app) newAuthCredentialsEnableCmd() *cobra.Command {
 			if err := a.requireServerAuth(); err != nil {
 				return err
 			}
-			status := "active"
+			status := string(state.CredentialStatusActive)
 			clearCooldown := ""
 			clearError := ""
 			cred, err := a.updateCredential(args[0], credentialUpdateRequest{
@@ -278,14 +280,14 @@ func (a *app) newAuthCredentialsCooldownCmd() *cobra.Command {
 			}
 			req := credentialUpdateRequest{}
 			if clear {
-				status := "active"
+				status := string(state.CredentialStatusActive)
 				cooldownUntil := ""
 				lastError := ""
 				req.Status = &status
 				req.CooldownUntil = &cooldownUntil
 				req.LastError = &lastError
 			} else {
-				status := "cooldown"
+				status := string(state.CredentialStatusCooldown)
 				until := time.Now().UTC().Add(cooldownFor).Format(time.RFC3339)
 				req.Status = &status
 				req.CooldownUntil = &until
@@ -418,14 +420,14 @@ func seedBootstrapSharedCredential(client apiClient, authFilePath string) (crede
 	} else if !found {
 		return createCredentialWithClient(client, credentialCreateRequest{
 			ID:       bootstrapSharedCredentialID,
-			Scope:    "shared",
+			Scope:    string(state.CredentialScopeShared),
 			AuthBlob: authBlob,
 			Weight:   1,
 		})
 	}
 
-	scope := "shared"
-	status := "active"
+	scope := string(state.CredentialScopeShared)
+	status := string(state.CredentialStatusActive)
 	clearValue := ""
 	return updateCredentialWithClient(client, bootstrapSharedCredentialID, credentialUpdateRequest{
 		Scope:         &scope,
@@ -461,17 +463,12 @@ func resolveCredentialAuthBlob(authFile, authBlob string, required bool) (string
 	}
 }
 
-func normalizeCredentialScope(scope string) (string, error) {
-	scope = strings.ToLower(strings.TrimSpace(scope))
-	if scope == "" {
-		scope = "personal"
-	}
-	switch scope {
-	case "personal", "shared":
-		return scope, nil
-	default:
+func normalizeCredentialScope(scope string) (state.CredentialScope, error) {
+	resolved, ok := state.ParseCredentialScope(scope)
+	if !ok {
 		return "", &cliError{Code: exitInput, Message: "invalid credential scope", Hint: "use personal or shared"}
 	}
+	return resolved, nil
 }
 
 func renderCredentialListTable(creds []credentialRecord) error {
@@ -482,9 +479,9 @@ func renderCredentialListTable(creds []credentialRecord) error {
 	for _, cred := range creds {
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			cred.ID,
-			firstNonEmpty(strings.TrimSpace(cred.Scope), "-"),
+			firstNonEmpty(strings.TrimSpace(string(cred.Scope)), "-"),
 			credentialOwnerLabel(cred),
-			firstNonEmpty(strings.TrimSpace(cred.Status), "-"),
+			firstNonEmpty(strings.TrimSpace(string(cred.Status)), "-"),
 			credentialCooldownLabel(cred.CooldownUntil),
 			credentialTimeLabel(cred.UpdatedAt),
 		); err != nil {
@@ -501,9 +498,9 @@ func renderCredentialDetailTable(cred credentialRecord) error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	rows := [][2]string{
 		{"id", cred.ID},
-		{"scope", cred.Scope},
+		{"scope", string(cred.Scope)},
 		{"owner_user_id", credentialOwnerLabel(cred)},
-		{"status", cred.Status},
+		{"status", string(cred.Status)},
 		{"weight", fmt.Sprintf("%d", cred.Weight)},
 		{"cooldown_until", credentialCooldownLabel(cred.CooldownUntil)},
 		{"last_error", firstNonEmpty(strings.TrimSpace(cred.LastError), "-")},

@@ -136,7 +136,7 @@ func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 				return Lease{}, fmt.Errorf("release credential lease %s after decrypt failure: %v: %w", leaseID, releaseErr, err)
 			}
 			until := time.Now().UTC().Add(b.cooldownOnCryptoError)
-			if statusErr := b.store.SetCodexCredentialStatus(credentialID, "cooldown", &until, "credential decrypt failure"); statusErr != nil {
+			if statusErr := b.store.SetCodexCredentialStatus(credentialID, state.CredentialStatusCooldown, &until, "credential decrypt failure"); statusErr != nil {
 				return Lease{}, fmt.Errorf("set credential %s cooldown after decrypt failure: %v: %w", credentialID, statusErr, err)
 			}
 			return Lease{}, fmt.Errorf("decrypt credential %s auth blob: %w", credentialID, err)
@@ -200,7 +200,7 @@ func (b *Broker) MarkCredentialCooldown(credentialID, reason string, duration ti
 		duration = 5 * time.Minute
 	}
 	until := time.Now().UTC().Add(duration)
-	if err := b.store.SetCodexCredentialStatus(credentialID, "cooldown", &until, strings.TrimSpace(reason)); err != nil {
+	if err := b.store.SetCodexCredentialStatus(credentialID, state.CredentialStatusCooldown, &until, strings.TrimSpace(reason)); err != nil {
 		return fmt.Errorf("set credential %s cooldown: %w", credentialID, err)
 	}
 	return nil

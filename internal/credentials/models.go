@@ -1,6 +1,10 @@
 package credentials
 
-import "time"
+import (
+	"time"
+
+	"github.com/rtzll/rascal/internal/state"
+)
 
 type AcquireRequest struct {
 	RunID  string
@@ -21,9 +25,9 @@ type Lease struct {
 type CredentialState struct {
 	ID            string
 	OwnerUserID   string
-	Scope         string
+	Scope         state.CredentialScope
 	Weight        int
-	Status        string
+	Status        state.CredentialStatus
 	CooldownUntil *time.Time
 	ActiveLeases  int
 	UsageTokens   int64

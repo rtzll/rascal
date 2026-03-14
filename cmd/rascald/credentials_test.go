@@ -113,6 +113,41 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 	}
 }
 
+func TestCredentialAPIRejectsInvalidStatusUpdate(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	cipher, err := credentials.NewAESCipher("test-secret")
+	if err != nil {
+		t.Fatalf("new cipher: %v", err)
+	}
+	s.cipher = cipher
+	if _, err := s.store.UpsertUser(state.UpsertUserInput{ID: "owner", ExternalLogin: "owner", Role: state.UserRoleUser}); err != nil {
+		t.Fatalf("upsert owner: %v", err)
+	}
+
+	blob, err := cipher.Encrypt([]byte(`{"token":"x"}`))
+	if err != nil {
+		t.Fatalf("encrypt auth blob: %v", err)
+	}
+	if _, err := s.store.CreateCodexCredential(state.CreateCodexCredentialInput{
+		ID:                "cred-invalid-status",
+		OwnerUserID:       "owner",
+		Scope:             state.CredentialScopePersonal,
+		EncryptedAuthBlob: blob,
+		Weight:            1,
+		Status:            state.CredentialStatusActive,
+	}); err != nil {
+		t.Fatalf("create credential: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/v1/credentials/cred-invalid-status", bytes.NewReader([]byte(`{"status":"paused"}`)))
+	req = withPrincipal(req, "owner", state.UserRoleUser)
+	rec := httptest.NewRecorder()
+	s.handleCredentialSubresources(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCreateTaskPersistsRequesterIdentity(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)

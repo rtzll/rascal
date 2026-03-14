@@ -22,7 +22,7 @@ func newBrokerTestStore(t *testing.T) *state.Store {
 	return store
 }
 
-func createCredential(t *testing.T, store *state.Store, c credentials.Cipher, id, owner, scope string) {
+func createCredential(t *testing.T, store *state.Store, c credentials.Cipher, id, owner string, scope state.CredentialScope) {
 	t.Helper()
 	blob, err := c.Encrypt([]byte(`{"token":"` + id + `"}`))
 	if err != nil {
@@ -34,7 +34,7 @@ func createCredential(t *testing.T, store *state.Store, c credentials.Cipher, id
 		Scope:             scope,
 		EncryptedAuthBlob: blob,
 		Weight:            1,
-		Status:            "active",
+		Status:            state.CredentialStatusActive,
 	}); err != nil {
 		t.Fatalf("create credential %s: %v", id, err)
 	}
@@ -50,8 +50,8 @@ func TestBrokerAcquireOwnThenShared(t *testing.T) {
 		t.Fatalf("upsert user: %v", err)
 	}
 
-	createCredential(t, store, c, "cred-personal", "u1", "personal")
-	createCredential(t, store, c, "cred-shared", "", "shared")
+	createCredential(t, store, c, "cred-personal", "u1", state.CredentialScopePersonal)
+	createCredential(t, store, c, "cred-shared", "", state.CredentialScopeShared)
 
 	strategy, err := credentialstrategies.ByName("requester_own_then_shared")
 	if err != nil {
@@ -80,7 +80,7 @@ func TestBrokerRenewReleaseAndExpiryReclaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	createCredential(t, store, c, "cred-shared", "", "shared")
+	createCredential(t, store, c, "cred-shared", "", state.CredentialScopeShared)
 	strategy, err := credentialstrategies.ByName("shared_least_active_leases")
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
@@ -124,7 +124,7 @@ func TestBrokerConcurrentAcquireAllowsCredentialReuse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	createCredential(t, store, c, "cred-shared", "", "shared")
+	createCredential(t, store, c, "cred-shared", "", state.CredentialScopeShared)
 	strategy, err := credentialstrategies.ByName("priority_burst")
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
@@ -173,11 +173,11 @@ func TestBrokerSkipsCooldownCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	createCredential(t, store, c, "cred-cooldown", "", "shared")
-	createCredential(t, store, c, "cred-active", "", "shared")
+	createCredential(t, store, c, "cred-cooldown", "", state.CredentialScopeShared)
+	createCredential(t, store, c, "cred-active", "", state.CredentialScopeShared)
 
 	until := time.Now().UTC().Add(10 * time.Minute)
-	if err := store.SetCodexCredentialStatus("cred-cooldown", "cooldown", &until, "auth failure"); err != nil {
+	if err := store.SetCodexCredentialStatus("cred-cooldown", state.CredentialStatusCooldown, &until, "auth failure"); err != nil {
 		t.Fatalf("set cooldown: %v", err)
 	}
 

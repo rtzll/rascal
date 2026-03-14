@@ -64,15 +64,15 @@ type RunLogsResponse struct {
 }
 
 type Credential struct {
-	ID            string     `json:"id" toml:"id"`
-	OwnerUserID   string     `json:"owner_user_id" toml:"owner_user_id"`
-	Scope         string     `json:"scope" toml:"scope"`
-	Weight        int        `json:"weight" toml:"weight"`
-	Status        string     `json:"status" toml:"status"`
-	CooldownUntil *time.Time `json:"cooldown_until,omitempty" toml:"cooldown_until,omitempty"`
-	LastError     string     `json:"last_error,omitempty" toml:"last_error,omitempty"`
-	CreatedAt     time.Time  `json:"created_at" toml:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at" toml:"updated_at"`
+	ID            string                 `json:"id" toml:"id"`
+	OwnerUserID   string                 `json:"owner_user_id" toml:"owner_user_id"`
+	Scope         state.CredentialScope  `json:"scope" toml:"scope"`
+	Weight        int                    `json:"weight" toml:"weight"`
+	Status        state.CredentialStatus `json:"status" toml:"status"`
+	CooldownUntil *time.Time             `json:"cooldown_until,omitempty" toml:"cooldown_until,omitempty"`
+	LastError     string                 `json:"last_error,omitempty" toml:"last_error,omitempty"`
+	CreatedAt     time.Time              `json:"created_at" toml:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at" toml:"updated_at"`
 }
 
 func CredentialFromState(credential state.CodexCredential) Credential {

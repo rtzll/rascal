@@ -40,13 +40,76 @@ type RunCredentialInfo struct {
 	CredentialID    string
 }
 
+type CredentialScope string
+
+const (
+	CredentialScopePersonal CredentialScope = "personal"
+	CredentialScopeShared   CredentialScope = "shared"
+)
+
+func NormalizeCredentialScope(scope CredentialScope) CredentialScope {
+	switch strings.ToLower(strings.TrimSpace(string(scope))) {
+	case string(CredentialScopeShared):
+		return CredentialScopeShared
+	default:
+		return CredentialScopePersonal
+	}
+}
+
+func ParseCredentialScope(scope string) (CredentialScope, bool) {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "":
+		return CredentialScopePersonal, true
+	case string(CredentialScopePersonal):
+		return CredentialScopePersonal, true
+	case string(CredentialScopeShared):
+		return CredentialScopeShared, true
+	default:
+		return "", false
+	}
+}
+
+type CredentialStatus string
+
+const (
+	CredentialStatusActive   CredentialStatus = "active"
+	CredentialStatusDisabled CredentialStatus = "disabled"
+	CredentialStatusCooldown CredentialStatus = "cooldown"
+)
+
+func NormalizeCredentialStatus(status CredentialStatus) CredentialStatus {
+	switch strings.ToLower(strings.TrimSpace(string(status))) {
+	case string(CredentialStatusDisabled):
+		return CredentialStatusDisabled
+	case string(CredentialStatusCooldown):
+		return CredentialStatusCooldown
+	default:
+		return CredentialStatusActive
+	}
+}
+
+func ParseCredentialStatus(status string) (CredentialStatus, bool) {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "":
+		return CredentialStatusActive, true
+	case string(CredentialStatusActive):
+		return CredentialStatusActive, true
+	case string(CredentialStatusDisabled):
+		return CredentialStatusDisabled, true
+	case string(CredentialStatusCooldown):
+		return CredentialStatusCooldown, true
+	default:
+		return "", false
+	}
+}
+
 type CodexCredential struct {
 	ID                string
 	OwnerUserID       string
-	Scope             string
+	Scope             CredentialScope
 	EncryptedAuthBlob []byte
 	Weight            int
-	Status            string
+	Status            CredentialStatus
 	CooldownUntil     *time.Time
 	LastError         string
 	CreatedAt         time.Time
@@ -56,9 +119,9 @@ type CodexCredential struct {
 type CredentialCandidate struct {
 	ID            string
 	OwnerUserID   string
-	Scope         string
+	Scope         CredentialScope
 	Weight        int
-	Status        string
+	Status        CredentialStatus
 	CooldownUntil *time.Time
 	ActiveLeases  int
 	UsageTokens   int64
@@ -95,10 +158,10 @@ type UpsertAPIKeyInput struct {
 type CreateCodexCredentialInput struct {
 	ID                string
 	OwnerUserID       string
-	Scope             string
+	Scope             CredentialScope
 	EncryptedAuthBlob []byte
 	Weight            int
-	Status            string
+	Status            CredentialStatus
 	CooldownUntil     *time.Time
 	LastError         string
 }
@@ -106,10 +169,10 @@ type CreateCodexCredentialInput struct {
 type UpdateCodexCredentialInput struct {
 	ID                string
 	OwnerUserID       string
-	Scope             string
+	Scope             CredentialScope
 	EncryptedAuthBlob []byte
 	Weight            int
-	Status            string
+	Status            CredentialStatus
 	CooldownUntil     *time.Time
 	LastError         string
 }
@@ -298,17 +361,19 @@ func (s *Store) GetRunCredentialInfo(runID string) (RunCredentialInfo, bool) {
 func (s *Store) CreateCodexCredential(in CreateCodexCredentialInput) (CodexCredential, error) {
 	in.ID = strings.TrimSpace(in.ID)
 	in.OwnerUserID = strings.TrimSpace(in.OwnerUserID)
-	in.Scope = strings.TrimSpace(strings.ToLower(in.Scope))
-	in.Status = strings.TrimSpace(strings.ToLower(in.Status))
 	if in.ID == "" {
 		return CodexCredential{}, fmt.Errorf("id is required")
 	}
-	if in.Scope == "" {
-		in.Scope = "personal"
+	scope, ok := ParseCredentialScope(string(in.Scope))
+	if !ok {
+		return CodexCredential{}, fmt.Errorf("invalid credential scope %q", in.Scope)
 	}
-	if in.Status == "" {
-		in.Status = "active"
+	status, ok := ParseCredentialStatus(string(in.Status))
+	if !ok {
+		return CodexCredential{}, fmt.Errorf("invalid credential status %q", in.Status)
 	}
+	in.Scope = scope
+	in.Status = status
 	if in.Weight <= 0 {
 		in.Weight = 1
 	}
@@ -316,10 +381,10 @@ func (s *Store) CreateCodexCredential(in CreateCodexCredentialInput) (CodexCrede
 	if err := s.q.CreateCodexCredential(context.Background(), sqlitegen.CreateCodexCredentialParams{
 		ID:                in.ID,
 		OwnerUserID:       toNullString(in.OwnerUserID),
-		Scope:             in.Scope,
+		Scope:             string(in.Scope),
 		EncryptedAuthBlob: in.EncryptedAuthBlob,
 		Weight:            int64(in.Weight),
-		Status:            in.Status,
+		Status:            string(in.Status),
 		CooldownUntil:     toNullInt64(in.CooldownUntil),
 		LastError:         in.LastError,
 		CreatedAt:         now.UnixNano(),
@@ -340,26 +405,28 @@ func (s *Store) CreateCodexCredential(in CreateCodexCredentialInput) (CodexCrede
 func (s *Store) UpdateCodexCredential(in UpdateCodexCredentialInput) (CodexCredential, error) {
 	in.ID = strings.TrimSpace(in.ID)
 	in.OwnerUserID = strings.TrimSpace(in.OwnerUserID)
-	in.Scope = strings.TrimSpace(strings.ToLower(in.Scope))
-	in.Status = strings.TrimSpace(strings.ToLower(in.Status))
 	if in.ID == "" {
 		return CodexCredential{}, fmt.Errorf("id is required")
 	}
-	if in.Scope == "" {
-		in.Scope = "personal"
+	scope, ok := ParseCredentialScope(string(in.Scope))
+	if !ok {
+		return CodexCredential{}, fmt.Errorf("invalid credential scope %q", in.Scope)
 	}
-	if in.Status == "" {
-		in.Status = "active"
+	status, ok := ParseCredentialStatus(string(in.Status))
+	if !ok {
+		return CodexCredential{}, fmt.Errorf("invalid credential status %q", in.Status)
 	}
+	in.Scope = scope
+	in.Status = status
 	if in.Weight <= 0 {
 		in.Weight = 1
 	}
 	rows, err := s.q.UpdateCodexCredential(context.Background(), sqlitegen.UpdateCodexCredentialParams{
 		OwnerUserID:       toNullString(in.OwnerUserID),
-		Scope:             in.Scope,
+		Scope:             string(in.Scope),
 		EncryptedAuthBlob: in.EncryptedAuthBlob,
 		Weight:            int64(in.Weight),
-		Status:            in.Status,
+		Status:            string(in.Status),
 		CooldownUntil:     toNullInt64(in.CooldownUntil),
 		LastError:         in.LastError,
 		UpdatedAt:         time.Now().UTC().UnixNano(),
@@ -381,17 +448,18 @@ func (s *Store) UpdateCodexCredential(in UpdateCodexCredentialInput) (CodexCrede
 	return out, nil
 }
 
-func (s *Store) SetCodexCredentialStatus(credentialID, status string, cooldownUntil *time.Time, lastError string) error {
+func (s *Store) SetCodexCredentialStatus(credentialID string, status CredentialStatus, cooldownUntil *time.Time, lastError string) error {
 	credentialID = strings.TrimSpace(credentialID)
-	status = strings.TrimSpace(strings.ToLower(status))
 	if credentialID == "" {
 		return nil
 	}
-	if status == "" {
-		status = "active"
+	parsed, ok := ParseCredentialStatus(string(status))
+	if !ok {
+		return fmt.Errorf("invalid credential status %q", status)
 	}
+	status = parsed
 	_, err := s.q.SetCodexCredentialStatus(context.Background(), sqlitegen.SetCodexCredentialStatusParams{
-		Status:        status,
+		Status:        string(status),
 		CooldownUntil: toNullInt64(cooldownUntil),
 		LastError:     strings.TrimSpace(lastError),
 		UpdatedAt:     time.Now().UTC().UnixNano(),
@@ -464,9 +532,9 @@ func (s *Store) ListCredentialCandidates(requesterUserID string, now, usageWindo
 		out = append(out, CredentialCandidate{
 			ID:            row.ID,
 			OwnerUserID:   fromNullString(row.OwnerUserID),
-			Scope:         row.Scope,
+			Scope:         NormalizeCredentialScope(CredentialScope(row.Scope)),
 			Weight:        int(row.Weight),
-			Status:        row.Status,
+			Status:        NormalizeCredentialStatus(CredentialStatus(row.Status)),
 			CooldownUntil: fromNullTime(row.CooldownUntil),
 			ActiveLeases:  int(row.ActiveLeases),
 			UsageTokens:   row.UsageTokens,
@@ -640,10 +708,10 @@ func fromDBCodexCredential(row sqlitegen.CodexCredential) CodexCredential {
 	return CodexCredential{
 		ID:                row.ID,
 		OwnerUserID:       fromNullString(row.OwnerUserID),
-		Scope:             row.Scope,
+		Scope:             NormalizeCredentialScope(CredentialScope(row.Scope)),
 		EncryptedAuthBlob: append([]byte(nil), row.EncryptedAuthBlob...),
 		Weight:            int(row.Weight),
-		Status:            row.Status,
+		Status:            NormalizeCredentialStatus(CredentialStatus(row.Status)),
 		CooldownUntil:     fromNullTime(row.CooldownUntil),
 		LastError:         row.LastError,
 		CreatedAt:         time.Unix(0, row.CreatedAt).UTC(),

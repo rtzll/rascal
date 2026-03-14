@@ -647,23 +647,20 @@ func (s *server) handleCredentials(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "auth_blob is required", http.StatusBadRequest)
 			return
 		}
-		scope := strings.ToLower(strings.TrimSpace(req.Scope))
-		ownerUserID := strings.TrimSpace(req.OwnerUserID)
-		if !requesterIsAdmin(r.Context()) {
-			scope = "personal"
-			ownerUserID = requesterUserID(r.Context())
-		}
-		if scope == "" {
-			scope = "personal"
-		}
-		if scope == "shared" {
-			ownerUserID = ""
-		}
-		if scope != "personal" && scope != "shared" {
+		scope, ok := state.ParseCredentialScope(req.Scope)
+		if !ok {
 			http.Error(w, "invalid scope", http.StatusBadRequest)
 			return
 		}
-		if scope == "personal" && ownerUserID == "" {
+		ownerUserID := strings.TrimSpace(req.OwnerUserID)
+		if !requesterIsAdmin(r.Context()) {
+			scope = state.CredentialScopePersonal
+			ownerUserID = requesterUserID(r.Context())
+		}
+		if scope == state.CredentialScopeShared {
+			ownerUserID = ""
+		}
+		if scope == state.CredentialScopePersonal && ownerUserID == "" {
 			ownerUserID = requesterUserID(r.Context())
 		}
 		id := strings.TrimSpace(req.ID)
@@ -686,7 +683,7 @@ func (s *server) handleCredentials(w http.ResponseWriter, r *http.Request) {
 			Scope:             scope,
 			EncryptedAuthBlob: encrypted,
 			Weight:            req.Weight,
-			Status:            "active",
+			Status:            state.CredentialStatusActive,
 		})
 		if err != nil {
 			http.Error(w, "failed to create credential: "+err.Error(), http.StatusInternalServerError)
@@ -725,7 +722,7 @@ func (s *server) handleCredentialSubresources(w http.ResponseWriter, r *http.Req
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, api.CredentialResponse{Credential: credentialResponse(credential)})
 	case http.MethodDelete:
-		if err := s.store.SetCodexCredentialStatus(credential.ID, "disabled", nil, "disabled by API"); err != nil {
+		if err := s.store.SetCodexCredentialStatus(credential.ID, state.CredentialStatusDisabled, nil, "disabled by API"); err != nil {
 			http.Error(w, "failed to disable credential", http.StatusInternalServerError)
 			return
 		}
@@ -755,17 +752,17 @@ func (s *server) handleCredentialSubresources(w http.ResponseWriter, r *http.Req
 			updated.OwnerUserID = strings.TrimSpace(*req.OwnerUserID)
 		}
 		if req.Scope != nil {
-			scope := strings.ToLower(strings.TrimSpace(*req.Scope))
-			if !requesterIsAdmin(r.Context()) && scope == "shared" {
-				http.Error(w, "shared scope requires admin", http.StatusForbidden)
-				return
-			}
-			if scope != "personal" && scope != "shared" {
+			scope, ok := state.ParseCredentialScope(*req.Scope)
+			if !ok {
 				http.Error(w, "invalid scope", http.StatusBadRequest)
 				return
 			}
+			if !requesterIsAdmin(r.Context()) && scope == state.CredentialScopeShared {
+				http.Error(w, "shared scope requires admin", http.StatusForbidden)
+				return
+			}
 			updated.Scope = scope
-			if scope == "shared" {
+			if scope == state.CredentialScopeShared {
 				updated.OwnerUserID = ""
 			}
 		}
@@ -781,7 +778,12 @@ func (s *server) handleCredentialSubresources(w http.ResponseWriter, r *http.Req
 			updated.Weight = *req.Weight
 		}
 		if req.Status != nil {
-			updated.Status = strings.ToLower(strings.TrimSpace(*req.Status))
+			status, ok := state.ParseCredentialStatus(*req.Status)
+			if !ok {
+				http.Error(w, "invalid status", http.StatusBadRequest)
+				return
+			}
+			updated.Status = status
 		}
 		if req.CooldownUntil != nil {
 			value := strings.TrimSpace(*req.CooldownUntil)
@@ -816,7 +818,7 @@ func (s *server) canAccessCredential(ctx context.Context, credential state.Codex
 	if requesterIsAdmin(ctx) {
 		return true
 	}
-	return credential.Scope == "personal" && credential.OwnerUserID == requesterUserID(ctx)
+	return credential.Scope == state.CredentialScopePersonal && credential.OwnerUserID == requesterUserID(ctx)
 }
 
 func credentialResponse(credential state.CodexCredential) api.Credential {
@@ -2171,7 +2173,7 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		info, ok := s.store.GetRunCredentialInfo(updated.ID)
 		if ok && strings.TrimSpace(info.CredentialID) != "" && isCredentialAuthFailure(updated.Error) {
 			until := time.Now().UTC().Add(5 * time.Minute)
-			if err := s.store.SetCodexCredentialStatus(info.CredentialID, "cooldown", &until, updated.Error); err != nil {
+			if err := s.store.SetCodexCredentialStatus(info.CredentialID, state.CredentialStatusCooldown, &until, updated.Error); err != nil {
 				log.Printf("run %s set credential cooldown failed: %v", updated.ID, err)
 			} else {
 				log.Printf("audit event=credential_cooldown run_id=%s credential_id=%s until=%s", updated.ID, info.CredentialID, until.Format(time.RFC3339))

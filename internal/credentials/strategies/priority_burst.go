@@ -1,6 +1,9 @@
 package strategies
 
-import "github.com/rtzll/rascal/internal/credentials"
+import (
+	"github.com/rtzll/rascal/internal/credentials"
+	"github.com/rtzll/rascal/internal/state"
+)
 
 type PriorityBurst struct{}
 
@@ -12,7 +15,7 @@ func (PriorityBurst) Select(_ credentials.AcquireRequest, candidates []credentia
 	bestLoad := 0
 	bestShared := false
 	for _, candidate := range sorted {
-		isShared := candidate.Scope == "shared"
+		isShared := candidate.Scope == state.CredentialScopeShared
 		if bestID == "" || candidate.ActiveLeases < bestLoad || (candidate.ActiveLeases == bestLoad && isShared && !bestShared) {
 			bestID = candidate.ID
 			bestLoad = candidate.ActiveLeases
