@@ -20,6 +20,20 @@ func TestRequesterOwnThenSharedSelectsPersonalFirst(t *testing.T) {
 	}
 }
 
+func TestRequesterOwnThenSharedBreaksLeaseTiesByCredentialID(t *testing.T) {
+	strategy := RequesterOwnThenShared{}
+	got, err := strategy.Select(credentials.AcquireRequest{UserID: "u1"}, []credentials.CredentialState{
+		{ID: "personal-b", Scope: "personal", OwnerUserID: "u1", ActiveLeases: 1},
+		{ID: "personal-a", Scope: "personal", OwnerUserID: "u1", ActiveLeases: 1},
+	})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if got != "personal-a" {
+		t.Fatalf("credential_id = %s, want personal-a", got)
+	}
+}
+
 func TestSharedLeastActiveLeases(t *testing.T) {
 	strategy := SharedLeastActiveLeases{}
 	got, err := strategy.Select(credentials.AcquireRequest{}, []credentials.CredentialState{
@@ -60,6 +74,20 @@ func TestPriorityBurstPrefersLeastLoadedSharedCredential(t *testing.T) {
 	}
 	if got != "shared-a" {
 		t.Fatalf("credential_id = %s, want shared-a (lowest load with shared priority)", got)
+	}
+}
+
+func TestPriorityBurstBreaksSharedTiesByCredentialID(t *testing.T) {
+	strategy := PriorityBurst{}
+	got, err := strategy.Select(credentials.AcquireRequest{}, []credentials.CredentialState{
+		{ID: "shared-b", Scope: "shared", ActiveLeases: 0},
+		{ID: "shared-a", Scope: "shared", ActiveLeases: 0},
+	})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if got != "shared-a" {
+		t.Fatalf("credential_id = %s, want shared-a", got)
 	}
 }
 

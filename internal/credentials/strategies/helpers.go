@@ -1,27 +1,49 @@
 package strategies
 
 import (
-	"sort"
+	"slices"
 
 	"github.com/rtzll/rascal/internal/credentials"
 )
 
-func cloneAndSortByID(candidates []credentials.CredentialState) []credentials.CredentialState {
-	out := append([]credentials.CredentialState(nil), candidates...)
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].ID < out[j].ID
-	})
+func cloneAndSort[T any](values []T, compare func(a, b T) int) []T {
+	out := slices.Clone(values)
+	slices.SortFunc(out, compare)
 	return out
 }
 
-func filter(candidates []credentials.CredentialState, pred func(credentials.CredentialState) bool) []credentials.CredentialState {
-	out := make([]credentials.CredentialState, 0, len(candidates))
-	for _, candidate := range candidates {
-		if pred(candidate) {
-			out = append(out, candidate)
+func filter[T any](values []T, pred func(T) bool) []T {
+	out := make([]T, 0, len(values))
+	for _, value := range values {
+		if pred(value) {
+			out = append(out, value)
 		}
 	}
 	return out
+}
+
+func first[T any](values []T, pred func(T) bool) (T, bool) {
+	for _, value := range values {
+		if pred(value) {
+			return value, true
+		}
+	}
+	var zero T
+	return zero, false
+}
+
+func minBy[T any](values []T, less func(a, b T) bool) (T, bool) {
+	if len(values) == 0 {
+		var zero T
+		return zero, false
+	}
+	best := values[0]
+	for _, value := range values[1:] {
+		if less(value, best) {
+			best = value
+		}
+	}
+	return best, true
 }
 
 func hasCapacity(candidate credentials.CredentialState) bool {
