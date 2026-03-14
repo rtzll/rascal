@@ -12,6 +12,7 @@ Setup:
   init        Initialize local Rascal CLI config
 
 Runs:
+  campaign    Manage multi-run maintenance campaigns
   cancel      Cancel a queued or running run
   open        Open PR URL for a run in your browser
   ps          List recent runs

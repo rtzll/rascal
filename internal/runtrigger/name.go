@@ -9,6 +9,7 @@ type Name string
 
 const (
 	NameCLI             Name = "cli"
+	NameCampaign        Name = "campaign"
 	NameRetry           Name = "retry"
 	NameIssueAPI        Name = "issue_api"
 	NameIssueLabel      Name = "issue_label"
@@ -46,6 +47,7 @@ func (n Name) String() string {
 func (n Name) IsKnown() bool {
 	switch Normalize(n.String()) {
 	case NameCLI,
+		NameCampaign,
 		NameRetry,
 		NameIssueAPI,
 		NameIssueLabel,

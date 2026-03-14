@@ -18,6 +18,38 @@ type ApiKey struct {
 	DisabledAt sql.NullInt64 `json:"disabled_at"`
 }
 
+type Campaign struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	Description       string        `json:"description"`
+	State             string        `json:"state"`
+	MaxConcurrent     int64         `json:"max_concurrent"`
+	StopAfterFailures int64         `json:"stop_after_failures"`
+	ContinueOnFailure int64         `json:"continue_on_failure"`
+	SkipIfOpenPr      int64         `json:"skip_if_open_pr"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	StartedAt         sql.NullInt64 `json:"started_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+}
+
+type CampaignItem struct {
+	ID              string `json:"id"`
+	CampaignID      string `json:"campaign_id"`
+	ItemOrder       int64  `json:"item_order"`
+	Repo            string `json:"repo"`
+	Task            string `json:"task"`
+	TaskID          string `json:"task_id"`
+	BaseBranch      string `json:"base_branch"`
+	BackendOverride string `json:"backend_override"`
+	State           string `json:"state"`
+	RunID           string `json:"run_id"`
+	SkipReason      string `json:"skip_reason"`
+	FailureReason   string `json:"failure_reason"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
+}
+
 type CodexCredential struct {
 	ID                string         `json:"id"`
 	OwnerUserID       sql.NullString `json:"owner_user_id"`

@@ -341,6 +341,8 @@ func newRootCmd() *cobra.Command {
 	cancelCmd.GroupID = "runs"
 	taskCmd := a.newTaskCmd()
 	taskCmd.GroupID = "runs"
+	campaignCmd := a.newCampaignCmd()
+	campaignCmd.GroupID = "runs"
 
 	logsCmd := a.newLogsCmd()
 	logsCmd.GroupID = "logs"
@@ -366,6 +368,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(retryCmd)
 	root.AddCommand(cancelCmd)
 	root.AddCommand(taskCmd)
+	root.AddCommand(campaignCmd)
 	root.AddCommand(logsCmd)
 	root.AddCommand(githubCmd)
 	root.AddCommand(infraCmd)

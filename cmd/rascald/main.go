@@ -105,6 +105,7 @@ type runRequest struct {
 	BaseBranch      string
 	HeadBranch      string
 	Trigger         runtrigger.Name
+	AgentBackend    string
 	IssueNumber     int
 	PRNumber        int
 	PRStatus        state.PRStatus
@@ -190,6 +191,9 @@ func main() {
 	s.recoverQueuedCancels()
 	s.recoverRunningRuns()
 	s.scheduleRuns("")
+	if err := s.scheduleCampaigns(); err != nil {
+		log.Printf("campaign scheduler bootstrap failed: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -199,6 +203,8 @@ func main() {
 	mux.HandleFunc("/v1/tasks", s.withAuth(s.handleCreateTask))
 	mux.HandleFunc("/v1/tasks/", s.withAuth(s.handleTaskSubresources))
 	mux.HandleFunc("/v1/tasks/issue", s.withAuth(s.handleCreateIssueTask))
+	mux.HandleFunc("/v1/campaigns", s.withAuth(s.handleCampaigns))
+	mux.HandleFunc("/v1/campaigns/", s.withAuth(s.handleCampaignSubresources))
 	mux.HandleFunc("/v1/credentials", s.withAuth(s.handleCredentials))
 	mux.HandleFunc("/v1/credentials/", s.withAuth(s.handleCredentialSubresources))
 	mux.HandleFunc("/v1/webhooks/github", s.handleWebhook)
@@ -1465,6 +1471,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if req.CreatedByUserID == "" {
 		req.CreatedByUserID = "system"
 	}
+	runBackend := normalizeCampaignBackend(req.AgentBackend, s.cfg.AgentBackend)
 	if req.Trigger == "" {
 		req.Trigger = runtrigger.NameCLI
 	} else {
@@ -1495,7 +1502,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if s.store.IsTaskCompleted(req.TaskID) {
 		return state.Run{}, errTaskCompleted
 	}
-	if existingTask, ok := s.store.GetTask(req.TaskID); ok && existingTask.AgentBackend != s.cfg.AgentBackend {
+	if existingTask, ok := s.store.GetTask(req.TaskID); ok && existingTask.AgentBackend != runBackend {
 		if err := s.store.DeleteTaskAgentSession(req.TaskID); err != nil {
 			return state.Run{}, fmt.Errorf("clear stale task session for backend migration: %w", err)
 		}
@@ -1522,7 +1529,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	_, err = s.store.UpsertTask(state.UpsertTaskInput{
 		ID:           req.TaskID,
 		Repo:         req.Repo,
-		AgentBackend: s.cfg.AgentBackend,
+		AgentBackend: runBackend,
 		IssueNumber:  req.IssueNumber,
 		PRNumber:     req.PRNumber,
 	})
@@ -1538,7 +1545,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		TaskID:       req.TaskID,
 		Repo:         req.Repo,
 		Task:         req.Task,
-		AgentBackend: s.cfg.AgentBackend,
+		AgentBackend: runBackend,
 		BaseBranch:   req.BaseBranch,
 		HeadBranch:   req.HeadBranch,
 		Trigger:      req.Trigger,
@@ -2391,6 +2398,9 @@ func (s *server) finishRun(run state.Run) {
 
 	if !s.isDraining() {
 		s.scheduleRuns(run.TaskID)
+		if err := s.scheduleCampaigns(); err != nil {
+			log.Printf("campaign scheduling failed after run %s: %v", run.ID, err)
+		}
 	}
 }
 
