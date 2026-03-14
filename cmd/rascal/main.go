@@ -152,6 +152,13 @@ type bootstrapPlanOutput struct {
 	Resolved bootstrapPlanResolved `json:"resolved"`
 }
 
+type authRotateOutput struct {
+	APIToken      string `json:"api_token"`
+	WebhookSecret string `json:"webhook_secret"`
+	WriteConfig   bool   `json:"write_config"`
+	SyncedRemote  bool   `json:"synced_remote"`
+}
+
 type doctorDiagnostics struct {
 	ConfigPath        string              `json:"config_path"`
 	ConfigExists      bool                `json:"config_exists"`
@@ -2243,11 +2250,11 @@ rascal auth sync --host "$SERVER_IP"
 				displayAPI = apiToken
 				displayWebhook = webhookSecret
 			}
-			out := map[string]any{
-				"api_token":      displayAPI,
-				"webhook_secret": displayWebhook,
-				"write_config":   writeConfig,
-				"synced_remote":  strings.TrimSpace(host) != "",
+			out := authRotateOutput{
+				APIToken:      displayAPI,
+				WebhookSecret: displayWebhook,
+				WriteConfig:   writeConfig,
+				SyncedRemote:  strings.TrimSpace(host) != "",
 			}
 			return a.emit(out, func() error {
 				a.println("api_token: %s", displayAPI)

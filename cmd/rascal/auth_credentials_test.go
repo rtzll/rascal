@@ -28,6 +28,38 @@ func TestAuthHelpContainsCredentials(t *testing.T) {
 	}
 }
 
+func TestAuthRotateJSON(t *testing.T) {
+	a := &app{
+		output:     "json",
+		configPath: filepath.Join(t.TempDir(), "config.toml"),
+	}
+	cmd := a.newAuthCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"rotate"})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("auth rotate: %v", err)
+	}
+
+	var out authRotateOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if out.APIToken == "" || !strings.Contains(out.APIToken, "*") {
+		t.Fatalf("expected masked api token, got %q", out.APIToken)
+	}
+	if out.WebhookSecret == "" || !strings.Contains(out.WebhookSecret, "*") {
+		t.Fatalf("expected masked webhook secret, got %q", out.WebhookSecret)
+	}
+	if out.WriteConfig {
+		t.Fatal("expected write_config=false by default")
+	}
+	if out.SyncedRemote {
+		t.Fatal("expected synced_remote=false by default")
+	}
+}
+
 func TestAuthCredentialsListJSON(t *testing.T) {
 	now := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
