@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/api"
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/credentials"
 	ghapi "github.com/rtzll/rascal/internal/github"
@@ -121,7 +122,16 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 		Context:     run.Context,
 		Debug:       run.Debug,
 	}
-	if got != want {
+	if got.RunID != want.RunID ||
+		got.TaskID != want.TaskID ||
+		got.Repo != want.Repo ||
+		got.Task != want.Task ||
+		got.Trigger != want.Trigger ||
+		got.IssueNumber != want.IssueNumber ||
+		got.PRNumber != want.PRNumber ||
+		got.Context != want.Context ||
+		got.Debug != want.Debug ||
+		got.Pipeline != nil {
 		t.Fatalf("context.json mismatch: got %#v want %#v", got, want)
 	}
 }
@@ -155,11 +165,12 @@ type stubbornLauncher struct {
 }
 
 type fakeRunResult struct {
-	PRNumber int
-	PRURL    string
-	HeadSHA  string
-	ExitCode int
-	Error    string
+	PRNumber  int
+	PRURL     string
+	HeadSHA   string
+	ExitCode  int
+	Error     string
+	Artifacts map[string]string
 }
 
 type fakeExecution struct {
@@ -410,6 +421,15 @@ func (l *stubbornLauncher) Remove(_ context.Context, _ runner.ExecutionHandle) e
 }
 
 func writeFakeMeta(spec runner.Spec, res fakeRunResult) error {
+	for name, body := range res.Artifacts {
+		path := filepath.Join(spec.RunDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("create fake artifact dir: %w", err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			return fmt.Errorf("write fake artifact %s: %w", name, err)
+		}
+	}
 	meta := runner.Meta{
 		RunID:      spec.RunID,
 		TaskID:     spec.TaskID,
@@ -593,6 +613,14 @@ func (f *fakeLauncher) Calls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.calls
+}
+
+func (f *fakeLauncher) Specs() []runner.Spec {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]runner.Spec, len(f.specs))
+	copy(out, f.specs)
+	return out
 }
 
 func newTestServer(t *testing.T, launcher runner.Launcher) *server {
@@ -5009,4 +5037,200 @@ func TestBeginDrainLeavesQueuedRunsForNextSlot(t *testing.T) {
 		r, ok := s.store.GetRun(queued.ID)
 		return ok && r.Status == state.StatusQueued
 	}, "queued run remains queued during drain")
+}
+
+func TestCreateAndQueuePipelineHappyPath(t *testing.T) {
+	t.Parallel()
+
+	launcher := &fakeLauncher{
+		resSeq: []fakeRunResult{
+			{Artifacts: map[string]string{"plan.json": `{"steps":["inspect","implement","verify"]}`}},
+			{Artifacts: map[string]string{"implementation-summary.json": `{"changed_files":["main.go"],"checks":["go test ./..."]}`}},
+			{Artifacts: map[string]string{"verification.json": `{"status":"ok","checks":["go test ./..."]}`}},
+		},
+	}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	firstRun, pipeline, err := s.createAndQueuePipeline(runRequest{
+		TaskID: "task_pipeline_happy",
+		Repo:   "owner/repo",
+		Task:   "Implement a bounded pipeline",
+	}, &api.RunPipelineRequest{Enabled: true})
+	if err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+	if firstRun.ID == "" {
+		t.Fatal("expected first child run")
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		detail, ok := s.store.GetRunPipelineDetail(pipeline.ID)
+		return ok && detail.Status == state.PipelineStatusSucceeded
+	}, "pipeline succeeded")
+
+	detail, ok := s.store.GetRunPipelineDetail(pipeline.ID)
+	if !ok {
+		t.Fatal("expected pipeline detail")
+	}
+	if len(detail.Phases) != 3 {
+		t.Fatalf("expected 3 phases, got %d", len(detail.Phases))
+	}
+	for _, phase := range detail.Phases {
+		if phase.State != state.PipelinePhaseStateSucceeded {
+			t.Fatalf("phase %s state = %s, want succeeded", phase.PhaseName, phase.State)
+		}
+		if len(phase.ArtifactPaths) != 1 {
+			t.Fatalf("phase %s artifact paths = %v, want 1 path", phase.PhaseName, phase.ArtifactPaths)
+		}
+		if _, err := os.Stat(phase.ArtifactPaths[0]); err != nil {
+			t.Fatalf("expected artifact for phase %s: %v", phase.PhaseName, err)
+		}
+	}
+
+	specs := launcher.Specs()
+	if len(specs) != 3 {
+		t.Fatalf("launcher specs = %d, want 3", len(specs))
+	}
+	if _, err := os.Stat(filepath.Join(specs[1].RunDir, "handoff", "plan", "plan.json")); err != nil {
+		t.Fatalf("implement phase missing planner handoff: %v", err)
+	}
+	for _, handoff := range []string{
+		filepath.Join(specs[2].RunDir, "handoff", "plan", "plan.json"),
+		filepath.Join(specs[2].RunDir, "handoff", "implement", "implementation-summary.json"),
+	} {
+		if _, err := os.Stat(handoff); err != nil {
+			t.Fatalf("verify phase missing handoff %s: %v", handoff, err)
+		}
+	}
+}
+
+func TestPipelineStopsOnImplementerFailure(t *testing.T) {
+	t.Parallel()
+
+	launcher := &fakeLauncher{
+		resSeq: []fakeRunResult{
+			{Artifacts: map[string]string{"plan.json": `{"steps":["code"]}`}},
+			{ExitCode: 1, Error: "implementer failed"},
+		},
+	}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	_, pipeline, err := s.createAndQueuePipeline(runRequest{
+		TaskID: "task_pipeline_failure",
+		Repo:   "owner/repo",
+		Task:   "Fail during implement",
+	}, &api.RunPipelineRequest{Enabled: true})
+	if err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		detail, ok := s.store.GetRunPipelineDetail(pipeline.ID)
+		return ok && detail.Status == state.PipelineStatusFailed
+	}, "pipeline failed")
+
+	detail, ok := s.store.GetRunPipelineDetail(pipeline.ID)
+	if !ok {
+		t.Fatal("expected pipeline detail")
+	}
+	if got := detail.Phases[0].State; got != state.PipelinePhaseStateSucceeded {
+		t.Fatalf("plan phase state = %s, want succeeded", got)
+	}
+	if got := detail.Phases[1].State; got != state.PipelinePhaseStateFailed {
+		t.Fatalf("implement phase state = %s, want failed", got)
+	}
+	if got := detail.Phases[2].State; got != state.PipelinePhaseStateSkipped {
+		t.Fatalf("verify phase state = %s, want skipped", got)
+	}
+}
+
+func TestPipelineCancelPropagatesToActiveChild(t *testing.T) {
+	t.Parallel()
+
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{
+		waitCh: waitCh,
+		res: fakeRunResult{
+			Artifacts: map[string]string{"plan.json": `{"steps":["cancel"]}`},
+		},
+	}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	firstRun, pipeline, err := s.createAndQueuePipeline(runRequest{
+		TaskID: "task_pipeline_cancel",
+		Repo:   "owner/repo",
+		Task:   "Cancel the parent pipeline",
+	}, &api.RunPipelineRequest{Enabled: true})
+	if err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+
+	waitFor(t, time.Second, func() bool {
+		run, ok := s.store.GetRun(firstRun.ID)
+		return ok && run.Status == state.StatusRunning
+	}, "pipeline child running")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+pipeline.TaskID+"/cancel", nil)
+	s.handleTaskSubresources(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 from task cancel, got %d", rec.Code)
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		run, ok := s.store.GetRun(firstRun.ID)
+		if !ok || run.Status != state.StatusCanceled {
+			return false
+		}
+		detail, ok := s.store.GetRunPipelineDetail(pipeline.ID)
+		return ok && detail.Status == state.PipelineStatusCanceled
+	}, "pipeline and child canceled")
+}
+
+func TestRecoverPipelinesDoesNotDuplicateActivePhase(t *testing.T) {
+	t.Parallel()
+
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{
+		waitCh: waitCh,
+		res: fakeRunResult{
+			Artifacts: map[string]string{"plan.json": `{"steps":["hold"]}`},
+		},
+	}
+	dataDir := t.TempDir()
+	statePath := filepath.Join(dataDir, "state.db")
+	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
+	defer func() {
+		close(waitCh)
+		waitForServerIdle(t, s1)
+	}()
+
+	firstRun, _, err := s1.createAndQueuePipeline(runRequest{
+		TaskID: "task_pipeline_recover",
+		Repo:   "owner/repo",
+		Task:   "Recover without duplicate children",
+	}, &api.RunPipelineRequest{Enabled: true})
+	if err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+	waitFor(t, time.Second, func() bool {
+		run, ok := s1.store.GetRun(firstRun.ID)
+		return ok && run.Status == state.StatusRunning
+	}, "first child running")
+	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "launcher called once")
+	if got := launcher.Calls(); got != 1 {
+		t.Fatalf("launcher calls = %d, want 1", got)
+	}
+
+	s2 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-b")
+	defer waitForServerIdle(t, s2)
+	s2.recoverPipelines()
+
+	time.Sleep(100 * time.Millisecond)
+	if got := launcher.Calls(); got != 1 {
+		t.Fatalf("launcher calls after recovery = %d, want 1", got)
+	}
 }

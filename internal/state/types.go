@@ -154,6 +154,41 @@ func ParseTaskStatus(raw string) (TaskStatus, bool) {
 	}
 }
 
+type RunPipelineStatus string
+
+const (
+	PipelineStatusPending   RunPipelineStatus = "pending"
+	PipelineStatusRunning   RunPipelineStatus = "running"
+	PipelineStatusSucceeded RunPipelineStatus = "succeeded"
+	PipelineStatusFailed    RunPipelineStatus = "failed"
+	PipelineStatusCanceled  RunPipelineStatus = "canceled"
+)
+
+type PipelinePhaseName string
+
+const (
+	PipelinePhasePlan      PipelinePhaseName = "plan"
+	PipelinePhaseImplement PipelinePhaseName = "implement"
+	PipelinePhaseVerify    PipelinePhaseName = "verify"
+)
+
+var fixedPipelinePhases = []PipelinePhaseName{
+	PipelinePhasePlan,
+	PipelinePhaseImplement,
+	PipelinePhaseVerify,
+}
+
+type RunPipelinePhaseState string
+
+const (
+	PipelinePhaseStatePending   RunPipelinePhaseState = "pending"
+	PipelinePhaseStateRunning   RunPipelinePhaseState = "running"
+	PipelinePhaseStateSucceeded RunPipelinePhaseState = "succeeded"
+	PipelinePhaseStateFailed    RunPipelinePhaseState = "failed"
+	PipelinePhaseStateSkipped   RunPipelinePhaseState = "skipped"
+	PipelinePhaseStateCanceled  RunPipelinePhaseState = "canceled"
+)
+
 type Run struct {
 	ID           string          `json:"id"`
 	TaskID       string          `json:"task_id"`
@@ -194,6 +229,61 @@ type Task struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type RunPipeline struct {
+	ID                   string             `json:"id"`
+	TaskID               string             `json:"task_id"`
+	Repo                 string             `json:"repo"`
+	Task                 string             `json:"task"`
+	BaseBranch           string             `json:"base_branch"`
+	HeadBranch           string             `json:"head_branch"`
+	Trigger              string             `json:"trigger"`
+	IssueNumber          int                `json:"issue_number,omitempty"`
+	PRNumber             int                `json:"pr_number,omitempty"`
+	Context              string             `json:"context,omitempty"`
+	Debug                bool               `json:"debug"`
+	CreatedByUserID      string             `json:"created_by_user_id,omitempty"`
+	ArtifactDir          string             `json:"artifact_dir"`
+	Status               RunPipelineStatus  `json:"status"`
+	ActivePhase          PipelinePhaseName  `json:"active_phase,omitempty"`
+	FailedPhase          PipelinePhaseName  `json:"failed_phase,omitempty"`
+	CancelRequested      bool               `json:"cancel_requested"`
+	MaxPhases            int                `json:"max_phases"`
+	MaxChildRunsPerPhase int                `json:"max_child_runs_per_phase"`
+	TotalChildRuns       int                `json:"total_child_runs"`
+	TokenBudgetTotal     int64              `json:"token_budget_total,omitempty"`
+	TokenBudgetUsed      int64              `json:"token_budget_used"`
+	DeadlineAt           *time.Time         `json:"deadline_at,omitempty"`
+	CreatedAt            time.Time          `json:"created_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
+	CompletedAt          *time.Time         `json:"completed_at,omitempty"`
+	Phases               []RunPipelinePhase `json:"phases,omitempty"`
+}
+
+type RunPipelinePhase struct {
+	PipelineID    string                `json:"pipeline_id"`
+	PhaseName     PipelinePhaseName     `json:"phase_name"`
+	PhaseOrder    int                   `json:"phase_order"`
+	Enabled       bool                  `json:"enabled"`
+	State         RunPipelinePhaseState `json:"state"`
+	RunID         string                `json:"run_id,omitempty"`
+	ChildIndex    int                   `json:"child_index"`
+	ArtifactPaths []string              `json:"artifact_paths,omitempty"`
+	Error         string                `json:"error,omitempty"`
+	CreatedAt     time.Time             `json:"created_at"`
+	UpdatedAt     time.Time             `json:"updated_at"`
+	StartedAt     *time.Time            `json:"started_at,omitempty"`
+	CompletedAt   *time.Time            `json:"completed_at,omitempty"`
+}
+
+type RunLineage struct {
+	RunID            string            `json:"run_id"`
+	ParentPipelineID string            `json:"parent_pipeline_id"`
+	PhaseName        PipelinePhaseName `json:"phase_name"`
+	PhaseOrder       int               `json:"phase_order"`
+	ChildIndex       int               `json:"child_index"`
+	CreatedAt        time.Time         `json:"created_at"`
 }
 
 type RunLease struct {
@@ -346,6 +436,47 @@ type CreateRunInput struct {
 	Context      string
 }
 
+type RunPipelineConfig struct {
+	Enabled              bool
+	Phases               []PipelinePhaseName
+	MaxPhases            int
+	MaxChildRunsPerPhase int
+	TokenBudgetTotal     int64
+	WallClockBudget      time.Duration
+}
+
+type CreateRunPipelineInput struct {
+	ID              string
+	TaskID          string
+	Repo            string
+	Task            string
+	BaseBranch      string
+	HeadBranch      string
+	Trigger         string
+	IssueNumber     int
+	PRNumber        int
+	Context         string
+	Debug           bool
+	CreatedByUserID string
+	ArtifactDir     string
+	Config          RunPipelineConfig
+}
+
+type StartRunPipelinePhaseChildInput struct {
+	PipelineID string
+	PhaseName  PipelinePhaseName
+	Run        CreateRunInput
+}
+
+type FinalizeRunPipelinePhaseInput struct {
+	PipelineID      string
+	PhaseName       PipelinePhaseName
+	State           RunPipelinePhaseState
+	ArtifactPaths   []string
+	Error           string
+	TokenUsageDelta int64
+}
+
 type UpsertTaskInput struct {
 	ID           string
 	Repo         string
@@ -372,4 +503,98 @@ type UpsertTaskAgentSessionInput struct {
 	SessionKey       string
 	SessionRoot      string
 	LastRunID        string
+}
+
+func FixedPipelinePhases() []PipelinePhaseName {
+	out := make([]PipelinePhaseName, len(fixedPipelinePhases))
+	copy(out, fixedPipelinePhases)
+	return out
+}
+
+func ParsePipelinePhaseName(raw string) (PipelinePhaseName, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(PipelinePhasePlan):
+		return PipelinePhasePlan, true
+	case string(PipelinePhaseImplement):
+		return PipelinePhaseImplement, true
+	case string(PipelinePhaseVerify):
+		return PipelinePhaseVerify, true
+	default:
+		return "", false
+	}
+}
+
+func PipelinePhasePosition(name PipelinePhaseName) int {
+	for i, candidate := range fixedPipelinePhases {
+		if candidate == name {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func PipelinePhaseArtifactName(name PipelinePhaseName) string {
+	switch name {
+	case PipelinePhasePlan:
+		return "plan.json"
+	case PipelinePhaseImplement:
+		return "implementation-summary.json"
+	case PipelinePhaseVerify:
+		return "verification.json"
+	default:
+		return ""
+	}
+}
+
+func NormalizeRunPipelineConfig(cfg RunPipelineConfig) (RunPipelineConfig, error) {
+	if !cfg.Enabled {
+		return cfg, nil
+	}
+
+	normalized := cfg
+	if len(normalized.Phases) == 0 {
+		normalized.Phases = FixedPipelinePhases()
+	} else {
+		seen := make(map[PipelinePhaseName]struct{}, len(normalized.Phases))
+		out := make([]PipelinePhaseName, 0, len(normalized.Phases))
+		for _, candidate := range fixedPipelinePhases {
+			for _, requested := range normalized.Phases {
+				if requested != candidate {
+					continue
+				}
+				if _, ok := seen[candidate]; ok {
+					break
+				}
+				seen[candidate] = struct{}{}
+				out = append(out, candidate)
+				break
+			}
+		}
+		if len(out) == 0 {
+			return RunPipelineConfig{}, fmt.Errorf("pipeline phases are required")
+		}
+		if len(out) != len(normalized.Phases) {
+			return RunPipelineConfig{}, fmt.Errorf("pipeline phases must be drawn from: %s, %s, %s", PipelinePhasePlan, PipelinePhaseImplement, PipelinePhaseVerify)
+		}
+		normalized.Phases = out
+	}
+	if normalized.MaxPhases <= 0 {
+		normalized.MaxPhases = len(normalized.Phases)
+	}
+	if normalized.MaxPhases > len(fixedPipelinePhases) {
+		return RunPipelineConfig{}, fmt.Errorf("max phases must be <= %d", len(fixedPipelinePhases))
+	}
+	if normalized.MaxChildRunsPerPhase <= 0 {
+		normalized.MaxChildRunsPerPhase = 1
+	}
+	if normalized.MaxChildRunsPerPhase > 3 {
+		return RunPipelineConfig{}, fmt.Errorf("max child runs per phase must be <= 3")
+	}
+	if normalized.TokenBudgetTotal < 0 {
+		return RunPipelineConfig{}, fmt.Errorf("token budget total must be >= 0")
+	}
+	if normalized.WallClockBudget < 0 {
+		return RunPipelineConfig{}, fmt.Errorf("wall clock budget must be >= 0")
+	}
+	return normalized, nil
 }

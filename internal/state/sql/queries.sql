@@ -443,6 +443,295 @@ SELECT
 FROM run_token_usage
 WHERE run_id = ?;
 
+-- name: InsertRunPipeline :one
+INSERT INTO run_pipelines (
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  issue_number,
+  pr_number,
+  context,
+  debug,
+  created_by_user_id,
+  artifact_dir,
+  status,
+  active_phase,
+  failed_phase,
+  cancel_requested,
+  max_phases,
+  max_child_runs_per_phase,
+  total_child_runs,
+  token_budget_total,
+  token_budget_used,
+  deadline_at,
+  created_at,
+  updated_at,
+  completed_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  issue_number,
+  pr_number,
+  context,
+  debug,
+  created_by_user_id,
+  artifact_dir,
+  status,
+  active_phase,
+  failed_phase,
+  cancel_requested,
+  max_phases,
+  max_child_runs_per_phase,
+  total_child_runs,
+  token_budget_total,
+  token_budget_used,
+  deadline_at,
+  created_at,
+  updated_at,
+  completed_at;
+
+-- name: GetRunPipeline :one
+SELECT
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  issue_number,
+  pr_number,
+  context,
+  debug,
+  created_by_user_id,
+  artifact_dir,
+  status,
+  active_phase,
+  failed_phase,
+  cancel_requested,
+  max_phases,
+  max_child_runs_per_phase,
+  total_child_runs,
+  token_budget_total,
+  token_budget_used,
+  deadline_at,
+  created_at,
+  updated_at,
+  completed_at
+FROM run_pipelines
+WHERE id = ?;
+
+-- name: GetRunPipelineByTask :one
+SELECT
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  issue_number,
+  pr_number,
+  context,
+  debug,
+  created_by_user_id,
+  artifact_dir,
+  status,
+  active_phase,
+  failed_phase,
+  cancel_requested,
+  max_phases,
+  max_child_runs_per_phase,
+  total_child_runs,
+  token_budget_total,
+  token_budget_used,
+  deadline_at,
+  created_at,
+  updated_at,
+  completed_at
+FROM run_pipelines
+WHERE task_id = ?;
+
+-- name: ListIncompleteRunPipelines :many
+SELECT
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  issue_number,
+  pr_number,
+  context,
+  debug,
+  created_by_user_id,
+  artifact_dir,
+  status,
+  active_phase,
+  failed_phase,
+  cancel_requested,
+  max_phases,
+  max_child_runs_per_phase,
+  total_child_runs,
+  token_budget_total,
+  token_budget_used,
+  deadline_at,
+  created_at,
+  updated_at,
+  completed_at
+FROM run_pipelines
+WHERE status IN ('pending', 'running')
+ORDER BY created_at ASC;
+
+-- name: UpdateRunPipeline :execrows
+UPDATE run_pipelines
+SET
+  task_id = ?,
+  repo = ?,
+  task = ?,
+  base_branch = ?,
+  head_branch = ?,
+  trigger = ?,
+  issue_number = ?,
+  pr_number = ?,
+  context = ?,
+  debug = ?,
+  created_by_user_id = ?,
+  artifact_dir = ?,
+  status = ?,
+  active_phase = ?,
+  failed_phase = ?,
+  cancel_requested = ?,
+  max_phases = ?,
+  max_child_runs_per_phase = ?,
+  total_child_runs = ?,
+  token_budget_total = ?,
+  token_budget_used = ?,
+  deadline_at = ?,
+  created_at = ?,
+  updated_at = ?,
+  completed_at = ?
+WHERE id = ?;
+
+-- name: InsertRunPipelinePhase :one
+INSERT INTO run_pipeline_phases (
+  pipeline_id,
+  phase_name,
+  phase_order,
+  enabled,
+  state,
+  run_id,
+  child_index,
+  artifact_paths,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING
+  pipeline_id,
+  phase_name,
+  phase_order,
+  enabled,
+  state,
+  run_id,
+  child_index,
+  artifact_paths,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at;
+
+-- name: GetRunPipelinePhase :one
+SELECT
+  pipeline_id,
+  phase_name,
+  phase_order,
+  enabled,
+  state,
+  run_id,
+  child_index,
+  artifact_paths,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+FROM run_pipeline_phases
+WHERE pipeline_id = ? AND phase_name = ?;
+
+-- name: ListRunPipelinePhases :many
+SELECT
+  pipeline_id,
+  phase_name,
+  phase_order,
+  enabled,
+  state,
+  run_id,
+  child_index,
+  artifact_paths,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+FROM run_pipeline_phases
+WHERE pipeline_id = ?
+ORDER BY phase_order ASC;
+
+-- name: UpdateRunPipelinePhase :execrows
+UPDATE run_pipeline_phases
+SET
+  phase_order = ?,
+  enabled = ?,
+  state = ?,
+  run_id = ?,
+  child_index = ?,
+  artifact_paths = ?,
+  error = ?,
+  created_at = ?,
+  updated_at = ?,
+  started_at = ?,
+  completed_at = ?
+WHERE pipeline_id = ? AND phase_name = ?;
+
+-- name: InsertRunLineage :exec
+INSERT INTO run_lineage (
+  run_id,
+  parent_pipeline_id,
+  phase_name,
+  phase_order,
+  child_index,
+  created_at
+)
+VALUES (?, ?, ?, ?, ?, ?);
+
+-- name: GetRunLineage :one
+SELECT
+  run_id,
+  parent_pipeline_id,
+  phase_name,
+  phase_order,
+  child_index,
+  created_at
+FROM run_lineage
+WHERE run_id = ?;
+
 -- name: UpsertRunCancel :exec
 INSERT INTO run_cancels (run_id, reason, source, requested_at)
 VALUES (?, ?, ?, ?)

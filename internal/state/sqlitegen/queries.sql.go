@@ -977,6 +977,209 @@ func (q *Queries) GetRunLease(ctx context.Context, runID string) (RunLease, erro
 	return i, err
 }
 
+const getRunLineage = `-- name: GetRunLineage :one
+SELECT
+  run_id,
+  parent_pipeline_id,
+  phase_name,
+  phase_order,
+  child_index,
+  created_at
+FROM run_lineage
+WHERE run_id = ?
+`
+
+func (q *Queries) GetRunLineage(ctx context.Context, runID string) (RunLineage, error) {
+	row := q.db.QueryRowContext(ctx, getRunLineage, runID)
+	var i RunLineage
+	err := row.Scan(
+		&i.RunID,
+		&i.ParentPipelineID,
+		&i.PhaseName,
+		&i.PhaseOrder,
+		&i.ChildIndex,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getRunPipeline = `-- name: GetRunPipeline :one
+SELECT
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  issue_number,
+  pr_number,
+  context,
+  debug,
+  created_by_user_id,
+  artifact_dir,
+  status,
+  active_phase,
+  failed_phase,
+  cancel_requested,
+  max_phases,
+  max_child_runs_per_phase,
+  total_child_runs,
+  token_budget_total,
+  token_budget_used,
+  deadline_at,
+  created_at,
+  updated_at,
+  completed_at
+FROM run_pipelines
+WHERE id = ?
+`
+
+func (q *Queries) GetRunPipeline(ctx context.Context, id string) (RunPipeline, error) {
+	row := q.db.QueryRowContext(ctx, getRunPipeline, id)
+	var i RunPipeline
+	err := row.Scan(
+		&i.ID,
+		&i.TaskID,
+		&i.Repo,
+		&i.Task,
+		&i.BaseBranch,
+		&i.HeadBranch,
+		&i.Trigger,
+		&i.IssueNumber,
+		&i.PrNumber,
+		&i.Context,
+		&i.Debug,
+		&i.CreatedByUserID,
+		&i.ArtifactDir,
+		&i.Status,
+		&i.ActivePhase,
+		&i.FailedPhase,
+		&i.CancelRequested,
+		&i.MaxPhases,
+		&i.MaxChildRunsPerPhase,
+		&i.TotalChildRuns,
+		&i.TokenBudgetTotal,
+		&i.TokenBudgetUsed,
+		&i.DeadlineAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const getRunPipelineByTask = `-- name: GetRunPipelineByTask :one
+SELECT
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  issue_number,
+  pr_number,
+  context,
+  debug,
+  created_by_user_id,
+  artifact_dir,
+  status,
+  active_phase,
+  failed_phase,
+  cancel_requested,
+  max_phases,
+  max_child_runs_per_phase,
+  total_child_runs,
+  token_budget_total,
+  token_budget_used,
+  deadline_at,
+  created_at,
+  updated_at,
+  completed_at
+FROM run_pipelines
+WHERE task_id = ?
+`
+
+func (q *Queries) GetRunPipelineByTask(ctx context.Context, taskID string) (RunPipeline, error) {
+	row := q.db.QueryRowContext(ctx, getRunPipelineByTask, taskID)
+	var i RunPipeline
+	err := row.Scan(
+		&i.ID,
+		&i.TaskID,
+		&i.Repo,
+		&i.Task,
+		&i.BaseBranch,
+		&i.HeadBranch,
+		&i.Trigger,
+		&i.IssueNumber,
+		&i.PrNumber,
+		&i.Context,
+		&i.Debug,
+		&i.CreatedByUserID,
+		&i.ArtifactDir,
+		&i.Status,
+		&i.ActivePhase,
+		&i.FailedPhase,
+		&i.CancelRequested,
+		&i.MaxPhases,
+		&i.MaxChildRunsPerPhase,
+		&i.TotalChildRuns,
+		&i.TokenBudgetTotal,
+		&i.TokenBudgetUsed,
+		&i.DeadlineAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const getRunPipelinePhase = `-- name: GetRunPipelinePhase :one
+SELECT
+  pipeline_id,
+  phase_name,
+  phase_order,
+  enabled,
+  state,
+  run_id,
+  child_index,
+  artifact_paths,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+FROM run_pipeline_phases
+WHERE pipeline_id = ? AND phase_name = ?
+`
+
+type GetRunPipelinePhaseParams struct {
+	PipelineID string `json:"pipeline_id"`
+	PhaseName  string `json:"phase_name"`
+}
+
+func (q *Queries) GetRunPipelinePhase(ctx context.Context, arg GetRunPipelinePhaseParams) (RunPipelinePhase, error) {
+	row := q.db.QueryRowContext(ctx, getRunPipelinePhase, arg.PipelineID, arg.PhaseName)
+	var i RunPipelinePhase
+	err := row.Scan(
+		&i.PipelineID,
+		&i.PhaseName,
+		&i.PhaseOrder,
+		&i.Enabled,
+		&i.State,
+		&i.RunID,
+		&i.ChildIndex,
+		&i.ArtifactPaths,
+		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const getRunTokenUsage = `-- name: GetRunTokenUsage :one
 SELECT
   run_id,
@@ -1271,6 +1474,272 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRun
 	return i, err
 }
 
+const insertRunLineage = `-- name: InsertRunLineage :exec
+INSERT INTO run_lineage (
+  run_id,
+  parent_pipeline_id,
+  phase_name,
+  phase_order,
+  child_index,
+  created_at
+)
+VALUES (?, ?, ?, ?, ?, ?)
+`
+
+type InsertRunLineageParams struct {
+	RunID            string `json:"run_id"`
+	ParentPipelineID string `json:"parent_pipeline_id"`
+	PhaseName        string `json:"phase_name"`
+	PhaseOrder       int64  `json:"phase_order"`
+	ChildIndex       int64  `json:"child_index"`
+	CreatedAt        int64  `json:"created_at"`
+}
+
+func (q *Queries) InsertRunLineage(ctx context.Context, arg InsertRunLineageParams) error {
+	_, err := q.db.ExecContext(ctx, insertRunLineage,
+		arg.RunID,
+		arg.ParentPipelineID,
+		arg.PhaseName,
+		arg.PhaseOrder,
+		arg.ChildIndex,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertRunPipeline = `-- name: InsertRunPipeline :one
+INSERT INTO run_pipelines (
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  issue_number,
+  pr_number,
+  context,
+  debug,
+  created_by_user_id,
+  artifact_dir,
+  status,
+  active_phase,
+  failed_phase,
+  cancel_requested,
+  max_phases,
+  max_child_runs_per_phase,
+  total_child_runs,
+  token_budget_total,
+  token_budget_used,
+  deadline_at,
+  created_at,
+  updated_at,
+  completed_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  issue_number,
+  pr_number,
+  context,
+  debug,
+  created_by_user_id,
+  artifact_dir,
+  status,
+  active_phase,
+  failed_phase,
+  cancel_requested,
+  max_phases,
+  max_child_runs_per_phase,
+  total_child_runs,
+  token_budget_total,
+  token_budget_used,
+  deadline_at,
+  created_at,
+  updated_at,
+  completed_at
+`
+
+type InsertRunPipelineParams struct {
+	ID                   string        `json:"id"`
+	TaskID               string        `json:"task_id"`
+	Repo                 string        `json:"repo"`
+	Task                 string        `json:"task"`
+	BaseBranch           string        `json:"base_branch"`
+	HeadBranch           string        `json:"head_branch"`
+	Trigger              string        `json:"trigger"`
+	IssueNumber          int64         `json:"issue_number"`
+	PrNumber             int64         `json:"pr_number"`
+	Context              string        `json:"context"`
+	Debug                bool          `json:"debug"`
+	CreatedByUserID      string        `json:"created_by_user_id"`
+	ArtifactDir          string        `json:"artifact_dir"`
+	Status               string        `json:"status"`
+	ActivePhase          string        `json:"active_phase"`
+	FailedPhase          string        `json:"failed_phase"`
+	CancelRequested      bool          `json:"cancel_requested"`
+	MaxPhases            int64         `json:"max_phases"`
+	MaxChildRunsPerPhase int64         `json:"max_child_runs_per_phase"`
+	TotalChildRuns       int64         `json:"total_child_runs"`
+	TokenBudgetTotal     int64         `json:"token_budget_total"`
+	TokenBudgetUsed      int64         `json:"token_budget_used"`
+	DeadlineAt           sql.NullInt64 `json:"deadline_at"`
+	CreatedAt            int64         `json:"created_at"`
+	UpdatedAt            int64         `json:"updated_at"`
+	CompletedAt          sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) InsertRunPipeline(ctx context.Context, arg InsertRunPipelineParams) (RunPipeline, error) {
+	row := q.db.QueryRowContext(ctx, insertRunPipeline,
+		arg.ID,
+		arg.TaskID,
+		arg.Repo,
+		arg.Task,
+		arg.BaseBranch,
+		arg.HeadBranch,
+		arg.Trigger,
+		arg.IssueNumber,
+		arg.PrNumber,
+		arg.Context,
+		arg.Debug,
+		arg.CreatedByUserID,
+		arg.ArtifactDir,
+		arg.Status,
+		arg.ActivePhase,
+		arg.FailedPhase,
+		arg.CancelRequested,
+		arg.MaxPhases,
+		arg.MaxChildRunsPerPhase,
+		arg.TotalChildRuns,
+		arg.TokenBudgetTotal,
+		arg.TokenBudgetUsed,
+		arg.DeadlineAt,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.CompletedAt,
+	)
+	var i RunPipeline
+	err := row.Scan(
+		&i.ID,
+		&i.TaskID,
+		&i.Repo,
+		&i.Task,
+		&i.BaseBranch,
+		&i.HeadBranch,
+		&i.Trigger,
+		&i.IssueNumber,
+		&i.PrNumber,
+		&i.Context,
+		&i.Debug,
+		&i.CreatedByUserID,
+		&i.ArtifactDir,
+		&i.Status,
+		&i.ActivePhase,
+		&i.FailedPhase,
+		&i.CancelRequested,
+		&i.MaxPhases,
+		&i.MaxChildRunsPerPhase,
+		&i.TotalChildRuns,
+		&i.TokenBudgetTotal,
+		&i.TokenBudgetUsed,
+		&i.DeadlineAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const insertRunPipelinePhase = `-- name: InsertRunPipelinePhase :one
+INSERT INTO run_pipeline_phases (
+  pipeline_id,
+  phase_name,
+  phase_order,
+  enabled,
+  state,
+  run_id,
+  child_index,
+  artifact_paths,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING
+  pipeline_id,
+  phase_name,
+  phase_order,
+  enabled,
+  state,
+  run_id,
+  child_index,
+  artifact_paths,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+`
+
+type InsertRunPipelinePhaseParams struct {
+	PipelineID    string        `json:"pipeline_id"`
+	PhaseName     string        `json:"phase_name"`
+	PhaseOrder    int64         `json:"phase_order"`
+	Enabled       bool          `json:"enabled"`
+	State         string        `json:"state"`
+	RunID         string        `json:"run_id"`
+	ChildIndex    int64         `json:"child_index"`
+	ArtifactPaths string        `json:"artifact_paths"`
+	Error         string        `json:"error"`
+	CreatedAt     int64         `json:"created_at"`
+	UpdatedAt     int64         `json:"updated_at"`
+	StartedAt     sql.NullInt64 `json:"started_at"`
+	CompletedAt   sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) InsertRunPipelinePhase(ctx context.Context, arg InsertRunPipelinePhaseParams) (RunPipelinePhase, error) {
+	row := q.db.QueryRowContext(ctx, insertRunPipelinePhase,
+		arg.PipelineID,
+		arg.PhaseName,
+		arg.PhaseOrder,
+		arg.Enabled,
+		arg.State,
+		arg.RunID,
+		arg.ChildIndex,
+		arg.ArtifactPaths,
+		arg.Error,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.StartedAt,
+		arg.CompletedAt,
+	)
+	var i RunPipelinePhase
+	err := row.Scan(
+		&i.PipelineID,
+		&i.PhaseName,
+		&i.PhaseOrder,
+		&i.Enabled,
+		&i.State,
+		&i.RunID,
+		&i.ChildIndex,
+		&i.ArtifactPaths,
+		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const isTaskCompleted = `-- name: IsTaskCompleted :one
 SELECT status = 'completed'
 FROM tasks
@@ -1530,6 +1999,146 @@ func (q *Queries) ListCredentialCandidates(ctx context.Context, arg ListCredenti
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIncompleteRunPipelines = `-- name: ListIncompleteRunPipelines :many
+SELECT
+  id,
+  task_id,
+  repo,
+  task,
+  base_branch,
+  head_branch,
+  trigger,
+  issue_number,
+  pr_number,
+  context,
+  debug,
+  created_by_user_id,
+  artifact_dir,
+  status,
+  active_phase,
+  failed_phase,
+  cancel_requested,
+  max_phases,
+  max_child_runs_per_phase,
+  total_child_runs,
+  token_budget_total,
+  token_budget_used,
+  deadline_at,
+  created_at,
+  updated_at,
+  completed_at
+FROM run_pipelines
+WHERE status IN ('pending', 'running')
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListIncompleteRunPipelines(ctx context.Context) ([]RunPipeline, error) {
+	rows, err := q.db.QueryContext(ctx, listIncompleteRunPipelines)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RunPipeline{}
+	for rows.Next() {
+		var i RunPipeline
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.Repo,
+			&i.Task,
+			&i.BaseBranch,
+			&i.HeadBranch,
+			&i.Trigger,
+			&i.IssueNumber,
+			&i.PrNumber,
+			&i.Context,
+			&i.Debug,
+			&i.CreatedByUserID,
+			&i.ArtifactDir,
+			&i.Status,
+			&i.ActivePhase,
+			&i.FailedPhase,
+			&i.CancelRequested,
+			&i.MaxPhases,
+			&i.MaxChildRunsPerPhase,
+			&i.TotalChildRuns,
+			&i.TokenBudgetTotal,
+			&i.TokenBudgetUsed,
+			&i.DeadlineAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunPipelinePhases = `-- name: ListRunPipelinePhases :many
+SELECT
+  pipeline_id,
+  phase_name,
+  phase_order,
+  enabled,
+  state,
+  run_id,
+  child_index,
+  artifact_paths,
+  error,
+  created_at,
+  updated_at,
+  started_at,
+  completed_at
+FROM run_pipeline_phases
+WHERE pipeline_id = ?
+ORDER BY phase_order ASC
+`
+
+func (q *Queries) ListRunPipelinePhases(ctx context.Context, pipelineID string) ([]RunPipelinePhase, error) {
+	rows, err := q.db.QueryContext(ctx, listRunPipelinePhases, pipelineID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RunPipelinePhase{}
+	for rows.Next() {
+		var i RunPipelinePhase
+		if err := rows.Scan(
+			&i.PipelineID,
+			&i.PhaseName,
+			&i.PhaseOrder,
+			&i.Enabled,
+			&i.State,
+			&i.RunID,
+			&i.ChildIndex,
+			&i.ArtifactPaths,
+			&i.Error,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2353,6 +2962,156 @@ func (q *Queries) UpdateRunExecutionState(ctx context.Context, arg UpdateRunExec
 		arg.UpdatedAt,
 		arg.LastObservedAt,
 		arg.RunID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateRunPipeline = `-- name: UpdateRunPipeline :execrows
+UPDATE run_pipelines
+SET
+  task_id = ?,
+  repo = ?,
+  task = ?,
+  base_branch = ?,
+  head_branch = ?,
+  trigger = ?,
+  issue_number = ?,
+  pr_number = ?,
+  context = ?,
+  debug = ?,
+  created_by_user_id = ?,
+  artifact_dir = ?,
+  status = ?,
+  active_phase = ?,
+  failed_phase = ?,
+  cancel_requested = ?,
+  max_phases = ?,
+  max_child_runs_per_phase = ?,
+  total_child_runs = ?,
+  token_budget_total = ?,
+  token_budget_used = ?,
+  deadline_at = ?,
+  created_at = ?,
+  updated_at = ?,
+  completed_at = ?
+WHERE id = ?
+`
+
+type UpdateRunPipelineParams struct {
+	TaskID               string        `json:"task_id"`
+	Repo                 string        `json:"repo"`
+	Task                 string        `json:"task"`
+	BaseBranch           string        `json:"base_branch"`
+	HeadBranch           string        `json:"head_branch"`
+	Trigger              string        `json:"trigger"`
+	IssueNumber          int64         `json:"issue_number"`
+	PrNumber             int64         `json:"pr_number"`
+	Context              string        `json:"context"`
+	Debug                bool          `json:"debug"`
+	CreatedByUserID      string        `json:"created_by_user_id"`
+	ArtifactDir          string        `json:"artifact_dir"`
+	Status               string        `json:"status"`
+	ActivePhase          string        `json:"active_phase"`
+	FailedPhase          string        `json:"failed_phase"`
+	CancelRequested      bool          `json:"cancel_requested"`
+	MaxPhases            int64         `json:"max_phases"`
+	MaxChildRunsPerPhase int64         `json:"max_child_runs_per_phase"`
+	TotalChildRuns       int64         `json:"total_child_runs"`
+	TokenBudgetTotal     int64         `json:"token_budget_total"`
+	TokenBudgetUsed      int64         `json:"token_budget_used"`
+	DeadlineAt           sql.NullInt64 `json:"deadline_at"`
+	CreatedAt            int64         `json:"created_at"`
+	UpdatedAt            int64         `json:"updated_at"`
+	CompletedAt          sql.NullInt64 `json:"completed_at"`
+	ID                   string        `json:"id"`
+}
+
+func (q *Queries) UpdateRunPipeline(ctx context.Context, arg UpdateRunPipelineParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateRunPipeline,
+		arg.TaskID,
+		arg.Repo,
+		arg.Task,
+		arg.BaseBranch,
+		arg.HeadBranch,
+		arg.Trigger,
+		arg.IssueNumber,
+		arg.PrNumber,
+		arg.Context,
+		arg.Debug,
+		arg.CreatedByUserID,
+		arg.ArtifactDir,
+		arg.Status,
+		arg.ActivePhase,
+		arg.FailedPhase,
+		arg.CancelRequested,
+		arg.MaxPhases,
+		arg.MaxChildRunsPerPhase,
+		arg.TotalChildRuns,
+		arg.TokenBudgetTotal,
+		arg.TokenBudgetUsed,
+		arg.DeadlineAt,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.CompletedAt,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateRunPipelinePhase = `-- name: UpdateRunPipelinePhase :execrows
+UPDATE run_pipeline_phases
+SET
+  phase_order = ?,
+  enabled = ?,
+  state = ?,
+  run_id = ?,
+  child_index = ?,
+  artifact_paths = ?,
+  error = ?,
+  created_at = ?,
+  updated_at = ?,
+  started_at = ?,
+  completed_at = ?
+WHERE pipeline_id = ? AND phase_name = ?
+`
+
+type UpdateRunPipelinePhaseParams struct {
+	PhaseOrder    int64         `json:"phase_order"`
+	Enabled       bool          `json:"enabled"`
+	State         string        `json:"state"`
+	RunID         string        `json:"run_id"`
+	ChildIndex    int64         `json:"child_index"`
+	ArtifactPaths string        `json:"artifact_paths"`
+	Error         string        `json:"error"`
+	CreatedAt     int64         `json:"created_at"`
+	UpdatedAt     int64         `json:"updated_at"`
+	StartedAt     sql.NullInt64 `json:"started_at"`
+	CompletedAt   sql.NullInt64 `json:"completed_at"`
+	PipelineID    string        `json:"pipeline_id"`
+	PhaseName     string        `json:"phase_name"`
+}
+
+func (q *Queries) UpdateRunPipelinePhase(ctx context.Context, arg UpdateRunPipelinePhaseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateRunPipelinePhase,
+		arg.PhaseOrder,
+		arg.Enabled,
+		arg.State,
+		arg.RunID,
+		arg.ChildIndex,
+		arg.ArtifactPaths,
+		arg.Error,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.StartedAt,
+		arg.CompletedAt,
+		arg.PipelineID,
+		arg.PhaseName,
 	)
 	if err != nil {
 		return 0, err

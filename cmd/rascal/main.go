@@ -1903,19 +1903,48 @@ rascal task run_abc123
 			if err := a.requireServerAuth(); err != nil {
 				return err
 			}
-			task, err := a.fetchTask(args[0])
+			resp, err := a.fetchTask(args[0])
 			if err != nil {
 				return err
 			}
-			return emit(a, api.TaskResponse{Task: task}, func() error {
+			return emit(a, resp, func() error {
 				tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 				if _, err := fmt.Fprintln(tw, "TASK ID\tSTATUS\tREPO\tPR\tPENDING INPUT\tUPDATED"); err != nil {
 					return fmt.Errorf("write task table header: %w", err)
 				}
-				if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%t\t%s\n", task.ID, task.Status, task.Repo, task.PRNumber, task.PendingInput, task.UpdatedAt.Format(time.RFC3339)); err != nil {
+				if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%t\t%s\n", resp.Task.ID, resp.Task.Status, resp.Task.Repo, resp.Task.PRNumber, resp.Task.PendingInput, resp.Task.UpdatedAt.Format(time.RFC3339)); err != nil {
 					return fmt.Errorf("write task table row: %w", err)
 				}
-				return tw.Flush()
+				if err := tw.Flush(); err != nil {
+					return fmt.Errorf("flush task table: %w", err)
+				}
+				if resp.Pipeline == nil {
+					return nil
+				}
+				if _, err := fmt.Fprintln(os.Stdout); err != nil {
+					return fmt.Errorf("write pipeline spacer: %w", err)
+				}
+				if _, err := fmt.Fprintf(os.Stdout, "PIPELINE %s\t%s\tactive=%s\tchildren=%d/%d\ttokens=%d", resp.Pipeline.ID, resp.Pipeline.Status, resp.Pipeline.ActivePhase, resp.Pipeline.TotalChildRuns, resp.Pipeline.MaxPhases, resp.Pipeline.TokenBudgetUsed); err != nil {
+					return fmt.Errorf("write pipeline summary: %w", err)
+				}
+				if resp.Pipeline.TokenBudgetTotal > 0 {
+					if _, err := fmt.Fprintf(os.Stdout, "/%d", resp.Pipeline.TokenBudgetTotal); err != nil {
+						return fmt.Errorf("write pipeline token budget: %w", err)
+					}
+				}
+				if _, err := fmt.Fprintln(os.Stdout); err != nil {
+					return fmt.Errorf("write pipeline newline: %w", err)
+				}
+				ptw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+				if _, err := fmt.Fprintln(ptw, "PHASE\tSTATE\tRUN\tARTIFACTS"); err != nil {
+					return fmt.Errorf("write pipeline phase header: %w", err)
+				}
+				for _, phase := range resp.Pipeline.Phases {
+					if _, err := fmt.Fprintf(ptw, "%d:%s\t%s\t%s\t%s\n", phase.PhaseOrder, phase.PhaseName, phase.State, phase.RunID, strings.Join(phase.ArtifactPaths, ",")); err != nil {
+						return fmt.Errorf("write pipeline phase row: %w", err)
+					}
+				}
+				return ptw.Flush()
 			})
 		},
 	}
@@ -2502,21 +2531,21 @@ func normalizedPRStatus(status state.PRStatus) state.PRStatus {
 	}
 }
 
-func (a *app) fetchTask(taskID string) (state.Task, error) {
+func (a *app) fetchTask(taskID string) (api.TaskResponse, error) {
 	escaped := url.PathEscape(taskID)
 	resp, err := a.client.do(http.MethodGet, "/v1/tasks/"+escaped, nil)
 	if err != nil {
-		return state.Task{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
+		return api.TaskResponse{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
 	defer closeWithLog("close get task response body", resp.Body)
 	if resp.StatusCode >= 300 {
-		return state.Task{}, decodeServerError(resp)
+		return api.TaskResponse{}, decodeServerError(resp)
 	}
 	var out api.TaskResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return state.Task{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+		return api.TaskResponse{}, &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 	}
-	return out.Task, nil
+	return out, nil
 }
 
 func decodeServerError(resp *http.Response) error {

@@ -189,6 +189,7 @@ func main() {
 	}
 	s.recoverQueuedCancels()
 	s.recoverRunningRuns()
+	s.recoverPipelines()
 	s.scheduleRuns("")
 
 	mux := http.NewServeMux()
@@ -531,7 +532,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := s.createAndQueueRun(runRequest{
+	runReq := runRequest{
 		TaskID:          req.TaskID,
 		Repo:            req.Repo,
 		Task:            req.Task,
@@ -539,7 +540,25 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Trigger:         trigger,
 		Debug:           req.Debug,
 		CreatedByUserID: requesterUserID(r.Context()),
-	})
+	}
+	if req.Pipeline != nil && req.Pipeline.Enabled {
+		run, pipeline, err := s.createAndQueuePipeline(runReq, req.Pipeline)
+		if err != nil {
+			if errors.Is(err, errServerDraining) {
+				http.Error(w, "server is draining", http.StatusServiceUnavailable)
+				return
+			}
+			http.Error(w, "failed to create pipeline: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		var lineage *state.RunLineage
+		if current, ok := s.store.GetRunLineage(run.ID); ok {
+			lineage = &current
+		}
+		writeJSON(w, http.StatusAccepted, api.RunResponse{Run: run, Lineage: lineage, Pipeline: &pipeline})
+		return
+	}
+	run, err := s.createAndQueueRun(runReq)
 	if err != nil {
 		if errors.Is(err, errServerDraining) {
 			http.Error(w, "server is draining", http.StatusServiceUnavailable)
@@ -590,7 +609,7 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		ctxText = fmt.Sprintf("Issue URL: %s", issue.HTMLURL)
 	}
 
-	run, err := s.createAndQueueRun(runRequest{
+	runReq := runRequest{
 		TaskID:          taskID,
 		Repo:            req.Repo,
 		Task:            taskText,
@@ -605,7 +624,29 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 			RequestedBy: requestedBy,
 			Trigger:     runtrigger.NameIssueAPI,
 		},
-	})
+	}
+	if req.Pipeline != nil && req.Pipeline.Enabled {
+		run, pipeline, err := s.createAndQueuePipeline(runReq, req.Pipeline)
+		if err != nil {
+			if errors.Is(err, errTaskCompleted) {
+				writeJSON(w, http.StatusConflict, api.ErrorResponse{Error: err.Error()})
+				return
+			}
+			if errors.Is(err, errServerDraining) {
+				http.Error(w, "server is draining", http.StatusServiceUnavailable)
+				return
+			}
+			http.Error(w, "failed to create pipeline: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		var lineage *state.RunLineage
+		if current, ok := s.store.GetRunLineage(run.ID); ok {
+			lineage = &current
+		}
+		writeJSON(w, http.StatusAccepted, api.RunResponse{Run: run, Lineage: lineage, Pipeline: &pipeline})
+		return
+	}
+	run, err := s.createAndQueueRun(runReq)
 	if err != nil {
 		if errors.Is(err, errTaskCompleted) {
 			writeJSON(w, http.StatusConflict, api.ErrorResponse{Error: err.Error()})
@@ -842,27 +883,46 @@ func newCredentialID() (string, error) {
 }
 
 func (s *server) handleTaskSubresources(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	path := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
 	path = strings.Trim(path, "/")
 	if path == "" {
 		http.Error(w, "task id is required", http.StatusBadRequest)
 		return
 	}
-	taskID, err := url.PathUnescape(path)
-	if err != nil {
-		http.Error(w, "invalid task id", http.StatusBadRequest)
+	switch {
+	case strings.HasSuffix(path, "/cancel"):
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		taskID, err := url.PathUnescape(strings.Trim(strings.TrimSuffix(path, "/cancel"), "/"))
+		if err != nil {
+			http.Error(w, "invalid task id", http.StatusBadRequest)
+			return
+		}
+		s.handleCancelTask(w, taskID)
 		return
+	default:
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		taskID, err := url.PathUnescape(path)
+		if err != nil {
+			http.Error(w, "invalid task id", http.StatusBadRequest)
+			return
+		}
+		task, ok := s.store.GetTask(taskID)
+		if !ok {
+			http.Error(w, "task not found", http.StatusNotFound)
+			return
+		}
+		var pipeline *state.RunPipeline
+		if detail, ok := s.store.GetRunPipelineDetailByTask(taskID); ok {
+			pipeline = &detail
+		}
+		writeJSON(w, http.StatusOK, api.TaskResponse{Task: task, Pipeline: pipeline})
 	}
-	task, ok := s.store.GetTask(taskID)
-	if !ok {
-		http.Error(w, "task not found", http.StatusNotFound)
-		return
-	}
-	writeJSON(w, http.StatusOK, api.TaskResponse{Task: task})
 }
 
 func (s *server) handleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -1338,7 +1398,11 @@ func (s *server) handleGetRun(w http.ResponseWriter, runID string) {
 		http.Error(w, "run not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, api.RunResponse{Run: run})
+	var lineage *state.RunLineage
+	if current, ok := s.store.GetRunLineage(runID); ok {
+		lineage = &current
+	}
+	writeJSON(w, http.StatusOK, api.RunResponse{Run: run, Lineage: lineage})
 }
 
 func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
@@ -1364,10 +1428,7 @@ func (s *server) handleCancelRun(w http.ResponseWriter, runID string) {
 			http.Error(w, "failed to cancel run", http.StatusInternalServerError)
 			return
 		}
-		s.clearRunCancelBestEffort(runID)
-		if !s.isDraining() {
-			s.scheduleRuns(run.TaskID)
-		}
+		s.finishRun(updated)
 		canceled := true
 		writeJSON(w, http.StatusOK, api.RunCancelResponse{Run: &updated, Canceled: &canceled})
 		return
@@ -1584,6 +1645,13 @@ func (s *server) writeRunFiles(run state.Run) (err error) {
 		Context:     run.Context,
 		Debug:       run.Debug,
 	}
+	pipelineContext, pipelineInstructions, err := s.pipelineRunFiles(run)
+	if err != nil {
+		return err
+	}
+	if pipelineContext != nil {
+		ctxPayload.Pipeline = pipelineContext
+	}
 	ctxData, err := json.MarshalIndent(ctxPayload, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal run context: %w", err)
@@ -1593,6 +1661,9 @@ func (s *server) writeRunFiles(run state.Run) (err error) {
 	}
 
 	instructions := instructionText(run)
+	if strings.TrimSpace(pipelineInstructions) != "" {
+		instructions += "\n\n" + pipelineInstructions
+	}
 	if err := os.WriteFile(filepath.Join(run.RunDir, "instructions.md"), []byte(instructions), 0o644); err != nil {
 		return fmt.Errorf("write run instructions: %w", err)
 	}
@@ -1615,15 +1686,16 @@ func (s *server) writeRunFiles(run state.Run) (err error) {
 }
 
 type runContextFile struct {
-	RunID       string `json:"run_id"`
-	TaskID      string `json:"task_id"`
-	Repo        string `json:"repo"`
-	Task        string `json:"task"`
-	Trigger     string `json:"trigger"`
-	IssueNumber int    `json:"issue_number"`
-	PRNumber    int    `json:"pr_number"`
-	Context     string `json:"context"`
-	Debug       bool   `json:"debug"`
+	RunID       string         `json:"run_id"`
+	TaskID      string         `json:"task_id"`
+	Repo        string         `json:"repo"`
+	Task        string         `json:"task"`
+	Trigger     string         `json:"trigger"`
+	IssueNumber int            `json:"issue_number"`
+	PRNumber    int            `json:"pr_number"`
+	Context     string         `json:"context"`
+	Pipeline    map[string]any `json:"pipeline,omitempty"`
+	Debug       bool           `json:"debug"`
 }
 
 func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget) error {
@@ -2381,6 +2453,7 @@ func (s *server) removeRunExecutionBestEffort(ctx context.Context, handle runner
 
 func (s *server) finishRun(run state.Run) {
 	if runStatusIsDone(run.Status) {
+		s.handlePipelineRunFinalized(run)
 		s.clearRunCancelBestEffort(run.ID)
 	}
 	taskCompleted := s.store.IsTaskCompleted(run.TaskID)
@@ -3214,6 +3287,9 @@ func requesterForRun(run state.Run, target runResponseTarget, requesterUserID st
 }
 
 func (s *server) postRunStartCommentBestEffort(run state.Run, sessionMode agent.SessionMode, sessionResume bool) {
+	if s.isPipelineChildRun(run.ID) {
+		return
+	}
 	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
 		return
 	}
@@ -3252,6 +3328,9 @@ func (s *server) postRunStartCommentBestEffort(run state.Run, sessionMode agent.
 }
 
 func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
+	if s.isPipelineChildRun(run.ID) {
+		return
+	}
 	if !isCommentTriggeredRun(run.Trigger) {
 		return
 	}
@@ -3311,6 +3390,9 @@ func (s *server) postRunCompletionCommentBestEffort(run state.Run) {
 }
 
 func (s *server) postRunFailureCommentBestEffort(run state.Run) {
+	if s.isPipelineChildRun(run.ID) {
+		return
+	}
 	if strings.TrimSpace(s.cfg.GitHubToken) == "" || s.gh == nil {
 		return
 	}
@@ -3352,6 +3434,9 @@ func (s *server) postRunFailureCommentBestEffort(run state.Run) {
 }
 
 func (s *server) notifyRunTerminalGitHubBestEffort(run state.Run) {
+	if s.isPipelineChildRun(run.ID) {
+		return
+	}
 	switch run.Status {
 	case state.StatusSucceeded:
 		s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionRocket)

@@ -845,3 +845,111 @@ func TestStoreRunCancelLifecycle(t *testing.T) {
 		t.Fatal("expected cancel request to be cleared")
 	}
 }
+
+func TestNormalizeRunPipelineConfigDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := NormalizeRunPipelineConfig(RunPipelineConfig{Enabled: true})
+	if err != nil {
+		t.Fatalf("normalize config: %v", err)
+	}
+	if len(cfg.Phases) != 3 {
+		t.Fatalf("expected 3 default phases, got %d", len(cfg.Phases))
+	}
+	if cfg.MaxPhases != 3 {
+		t.Fatalf("max phases = %d, want 3", cfg.MaxPhases)
+	}
+	if cfg.MaxChildRunsPerPhase != 1 {
+		t.Fatalf("max child runs per phase = %d, want 1", cfg.MaxChildRunsPerPhase)
+	}
+}
+
+func TestStoreRunPipelineLimitExhaustion(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-pipeline", Repo: "owner/repo"}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	pipeline, err := store.CreateRunPipeline(CreateRunPipelineInput{
+		ID:          "pipe_limit",
+		TaskID:      "task-pipeline",
+		Repo:        "owner/repo",
+		Task:        "pipeline task",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/task-pipeline",
+		Trigger:     "cli",
+		ArtifactDir: filepath.Join(t.TempDir(), "artifacts"),
+		Config: RunPipelineConfig{
+			Enabled:   true,
+			MaxPhases: 2,
+			Phases: []PipelinePhaseName{
+				PipelinePhasePlan,
+				PipelinePhaseImplement,
+				PipelinePhaseVerify,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+
+	startPhase := func(runID string, phase PipelinePhaseName) {
+		if _, _, err := store.StartRunPipelinePhaseChild(StartRunPipelinePhaseChildInput{
+			PipelineID: pipeline.ID,
+			PhaseName:  phase,
+			Run: CreateRunInput{
+				ID:           runID,
+				TaskID:       pipeline.TaskID,
+				Repo:         pipeline.Repo,
+				Task:         pipeline.Task,
+				AgentBackend: agent.BackendCodex,
+				BaseBranch:   pipeline.BaseBranch,
+				HeadBranch:   pipeline.HeadBranch,
+				Trigger:      runtrigger.Normalize(pipeline.Trigger),
+				RunDir:       filepath.Join(t.TempDir(), runID),
+			},
+		}); err != nil {
+			t.Fatalf("start phase %s: %v", phase, err)
+		}
+	}
+
+	startPhase("run_plan", PipelinePhasePlan)
+	if _, _, err := store.FinalizeRunPipelinePhase(FinalizeRunPipelinePhaseInput{
+		PipelineID:    pipeline.ID,
+		PhaseName:     PipelinePhasePlan,
+		State:         PipelinePhaseStateSucceeded,
+		ArtifactPaths: []string{"/tmp/plan.json"},
+	}); err != nil {
+		t.Fatalf("finalize plan: %v", err)
+	}
+
+	startPhase("run_implement", PipelinePhaseImplement)
+	updated, _, err := store.FinalizeRunPipelinePhase(FinalizeRunPipelinePhaseInput{
+		PipelineID:    pipeline.ID,
+		PhaseName:     PipelinePhaseImplement,
+		State:         PipelinePhaseStateSucceeded,
+		ArtifactPaths: []string{"/tmp/implementation-summary.json"},
+	})
+	if err != nil {
+		t.Fatalf("finalize implement: %v", err)
+	}
+	if updated.Status != PipelineStatusFailed {
+		t.Fatalf("pipeline status = %s, want failed", updated.Status)
+	}
+	if updated.FailedPhase != PipelinePhaseVerify {
+		t.Fatalf("pipeline failed phase = %s, want verify", updated.FailedPhase)
+	}
+
+	detail, ok := store.GetRunPipelineDetail(updated.ID)
+	if !ok {
+		t.Fatal("expected pipeline detail")
+	}
+	if got := detail.Phases[2].State; got != PipelinePhaseStateSkipped {
+		t.Fatalf("verify phase state = %s, want skipped", got)
+	}
+}

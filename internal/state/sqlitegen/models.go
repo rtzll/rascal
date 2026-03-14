@@ -114,6 +114,60 @@ type RunLease struct {
 	LeaseExpiresAt int64  `json:"lease_expires_at"`
 }
 
+type RunLineage struct {
+	RunID            string `json:"run_id"`
+	ParentPipelineID string `json:"parent_pipeline_id"`
+	PhaseName        string `json:"phase_name"`
+	PhaseOrder       int64  `json:"phase_order"`
+	ChildIndex       int64  `json:"child_index"`
+	CreatedAt        int64  `json:"created_at"`
+}
+
+type RunPipeline struct {
+	ID                   string        `json:"id"`
+	TaskID               string        `json:"task_id"`
+	Repo                 string        `json:"repo"`
+	Task                 string        `json:"task"`
+	BaseBranch           string        `json:"base_branch"`
+	HeadBranch           string        `json:"head_branch"`
+	Trigger              string        `json:"trigger"`
+	IssueNumber          int64         `json:"issue_number"`
+	PrNumber             int64         `json:"pr_number"`
+	Context              string        `json:"context"`
+	Debug                bool          `json:"debug"`
+	CreatedByUserID      string        `json:"created_by_user_id"`
+	ArtifactDir          string        `json:"artifact_dir"`
+	Status               string        `json:"status"`
+	ActivePhase          string        `json:"active_phase"`
+	FailedPhase          string        `json:"failed_phase"`
+	CancelRequested      bool          `json:"cancel_requested"`
+	MaxPhases            int64         `json:"max_phases"`
+	MaxChildRunsPerPhase int64         `json:"max_child_runs_per_phase"`
+	TotalChildRuns       int64         `json:"total_child_runs"`
+	TokenBudgetTotal     int64         `json:"token_budget_total"`
+	TokenBudgetUsed      int64         `json:"token_budget_used"`
+	DeadlineAt           sql.NullInt64 `json:"deadline_at"`
+	CreatedAt            int64         `json:"created_at"`
+	UpdatedAt            int64         `json:"updated_at"`
+	CompletedAt          sql.NullInt64 `json:"completed_at"`
+}
+
+type RunPipelinePhase struct {
+	PipelineID    string        `json:"pipeline_id"`
+	PhaseName     string        `json:"phase_name"`
+	PhaseOrder    int64         `json:"phase_order"`
+	Enabled       bool          `json:"enabled"`
+	State         string        `json:"state"`
+	RunID         string        `json:"run_id"`
+	ChildIndex    int64         `json:"child_index"`
+	ArtifactPaths string        `json:"artifact_paths"`
+	Error         string        `json:"error"`
+	CreatedAt     int64         `json:"created_at"`
+	UpdatedAt     int64         `json:"updated_at"`
+	StartedAt     sql.NullInt64 `json:"started_at"`
+	CompletedAt   sql.NullInt64 `json:"completed_at"`
+}
+
 type RunTokenUsage struct {
 	RunID                 string        `json:"run_id"`
 	Backend               string        `json:"backend"`

@@ -14,22 +14,35 @@ type ServiceStatusResponse struct {
 }
 
 type CreateTaskRequest struct {
-	TaskID     string          `json:"task_id,omitempty"`
-	Repo       string          `json:"repo"`
-	Task       string          `json:"task"`
-	BaseBranch string          `json:"base_branch"`
-	Trigger    runtrigger.Name `json:"trigger,omitempty"`
-	Debug      *bool           `json:"debug,omitempty"`
+	TaskID     string              `json:"task_id,omitempty"`
+	Repo       string              `json:"repo"`
+	Task       string              `json:"task"`
+	BaseBranch string              `json:"base_branch"`
+	Trigger    runtrigger.Name     `json:"trigger,omitempty"`
+	Debug      *bool               `json:"debug,omitempty"`
+	Pipeline   *RunPipelineRequest `json:"pipeline,omitempty"`
 }
 
 type CreateIssueTaskRequest struct {
-	Repo        string `json:"repo"`
-	IssueNumber int    `json:"issue_number"`
-	Debug       *bool  `json:"debug,omitempty"`
+	Repo        string              `json:"repo"`
+	IssueNumber int                 `json:"issue_number"`
+	Debug       *bool               `json:"debug,omitempty"`
+	Pipeline    *RunPipelineRequest `json:"pipeline,omitempty"`
+}
+
+type RunPipelineRequest struct {
+	Enabled              bool     `json:"enabled,omitempty"`
+	Phases               []string `json:"phases,omitempty"`
+	MaxPhases            int      `json:"max_phases,omitempty"`
+	MaxChildRunsPerPhase int      `json:"max_child_runs_per_phase,omitempty"`
+	TokenBudgetTotal     int64    `json:"token_budget_total,omitempty"`
+	WallClockBudgetSecs  int64    `json:"wall_clock_budget_secs,omitempty"`
 }
 
 type RunResponse struct {
-	Run state.Run `json:"run" toml:"run"`
+	Run      state.Run          `json:"run" toml:"run"`
+	Lineage  *state.RunLineage  `json:"lineage,omitempty" toml:"lineage,omitempty"`
+	Pipeline *state.RunPipeline `json:"pipeline,omitempty" toml:"pipeline,omitempty"`
 }
 
 type RunsResponse struct {
@@ -37,7 +50,8 @@ type RunsResponse struct {
 }
 
 type TaskResponse struct {
-	Task state.Task `json:"task" toml:"task"`
+	Task     state.Task         `json:"task" toml:"task"`
+	Pipeline *state.RunPipeline `json:"pipeline,omitempty" toml:"pipeline,omitempty"`
 }
 
 type ErrorResponse struct {
