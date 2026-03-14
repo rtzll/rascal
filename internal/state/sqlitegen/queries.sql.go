@@ -2052,17 +2052,17 @@ UPDATE tasks
 SET
   last_run_id = ?1,
   updated_at = ?2,
-  issue_number = CASE WHEN ?3 > 0 THEN ?3 ELSE issue_number END,
-  pr_number = CASE WHEN ?4 > 0 THEN ?4 ELSE pr_number END
+  issue_number = COALESCE(?3, issue_number),
+  pr_number = COALESCE(?4, pr_number)
 WHERE id = ?5
 `
 
 type SetTaskLastRunParams struct {
-	LastRunID   string      `json:"last_run_id"`
-	UpdatedAt   int64       `json:"updated_at"`
-	IssueNumber interface{} `json:"issue_number"`
-	PrNumber    interface{} `json:"pr_number"`
-	ID          string      `json:"id"`
+	LastRunID   string        `json:"last_run_id"`
+	UpdatedAt   int64         `json:"updated_at"`
+	IssueNumber sql.NullInt64 `json:"issue_number"`
+	PrNumber    sql.NullInt64 `json:"pr_number"`
+	ID          string        `json:"id"`
 }
 
 func (q *Queries) SetTaskLastRun(ctx context.Context, arg SetTaskLastRunParams) (int64, error) {

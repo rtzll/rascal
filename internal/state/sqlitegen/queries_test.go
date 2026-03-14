@@ -57,8 +57,32 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatalf("unexpected task by PR: %s", byPR.ID)
 	}
 
-	if _, err := q.SetTaskLastRun(ctx, SetTaskLastRunParams{LastRunID: "run_2", UpdatedAt: later + 2, IssueNumber: int64(2), PrNumber: int64(77), ID: "task_1"}); err != nil {
+	if _, err := q.SetTaskLastRun(ctx, SetTaskLastRunParams{
+		LastRunID:   "run_2",
+		UpdatedAt:   later + 2,
+		IssueNumber: sql.NullInt64{Int64: 2, Valid: true},
+		PrNumber:    sql.NullInt64{Int64: 77, Valid: true},
+		ID:          "task_1",
+	}); err != nil {
 		t.Fatalf("SetTaskLastRun: %v", err)
+	}
+	if _, err := q.SetTaskLastRun(ctx, SetTaskLastRunParams{
+		LastRunID: "run_3",
+		UpdatedAt: later + 3,
+		ID:        "task_1",
+	}); err != nil {
+		t.Fatalf("SetTaskLastRun with null numbers: %v", err)
+	}
+
+	gotTask, err = q.GetTask(ctx, "task_1")
+	if err != nil {
+		t.Fatalf("GetTask after SetTaskLastRun: %v", err)
+	}
+	if gotTask.IssueNumber != 2 {
+		t.Fatalf("issue_number = %d, want 2", gotTask.IssueNumber)
+	}
+	if gotTask.PrNumber != 77 {
+		t.Fatalf("pr_number = %d, want 77", gotTask.PrNumber)
 	}
 
 	completed, err := q.IsTaskCompleted(ctx, "task_1")

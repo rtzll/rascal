@@ -383,8 +383,8 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	if _, err := qtx.SetTaskLastRun(context.Background(), sqlitegen.SetTaskLastRunParams{
 		LastRunID:   row.ID,
 		UpdatedAt:   now.UnixNano(),
-		IssueNumber: int64(in.IssueNumber),
-		PrNumber:    int64(in.PRNumber),
+		IssueNumber: optionalPositiveInt64(in.IssueNumber),
+		PrNumber:    optionalPositiveInt64(in.PRNumber),
 		ID:          in.TaskID,
 	}); err != nil {
 		return Run{}, fmt.Errorf("set last run for task %q to %q: %w", in.TaskID, row.ID, err)
@@ -396,7 +396,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	if err := tx.Commit(); err != nil {
 		return Run{}, fmt.Errorf("commit create run transaction for run %q: %w", in.ID, err)
 	}
-	return fromDBRun(row), nil
+	return fromDBInsertRunRow(row), nil
 }
 
 func (s *Store) GetRun(id string) (Run, bool) {
@@ -407,7 +407,7 @@ func (s *Store) GetRun(id string) (Run, bool) {
 		}
 		return Run{}, false
 	}
-	return fromDBRun(row), true
+	return fromDBGetRunRow(row), true
 }
 
 func (s *Store) ListRuns(limit int) []Run {
@@ -420,7 +420,7 @@ func (s *Store) ListRuns(limit int) []Run {
 	}
 	out := make([]Run, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, fromDBRun(r))
+		out = append(out, fromDBListRunsRow(r))
 	}
 	return out
 }
@@ -432,7 +432,7 @@ func (s *Store) ListRunningRuns() []Run {
 	}
 	out := make([]Run, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, fromDBRun(r))
+		out = append(out, fromDBListRunningRunsRow(r))
 	}
 	return out
 }
@@ -459,7 +459,7 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 		}
 		return Run{}, fmt.Errorf("load run %q for update: %w", id, err)
 	}
-	r := fromDBRun(row)
+	r := fromDBGetRunRow(row)
 	prevStatus := r.Status
 	if err := fn(&r); err != nil {
 		return Run{}, fmt.Errorf("apply run update for %q: %w", id, err)
@@ -480,8 +480,8 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 	if _, err := qtx.SetTaskLastRun(context.Background(), sqlitegen.SetTaskLastRunParams{
 		LastRunID:   r.ID,
 		UpdatedAt:   r.UpdatedAt.UnixNano(),
-		IssueNumber: int64(r.IssueNumber),
-		PrNumber:    int64(r.PRNumber),
+		IssueNumber: optionalPositiveInt64(r.IssueNumber),
+		PrNumber:    optionalPositiveInt64(r.PRNumber),
 		ID:          r.TaskID,
 	}); err != nil {
 		return Run{}, fmt.Errorf("set last run for task %q to %q: %w", r.TaskID, r.ID, err)
@@ -539,7 +539,7 @@ func (s *Store) ClaimRunStart(runID string) (Run, bool, error) {
 		}
 		return Run{}, false, fmt.Errorf("load run %q after claim start: %w", runID, err)
 	}
-	return fromDBRun(row), rows > 0, nil
+	return fromDBGetRunRow(row), rows > 0, nil
 }
 
 func (s *Store) ClaimNextQueuedRun(preferredTaskID string) (Run, bool, error) {
@@ -552,7 +552,7 @@ func (s *Store) ClaimNextQueuedRun(preferredTaskID string) (Run, bool, error) {
 			TaskID:    preferredTaskID,
 		})
 		if err == nil {
-			return fromDBRun(row), true, nil
+			return fromDBClaimNextQueuedRunForTaskRow(row), true, nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return Run{}, false, fmt.Errorf("claim next queued run for task %q: %w", preferredTaskID, err)
@@ -569,7 +569,7 @@ func (s *Store) ClaimNextQueuedRun(preferredTaskID string) (Run, bool, error) {
 		}
 		return Run{}, false, fmt.Errorf("claim next queued run: %w", err)
 	}
-	return fromDBRun(row), true, nil
+	return fromDBClaimNextQueuedRunRow(row), true, nil
 }
 
 func (s *Store) UpsertRunLease(runID, ownerID string, ttl time.Duration) error {
@@ -924,7 +924,7 @@ func (s *Store) ActiveRunForTask(taskID string) (Run, bool) {
 		}
 		return Run{}, false
 	}
-	return fromDBRun(row), true
+	return fromDBActiveRunForTaskRow(row), true
 }
 
 func (s *Store) LastRunForTask(taskID string) (Run, bool) {
@@ -935,7 +935,7 @@ func (s *Store) LastRunForTask(taskID string) (Run, bool) {
 		}
 		return Run{}, false
 	}
-	return fromDBRun(row), true
+	return fromDBLastRunForTaskRow(row), true
 }
 
 func (s *Store) CancelQueuedRuns(taskID, reason string) error {
@@ -1133,29 +1133,36 @@ func fromDBRunParts(id, taskID, repo, task, agentBackend, baseBranch, headBranch
 	return out
 }
 
-func fromDBRun(row any) Run {
-	switch r := row.(type) {
-	case sqlitegen.Run:
-		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
-	case sqlitegen.InsertRunRow:
-		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
-	case sqlitegen.GetRunRow:
-		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
-	case sqlitegen.ListRunsRow:
-		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
-	case sqlitegen.ListRunningRunsRow:
-		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
-	case sqlitegen.LastRunForTaskRow:
-		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
-	case sqlitegen.ActiveRunForTaskRow:
-		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
-	case sqlitegen.ClaimNextQueuedRunRow:
-		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
-	case sqlitegen.ClaimNextQueuedRunForTaskRow:
-		return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
-	default:
-		return Run{}
-	}
+func fromDBInsertRunRow(r sqlitegen.InsertRunRow) Run {
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+}
+
+func fromDBGetRunRow(r sqlitegen.GetRunRow) Run {
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+}
+
+func fromDBListRunsRow(r sqlitegen.ListRunsRow) Run {
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+}
+
+func fromDBListRunningRunsRow(r sqlitegen.ListRunningRunsRow) Run {
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+}
+
+func fromDBLastRunForTaskRow(r sqlitegen.LastRunForTaskRow) Run {
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+}
+
+func fromDBActiveRunForTaskRow(r sqlitegen.ActiveRunForTaskRow) Run {
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+}
+
+func fromDBClaimNextQueuedRunRow(r sqlitegen.ClaimNextQueuedRunRow) Run {
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+}
+
+func fromDBClaimNextQueuedRunForTaskRow(r sqlitegen.ClaimNextQueuedRunForTaskRow) Run {
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {
@@ -1211,6 +1218,13 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 		CompletedAt:  toNullInt64(r.CompletedAt),
 		ID:           r.ID,
 	}
+}
+
+func optionalPositiveInt64(v int) sql.NullInt64 {
+	if v <= 0 {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(v), Valid: true}
 }
 
 func fromDBRunTokenUsage(row sqlitegen.RunTokenUsage) RunTokenUsage {

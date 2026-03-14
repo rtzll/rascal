@@ -78,8 +78,8 @@ UPDATE tasks
 SET
   last_run_id = sqlc.arg(last_run_id),
   updated_at = sqlc.arg(updated_at),
-  issue_number = CASE WHEN sqlc.arg(issue_number) > 0 THEN sqlc.arg(issue_number) ELSE issue_number END,
-  pr_number = CASE WHEN sqlc.arg(pr_number) > 0 THEN sqlc.arg(pr_number) ELSE pr_number END
+  issue_number = COALESCE(sqlc.narg(issue_number), issue_number),
+  pr_number = COALESCE(sqlc.narg(pr_number), pr_number)
 WHERE id = sqlc.arg(id);
 
 -- name: IsTaskCompleted :one
