@@ -12,12 +12,16 @@ type Label struct {
 	Name string `json:"name"`
 }
 
+type PullRequestRef struct {
+	URL string `json:"url"`
+}
+
 type Issue struct {
-	Number      int         `json:"number"`
-	Title       string      `json:"title"`
-	Body        string      `json:"body"`
-	Labels      []Label     `json:"labels"`
-	PullRequest interface{} `json:"pull_request"`
+	Number      int             `json:"number"`
+	Title       string          `json:"title"`
+	Body        string          `json:"body"`
+	Labels      []Label         `json:"labels"`
+	PullRequest *PullRequestRef `json:"pull_request"`
 }
 
 type Comment struct {

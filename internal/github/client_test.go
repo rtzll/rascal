@@ -86,18 +86,18 @@ func TestGetPullRequest(t *testing.T) {
 func TestFindWebhookByURL(t *testing.T) {
 	client := newGitHubMockClient(t,
 		githubRoute(http.MethodGet, "/repos/owner/repo/hooks", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONResponse(t, w, http.StatusOK, []map[string]any{
+			writeJSONResponse(t, w, http.StatusOK, []webhookAPIResponse{
 				{
-					"id":     1,
-					"active": true,
-					"events": []string{"issues"},
-					"config": map[string]any{"url": "https://example.com/a"},
+					ID:     1,
+					Active: true,
+					Events: []string{"issues"},
+					Config: webhookConfig{URL: "https://example.com/a"},
 				},
 				{
-					"id":     2,
-					"active": true,
-					"events": []string{"issues", "issue_comment"},
-					"config": map[string]any{"url": "https://example.com/b"},
+					ID:     2,
+					Active: true,
+					Events: []string{"issues", "issue_comment"},
+					Config: webhookConfig{URL: "https://example.com/b"},
 				},
 			})
 		}),
@@ -118,12 +118,12 @@ func TestDeleteWebhookByURL(t *testing.T) {
 	deleted := false
 	client := newGitHubMockClient(t,
 		githubRoute(http.MethodGet, "/repos/owner/repo/hooks", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONResponse(t, w, http.StatusOK, []map[string]any{
+			writeJSONResponse(t, w, http.StatusOK, []webhookAPIResponse{
 				{
-					"id":     22,
-					"active": true,
-					"events": []string{"issues"},
-					"config": map[string]any{"url": "https://example.com/hook"},
+					ID:     22,
+					Active: true,
+					Events: []string{"issues"},
+					Config: webhookConfig{URL: "https://example.com/hook"},
 				},
 			})
 		}),
@@ -353,13 +353,23 @@ func TestUpsertWebhookDefaultEventsIncludeReviewComment(t *testing.T) {
 
 	client := newGitHubMockClient(t,
 		githubRoute(http.MethodGet, "/repos/owner/repo/hooks", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONResponse(t, w, http.StatusOK, []map[string]any{})
+			writeJSONResponse(t, w, http.StatusOK, []webhookAPIResponse{})
 		}),
 		githubRoute(http.MethodPost, "/repos/owner/repo/hooks", func(w http.ResponseWriter, r *http.Request) {
-			payload := decodeJSONRequest[struct {
-				Events []string `json:"events"`
-			}](t, r)
+			payload := decodeJSONRequest[webhookPayload](t, r)
 			receivedEvents = append(receivedEvents, payload.Events...)
+			if payload.Config.URL != "https://example.com/hook" {
+				t.Fatalf("config url = %q, want webhook URL", payload.Config.URL)
+			}
+			if payload.Config.ContentType != "json" {
+				t.Fatalf("content type = %q, want json", payload.Config.ContentType)
+			}
+			if payload.Config.Secret != "secret" {
+				t.Fatalf("secret = %q, want secret", payload.Config.Secret)
+			}
+			if !payload.Active {
+				t.Fatal("expected webhook payload to be active")
+			}
 			w.WriteHeader(http.StatusCreated)
 			if _, err := io.WriteString(w, `{"id":1}`); err != nil {
 				t.Fatalf("write response: %v", err)

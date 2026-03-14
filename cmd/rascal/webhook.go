@@ -351,7 +351,7 @@ func buildWebhookTestEvent(event, repo string) (any, error) {
 				Number:      issueNumber,
 				Title:       "Rascal webhook test PR",
 				Body:        "Synthetic PR for webhook test.",
-				PullRequest: map[string]any{"url": "https://example.com/pull/123"},
+				PullRequest: &ghapi.PullRequestRef{URL: "https://example.com/pull/123"},
 			},
 			Comment: ghapi.Comment{
 				ID:   commentID,

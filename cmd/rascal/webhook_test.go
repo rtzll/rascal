@@ -123,6 +123,9 @@ func TestBuildWebhookTestPayloadTemplates(t *testing.T) {
 				if ev.Issue.PullRequest == nil {
 					t.Fatal("expected pull_request marker")
 				}
+				if ev.Issue.PullRequest.URL != "https://example.com/pull/123" {
+					t.Fatalf("unexpected pull_request url: %q", ev.Issue.PullRequest.URL)
+				}
 				if ev.Comment.ID == 0 {
 					t.Fatal("expected comment id")
 				}

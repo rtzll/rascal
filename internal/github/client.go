@@ -53,6 +53,25 @@ type issueReaction struct {
 	} `json:"user"`
 }
 
+type webhookConfig struct {
+	URL         string `json:"url"`
+	ContentType string `json:"content_type,omitempty"`
+	Secret      string `json:"secret,omitempty"`
+}
+
+type webhookPayload struct {
+	Config webhookConfig `json:"config"`
+	Events []string      `json:"events"`
+	Active bool          `json:"active"`
+}
+
+type webhookAPIResponse struct {
+	ID     int           `json:"id"`
+	Active bool          `json:"active"`
+	Events []string      `json:"events"`
+	Config webhookConfig `json:"config"`
+}
+
 func NewAPIClient(token string) *APIClient {
 	return &APIClient{
 		token:   strings.TrimSpace(token),
@@ -414,24 +433,19 @@ func (c *APIClient) UpsertWebhook(ctx context.Context, repo, webhookURL, secret 
 		return fmt.Errorf("github list hooks failed (%d): %s", listResp.StatusCode, describeWebhookAuthFailure(listResp.StatusCode, []byte(readResponseBody(listResp.Body))))
 	}
 
-	var hooks []struct {
-		ID     int `json:"id"`
-		Config struct {
-			URL string `json:"url"`
-		} `json:"config"`
-	}
+	var hooks []webhookAPIResponse
 	if err := json.NewDecoder(listResp.Body).Decode(&hooks); err != nil {
 		return fmt.Errorf("decode hooks: %w", err)
 	}
 
-	payload := map[string]any{
-		"config": map[string]string{
-			"url":          webhookURL,
-			"content_type": "json",
-			"secret":       secret,
+	payload := webhookPayload{
+		Config: webhookConfig{
+			URL:         webhookURL,
+			ContentType: "json",
+			Secret:      secret,
 		},
-		"events": events,
-		"active": true,
+		Events: events,
+		Active: true,
 	}
 
 	for _, h := range hooks {
@@ -514,14 +528,7 @@ func (c *APIClient) listWebhooks(ctx context.Context, repo string) ([]WebhookDat
 	if listResp.StatusCode >= 300 {
 		return nil, fmt.Errorf("github list hooks failed (%d): %s", listResp.StatusCode, describeWebhookAuthFailure(listResp.StatusCode, []byte(readResponseBody(listResp.Body))))
 	}
-	var hooks []struct {
-		ID     int      `json:"id"`
-		Active bool     `json:"active"`
-		Events []string `json:"events"`
-		Config struct {
-			URL string `json:"url"`
-		} `json:"config"`
-	}
+	var hooks []webhookAPIResponse
 	if err := json.NewDecoder(listResp.Body).Decode(&hooks); err != nil {
 		return nil, fmt.Errorf("decode hooks: %w", err)
 	}
