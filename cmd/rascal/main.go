@@ -78,6 +78,52 @@ type doctorRemoteReport struct {
 	Error string `json:"error,omitempty"`
 }
 
+type clientConfigFile struct {
+	ServerURL   *string `toml:"server_url,omitempty"`
+	APIToken    *string `toml:"api_token,omitempty"`
+	DefaultRepo *string `toml:"default_repo,omitempty"`
+	Host        *string `toml:"host,omitempty"`
+	Domain      *string `toml:"domain,omitempty"`
+	Transport   *string `toml:"transport,omitempty"`
+	SSHHost     *string `toml:"ssh_host,omitempty"`
+	SSHUser     *string `toml:"ssh_user,omitempty"`
+	SSHKey      *string `toml:"ssh_key,omitempty"`
+	SSHPort     *int    `toml:"ssh_port,omitempty"`
+}
+
+type configValue struct {
+	stringValue *string
+	intValue    *int
+}
+
+type configViewOutput struct {
+	ConfigPath        string `json:"config_path"`
+	ServerURL         string `json:"server_url"`
+	APIToken          string `json:"api_token"`
+	DefaultRepo       string `json:"default_repo"`
+	Host              string `json:"host"`
+	Domain            string `json:"domain"`
+	Transport         string `json:"transport"`
+	SSHHost           string `json:"ssh_host"`
+	SSHUser           string `json:"ssh_user"`
+	SSHKey            string `json:"ssh_key"`
+	SSHPort           int    `json:"ssh_port"`
+	ServerSource      string `json:"server_source"`
+	APITokenSource    string `json:"api_token_source"`
+	DefaultRepoSource string `json:"default_repo_source"`
+	TransportSource   string `json:"transport_source"`
+	ResolvedTransport string `json:"resolved_transport"`
+}
+
+type configUnsetOutput struct {
+	Key        string      `json:"key"`
+	Value      configValue `json:"value"`
+	Source     string      `json:"source"`
+	Status     string      `json:"status"`
+	Message    string      `json:"message"`
+	ConfigPath string      `json:"config_path"`
+}
+
 type doctorDiagnostics struct {
 	ConfigPath        string              `json:"config_path"`
 	ConfigExists      bool                `json:"config_exists"`
@@ -1891,28 +1937,41 @@ rascal config view
 rascal config view --output json
 `),
 		RunE: func(_ *cobra.Command, _ []string) error {
-			view := map[string]any{
-				"config_path":         a.configPath,
-				"server_url":          a.cfg.ServerURL,
-				"api_token":           maskSecret(a.cfg.APIToken),
-				"default_repo":        a.cfg.DefaultRepo,
-				"host":                a.cfg.Host,
-				"domain":              a.cfg.Domain,
-				"transport":           a.cfg.Transport,
-				"ssh_host":            a.cfg.SSHHost,
-				"ssh_user":            a.cfg.SSHUser,
-				"ssh_key":             a.cfg.SSHKey,
-				"ssh_port":            a.cfg.SSHPort,
-				"server_source":       a.serverSource,
-				"api_token_source":    a.tokenSource,
-				"default_repo_source": a.repoSource,
-				"transport_source":    a.transportSource,
-				"resolved_transport":  a.client.transport,
+			view := configViewOutput{
+				ConfigPath:        a.configPath,
+				ServerURL:         a.cfg.ServerURL,
+				APIToken:          maskSecret(a.cfg.APIToken),
+				DefaultRepo:       a.cfg.DefaultRepo,
+				Host:              a.cfg.Host,
+				Domain:            a.cfg.Domain,
+				Transport:         a.cfg.Transport,
+				SSHHost:           a.cfg.SSHHost,
+				SSHUser:           a.cfg.SSHUser,
+				SSHKey:            a.cfg.SSHKey,
+				SSHPort:           a.cfg.SSHPort,
+				ServerSource:      a.serverSource,
+				APITokenSource:    a.tokenSource,
+				DefaultRepoSource: a.repoSource,
+				TransportSource:   a.transportSource,
+				ResolvedTransport: a.client.transport,
 			}
 			return a.emit(view, func() error {
-				for _, key := range []string{"config_path", "server_url", "api_token", "default_repo", "host", "domain", "transport", "ssh_host", "ssh_user", "ssh_key", "ssh_port", "server_source", "api_token_source", "default_repo_source", "transport_source", "resolved_transport"} {
-					a.println("%s: %v", key, view[key])
-				}
+				a.println("config_path: %s", view.ConfigPath)
+				a.println("server_url: %s", view.ServerURL)
+				a.println("api_token: %s", view.APIToken)
+				a.println("default_repo: %s", view.DefaultRepo)
+				a.println("host: %s", view.Host)
+				a.println("domain: %s", view.Domain)
+				a.println("transport: %s", view.Transport)
+				a.println("ssh_host: %s", view.SSHHost)
+				a.println("ssh_user: %s", view.SSHUser)
+				a.println("ssh_key: %s", view.SSHKey)
+				a.println("ssh_port: %d", view.SSHPort)
+				a.println("server_source: %s", view.ServerSource)
+				a.println("api_token_source: %s", view.APITokenSource)
+				a.println("default_repo_source: %s", view.DefaultRepoSource)
+				a.println("transport_source: %s", view.TransportSource)
+				a.println("resolved_transport: %s", view.ResolvedTransport)
 				return nil
 			})
 		},
@@ -2044,16 +2103,16 @@ rascal config unset default_repo
 			if !isSupportedConfigKey(key) {
 				return &cliError{Code: exitInput, Message: "invalid key", Hint: configKeysHint()}
 			}
-			settings, exists, err := loadFileConfigMap(a.configPath)
+			settings, exists, err := loadClientConfigFile(a.configPath)
 			if err != nil {
 				return err
 			}
-			_, hadKey := settings[key]
+			hadKey := settings.Has(key)
 			status := "absent"
 			message := ""
 			if hadKey {
-				delete(settings, key)
-				if err := saveClientConfigMap(a.configPath, settings); err != nil {
+				settings.Unset(key)
+				if err := saveClientConfigFile(a.configPath, settings); err != nil {
 					return err
 				}
 				status = "removed"
@@ -2067,19 +2126,19 @@ rascal config unset default_repo
 				return err
 			}
 			value, source := a.effectiveConfigValue(key, settings)
-			out := map[string]any{
-				"key":         key,
-				"value":       value,
-				"source":      source,
-				"status":      status,
-				"message":     message,
-				"config_path": a.configPath,
+			out := configUnsetOutput{
+				Key:        key,
+				Value:      value,
+				Source:     source,
+				Status:     status,
+				Message:    message,
+				ConfigPath: a.configPath,
 			}
 			return a.emit(out, func() error {
 				if message != "" {
 					a.println(message)
 				}
-				a.println("effective %s: %v (%s)", key, value, source)
+				a.println("effective %s: %s (%s)", key, value.String(), source)
 				return nil
 			})
 		},
@@ -2543,28 +2602,25 @@ func loadFileConfig(path string) (config.ClientConfig, error) {
 	}, nil
 }
 
-func loadFileConfigMap(path string) (map[string]any, bool, error) {
+func loadClientConfigFile(path string) (clientConfigFile, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return map[string]any{}, false, nil
+			return clientConfigFile{}, false, nil
 		}
-		return nil, false, &cliError{Code: exitConfig, Message: "failed to read config file", Cause: err}
+		return clientConfigFile{}, false, &cliError{Code: exitConfig, Message: "failed to read config file", Cause: err}
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return map[string]any{}, true, nil
+		return clientConfigFile{}, true, nil
 	}
-	var out map[string]any
+	var out clientConfigFile
 	if err := toml.Unmarshal(data, &out); err != nil {
-		return nil, true, &cliError{Code: exitConfig, Message: "failed to parse config file", Cause: err}
-	}
-	if out == nil {
-		out = map[string]any{}
+		return clientConfigFile{}, true, &cliError{Code: exitConfig, Message: "failed to parse config file", Cause: err}
 	}
 	return out, true, nil
 }
 
-func saveClientConfigMap(path string, settings map[string]any) error {
+func saveClientConfigFile(path string, settings clientConfigFile) error {
 	if path == "" {
 		path = config.DefaultClientConfigPath()
 	}
@@ -2582,6 +2638,121 @@ func saveClientConfigMap(path string, settings map[string]any) error {
 		return &cliError{Code: exitConfig, Message: "failed to chmod config file", Cause: err}
 	}
 	return nil
+}
+
+func (f clientConfigFile) Has(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "server_url":
+		return f.ServerURL != nil
+	case "api_token":
+		return f.APIToken != nil
+	case "default_repo":
+		return f.DefaultRepo != nil
+	case "host":
+		return f.Host != nil
+	case "domain":
+		return f.Domain != nil
+	case "transport":
+		return f.Transport != nil
+	case "ssh_host":
+		return f.SSHHost != nil
+	case "ssh_user":
+		return f.SSHUser != nil
+	case "ssh_key":
+		return f.SSHKey != nil
+	case "ssh_port":
+		return f.SSHPort != nil
+	default:
+		return false
+	}
+}
+
+func (f *clientConfigFile) Unset(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "server_url":
+		had := f.ServerURL != nil
+		f.ServerURL = nil
+		return had
+	case "api_token":
+		had := f.APIToken != nil
+		f.APIToken = nil
+		return had
+	case "default_repo":
+		had := f.DefaultRepo != nil
+		f.DefaultRepo = nil
+		return had
+	case "host":
+		had := f.Host != nil
+		f.Host = nil
+		return had
+	case "domain":
+		had := f.Domain != nil
+		f.Domain = nil
+		return had
+	case "transport":
+		had := f.Transport != nil
+		f.Transport = nil
+		return had
+	case "ssh_host":
+		had := f.SSHHost != nil
+		f.SSHHost = nil
+		return had
+	case "ssh_user":
+		had := f.SSHUser != nil
+		f.SSHUser = nil
+		return had
+	case "ssh_key":
+		had := f.SSHKey != nil
+		f.SSHKey = nil
+		return had
+	case "ssh_port":
+		had := f.SSHPort != nil
+		f.SSHPort = nil
+		return had
+	default:
+		return false
+	}
+}
+
+func newConfigStringValue(value string) configValue {
+	value = strings.TrimSpace(value)
+	return configValue{stringValue: &value}
+}
+
+func newConfigIntValue(value int) configValue {
+	return configValue{intValue: &value}
+}
+
+func (v configValue) MarshalJSON() ([]byte, error) {
+	if v.intValue != nil {
+		data, err := json.Marshal(*v.intValue)
+		if err != nil {
+			return nil, fmt.Errorf("marshal int config value: %w", err)
+		}
+		return data, nil
+	}
+	if v.stringValue != nil {
+		data, err := json.Marshal(*v.stringValue)
+		if err != nil {
+			return nil, fmt.Errorf("marshal string config value: %w", err)
+		}
+		return data, nil
+	}
+	data, err := json.Marshal("")
+	if err != nil {
+		return nil, fmt.Errorf("marshal empty config value: %w", err)
+	}
+	return data, nil
+}
+
+func (v configValue) String() string {
+	if v.intValue != nil {
+		return fmt.Sprintf("%d", *v.intValue)
+	}
+	if v.stringValue != nil {
+		return *v.stringValue
+	}
+	return ""
 }
 
 func loadEnvFile(path string) (out map[string]string, err error) {
@@ -3257,31 +3428,31 @@ func configKeysHelpText() string {
 	return strings.Join(supportedConfigKeys(), "\n")
 }
 
-func configSourceFromEnvConfig(envKey, configKey string, settings map[string]any, fallback string) string {
+func configSourceFromEnvConfig(envKey, configKey string, settings clientConfigFile, fallback string) string {
 	if strings.TrimSpace(os.Getenv(envKey)) != "" {
 		return "env"
 	}
-	if _, ok := settings[configKey]; ok {
+	if settings.Has(configKey) {
 		return "config"
 	}
 	return fallback
 }
 
-func (a *app) configSourceFromFlagEnvConfig(flagSet bool, envKey, configKey string, settings map[string]any, fallback string) string {
+func (a *app) configSourceFromFlagEnvConfig(flagSet bool, envKey, configKey string, settings clientConfigFile, fallback string) string {
 	if flagSet {
 		return "flag"
 	}
 	return configSourceFromEnvConfig(envKey, configKey, settings, fallback)
 }
 
-func (a *app) sshHostSource(settings map[string]any) string {
+func (a *app) sshHostSource(settings clientConfigFile) string {
 	if strings.TrimSpace(a.sshHostFlag) != "" {
 		return "flag"
 	}
 	if strings.TrimSpace(os.Getenv("RASCAL_SSH_HOST")) != "" {
 		return "env"
 	}
-	if _, ok := settings["ssh_host"]; ok {
+	if settings.Has("ssh_host") {
 		return "config"
 	}
 	if strings.TrimSpace(a.cfg.Host) != "" {
@@ -3290,30 +3461,30 @@ func (a *app) sshHostSource(settings map[string]any) string {
 	return "unset"
 }
 
-func (a *app) effectiveConfigValue(key string, settings map[string]any) (any, string) {
+func (a *app) effectiveConfigValue(key string, settings clientConfigFile) (configValue, string) {
 	switch key {
 	case "server_url":
-		return a.cfg.ServerURL, a.serverSource
+		return newConfigStringValue(a.cfg.ServerURL), a.serverSource
 	case "api_token":
-		return maskSecret(a.cfg.APIToken), a.tokenSource
+		return newConfigStringValue(maskSecret(a.cfg.APIToken)), a.tokenSource
 	case "default_repo":
-		return a.cfg.DefaultRepo, a.repoSource
+		return newConfigStringValue(a.cfg.DefaultRepo), a.repoSource
 	case "host":
-		return a.cfg.Host, configSourceFromEnvConfig("RASCAL_HOST", "host", settings, "unset")
+		return newConfigStringValue(a.cfg.Host), configSourceFromEnvConfig("RASCAL_HOST", "host", settings, "unset")
 	case "domain":
-		return a.cfg.Domain, configSourceFromEnvConfig("RASCAL_DOMAIN", "domain", settings, "unset")
+		return newConfigStringValue(a.cfg.Domain), configSourceFromEnvConfig("RASCAL_DOMAIN", "domain", settings, "unset")
 	case "transport":
-		return a.cfg.Transport, a.transportSource
+		return newConfigStringValue(a.cfg.Transport), a.transportSource
 	case "ssh_host":
-		return a.cfg.SSHHost, a.sshHostSource(settings)
+		return newConfigStringValue(a.cfg.SSHHost), a.sshHostSource(settings)
 	case "ssh_user":
-		return a.cfg.SSHUser, a.configSourceFromFlagEnvConfig(strings.TrimSpace(a.sshUserFlag) != "", "RASCAL_SSH_USER", "ssh_user", settings, "default")
+		return newConfigStringValue(a.cfg.SSHUser), a.configSourceFromFlagEnvConfig(strings.TrimSpace(a.sshUserFlag) != "", "RASCAL_SSH_USER", "ssh_user", settings, "default")
 	case "ssh_key":
-		return a.cfg.SSHKey, a.configSourceFromFlagEnvConfig(strings.TrimSpace(a.sshKeyFlag) != "", "RASCAL_SSH_KEY", "ssh_key", settings, "unset")
+		return newConfigStringValue(a.cfg.SSHKey), a.configSourceFromFlagEnvConfig(strings.TrimSpace(a.sshKeyFlag) != "", "RASCAL_SSH_KEY", "ssh_key", settings, "unset")
 	case "ssh_port":
-		return a.cfg.SSHPort, a.configSourceFromFlagEnvConfig(a.sshPortFlag > 0, "RASCAL_SSH_PORT", "ssh_port", settings, "default")
+		return newConfigIntValue(a.cfg.SSHPort), a.configSourceFromFlagEnvConfig(a.sshPortFlag > 0, "RASCAL_SSH_PORT", "ssh_port", settings, "default")
 	default:
-		return "", "unset"
+		return newConfigStringValue(""), "unset"
 	}
 }
 
