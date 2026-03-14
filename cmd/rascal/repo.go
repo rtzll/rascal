@@ -38,6 +38,29 @@ type repoEnableResult struct {
 	WebhookURL string
 }
 
+type repoEnableOutput struct {
+	Repo       string `json:"repo"`
+	Enabled    bool   `json:"enabled"`
+	WebhookURL string `json:"webhook_url"`
+	Label      string `json:"label"`
+}
+
+type repoDisableOutput struct {
+	Repo       string `json:"repo"`
+	Removed    bool   `json:"removed"`
+	WebhookURL string `json:"webhook_url"`
+}
+
+type repoStatusOutput struct {
+	Repo                 string             `json:"repo"`
+	LabelExists          bool               `json:"label_exists"`
+	WebhookURL           string             `json:"webhook_url"`
+	Webhook              *ghapi.WebhookData `json:"webhook,omitempty"`
+	RequiredEvents       []string           `json:"required_events"`
+	MissingEvents        []string           `json:"missing_events"`
+	WebhookEventsHealthy bool               `json:"webhook_events_healthy"`
+}
+
 type repoGitHubClient interface {
 	EnsureLabel(ctx context.Context, repo, name, color, description string) error
 	UpsertWebhook(ctx context.Context, repo, webhookURL, secret string, events []string) error
@@ -136,11 +159,11 @@ func (a *app) newRepoEnableCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.emit(map[string]any{
-				"repo":        result.Repo,
-				"enabled":     true,
-				"webhook_url": result.WebhookURL,
-				"label":       "rascal",
+			return a.emit(repoEnableOutput{
+				Repo:       result.Repo,
+				Enabled:    true,
+				WebhookURL: result.WebhookURL,
+				Label:      "rascal",
 			}, func() error {
 				a.println("repo enabled: %s", result.Repo)
 				a.println("webhook: %s", result.WebhookURL)
@@ -216,10 +239,10 @@ func (a *app) newRepoDisableCmd() *cobra.Command {
 			if err != nil {
 				return &cliError{Code: exitRuntime, Message: "failed to remove webhook", Cause: err}
 			}
-			return a.emit(map[string]any{
-				"repo":        repo,
-				"removed":     removed,
-				"webhook_url": webhookURL,
+			return a.emit(repoDisableOutput{
+				Repo:       repo,
+				Removed:    removed,
+				WebhookURL: webhookURL,
 			}, func() error {
 				if removed {
 					a.println("removed webhook for %s: %s", repo, webhookURL)
@@ -275,14 +298,14 @@ func (a *app) newRepoStatusCmd() *cobra.Command {
 			if hook != nil {
 				missingEvents = missingRequiredWebhookEvents(hook.Events)
 			}
-			out := map[string]any{
-				"repo":                   repo,
-				"label_exists":           labelExists,
-				"webhook_url":            webhookURL,
-				"webhook":                hook,
-				"required_events":        requiredWebhookEvents,
-				"missing_events":         missingEvents,
-				"webhook_events_healthy": hook != nil && len(missingEvents) == 0,
+			out := repoStatusOutput{
+				Repo:                 repo,
+				LabelExists:          labelExists,
+				WebhookURL:           webhookURL,
+				Webhook:              hook,
+				RequiredEvents:       requiredWebhookEvents,
+				MissingEvents:        missingEvents,
+				WebhookEventsHealthy: hook != nil && len(missingEvents) == 0,
 			}
 			return a.emit(out, func() error {
 				a.println("repo: %s", repo)
