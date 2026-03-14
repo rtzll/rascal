@@ -3,6 +3,7 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 )
 
@@ -14,18 +15,26 @@ const (
 )
 
 func NormalizeBackend(raw string) Backend {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case string(BackendCodex):
-		return BackendCodex
-	case string(BackendGoose):
-		return BackendGoose
-	default:
+	backend, err := ParseBackend(raw)
+	if err != nil {
 		return BackendCodex
 	}
+	return backend
 }
 
 func (b Backend) String() string {
 	return string(NormalizeBackend(string(b)))
+}
+
+func ParseBackend(raw string) (Backend, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(BackendCodex):
+		return BackendCodex, nil
+	case string(BackendGoose):
+		return BackendGoose, nil
+	default:
+		return "", fmt.Errorf("unknown agent backend %q", raw)
+	}
 }
 
 type SessionMode string
@@ -37,13 +46,23 @@ const (
 )
 
 func NormalizeSessionMode(raw string) SessionMode {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case string(SessionModePROnly):
-		return SessionModePROnly
-	case string(SessionModeAll):
-		return SessionModeAll
-	default:
+	mode, err := ParseSessionMode(raw)
+	if err != nil {
 		return SessionModeOff
+	}
+	return mode
+}
+
+func ParseSessionMode(raw string) (SessionMode, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(SessionModeOff):
+		return SessionModeOff, nil
+	case string(SessionModePROnly):
+		return SessionModePROnly, nil
+	case string(SessionModeAll):
+		return SessionModeAll, nil
+	default:
+		return "", fmt.Errorf("unknown agent session mode %q", raw)
 	}
 }
 

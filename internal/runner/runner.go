@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -66,11 +67,21 @@ type SessionSpec struct {
 }
 
 func NormalizeMode(raw string) Mode {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case string(ModeDocker):
-		return ModeDocker
-	default:
+	mode, err := ParseMode(raw)
+	if err != nil {
 		return ModeNoop
+	}
+	return mode
+}
+
+func ParseMode(raw string) (Mode, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(ModeNoop):
+		return ModeNoop, nil
+	case string(ModeDocker):
+		return ModeDocker, nil
+	default:
+		return "", fmt.Errorf("unknown runner mode %q", raw)
 	}
 }
 

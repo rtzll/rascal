@@ -449,8 +449,15 @@ func loadConfig() (config, error) {
 		}
 	}
 
-	agentBackend := agent.NormalizeBackend(os.Getenv("RASCAL_AGENT_BACKEND"))
-	agentSessionMode := agent.NormalizeSessionMode(firstSetEnvValue("RASCAL_GOOSE_SESSION_MODE", "RASCAL_AGENT_SESSION_MODE"))
+	agentBackend, err := agent.ParseBackend(os.Getenv("RASCAL_AGENT_BACKEND"))
+	if err != nil {
+		return config{}, fmt.Errorf("invalid RASCAL_AGENT_BACKEND: %w", err)
+	}
+	agentSessionModeRaw := firstSetEnvValue("RASCAL_GOOSE_SESSION_MODE", "RASCAL_AGENT_SESSION_MODE")
+	agentSessionMode, err := agent.ParseSessionMode(agentSessionModeRaw)
+	if err != nil {
+		return config{}, fmt.Errorf("invalid agent session mode: %w", err)
+	}
 	agentSessionResume := parseBoolEnv(firstSetEnvValue("RASCAL_GOOSE_SESSION_RESUME", "RASCAL_AGENT_SESSION_RESUME"), false)
 	if agentSessionMode == agent.SessionModeOff {
 		agentSessionResume = false

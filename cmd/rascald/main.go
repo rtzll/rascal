@@ -150,7 +150,10 @@ type authPrincipal struct {
 }
 
 func main() {
-	cfg := config.LoadServerConfig()
+	cfg, err := config.LoadServerConfig()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
 	if err := cfg.Ensure(); err != nil {
 		log.Fatalf("config: %v", err)
 	}

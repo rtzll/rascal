@@ -339,6 +339,38 @@ func TestLoadConfigRespectsGooseSessionEnv(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsInvalidAgentBackend(t *testing.T) {
+	t.Setenv("RASCAL_RUN_ID", "run_invalid_backend")
+	t.Setenv("RASCAL_TASK_ID", "task_invalid_backend")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_AGENT_BACKEND", "claude")
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("loadConfig error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "invalid RASCAL_AGENT_BACKEND") {
+		t.Fatalf("loadConfig error = %q", err.Error())
+	}
+}
+
+func TestLoadConfigRejectsInvalidAgentSessionMode(t *testing.T) {
+	t.Setenv("RASCAL_RUN_ID", "run_invalid_session_mode")
+	t.Setenv("RASCAL_TASK_ID", "task_invalid_session_mode")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_AGENT_SESSION_MODE", "sometimes")
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("loadConfig error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "invalid agent session mode") {
+		t.Fatalf("loadConfig error = %q", err.Error())
+	}
+}
+
 func TestRunGooseNoSessionByDefault(t *testing.T) {
 	root := t.TempDir()
 	cfg := config{

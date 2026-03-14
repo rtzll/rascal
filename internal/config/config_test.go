@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rtzll/rascal/internal/agent"
@@ -124,7 +125,10 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 	t.Setenv("RASCAL_GOOSE_SESSION_ROOT", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_TTL_DAYS", "")
 
-	cfg := LoadServerConfig()
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
 	if cfg.AgentSession.Mode != agent.SessionModeAll {
 		t.Fatalf("AgentSession.Mode = %q, want all", cfg.AgentSession.Mode)
 	}
@@ -140,7 +144,10 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 func TestLoadServerConfigDefaultsAgentBackendToCodex(t *testing.T) {
 	t.Setenv("RASCAL_AGENT_BACKEND", "")
 
-	cfg := LoadServerConfig()
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
 	if cfg.AgentBackend != "codex" {
 		t.Fatalf("AgentBackend = %q, want codex", cfg.AgentBackend)
 	}
@@ -158,7 +165,10 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	t.Setenv("RASCAL_GOOSE_SESSION_ROOT", root)
 	t.Setenv("RASCAL_GOOSE_SESSION_TTL_DAYS", "0")
 
-	cfg := LoadServerConfig()
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
 	if cfg.AgentSession.Mode != agent.SessionModePROnly {
 		t.Fatalf("AgentSession.Mode = %q, want pr-only", cfg.AgentSession.Mode)
 	}
@@ -173,7 +183,10 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 func TestLoadServerConfigNormalizesRunnerMode(t *testing.T) {
 	t.Setenv("RASCAL_RUNNER_MODE", "DOCKER")
 
-	cfg := LoadServerConfig()
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
 	if cfg.RunnerMode != runner.ModeDocker {
 		t.Fatalf("RunnerMode = %q, want docker", cfg.RunnerMode)
 	}
@@ -183,14 +196,48 @@ func TestLoadServerConfigCredentialEncryptionKeyFallback(t *testing.T) {
 	t.Setenv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "")
 	t.Setenv("RASCAL_API_TOKEN", "api-token-fallback")
 
-	cfg := LoadServerConfig()
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
 	if cfg.CredentialEncryptionKey != "api-token-fallback" {
 		t.Fatalf("CredentialEncryptionKey = %q, want api-token-fallback", cfg.CredentialEncryptionKey)
 	}
 
 	t.Setenv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "explicit-key")
-	cfg = LoadServerConfig()
+	cfg, err = LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
 	if cfg.CredentialEncryptionKey != "explicit-key" {
 		t.Fatalf("CredentialEncryptionKey = %q, want explicit-key", cfg.CredentialEncryptionKey)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidEnumEnv(t *testing.T) {
+	tests := []struct {
+		name   string
+		key    string
+		value  string
+		needle string
+	}{
+		{name: "runner mode", key: "RASCAL_RUNNER_MODE", value: "podman", needle: "unknown runner mode"},
+		{name: "agent backend", key: "RASCAL_AGENT_BACKEND", value: "claude", needle: "unknown agent backend"},
+		{name: "credential strategy", key: "RASCAL_CREDENTIAL_STRATEGY", value: "weighted", needle: "unknown credential strategy"},
+		{name: "agent session mode", key: "RASCAL_AGENT_SESSION_MODE", value: "sometimes", needle: "unknown agent session mode"},
+		{name: "legacy goose session mode", key: "RASCAL_GOOSE_SESSION_MODE", value: "sometimes", needle: "unknown agent session mode"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tt.key, tt.value)
+			_, err := LoadServerConfig()
+			if err == nil {
+				t.Fatalf("LoadServerConfig error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.needle) {
+				t.Fatalf("LoadServerConfig error = %q, want substring %q", err.Error(), tt.needle)
+			}
+		})
 	}
 }

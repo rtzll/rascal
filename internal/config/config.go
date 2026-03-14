@@ -60,9 +60,25 @@ type ClientConfig struct {
 	SSHPort     int
 }
 
-func LoadServerConfig() ServerConfig {
+func LoadServerConfig() (ServerConfig, error) {
 	dataDir := envOrDefault("RASCAL_DATA_DIR", "./var/lib/rascal")
 	statePath := envOrDefault("RASCAL_STATE_PATH", filepath.Join(dataDir, "state.db"))
+	runnerMode, err := runner.ParseMode(envOrDefault("RASCAL_RUNNER_MODE", string(runner.ModeNoop)))
+	if err != nil {
+		return ServerConfig{}, fmt.Errorf("parse RASCAL_RUNNER_MODE: %w", err)
+	}
+	agentBackend, err := loadAgentBackend()
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	credentialStrategy, err := credentialstrategy.ParseName(envOrDefault("RASCAL_CREDENTIAL_STRATEGY", credentialstrategy.DefaultName.String()))
+	if err != nil {
+		return ServerConfig{}, fmt.Errorf("parse RASCAL_CREDENTIAL_STRATEGY: %w", err)
+	}
+	agentSession, err := loadAgentSessionConfig(dataDir)
+	if err != nil {
+		return ServerConfig{}, err
+	}
 
 	cfg := ServerConfig{
 		ListenAddr:              envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
@@ -74,20 +90,20 @@ func LoadServerConfig() ServerConfig {
 		GitHubToken:             strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")),
 		GitHubWebhookSecret:     strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
 		BotLogin:                strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
-		RunnerMode:              runner.NormalizeMode(envOrDefault("RASCAL_RUNNER_MODE", string(runner.ModeNoop))),
-		AgentBackend:            loadAgentBackend(),
+		RunnerMode:              runnerMode,
+		AgentBackend:            agentBackend,
 		RunnerImageGoose:        envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", defaults.GooseRunnerImageTag),
 		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
 		RunnerMaxAttempts:       envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
-		CredentialStrategy:      credentialstrategy.NormalizeName(envOrDefault("RASCAL_CREDENTIAL_STRATEGY", credentialstrategy.DefaultName.String())),
+		CredentialStrategy:      credentialStrategy,
 		CredentialLeaseTTL:      envDurationOrDefault("RASCAL_CREDENTIAL_LEASE_TTL", 90*time.Second),
 		CredentialRenewEvery:    envDurationOrDefault("RASCAL_CREDENTIAL_RENEW_INTERVAL", 30*time.Second),
 		CredentialEncryptionKey: firstNonEmptyEnv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "RASCAL_API_TOKEN"),
-		AgentSession:            loadAgentSessionConfig(dataDir),
+		AgentSession:            agentSession,
 		MaxRuns:                 200,
 	}
 	cfg.RunnerImage = cfg.RunnerImageForBackend(cfg.AgentBackend)
-	return cfg
+	return cfg, nil
 }
 
 func (c ServerConfig) Ensure() error {
@@ -286,38 +302,48 @@ func envDurationOrDefault(key string, fallback time.Duration) time.Duration {
 	return out
 }
 
-func loadAgentBackend() agent.Backend {
-	return agent.NormalizeBackend(envOrDefault("RASCAL_AGENT_BACKEND", "codex"))
+func loadAgentBackend() (agent.Backend, error) {
+	backend, err := agent.ParseBackend(envOrDefault("RASCAL_AGENT_BACKEND", "codex"))
+	if err != nil {
+		return "", fmt.Errorf("parse RASCAL_AGENT_BACKEND: %w", err)
+	}
+	return backend, nil
 }
 
-func loadAgentSessionConfig(dataDir string) AgentSessionConfig {
+func loadAgentSessionConfig(dataDir string) (AgentSessionConfig, error) {
+	mode, err := loadAgentSessionMode()
+	if err != nil {
+		return AgentSessionConfig{}, err
+	}
 	return AgentSessionConfig{
-		Mode:    loadAgentSessionMode(),
+		Mode:    mode,
 		Root:    loadAgentSessionRoot(dataDir),
 		TTLDays: loadAgentSessionTTLDays(),
-	}
+	}, nil
 }
 
-func loadAgentSessionMode() agent.SessionMode {
+func loadAgentSessionMode() (agent.SessionMode, error) {
 	if raw, ok := os.LookupEnv("RASCAL_GOOSE_SESSION_MODE"); ok {
-		mode := agent.NormalizeSessionMode(raw)
-		if mode == "" || mode == agent.SessionModeOff {
-			if strings.TrimSpace(raw) == "" {
-				return agent.SessionModeAll
-			}
+		if strings.TrimSpace(raw) == "" {
+			return agent.SessionModeAll, nil
 		}
-		return mode
+		mode, err := agent.ParseSessionMode(raw)
+		if err != nil {
+			return "", fmt.Errorf("parse RASCAL_GOOSE_SESSION_MODE: %w", err)
+		}
+		return mode, nil
 	}
 	if raw, ok := os.LookupEnv("RASCAL_AGENT_SESSION_MODE"); ok {
-		mode := agent.NormalizeSessionMode(raw)
-		if mode == "" || mode == agent.SessionModeOff {
-			if strings.TrimSpace(raw) == "" {
-				return agent.SessionModeAll
-			}
+		if strings.TrimSpace(raw) == "" {
+			return agent.SessionModeAll, nil
 		}
-		return mode
+		mode, err := agent.ParseSessionMode(raw)
+		if err != nil {
+			return "", fmt.Errorf("parse RASCAL_AGENT_SESSION_MODE: %w", err)
+		}
+		return mode, nil
 	}
-	return agent.SessionModeAll
+	return agent.SessionModeAll, nil
 }
 
 func loadAgentSessionRoot(dataDir string) string {

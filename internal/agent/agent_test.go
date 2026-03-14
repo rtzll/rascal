@@ -31,6 +31,43 @@ func TestNormalizeBackend(t *testing.T) {
 	}
 }
 
+func TestParseBackend(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		in      string
+		want    Backend
+		wantErr bool
+	}{
+		{name: "default empty", in: "", want: BackendCodex},
+		{name: "codex explicit", in: " codex ", want: BackendCodex},
+		{name: "goose explicit", in: "GOOSE", want: BackendGoose},
+		{name: "invalid", in: "other", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := ParseBackend(tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ParseBackend(%q) error = nil, want error", tt.in)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseBackend(%q) returned error: %v", tt.in, err)
+			}
+			if got != tt.want {
+				t.Fatalf("ParseBackend(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeSessionMode(t *testing.T) {
 	t.Parallel()
 
@@ -52,6 +89,44 @@ func TestNormalizeSessionMode(t *testing.T) {
 
 			if got := NormalizeSessionMode(tt.in); got != tt.want {
 				t.Fatalf("NormalizeSessionMode(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSessionMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		in      string
+		want    SessionMode
+		wantErr bool
+	}{
+		{name: "default empty", in: "", want: SessionModeOff},
+		{name: "off explicit", in: " off ", want: SessionModeOff},
+		{name: "pr only", in: " PR-ONLY ", want: SessionModePROnly},
+		{name: "all", in: "all", want: SessionModeAll},
+		{name: "invalid", in: "sometimes", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := ParseSessionMode(tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ParseSessionMode(%q) error = nil, want error", tt.in)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseSessionMode(%q) returned error: %v", tt.in, err)
+			}
+			if got != tt.want {
+				t.Fatalf("ParseSessionMode(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
