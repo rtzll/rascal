@@ -17,7 +17,6 @@ Flags:
       --goarch string                 GOARCH for rascald binary (auto-detected when empty)
   -h, --help                          help for deploy
       --host string                   existing server host (defaults to config host/ssh_host)
-      --runner-image string           legacy shorthand for goose runner image tag (default "rascal-runner-goose:latest")
       --runner-image-codex string     codex runner docker image tag (default "rascal-runner-codex:latest")
       --runner-image-goose string     goose runner docker image tag (default "rascal-runner-goose:latest")
       --ssh-key string                SSH private key path

@@ -81,7 +81,8 @@ jobs:
       DEPLOY_HOST: ${{ vars.RASCAL_DEPLOY_HOST || secrets.RASCAL_DEPLOY_HOST }}
       DEPLOY_USER: ${{ vars.RASCAL_DEPLOY_SSH_USER || secrets.RASCAL_DEPLOY_SSH_USER || 'root' }}
       DEPLOY_PORT: ${{ vars.RASCAL_DEPLOY_SSH_PORT || secrets.RASCAL_DEPLOY_SSH_PORT || '22' }}
-      DEPLOY_RUNNER_IMAGE: ${{ vars.RASCAL_RUNNER_IMAGE || 'rascal-runner:latest' }}
+      DEPLOY_RUNNER_IMAGE_GOOSE: ${{ vars.RASCAL_RUNNER_IMAGE_GOOSE || 'rascal-runner-goose:latest' }}
+      DEPLOY_RUNNER_IMAGE_CODEX: ${{ vars.RASCAL_RUNNER_IMAGE_CODEX || 'rascal-runner-codex:latest' }}
       DEPLOY_DOMAIN: ${{ vars.RASCAL_DOMAIN || secrets.RASCAL_DOMAIN || '' }}
     steps:
       - name: Checkout
@@ -139,4 +140,5 @@ jobs:
             --ssh-port "${DEPLOY_PORT}" \
             --ssh-key "$HOME/.ssh/id_ed25519" \
             --domain "${DEPLOY_DOMAIN}" \
-            --runner-image "${DEPLOY_RUNNER_IMAGE}"
+            --runner-image-goose "${DEPLOY_RUNNER_IMAGE_GOOSE}" \
+            --runner-image-codex "${DEPLOY_RUNNER_IMAGE_CODEX}"

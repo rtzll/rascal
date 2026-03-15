@@ -212,7 +212,6 @@ func (a *app) newInfraUpCmd() *cobra.Command {
 		codexAuthPath      string
 		domain             string
 		agentRuntime       string
-		runnerImage        string
 		runnerImageGoose   string
 		runnerImageCodex   string
 		skipEnvUpload      bool
@@ -270,7 +269,6 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
 				AgentRuntime:       agentRuntime,
-				RunnerImage:        runnerImage,
 				RunnerImageGoose:   runnerImageGoose,
 				RunnerImageCodex:   runnerImageCodex,
 				SkipEnvUpload:      skipEnvUpload,
@@ -313,7 +311,6 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	cmd.Flags().StringVar(&agentRuntime, "agent-runtime", "", "agent runtime to use on the server (goose or codex)")
-	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
 	cmd.Flags().BoolVar(&skipEnvUpload, "skip-env-upload", false, "keep existing /etc/rascal/rascal.env on server")
@@ -333,7 +330,6 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 		codexAuthPath      string
 		domain             string
 		agentRuntime       string
-		runnerImage        string
 		runnerImageGoose   string
 		runnerImageCodex   string
 		uploadEnv          bool
@@ -355,7 +351,6 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
 				AgentRuntime:       agentRuntime,
-				RunnerImage:        runnerImage,
 				RunnerImageGoose:   runnerImageGoose,
 				RunnerImageCodex:   runnerImageCodex,
 				SkipEnvUpload:      !uploadEnv,
@@ -390,7 +385,6 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	cmd.Flags().StringVar(&agentRuntime, "agent-runtime", "", "agent runtime to use on the server (goose or codex)")
-	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
 	cmd.Flags().BoolVar(&uploadEnv, "upload-env", false, "upload/update /etc/rascal/rascal.env on server")
@@ -410,7 +404,6 @@ type deployExistingInput struct {
 	CodexAuthPath      string
 	Domain             string
 	AgentRuntime       string
-	RunnerImage        string
 	RunnerImageGoose   string
 	RunnerImageCodex   string
 	SkipEnvUpload      bool
@@ -449,8 +442,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		}
 		agentRuntime = parsedRuntime
 	}
-	runnerImage := firstNonEmpty(strings.TrimSpace(input.RunnerImage), defaults.GooseRunnerImageTag)
-	runnerImageGoose := firstNonEmpty(strings.TrimSpace(input.RunnerImageGoose), runnerImage, defaults.GooseRunnerImageTag)
+	runnerImageGoose := firstNonEmpty(strings.TrimSpace(input.RunnerImageGoose), defaults.GooseRunnerImageTag)
 	runnerImageCodex := firstNonEmpty(strings.TrimSpace(input.RunnerImageCodex), defaults.CodexRunnerImageTag)
 	sshPort := input.SSHPort
 	apiToken := firstNonEmpty(strings.TrimSpace(input.APIToken), strings.TrimSpace(a.cfg.APIToken))
@@ -550,7 +542,6 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		GitHubRuntimeToken: githubRuntimeToken,
 		RunnerMode:         "docker",
 		AgentRuntime:       agentRuntime,
-		RunnerImage:        runnerImageGoose,
 		RunnerImageGoose:   runnerImageGoose,
 		RunnerImageCodex:   runnerImageCodex,
 		ServerListenAddr:   ":8080",

@@ -37,7 +37,6 @@ type Config struct {
 	GitHubRuntimeToken string
 	RunnerMode         runner.Mode
 	AgentRuntime       agent.Runtime
-	RunnerImage        string
 	RunnerImageGoose   string
 	RunnerImageCodex   string
 	ServerListenAddr   string
@@ -59,7 +58,6 @@ type plan struct {
 	Domain           string   `json:"domain,omitempty"`
 	GOARCH           string   `json:"goarch"`
 	AgentRuntime     string   `json:"agent_runtime"`
-	RunnerImage      string   `json:"runner_image"`
 	RunnerImageGoose string   `json:"runner_image_goose"`
 	RunnerImageCodex string   `json:"runner_image_codex"`
 	UploadEnvFile    bool     `json:"upload_env_file"`
@@ -143,7 +141,6 @@ func Execute(cfg Config) error {
 		Domain:           strings.TrimSpace(cfg.Domain),
 		GOARCH:           strings.TrimSpace(cfg.GOARCH),
 		AgentRuntime:     firstNonEmpty(strings.TrimSpace(string(cfg.AgentRuntime)), string(agent.RuntimeGoose)),
-		RunnerImage:      strings.TrimSpace(cfg.RunnerImage),
 		RunnerImageGoose: strings.TrimSpace(cfg.RunnerImageGoose),
 		RunnerImageCodex: strings.TrimSpace(cfg.RunnerImageCodex),
 		UploadEnvFile:    cfg.UploadEnvFile,
@@ -626,10 +623,7 @@ func firstNonEmpty(values ...string) string {
 
 func serverEnvFile(cfg Config) string {
 	runtime := strings.TrimSpace(string(cfg.AgentRuntime))
-	gooseImage := strings.TrimSpace(cfg.RunnerImageGoose)
-	if gooseImage == "" {
-		gooseImage = firstNonEmpty(strings.TrimSpace(cfg.RunnerImage), defaults.GooseRunnerImageTag)
-	}
+	gooseImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageGoose), defaults.GooseRunnerImageTag)
 	codexImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageCodex), defaults.CodexRunnerImageTag)
 	lines := []string{
 		fmt.Sprintf("RASCAL_LISTEN_ADDR=%s", cfg.ServerListenAddr),
