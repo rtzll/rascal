@@ -111,19 +111,26 @@ func renderAgentDetailsSection(gooseOutput string) string {
 	)
 }
 
-func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection string) string {
+func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection string, extraSections ...string) string {
 	gooseSection := renderAgentDetailsSection(gooseOutput)
+	extraBody := strings.TrimSpace(strings.Join(extraSections, "\n\n"))
+	footer := ""
 	if usage, ok := ExtractTokenUsage(gooseOutput); ok {
-		body := ""
-		if strings.TrimSpace(commitBody) != "" {
-			body = commitBody + "\n\n"
-		}
-		body += gooseSection + closesSection + "\n\n---\n\n" + fmt.Sprintf(
+		footer = fmt.Sprintf(
 			"Rascal run `%s` completed in %s · %s tokens",
 			runID,
 			runDuration,
 			formatTokenCount(usage.TotalTokens),
 		)
+		body := ""
+		if strings.TrimSpace(commitBody) != "" {
+			body = commitBody + "\n\n"
+		}
+		body += gooseSection + closesSection
+		if extraBody != "" {
+			body += "\n\n" + extraBody
+		}
+		body += "\n\n---\n\n" + footer
 		return body
 	}
 
@@ -131,7 +138,11 @@ func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection stri
 	if strings.TrimSpace(commitBody) != "" {
 		body = commitBody + "\n\n" + body
 	}
-	body += "\n\n" + gooseSection + closesSection + "\n\n---\n\n" + fmt.Sprintf("Rascal run took %s", runDuration)
+	body += "\n\n" + gooseSection + closesSection
+	if extraBody != "" {
+		body += "\n\n" + extraBody
+	}
+	body += "\n\n---\n\n" + fmt.Sprintf("Rascal run took %s", runDuration)
 	return body
 }
 

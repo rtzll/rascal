@@ -138,7 +138,7 @@ func firstNonEmptyLine(s string) string {
 }
 
 func loadPRView(ex CommandExecutor, cfg Config) (prView, bool, error) {
-	out, err := runCommand(ex, cfg.RepoDir, nil, "gh", "pr", "view", cfg.HeadBranch, "--repo", cfg.Repo, "--json", "number,url")
+	out, err := runCommand(ex, cfg.RepoDir, nil, "gh", "pr", "view", cfg.HeadBranch, "--repo", cfg.Repo, "--json", "number,url,body")
 	if err != nil {
 		return prView{}, false, nil
 	}

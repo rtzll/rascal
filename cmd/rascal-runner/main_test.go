@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rtzll/rascal/internal/reviewhandoff"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
@@ -1224,6 +1225,15 @@ func TestRunEndToEndWithFakeCommands(t *testing.T) {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
 	}
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir repo git dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoDir, ".github"), 0o755); err != nil {
+		t.Fatalf("mkdir codeowners dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".github", "CODEOWNERS"), []byte("/internal/worker/ @octo/reviewers\n"), 0o644); err != nil {
+		t.Fatalf("write CODEOWNERS: %v", err)
+	}
 
 	writeExe(t, filepath.Join(binDir, "git"), fmt.Sprintf(`#!/usr/bin/env bash
 set -eu
@@ -1246,7 +1256,15 @@ case "$cmd" in
     mkdir -p "$target/.git"
     exit 0
     ;;
+  diff)
+    printf '12\t1\tinternal/worker/worker.go\n3\t0\tinternal/worker/worker_test.go\n'
+    exit 0
+    ;;
   fetch|pull|checkout|add|commit|push)
+    exit 0
+    ;;
+  log)
+    printf 'Alice <alice@users.noreply.github.com>\nAlice <alice@users.noreply.github.com>\n'
     exit 0
     ;;
   status)
@@ -1390,6 +1408,107 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 	}
 	if !strings.Contains(prBody, "Rascal run `run_fake` completed in ") || !strings.Contains(prBody, "· 321 tokens") {
 		t.Fatalf("expected token summary in pr body:\n%s", prBody)
+	}
+	if !strings.Contains(prBody, "## Review Handoff") || !strings.Contains(prBody, reviewhandoff.PRSectionStartMarker) {
+		t.Fatalf("expected review handoff section in pr body:\n%s", prBody)
+	}
+
+	report, ok, err := reviewhandoff.ReadReport(metaDir)
+	if err != nil {
+		t.Fatalf("read review handoff: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected persisted review handoff artifact")
+	}
+	if len(report.SuggestedReviewers) == 0 || report.SuggestedReviewers[0].Reviewer != "@octo/reviewers" {
+		t.Fatalf("unexpected reviewer suggestions: %#v", report.SuggestedReviewers)
+	}
+}
+
+func TestRunWithExecutorUpdatesExistingPRReviewHandoffIdempotently(t *testing.T) {
+	metaDir := filepath.Join(t.TempDir(), "meta")
+	workRoot := filepath.Join(t.TempDir(), "work")
+	repoDir := filepath.Join(workRoot, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir repo git dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoDir, ".github"), 0o755); err != nil {
+		t.Fatalf("mkdir codeowners dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".github", "CODEOWNERS"), []byte("/internal/worker/ @octo/reviewers\n"), 0o644); err != nil {
+		t.Fatalf("write CODEOWNERS: %v", err)
+	}
+
+	t.Setenv("RASCAL_RUN_ID", "run_existing_pr")
+	t.Setenv("RASCAL_TASK_ID", "task_existing_pr")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_INSTRUCTION", "Refresh review handoff")
+	t.Setenv("RASCAL_AGENT_RUNTIME", "goose")
+	t.Setenv("RASCAL_META_DIR", metaDir)
+	t.Setenv("RASCAL_WORK_ROOT", workRoot)
+	t.Setenv("RASCAL_REPO_DIR", repoDir)
+
+	var editedBodies []string
+	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			switch {
+			case name == "gh" && len(args) >= 2 && args[0] == "api" && args[1] == "user":
+				return `{"login":"rascalbot"}`, nil
+			case name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "view":
+				return `{"number":88,"url":"https://github.com/owner/repo/pull/88","body":"Existing intro\n\n` + reviewhandoff.PRSectionStartMarker + `\n## Review Handoff\n- stale\n` + reviewhandoff.PRSectionEndMarker + `\n\n---\n\nFooter"}`, nil
+			case name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "edit":
+				bodyPath := ""
+				for i := 0; i < len(args)-1; i++ {
+					if args[i] == "--body-file" {
+						bodyPath = args[i+1]
+					}
+				}
+				if bodyPath == "" {
+					t.Fatalf("missing --body-file in gh pr edit args: %v", args)
+				}
+				data, err := os.ReadFile(bodyPath)
+				if err != nil {
+					t.Fatalf("read body file: %v", err)
+				}
+				editedBodies = append(editedBodies, string(data))
+				return "", nil
+			case name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain":
+				return " M internal/worker/worker.go\n", nil
+			case name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--left-right" && args[2] == "--count":
+				return "0 1", nil
+			case name == "git" && len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
+				return "0123456789abcdef0123456789abcdef01234567", nil
+			case name == "git" && len(args) >= 2 && args[0] == "diff" && args[1] == "--numstat":
+				return "10\t2\tinternal/worker/worker.go\n", nil
+			case name == "git" && len(args) >= 2 && args[0] == "log":
+				return "Alice <alice@users.noreply.github.com>\nAlice <alice@users.noreply.github.com>\n", nil
+			default:
+				return "", nil
+			}
+		},
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, _ ...string) error {
+			if name != "goose" {
+				return nil
+			}
+			if _, err := io.WriteString(stdout, `{"event":"message","usage":{"total_tokens":55}}`+"\n"); err != nil {
+				return fmt.Errorf("write fake goose log: %w", err)
+			}
+			return nil
+		},
+	}
+
+	if err := worker.RunWithExecutor(ex); err != nil {
+		t.Fatalf("runWithExecutor returned error: %v", err)
+	}
+	if len(editedBodies) != 1 {
+		t.Fatalf("expected exactly one PR body update, got %d", len(editedBodies))
+	}
+	if strings.Count(editedBodies[0], reviewhandoff.PRSectionStartMarker) != 1 {
+		t.Fatalf("expected one managed review handoff section, got:\n%s", editedBodies[0])
+	}
+	if !strings.Contains(editedBodies[0], "Footer") {
+		t.Fatalf("expected footer to be preserved, got:\n%s", editedBodies[0])
 	}
 }
 
