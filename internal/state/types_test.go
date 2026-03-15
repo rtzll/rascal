@@ -47,6 +47,16 @@ func TestParseRunAndTaskStatus(t *testing.T) {
 	if _, ok := ParseRunExecutionBackend("podman"); ok {
 		t.Fatal("expected invalid run execution backend to be rejected")
 	}
+
+	if got, ok := ParseDeliveryStatus(" processed "); !ok || got != DeliveryStatusProcessed {
+		t.Fatalf("ParseDeliveryStatus(processed) = %q, %t", got, ok)
+	}
+	if got, ok := ParseDeliveryStatus(""); !ok || got != DeliveryStatusProcessing {
+		t.Fatalf("ParseDeliveryStatus(empty) = %q, %t", got, ok)
+	}
+	if _, ok := ParseDeliveryStatus("queued"); ok {
+		t.Fatal("expected invalid delivery status to be rejected")
+	}
 }
 
 func TestFromDBNormalizesTaskAndRunStatus(t *testing.T) {

@@ -1000,7 +1000,8 @@ func (s *Store) ClaimDelivery(deliveryID, claimedBy string) (DeliveryClaim, bool
 	if err := s.trimDeliveriesIfNeeded(); err != nil {
 		return DeliveryClaim{}, false, fmt.Errorf("trim deliveries after claiming %q: %w", deliveryID, err)
 	}
-	return DeliveryClaim{ID: deliveryID, Token: token}, row.Status == "processing" && row.ClaimToken == token, nil
+	status, _ := ParseDeliveryStatus(row.Status)
+	return DeliveryClaim{ID: deliveryID, Token: token}, status == DeliveryStatusProcessing && row.ClaimToken == token, nil
 }
 
 func (s *Store) CompleteDeliveryClaim(claim DeliveryClaim) error {

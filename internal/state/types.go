@@ -302,6 +302,33 @@ type RunCancelRequest struct {
 	RequestedAt time.Time `json:"requested_at"`
 }
 
+type DeliveryStatus string
+
+const (
+	DeliveryStatusProcessing DeliveryStatus = "processing"
+	DeliveryStatusProcessed  DeliveryStatus = "processed"
+)
+
+func NormalizeDeliveryStatus(status DeliveryStatus) DeliveryStatus {
+	switch strings.ToLower(strings.TrimSpace(string(status))) {
+	case string(DeliveryStatusProcessed):
+		return DeliveryStatusProcessed
+	default:
+		return DeliveryStatusProcessing
+	}
+}
+
+func ParseDeliveryStatus(raw string) (DeliveryStatus, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(DeliveryStatusProcessing):
+		return DeliveryStatusProcessing, true
+	case string(DeliveryStatusProcessed):
+		return DeliveryStatusProcessed, true
+	default:
+		return "", false
+	}
+}
+
 type CreateRunInput struct {
 	ID           string
 	TaskID       string
