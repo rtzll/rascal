@@ -53,6 +53,21 @@ func ReviewThreadContext(thread ReviewThread) string {
 	return "review thread marked unresolved"
 }
 
+func ReviewThreadSourceText(thread ReviewThread) string {
+	var parts []string
+	if location := FormatReviewCommentLocation(thread.Path, thread.StartLine, thread.Line); location != "" {
+		parts = append(parts, fmt.Sprintf("Thread location: %s", location))
+	}
+	for _, comment := range thread.Comments {
+		body := strings.TrimSpace(comment.Body)
+		if body == "" {
+			continue
+		}
+		parts = append(parts, body)
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
 func IssueTaskFromIssue(title, body string) string {
 	title = strings.TrimSpace(title)
 	body = strings.TrimSpace(body)

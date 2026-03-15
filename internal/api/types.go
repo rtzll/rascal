@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rtzll/rascal/internal/planning"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -48,6 +49,11 @@ type CreateIssueTaskRequest struct {
 
 type RunResponse struct {
 	Run state.Run `json:"run" toml:"run"`
+}
+
+type RunBriefResponse struct {
+	Brief         planning.RunBrief        `json:"brief" toml:"brief"`
+	SourceSummary []planning.SourceSummary `json:"source_summary,omitempty" toml:"source_summary,omitempty"`
 }
 
 type RunsResponse struct {

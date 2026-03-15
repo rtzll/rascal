@@ -22,6 +22,7 @@ import (
 	"github.com/rtzll/rascal/internal/api"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/logs"
+	"github.com/rtzll/rascal/internal/planning"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -49,6 +50,8 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/readyz", s.HandleReady)
 	mux.HandleFunc("/v1/runs", s.WithAuth(s.HandleListRuns))
 	mux.HandleFunc("/v1/runs/", s.WithAuth(s.HandleRunSubresources))
+	mux.HandleFunc("/v1/briefs", s.WithAuth(s.HandleCompileBrief))
+	mux.HandleFunc("/v1/briefs/issue", s.WithAuth(s.HandleCompileIssueBrief))
 	mux.HandleFunc("/v1/tasks", s.WithAuth(s.HandleCreateTask))
 	mux.HandleFunc("/v1/tasks/", s.WithAuth(s.HandleTaskSubresources))
 	mux.HandleFunc("/v1/tasks/issue", s.WithAuth(s.HandleCreateIssueTask))
@@ -246,6 +249,18 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid trigger", http.StatusBadRequest)
 		return
 	}
+	plan, err := planning.Compile(planning.Input{
+		Trigger:     trigger,
+		Repo:        req.Repo,
+		Instruction: req.Instruction,
+		Sources: []planning.Source{
+			planning.ManualPromptSource(req.Instruction),
+		},
+	})
+	if err != nil {
+		http.Error(w, "failed to compile run brief: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	run, err := s.CreateAndQueueRun(RunRequest{
 		TaskID:          req.TaskID,
@@ -255,6 +270,7 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Trigger:         trigger,
 		Debug:           req.Debug,
 		CreatedByUserID: requesterUserID(r.Context()),
+		Plan:            &plan,
 	})
 	if err != nil {
 		if errors.Is(err, errServerDraining) {
@@ -292,6 +308,9 @@ func (s *Server) HandleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 	taskID := repoIssueTaskID(req.Repo, req.IssueNumber)
 	taskText := fmt.Sprintf("Work on issue #%d in %s", req.IssueNumber, req.Repo)
 	ctxText := ""
+	sources := []planning.Source{
+		planning.ReferenceSource("Issue reference", fmt.Sprintf("%s#%d", req.Repo, req.IssueNumber)),
+	}
 	requestedBy := requesterUserID(r.Context())
 	if requestedBy == "system" {
 		requestedBy = ""
@@ -304,6 +323,21 @@ func (s *Server) HandleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		}
 		taskText = ghapi.IssueTaskFromIssue(issue.Title, issue.Body)
 		ctxText = fmt.Sprintf("Issue URL: %s", issue.HTMLURL)
+		sources = []planning.Source{
+			planning.IssueSource(issue.Title, issue.Body, issue.HTMLURL),
+		}
+	}
+	plan, err := planning.Compile(planning.Input{
+		Trigger:     runtrigger.NameIssueAPI,
+		Repo:        req.Repo,
+		Instruction: taskText,
+		Context:     ctxText,
+		IssueNumber: req.IssueNumber,
+		Sources:     sources,
+	})
+	if err != nil {
+		http.Error(w, "failed to compile run brief: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	run, err := s.CreateAndQueueRun(RunRequest{
@@ -315,6 +349,7 @@ func (s *Server) HandleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		Context:         ctxText,
 		Debug:           req.Debug,
 		CreatedByUserID: requesterUserID(r.Context()),
+		Plan:            &plan,
 		ResponseTarget: &RunResponseTarget{
 			Repo:        req.Repo,
 			IssueNumber: req.IssueNumber,
@@ -335,6 +370,98 @@ func (s *Server) HandleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, api.RunResponse{Run: run})
+}
+
+func (s *Server) HandleCompileBrief(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req createTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	req.Repo = strings.TrimSpace(req.Repo)
+	req.Instruction = strings.TrimSpace(req.Instruction)
+	if req.Repo == "" || req.Instruction == "" {
+		http.Error(w, "repo and task are required", http.StatusBadRequest)
+		return
+	}
+	trigger, err := runtrigger.ParseOrDefault(req.Trigger.String(), runtrigger.NameCLI)
+	if err != nil {
+		http.Error(w, "invalid trigger", http.StatusBadRequest)
+		return
+	}
+	compiled, err := planning.Compile(planning.Input{
+		Trigger:     trigger,
+		Repo:        req.Repo,
+		Instruction: req.Instruction,
+		Sources: []planning.Source{
+			planning.ManualPromptSource(req.Instruction),
+		},
+	})
+	if err != nil {
+		http.Error(w, "failed to compile brief: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, api.RunBriefResponse{
+		Brief:         compiled.Brief,
+		SourceSummary: planning.Summaries(compiled.Input),
+	})
+}
+
+func (s *Server) HandleCompileIssueBrief(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req createIssueTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	req.Repo = state.NormalizeRepo(strings.TrimSpace(req.Repo))
+	if req.Repo == "" || req.IssueNumber <= 0 {
+		http.Error(w, "repo and issue_number are required", http.StatusBadRequest)
+		return
+	}
+
+	taskText := fmt.Sprintf("Work on issue #%d in %s", req.IssueNumber, req.Repo)
+	ctxText := ""
+	sources := []planning.Source{
+		planning.ReferenceSource("Issue reference", fmt.Sprintf("%s#%d", req.Repo, req.IssueNumber)),
+	}
+	if strings.TrimSpace(s.Config.GitHubToken) != "" {
+		issue, err := s.GitHub.GetIssue(r.Context(), req.Repo, req.IssueNumber)
+		if err != nil {
+			http.Error(w, "failed to fetch issue: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		taskText = ghapi.IssueTaskFromIssue(issue.Title, issue.Body)
+		ctxText = fmt.Sprintf("Issue URL: %s", issue.HTMLURL)
+		sources = []planning.Source{
+			planning.IssueSource(issue.Title, issue.Body, issue.HTMLURL),
+		}
+	}
+	compiled, err := planning.Compile(planning.Input{
+		Trigger:     runtrigger.NameIssueAPI,
+		Repo:        req.Repo,
+		Instruction: taskText,
+		Context:     ctxText,
+		IssueNumber: req.IssueNumber,
+		Sources:     sources,
+	})
+	if err != nil {
+		http.Error(w, "failed to compile brief: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, api.RunBriefResponse{
+		Brief:         compiled.Brief,
+		SourceSummary: planning.Summaries(compiled.Input),
+	})
 }
 
 func (s *Server) HandleCredentials(w http.ResponseWriter, r *http.Request) {

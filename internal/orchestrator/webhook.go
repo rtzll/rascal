@@ -11,6 +11,7 @@ import (
 
 	"github.com/rtzll/rascal/internal/api"
 	ghapi "github.com/rtzll/rascal/internal/github"
+	"github.com/rtzll/rascal/internal/planning"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -97,7 +98,21 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 				return nil
 			}
 			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
-			_, err := s.CreateAndQueueRun(RunRequest{
+			plan, err := planning.Compile(planning.Input{
+				Trigger:     runtrigger.NameIssueLabel,
+				Repo:        ev.Repository.FullName,
+				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number),
+				IssueNumber: ev.Issue.Number,
+				Sources: []planning.Source{
+					planning.IssueSource(ev.Issue.Title, ev.Issue.Body, ""),
+					planning.ContextSource("Trigger context", fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number)),
+				},
+			})
+			if err != nil {
+				return fmt.Errorf("compile issue label brief: %w", err)
+			}
+			_, err = s.CreateAndQueueRun(RunRequest{
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
 				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
@@ -105,6 +120,7 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 				IssueNumber: ev.Issue.Number,
 				Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number),
 				Debug:       boolPtr(true),
+				Plan:        &plan,
 				ResponseTarget: &RunResponseTarget{
 					Repo:        ev.Repository.FullName,
 					IssueNumber: ev.Issue.Number,
@@ -130,7 +146,21 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if err := s.Store.CancelQueuedRuns(taskID, "issue edited", state.RunStatusReasonIssueEdited); err != nil {
 				return fmt.Errorf("cancel queued runs for edited issue: %w", err)
 			}
-			_, err := s.CreateAndQueueRun(RunRequest{
+			plan, err := planning.Compile(planning.Input{
+				Trigger:     runtrigger.NameIssueEdited,
+				Repo:        ev.Repository.FullName,
+				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Context:     fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number),
+				IssueNumber: ev.Issue.Number,
+				Sources: []planning.Source{
+					planning.IssueSource(ev.Issue.Title, ev.Issue.Body, ""),
+					planning.ContextSource("Trigger context", fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number)),
+				},
+			})
+			if err != nil {
+				return fmt.Errorf("compile issue edited brief: %w", err)
+			}
+			_, err = s.CreateAndQueueRun(RunRequest{
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
 				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
@@ -138,6 +168,7 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 				IssueNumber: ev.Issue.Number,
 				Context:     fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number),
 				Debug:       boolPtr(true),
+				Plan:        &plan,
 				ResponseTarget: &RunResponseTarget{
 					Repo:        ev.Repository.FullName,
 					IssueNumber: ev.Issue.Number,
@@ -184,7 +215,21 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if err := s.Store.MarkTaskOpen(taskID); err != nil {
 				return fmt.Errorf("mark task open for reopened issue: %w", err)
 			}
-			_, err := s.CreateAndQueueRun(RunRequest{
+			plan, err := planning.Compile(planning.Input{
+				Trigger:     runtrigger.NameIssueReopened,
+				Repo:        ev.Repository.FullName,
+				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Context:     fmt.Sprintf("Triggered by issue reopen on issue #%d", ev.Issue.Number),
+				IssueNumber: ev.Issue.Number,
+				Sources: []planning.Source{
+					planning.IssueSource(ev.Issue.Title, ev.Issue.Body, ""),
+					planning.ContextSource("Trigger context", fmt.Sprintf("Triggered by issue reopen on issue #%d", ev.Issue.Number)),
+				},
+			})
+			if err != nil {
+				return fmt.Errorf("compile issue reopened brief: %w", err)
+			}
+			_, err = s.CreateAndQueueRun(RunRequest{
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
 				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
@@ -193,6 +238,7 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 				PRStatus:    state.PRStatusNone,
 				Context:     fmt.Sprintf("Triggered by issue reopen on issue #%d", ev.Issue.Number),
 				Debug:       boolPtr(true),
+				Plan:        &plan,
 				ResponseTarget: &RunResponseTarget{
 					Repo:        ev.Repository.FullName,
 					IssueNumber: ev.Issue.Number,
@@ -239,8 +285,22 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 		}
 		s.addIssueCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
 		baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.Issue.Number, "", "")
+		plan, err := planning.Compile(planning.Input{
+			Trigger:     runtrigger.NamePRComment,
+			Repo:        ev.Repository.FullName,
+			Instruction: fmt.Sprintf("Address PR #%d feedback", ev.Issue.Number),
+			Context:     strings.TrimSpace(ev.Comment.Body),
+			IssueNumber: task.IssueNumber,
+			PRNumber:    ev.Issue.Number,
+			Sources: []planning.Source{
+				planning.PRCommentSource(ev.Comment.Body, ev.Comment.User.Login),
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("compile pr comment brief: %w", err)
+		}
 
-		_, err := s.CreateAndQueueRun(RunRequest{
+		_, err = s.CreateAndQueueRun(RunRequest{
 			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
 			Instruction: fmt.Sprintf("Address PR #%d feedback", ev.Issue.Number),
@@ -252,6 +312,7 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 			BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
 			HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
 			Debug:       boolPtr(true),
+			Plan:        &plan,
 			ResponseTarget: &RunResponseTarget{
 				Repo:        ev.Repository.FullName,
 				IssueNumber: ev.Issue.Number,
@@ -288,7 +349,21 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if contextText == "" {
 			contextText = fmt.Sprintf("review state: %s", ev.Review.State)
 		}
-		_, err := s.CreateAndQueueRun(RunRequest{
+		plan, err := planning.Compile(planning.Input{
+			Trigger:     runtrigger.NamePRReview,
+			Repo:        ev.Repository.FullName,
+			Instruction: fmt.Sprintf("Address PR #%d review feedback", ev.PullRequest.Number),
+			Context:     contextText,
+			IssueNumber: task.IssueNumber,
+			PRNumber:    ev.PullRequest.Number,
+			Sources: []planning.Source{
+				planning.PRReviewSource(ev.Review.Body, ev.Review.State, ev.Review.User.Login),
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("compile pr review brief: %w", err)
+		}
+		_, err = s.CreateAndQueueRun(RunRequest{
 			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
 			Instruction: fmt.Sprintf("Address PR #%d review feedback", ev.PullRequest.Number),
@@ -300,6 +375,7 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 			BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
 			HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
 			Debug:       boolPtr(true),
+			Plan:        &plan,
 			ResponseTarget: &RunResponseTarget{
 				Repo:        ev.Repository.FullName,
 				IssueNumber: ev.PullRequest.Number,
@@ -339,7 +415,8 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 		baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.PullRequest.Number, ev.PullRequest.Base.Ref, ev.PullRequest.Head.Ref)
 
 		contextText := strings.TrimSpace(ev.Comment.Body)
-		if location := ghapi.FormatReviewCommentLocation(ev.Comment.Path, ev.Comment.StartLine, ev.Comment.Line); location != "" {
+		location := ghapi.FormatReviewCommentLocation(ev.Comment.Path, ev.Comment.StartLine, ev.Comment.Line)
+		if location != "" {
 			if contextText == "" {
 				contextText = fmt.Sprintf("inline review comment at %s", location)
 			} else {
@@ -348,7 +425,21 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 Inline comment location: %s`, contextText, location)
 			}
 		}
-		_, err := s.CreateAndQueueRun(RunRequest{
+		plan, err := planning.Compile(planning.Input{
+			Trigger:     runtrigger.NamePRReviewComment,
+			Repo:        ev.Repository.FullName,
+			Instruction: fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
+			Context:     contextText,
+			IssueNumber: task.IssueNumber,
+			PRNumber:    ev.PullRequest.Number,
+			Sources: []planning.Source{
+				planning.PRReviewCommentSource(ev.Comment.Body, location, ev.Comment.User.Login),
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("compile pr review comment brief: %w", err)
+		}
+		_, err = s.CreateAndQueueRun(RunRequest{
 			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
 			Instruction: fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
@@ -360,6 +451,7 @@ Inline comment location: %s`, contextText, location)
 			BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
 			HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
 			Debug:       boolPtr(true),
+			Plan:        &plan,
 			ResponseTarget: &RunResponseTarget{
 				Repo:        ev.Repository.FullName,
 				IssueNumber: ev.PullRequest.Number,
@@ -389,7 +481,22 @@ Inline comment location: %s`, contextText, location)
 				return nil
 			}
 			baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.PullRequest.Number, ev.PullRequest.Base.Ref, ev.PullRequest.Head.Ref)
-			_, err := s.CreateAndQueueRun(RunRequest{
+			location := ghapi.FormatReviewCommentLocation(ev.Thread.Path, ev.Thread.StartLine, ev.Thread.Line)
+			plan, err := planning.Compile(planning.Input{
+				Trigger:     runtrigger.NamePRReviewThread,
+				Repo:        ev.Repository.FullName,
+				Instruction: fmt.Sprintf("Address PR #%d unresolved review thread", ev.PullRequest.Number),
+				Context:     ghapi.ReviewThreadContext(ev.Thread),
+				IssueNumber: task.IssueNumber,
+				PRNumber:    ev.PullRequest.Number,
+				Sources: []planning.Source{
+					planning.PRReviewThreadSource(ghapi.ReviewThreadSourceText(ev.Thread), location),
+				},
+			})
+			if err != nil {
+				return fmt.Errorf("compile pr review thread brief: %w", err)
+			}
+			_, err = s.CreateAndQueueRun(RunRequest{
 				TaskID:      task.ID,
 				Repo:        ev.Repository.FullName,
 				Instruction: fmt.Sprintf("Address PR #%d unresolved review thread", ev.PullRequest.Number),
@@ -401,6 +508,7 @@ Inline comment location: %s`, contextText, location)
 				BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
 				HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
 				Debug:       boolPtr(true),
+				Plan:        &plan,
 				ResponseTarget: &RunResponseTarget{
 					Repo:           ev.Repository.FullName,
 					IssueNumber:    ev.PullRequest.Number,

@@ -168,6 +168,39 @@ func TestBuildCreateTaskPayloadForIssue(t *testing.T) {
 	}
 }
 
+func TestBuildCompileBriefPayloadForIssue(t *testing.T) {
+	t.Parallel()
+
+	req := buildCompileBriefPayload(createTaskPayloadInput{
+		Repo:        "owner/repo",
+		IssueNumber: 42,
+	})
+
+	if req.path != "/v1/briefs/issue" {
+		t.Fatalf("path = %q, want /v1/briefs/issue", req.path)
+	}
+	if req.issueTask == nil {
+		t.Fatal("expected issue payload")
+	}
+}
+
+func TestBuildCompileBriefPayloadForManualRun(t *testing.T) {
+	t.Parallel()
+
+	req := buildCompileBriefPayload(createTaskPayloadInput{
+		Repo:        "owner/repo",
+		Instruction: "Fix flaky tests",
+		BaseBranch:  "main",
+	})
+
+	if req.path != "/v1/briefs" {
+		t.Fatalf("path = %q, want /v1/briefs", req.path)
+	}
+	if req.task == nil {
+		t.Fatal("expected task payload")
+	}
+}
+
 func TestDecodeServerErrorIncludesRequestID(t *testing.T) {
 	t.Parallel()
 
@@ -1363,6 +1396,110 @@ func TestRunIssueSendsExplicitDebugOverride(t *testing.T) {
 
 	if payload.Debug == nil || *payload.Debug != false {
 		t.Fatalf("expected explicit debug override false, got: %v", payload.Debug)
+	}
+}
+
+func TestRunDryRunBriefUsesBriefEndpoint(t *testing.T) {
+	var payload api.CreateTaskRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/v1/briefs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(api.RunBriefResponse{
+			Brief: api.RunBriefResponse{}.Brief,
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "json",
+	}
+
+	cmd := mustNewRunCmd(t, a)
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--repo", "owner/repo", "--instruction", "Fix flaky tests", "--dry-run-brief"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("run --dry-run-brief: %v", err)
+	}
+
+	if payload.Repo != "owner/repo" || payload.Instruction != "Fix flaky tests" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestRunIssueDryRunBriefUsesIssueBriefEndpoint(t *testing.T) {
+	var payload api.CreateIssueTaskRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/v1/briefs/issue" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(api.RunBriefResponse{}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+			APIToken:  "test-token",
+			Transport: "http",
+		},
+		client: apiClient{
+			baseURL:   srv.URL,
+			token:     "test-token",
+			http:      srv.Client(),
+			transport: "http",
+		},
+		output: "json",
+	}
+
+	cmd := mustNewRunCmd(t, a)
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--issue", "owner/repo#123", "--dry-run-brief"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("run --issue --dry-run-brief: %v", err)
+	}
+
+	if payload.Repo != "owner/repo" || payload.IssueNumber != 123 {
+		t.Fatalf("unexpected payload: %+v", payload)
 	}
 }
 

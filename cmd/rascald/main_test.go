@@ -47,6 +47,10 @@ func TestInstructionTextPRGitContext(t *testing.T) {
 	got := orchestrator.InstructionText(run)
 
 	for _, want := range []string{
+		"# Execution Brief",
+		"## Primary Objective",
+		"Address PR #137 feedback",
+		"## Background Summary",
 		"## Git Context",
 		"- Remote: `origin`",
 		"- Base branch: `main`",
@@ -56,7 +60,6 @@ func TestInstructionTextPRGitContext(t *testing.T) {
 		"`git push --force-with-lease origin HEAD:rascal/task-xyz789`",
 		"`git push origin HEAD:rascal/task-xyz789`",
 		"do not rely on the harness to publish those changes for you",
-		"## Additional Context",
 		"Please rebase this on main and fix the conflicts.",
 	} {
 		if !strings.Contains(got, want) {
@@ -125,6 +128,28 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("context.json mismatch: got %#v want %#v", got, want)
+	}
+
+	for _, name := range []string{"trigger-input.json", "run-brief.json", "run-brief.md", "instructions.md"} {
+		if _, err := os.Stat(filepath.Join(runDir, name)); err != nil {
+			t.Fatalf("expected %s to be written: %v", name, err)
+		}
+	}
+
+	briefData, err := os.ReadFile(filepath.Join(runDir, "run-brief.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(run-brief.json) error = %v", err)
+	}
+	var brief struct {
+		PrimaryObjective struct {
+			Text string `json:"text"`
+		} `json:"primary_objective"`
+	}
+	if err := json.Unmarshal(briefData, &brief); err != nil {
+		t.Fatalf("Unmarshal(run-brief.json) error = %v", err)
+	}
+	if brief.PrimaryObjective.Text != "Address PR feedback" {
+		t.Fatalf("unexpected primary objective: %q", brief.PrimaryObjective.Text)
 	}
 }
 
