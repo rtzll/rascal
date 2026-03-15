@@ -5203,12 +5203,15 @@ func TestRecoverPipelinesDoesNotDuplicateActivePhase(t *testing.T) {
 	dataDir := t.TempDir()
 	statePath := filepath.Join(dataDir, "state.db")
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
+	released := false
 	defer func() {
-		close(waitCh)
+		if !released {
+			close(waitCh)
+		}
 		waitForServerIdle(t, s1)
 	}()
 
-	firstRun, _, err := s1.createAndQueuePipeline(runRequest{
+	firstRun, pipeline, err := s1.createAndQueuePipeline(runRequest{
 		TaskID: "task_pipeline_recover",
 		Repo:   "owner/repo",
 		Task:   "Recover without duplicate children",
@@ -5233,4 +5236,18 @@ func TestRecoverPipelinesDoesNotDuplicateActivePhase(t *testing.T) {
 	if got := launcher.Calls(); got != 1 {
 		t.Fatalf("launcher calls after recovery = %d, want 1", got)
 	}
+	close(waitCh)
+	released = true
+
+	waitFor(t, 2*time.Second, func() bool {
+		detail, ok := s2.store.GetRunPipelineDetail(pipeline.ID)
+		if !ok {
+			return false
+		}
+		return detail.Status == state.PipelineStatusSucceeded ||
+			detail.Status == state.PipelineStatusFailed ||
+			detail.Status == state.PipelineStatusCanceled
+	}, "pipeline settled after recovery")
+	waitForServerIdle(t, s1)
+	waitForServerIdle(t, s2)
 }
