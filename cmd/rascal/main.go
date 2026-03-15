@@ -1793,7 +1793,7 @@ func (a *app) newTaskCmd() *cobra.Command {
 		Short: "Show task status/details",
 		Long:  "Show task status, repository, PR number, and pending-input state.",
 		Example: strings.TrimSpace(`
-rascal task run_abc123
+rascal task owner/repo#123
 `),
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
