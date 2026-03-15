@@ -16,7 +16,7 @@ and ship PRs.
 `rascal` (CLI) -> `rascald` (orchestrator API) -> runner container -> branch +
 PR on GitHub.
 
-## Quickstart (10 Minutes)
+## Quickstart
 
 1. Install the CLI so `rascal` is available on your `PATH`:
 
