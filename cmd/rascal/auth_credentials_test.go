@@ -15,7 +15,7 @@ import (
 )
 
 func TestAuthHelpContainsCredentials(t *testing.T) {
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 	var stdout strings.Builder
 	root.SetOut(&stdout)
 	root.SetErr(&stdout)

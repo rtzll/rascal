@@ -347,7 +347,7 @@ func TestInfraDeployExistingJSONOutput(t *testing.T) {
 	}
 
 	a := &app{output: "json", quiet: true}
-	cmd := a.newInfraDeployExistingCmd()
+	cmd := mustNewInfraDeployExistingCmd(t, a)
 	cmd.SetArgs([]string{"--host", "203.0.113.10", "--goarch", "amd64"})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
@@ -395,7 +395,7 @@ func TestInfraUpJSONOutputIncludesProvisionedServer(t *testing.T) {
 	}
 
 	a := &app{output: "json", quiet: true}
-	cmd := a.newInfraUpCmd()
+	cmd := mustNewInfraUpCmd(t, a)
 	cmd.SetArgs([]string{"--provision", "--hcloud-token", "hcloud-token", "--goarch", "amd64", "--skip-env-upload"})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {

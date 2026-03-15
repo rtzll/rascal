@@ -19,7 +19,48 @@ import (
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
+	"github.com/spf13/cobra"
 )
+
+func mustNewRootCmd(t *testing.T) *cobra.Command {
+	t.Helper()
+
+	cmd, err := newRootCmd()
+	if err != nil {
+		t.Fatalf("newRootCmd: %v", err)
+	}
+	return cmd
+}
+
+func mustNewRunCmd(t *testing.T, a *app) *cobra.Command {
+	t.Helper()
+
+	cmd, err := a.newRunCmd()
+	if err != nil {
+		t.Fatalf("newRunCmd: %v", err)
+	}
+	return cmd
+}
+
+func mustNewInfraUpCmd(t *testing.T, a *app) *cobra.Command {
+	t.Helper()
+
+	cmd, err := a.newInfraUpCmd()
+	if err != nil {
+		t.Fatalf("newInfraUpCmd: %v", err)
+	}
+	return cmd
+}
+
+func mustNewInfraDeployExistingCmd(t *testing.T, a *app) *cobra.Command {
+	t.Helper()
+
+	cmd, err := a.newInfraDeployExistingCmd()
+	if err != nil {
+		t.Fatalf("newInfraDeployExistingCmd: %v", err)
+	}
+	return cmd
+}
 
 func TestMaskSecret(t *testing.T) {
 	t.Parallel()
@@ -323,7 +364,7 @@ func TestDoctorJSONOutputIncludesTypedRemoteStatus(t *testing.T) {
 }
 
 func TestCompletionHelpContainsInstall(t *testing.T) {
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 	var stdout bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&stdout)
@@ -337,7 +378,7 @@ func TestCompletionHelpContainsInstall(t *testing.T) {
 }
 
 func TestRetryCommandAliasesRerun(t *testing.T) {
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 	cmd, _, err := root.Find([]string{"rerun"})
 	if err != nil {
 		t.Fatalf("find rerun: %v", err)
@@ -348,7 +389,7 @@ func TestRetryCommandAliasesRerun(t *testing.T) {
 }
 
 func TestRootFlagsDoNotExposeDeadFlags(t *testing.T) {
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 	for _, name := range []string{"verbose", "yes", "debug"} {
 		if f := root.PersistentFlags().Lookup(name); f != nil {
 			t.Fatalf("unexpected flag %q", name)
@@ -368,7 +409,7 @@ func TestRootFlagsDoNotExposeDeadFlags(t *testing.T) {
 }
 
 func TestRootHasGitHubAndInfraCommands(t *testing.T) {
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 	if _, _, err := root.Find([]string{"deploy"}); err != nil {
 		t.Fatalf("deploy command missing: %v", err)
 	}
@@ -408,7 +449,7 @@ func TestRootHasGitHubAndInfraCommands(t *testing.T) {
 }
 
 func TestLogsFollowIntervalDefaults(t *testing.T) {
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 
 	logsCmd, _, err := root.Find([]string{"logs"})
 	if err != nil {
@@ -428,7 +469,7 @@ func TestLogsFollowIntervalDefaults(t *testing.T) {
 }
 
 func TestBootstrapAndInfraDefaults(t *testing.T) {
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 
 	bootstrapCmd, _, err := root.Find([]string{"bootstrap"})
 	if err != nil {
@@ -778,7 +819,7 @@ func TestInfraUpValidatesRequiredInputs(t *testing.T) {
 			ServerURL: "http://127.0.0.1:8080",
 		},
 	}
-	cmd := a.newInfraUpCmd()
+	cmd := mustNewInfraUpCmd(t, a)
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 
@@ -791,7 +832,7 @@ func TestInfraUpValidatesRequiredInputs(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	cmd = a.newInfraUpCmd()
+	cmd = mustNewInfraUpCmd(t, a)
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{"--host", "203.0.113.10", "--provision"})
@@ -803,7 +844,7 @@ func TestInfraUpValidatesRequiredInputs(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	cmd = a.newInfraUpCmd()
+	cmd = mustNewInfraUpCmd(t, a)
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	t.Setenv("HCLOUD_TOKEN", "")
@@ -818,7 +859,7 @@ func TestInfraUpValidatesRequiredInputs(t *testing.T) {
 }
 
 func TestRunRetryDebugDefaults(t *testing.T) {
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 
 	runCmd, _, err := root.Find([]string{"run"})
 	if err != nil {
@@ -838,7 +879,7 @@ func TestRunRetryDebugDefaults(t *testing.T) {
 }
 
 func TestPSDefaults(t *testing.T) {
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 
 	psCmd, _, err := root.Find([]string{"ps"})
 	if err != nil {
@@ -1226,7 +1267,7 @@ func TestRunCreatesTaskPayload(t *testing.T) {
 		output: "json",
 	}
 
-	cmd := a.newRunCmd()
+	cmd := mustNewRunCmd(t, a)
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{"--repo", "owner/repo", "--task", "Fix flaky tests"})
@@ -1286,7 +1327,7 @@ func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
 		output: "json",
 	}
 
-	cmd := a.newRunCmd()
+	cmd := mustNewRunCmd(t, a)
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{"--issue", "owner/repo#123"})
@@ -1343,7 +1384,7 @@ func TestRunIssueSendsExplicitDebugOverride(t *testing.T) {
 		output: "json",
 	}
 
-	cmd := a.newRunCmd()
+	cmd := mustNewRunCmd(t, a)
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{"--issue", "owner/repo#123", "--debug=false"})
@@ -1537,7 +1578,7 @@ func TestRunIssueInvalidFormat(t *testing.T) {
 			APIToken: "test-token",
 		},
 	}
-	cmd := a.newRunCmd()
+	cmd := mustNewRunCmd(t, a)
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{"--issue", "owner/repo"})
@@ -1556,7 +1597,7 @@ func TestRunIssueMutualExclusion(t *testing.T) {
 			APIToken: "test-token",
 		},
 	}
-	cmd := a.newRunCmd()
+	cmd := mustNewRunCmd(t, a)
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{"--issue", "owner/repo#42", "--task", "Fix it"})
@@ -1570,7 +1611,7 @@ func TestRunIssueMutualExclusion(t *testing.T) {
 }
 
 func TestAuthHelpContainsSync(t *testing.T) {
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 	var stdout bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&stdout)
@@ -1599,7 +1640,7 @@ func TestConfigUnsetRemovesKeyAndReportsEffectiveValue(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.toml")
 
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 	root.SetArgs([]string{"--config", cfgPath, "config", "set", "server_url", "https://example.com"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("config set: %v", err)
@@ -1609,7 +1650,7 @@ func TestConfigUnsetRemovesKeyAndReportsEffectiveValue(t *testing.T) {
 	}
 
 	stdout, err := captureStdout(func() error {
-		root := newRootCmd()
+		root := mustNewRootCmd(t)
 		root.SetArgs([]string{"--config", cfgPath, "--output", "json", "config", "unset", "server_url"})
 		return root.Execute()
 	})
@@ -1657,7 +1698,7 @@ func TestConfigUnsetIdempotent(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		stdout, err := captureStdout(func() error {
-			root := newRootCmd()
+			root := mustNewRootCmd(t)
 			root.SetArgs([]string{"--config", cfgPath, "--output", "json", "config", "unset", "default_repo"})
 			return root.Execute()
 		})
@@ -1691,7 +1732,7 @@ func TestConfigGetMasksAPITokenFromLocalConfig(t *testing.T) {
 	}
 
 	stdout, err := captureStdout(func() error {
-		root := newRootCmd()
+		root := mustNewRootCmd(t)
 		root.SetArgs([]string{"--config", cfgPath, "config", "get", "api_token"})
 		return root.Execute()
 	})
@@ -1708,7 +1749,7 @@ func TestConfigSetSSHPortPersistsInteger(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.toml")
 
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 	root.SetArgs([]string{"--config", cfgPath, "config", "set", "ssh_port", "2222"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("config set: %v", err)
@@ -2275,7 +2316,7 @@ func captureStdout(fn func() error) (string, error) {
 
 func renderHelpOutput(t *testing.T, args ...string) string {
 	t.Helper()
-	root := newRootCmd()
+	root := mustNewRootCmd(t)
 	var stdout bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&stdout)

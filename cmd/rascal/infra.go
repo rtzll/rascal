@@ -102,7 +102,7 @@ func runHetznerProvision(cfg hcloudProvisionConfig, timeout time.Duration) (hclo
 
 var runHetznerProvisionFn = runHetznerProvision
 
-func (a *app) newInfraCmd() *cobra.Command {
+func (a *app) newInfraCmd() (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:   "infra",
 		Short: "Infrastructure operations (provisioning/deploy)",
@@ -116,10 +116,18 @@ rascal infra deploy-existing --host "$SERVER_IP" --ssh-key ~/.ssh/id_ed25519
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(a.newInfraUpCmd())
+	infraUpCmd, err := a.newInfraUpCmd()
+	if err != nil {
+		return nil, err
+	}
+	cmd.AddCommand(infraUpCmd)
 	cmd.AddCommand(a.newInfraProvisionHetznerCmd())
-	cmd.AddCommand(a.newInfraDeployExistingCmd())
-	return cmd
+	infraDeployExistingCmd, err := a.newInfraDeployExistingCmd()
+	if err != nil {
+		return nil, err
+	}
+	cmd.AddCommand(infraDeployExistingCmd)
+	return cmd, nil
 }
 
 func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
@@ -192,11 +200,11 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 	return cmd
 }
 
-func (a *app) newInfraDeployExistingCmd() *cobra.Command {
+func (a *app) newInfraDeployExistingCmd() (*cobra.Command, error) {
 	return a.newDeployExistingCmd("deploy-existing", "Deploy rascald to an existing Linux host over SSH")
 }
 
-func (a *app) newInfraUpCmd() *cobra.Command {
+func (a *app) newInfraUpCmd() (*cobra.Command, error) {
 	var (
 		host               string
 		provision          bool
@@ -314,17 +322,17 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	cmd.Flags().StringVar(&agentBackend, "agent-runtime", string(agent.RuntimeCodex), "agent runtime to use on the server (goose or codex)")
 	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.RuntimeCodex), "deprecated alias for --agent-runtime")
-	if err := cmd.Flags().MarkHidden("agent-backend"); err != nil {
-		panic(err)
+	if err := hideFlag(cmd, "agent-backend"); err != nil {
+		return nil, err
 	}
 	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
 	cmd.Flags().BoolVar(&skipEnvUpload, "skip-env-upload", false, "keep existing /etc/rascal/rascal.env on server")
-	return cmd
+	return cmd, nil
 }
 
-func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
+func (a *app) newDeployExistingCmd(use, short string) (*cobra.Command, error) {
 	var (
 		host               string
 		sshUser            string
@@ -395,14 +403,14 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	cmd.Flags().StringVar(&agentBackend, "agent-runtime", string(agent.RuntimeCodex), "agent runtime to use on the server (goose or codex)")
 	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.RuntimeCodex), "deprecated alias for --agent-runtime")
-	if err := cmd.Flags().MarkHidden("agent-backend"); err != nil {
-		panic(err)
+	if err := hideFlag(cmd, "agent-backend"); err != nil {
+		return nil, err
 	}
 	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
 	cmd.Flags().BoolVar(&uploadEnv, "upload-env", false, "upload/update /etc/rascal/rascal.env on server")
-	return cmd
+	return cmd, nil
 }
 
 type deployExistingInput struct {

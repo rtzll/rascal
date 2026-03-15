@@ -271,12 +271,16 @@ const (
 )
 
 func main() {
-	if err := newRootCmd().Execute(); err != nil {
+	root, err := newRootCmd()
+	if err != nil {
+		exitErr(err)
+	}
+	if err := root.Execute(); err != nil {
 		exitErr(err)
 	}
 }
 
-func newRootCmd() *cobra.Command {
+func newRootCmd() (*cobra.Command, error) {
 	a := &app{}
 
 	root := &cobra.Command{
@@ -322,14 +326,20 @@ func newRootCmd() *cobra.Command {
 	initCmd.GroupID = "setup"
 	bootstrapCmd := a.newBootstrapCmd()
 	bootstrapCmd.GroupID = "setup"
-	deployCmd := a.newDeployCmd()
+	deployCmd, err := a.newDeployCmd()
+	if err != nil {
+		return nil, err
+	}
 	deployCmd.GroupID = "setup"
 	configCmd := a.newConfigCmd()
 	configCmd.GroupID = "setup"
 	authCmd := a.newAuthCmd()
 	authCmd.GroupID = "setup"
 
-	runCmd := a.newRunCmd()
+	runCmd, err := a.newRunCmd()
+	if err != nil {
+		return nil, err
+	}
 	runCmd.GroupID = "runs"
 	psCmd := a.newPSCmd()
 	psCmd.GroupID = "runs"
@@ -347,7 +357,10 @@ func newRootCmd() *cobra.Command {
 
 	githubCmd := a.newGitHubCmd()
 	githubCmd.GroupID = "integrations"
-	infraCmd := a.newInfraCmd()
+	infraCmd, err := a.newInfraCmd()
+	if err != nil {
+		return nil, err
+	}
 	infraCmd.GroupID = "integrations"
 
 	doctorCmd := a.newDoctorCmd()
@@ -372,7 +385,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(doctorCmd)
 	root.AddCommand(completionCmd)
 
-	return root
+	return root, nil
 }
 
 func (a *app) initConfig() error {
@@ -976,18 +989,21 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 	return cmd
 }
 
-func (a *app) newDeployCmd() *cobra.Command {
-	cmd := a.newDeployExistingCmd("deploy", "Deploy rascald to an existing host")
+func (a *app) newDeployCmd() (*cobra.Command, error) {
+	cmd, err := a.newDeployExistingCmd("deploy", "Deploy rascald to an existing host")
+	if err != nil {
+		return nil, err
+	}
 	cmd.Long = "Deploy or redeploy rascald to an existing Linux host over SSH without running provisioning or webhook setup."
 	cmd.Example = strings.TrimSpace(`
 rascal deploy --host "$SERVER_IP"
 rascal deploy --host "$SERVER_IP" --upload-env --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 rascal deploy --host "$SERVER_IP" --codex-auth ~/.codex/auth.json
 `)
-	return cmd
+	return cmd, nil
 }
 
-func (a *app) newRunCmd() *cobra.Command {
+func (a *app) newRunCmd() (*cobra.Command, error) {
 	var repo, instruction, legacyTask, baseBranch, issueRef string
 	var debug bool
 	cmd := &cobra.Command{
@@ -1074,13 +1090,20 @@ rascal run --issue OWNER/REPO#123
 	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository in OWNER/REPO form")
 	cmd.Flags().StringVarP(&instruction, "instruction", "t", "", "instruction text")
 	cmd.Flags().StringVar(&legacyTask, "task", "", "deprecated alias for --instruction")
-	if err := cmd.Flags().MarkHidden("task"); err != nil {
-		panic(err)
+	if err := hideFlag(cmd, "task"); err != nil {
+		return nil, err
 	}
 	cmd.Flags().StringVarP(&baseBranch, "base-branch", "b", "main", "base branch")
 	cmd.Flags().StringVar(&issueRef, "issue", "", "issue reference in OWNER/REPO#NUMBER form")
 	cmd.Flags().BoolVar(&debug, "debug", true, "stream detailed agent execution logs (use --debug=false to reduce verbosity)")
-	return cmd
+	return cmd, nil
+}
+
+func hideFlag(cmd *cobra.Command, name string) error {
+	if err := cmd.Flags().MarkHidden(name); err != nil {
+		return fmt.Errorf("hide %q flag: %w", name, err)
+	}
+	return nil
 }
 
 func (a *app) newPSCmd() *cobra.Command {
