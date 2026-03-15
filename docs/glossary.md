@@ -4,19 +4,25 @@
 
 - `Task`: durable unit of work tracked across retries, follow-up input, and PR iteration.
 - `Run`: one execution attempt to advance a task.
-- `AgentBackend`: the backend recorded for a task or run attempt. Rascal currently supports `goose` and `codex`, and a task may switch backends across runs.
-- `AgentSession`: optional task-scoped backend state used to resume later runs. Rascal resets it when the task switches backends.
 - `RunExecution`: detached execution metadata for a run, such as container identity and observed state.
+- `Runner`: the execution launcher abstraction that starts, inspects, stops, and removes detached executions.
+- `Worker`: the in-execution component that performs a run inside the launched environment.
+- `AgentHarness`: the tool wrapper invoked by the worker. Rascal currently supports `goose` and `codex`.
+- `ModelProvider`: the underlying model/service used by a harness. Today the concrete provider in use is `codex`, with room for future providers.
+- `SessionPolicy`: policy governing whether a task-scoped session may resume (`off`, `pr-only`, `all`).
+- `AgentBackend`: compatibility term still present at some boundaries; it maps to the selected `AgentHarness`.
+- `AgentSession`: optional task-scoped harness state used to resume later runs. Rascal resets it when the task switches harnesses.
 - `RunLease`: supervision ownership record for a running run. It tells Rascal which orchestrator instance currently owns supervision.
 
 ## System Terms
 
 - `Control plane`: `rascal` plus `rascald`. This layer accepts work, persists state, schedules runs, and supervises execution.
 - `Execution plane`: detached Docker containers started for `rascal-runner`.
-- `Runner image`: Docker image used to execute a run. Rascal maintains separate images for Goose and Codex backends.
+- `Runner image`: Docker image used to execute a run. Rascal maintains separate images for Goose and Codex harnesses.
 - `Active slot`: the currently live `rascald` slot in blue/green deploys. Only this slot should process webhook traffic.
 - `Inactive slot`: the standby slot prepared during blue/green deploys before cutover.
 - `Draining`: shutdown mode where an old slot stops accepting work and relinquishes run supervision without canceling detached execution.
+- `Deep module`: a package boundary that owns a cohesive area of behavior, such as `internal/github`, `internal/apiclient`, `internal/clientconfig`, or `internal/remote`.
 
 ## Deployment Terms
 

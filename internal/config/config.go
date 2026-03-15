@@ -324,24 +324,22 @@ func loadAgentSessionConfig(dataDir string) (AgentSessionConfig, error) {
 
 func loadAgentSessionMode() (agent.SessionMode, error) {
 	if raw, ok := os.LookupEnv("RASCAL_GOOSE_SESSION_MODE"); ok {
-		if strings.TrimSpace(raw) == "" {
-			return agent.SessionModeAll, nil
+		if strings.TrimSpace(raw) != "" {
+			mode, err := agent.ParseSessionMode(raw)
+			if err != nil {
+				return "", fmt.Errorf("parse RASCAL_GOOSE_SESSION_MODE: %w", err)
+			}
+			return mode, nil
 		}
-		mode, err := agent.ParseSessionMode(raw)
-		if err != nil {
-			return "", fmt.Errorf("parse RASCAL_GOOSE_SESSION_MODE: %w", err)
-		}
-		return mode, nil
 	}
 	if raw, ok := os.LookupEnv("RASCAL_AGENT_SESSION_MODE"); ok {
-		if strings.TrimSpace(raw) == "" {
-			return agent.SessionModeAll, nil
+		if strings.TrimSpace(raw) != "" {
+			mode, err := agent.ParseSessionMode(raw)
+			if err != nil {
+				return "", fmt.Errorf("parse RASCAL_AGENT_SESSION_MODE: %w", err)
+			}
+			return mode, nil
 		}
-		mode, err := agent.ParseSessionMode(raw)
-		if err != nil {
-			return "", fmt.Errorf("parse RASCAL_AGENT_SESSION_MODE: %w", err)
-		}
-		return mode, nil
 	}
 	return agent.SessionModeAll, nil
 }

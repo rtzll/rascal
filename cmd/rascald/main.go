@@ -586,7 +586,7 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to fetch issue: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		taskText = issueTaskFromIssue(issue.Title, issue.Body)
+		taskText = ghapi.IssueTaskFromIssue(issue.Title, issue.Body)
 		ctxText = fmt.Sprintf("Issue URL: %s", issue.HTMLURL)
 	}
 
@@ -950,7 +950,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			_, err := s.createAndQueueRun(runRequest{
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
-				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Task:        ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
 				Trigger:     runtrigger.NameIssueLabel,
 				IssueNumber: ev.Issue.Number,
 				Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number),
@@ -973,7 +973,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			s.removeIssueReactionsBestEffort(ev.Repository.FullName, ev.Issue.Number)
 			return nil
 		case "edited":
-			if !issueHasLabel(ev.Issue.Labels, "rascal") {
+			if !ghapi.IssueHasLabel(ev.Issue.Labels, "rascal") {
 				return nil
 			}
 			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
@@ -983,7 +983,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			_, err := s.createAndQueueRun(runRequest{
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
-				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Task:        ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
 				Trigger:     runtrigger.NameIssueEdited,
 				IssueNumber: ev.Issue.Number,
 				Context:     fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number),
@@ -1000,7 +1000,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			}
 			return err
 		case "closed":
-			if !issueHasLabel(ev.Issue.Labels, "rascal") {
+			if !ghapi.IssueHasLabel(ev.Issue.Labels, "rascal") {
 				return nil
 			}
 			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
@@ -1020,7 +1020,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			s.cancelRunningTaskRuns(taskID, "issue closed")
 			return nil
 		case "reopened":
-			if !issueHasLabel(ev.Issue.Labels, "rascal") {
+			if !ghapi.IssueHasLabel(ev.Issue.Labels, "rascal") {
 				return nil
 			}
 			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
@@ -1037,7 +1037,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			_, err := s.createAndQueueRun(runRequest{
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
-				Task:        issueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Task:        ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
 				Trigger:     runtrigger.NameIssueReopened,
 				IssueNumber: ev.Issue.Number,
 				PRStatus:    state.PRStatusNone,
@@ -1068,13 +1068,13 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		switch ev.Action {
 		case "created":
 		case "edited":
-			if !issueCommentBodyChanged(ev) {
+			if !ghapi.IssueCommentBodyChanged(ev) {
 				return nil
 			}
 		default:
 			return nil
 		}
-		if isRascalAutomationComment(ev.Comment.Body) {
+		if ghapi.IsAutomationComment(ev.Comment.Body, runCompletionCommentBodyMarker, runStartCommentBodyMarker, runFailureCommentBodyMarker) {
 			return nil
 		}
 		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
@@ -1163,7 +1163,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		switch ev.Action {
 		case "created":
 		case "edited":
-			if !reviewCommentBodyChanged(ev) {
+			if !ghapi.ReviewCommentBodyChanged(ev) {
 				return nil
 			}
 		default:
@@ -1180,7 +1180,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.PullRequest.Number, ev.PullRequest.Base.Ref, ev.PullRequest.Head.Ref)
 
 		contextText := strings.TrimSpace(ev.Comment.Body)
-		if location := formatReviewCommentLocation(ev.Comment.Path, ev.Comment.StartLine, ev.Comment.Line); location != "" {
+		if location := ghapi.FormatReviewCommentLocation(ev.Comment.Path, ev.Comment.StartLine, ev.Comment.Line); location != "" {
 			if contextText == "" {
 				contextText = fmt.Sprintf("inline review comment at %s", location)
 			} else {
@@ -1235,7 +1235,7 @@ Inline comment location: %s`, contextText, location)
 				IssueNumber: task.IssueNumber,
 				PRNumber:    ev.PullRequest.Number,
 				PRStatus:    state.PRStatusOpen,
-				Context:     reviewThreadContext(ev.Thread),
+				Context:     ghapi.ReviewThreadContext(ev.Thread),
 				BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
 				HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
 				Debug:       boolPtr(true),
@@ -2580,54 +2580,6 @@ func (s *server) resolvePRBranches(ctx context.Context, repo string, prNumber in
 	return baseBranch, headBranch
 }
 
-func issueHasLabel(labels []ghapi.Label, name string) bool {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return false
-	}
-	for _, label := range labels {
-		if strings.EqualFold(strings.TrimSpace(label.Name), name) {
-			return true
-		}
-	}
-	return false
-}
-
-func issueCommentBodyChanged(ev ghapi.IssueCommentEvent) bool {
-	if ev.Changes.Body == nil {
-		return false
-	}
-	newBody := strings.TrimSpace(ev.Comment.Body)
-	oldBody := strings.TrimSpace(ev.Changes.Body.From)
-	return newBody != oldBody
-}
-
-func reviewCommentBodyChanged(ev ghapi.PullRequestReviewCommentEvent) bool {
-	if ev.Changes.Body == nil {
-		return false
-	}
-	newBody := strings.TrimSpace(ev.Comment.Body)
-	oldBody := strings.TrimSpace(ev.Changes.Body.From)
-	return newBody != oldBody
-}
-
-func reviewThreadContext(thread ghapi.ReviewThread) string {
-	for i := len(thread.Comments) - 1; i >= 0; i-- {
-		body := strings.TrimSpace(thread.Comments[i].Body)
-		if body == "" {
-			continue
-		}
-		if location := formatReviewCommentLocation(thread.Path, thread.StartLine, thread.Line); location != "" {
-			return fmt.Sprintf("%s\n\nThread location: %s", body, location)
-		}
-		return body
-	}
-	if location := formatReviewCommentLocation(thread.Path, thread.StartLine, thread.Line); location != "" {
-		return fmt.Sprintf("review thread marked unresolved at %s", location)
-	}
-	return "review thread marked unresolved"
-}
-
 func (s *server) cancelQueuedReviewThreadRuns(taskID, repo string, prNumber int, reviewThreadID int64, reason string) {
 	taskID = strings.TrimSpace(taskID)
 	repo = strings.TrimSpace(repo)
@@ -2709,34 +2661,6 @@ func newRequestID() string {
 		return fmt.Sprintf("req_%d", time.Now().UnixNano())
 	}
 	return "req_" + hex.EncodeToString(b)
-}
-
-func issueTaskFromIssue(title, body string) string {
-	title = strings.TrimSpace(title)
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return title
-	}
-	return fmt.Sprintf(`%s
-
-%s`, title, body)
-}
-
-func formatReviewCommentLocation(path string, startLine, line *int) string {
-	path = strings.TrimSpace(path)
-	if line != nil && *line > 0 {
-		if startLine != nil && *startLine > 0 && *startLine != *line {
-			if path == "" {
-				return fmt.Sprintf("lines %d-%d", *startLine, *line)
-			}
-			return fmt.Sprintf("%s:%d-%d", path, *startLine, *line)
-		}
-		if path == "" {
-			return fmt.Sprintf("line %d", *line)
-		}
-		return fmt.Sprintf("%s:%d", path, *line)
-	}
-	return path
 }
 
 func instructionText(run state.Run) string {
@@ -3469,7 +3393,7 @@ func buildRunStartComment(run state.Run, target runResponseTarget, requestedBy s
 		queueDelaySeconds = &delay
 	}
 
-	body := runsummary.BuildStartComment(runsummary.StartCommentInput{
+	return ghapi.RenderStartComment(runStartCommentBodyMarker, runsummary.StartCommentInput{
 		RunID:             run.ID,
 		RequestedBy:       requestedBy,
 		Trigger:           runtrigger.Normalize(firstNonEmpty(target.Trigger.String(), run.Trigger.String())),
@@ -3484,7 +3408,6 @@ func buildRunStartComment(run state.Run, target runResponseTarget, requestedBy s
 		Context:           run.Context,
 		QueueDelaySeconds: queueDelaySeconds,
 	})
-	return runStartCommentBodyMarker + "\n\n" + body
 }
 
 func loadRunBuildCommit(runDir string) string {
@@ -3533,7 +3456,7 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 	if err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("read commit message: %w", err)
 	}
-	body, err := runsummary.BuildCompletionComment(runsummary.CompletionCommentInput{
+	body, err := ghapi.RenderCompletionComment(runCompletionCommentBodyMarker, runsummary.CompletionCommentInput{
 		RunID:           run.ID,
 		Repo:            repo,
 		RequestedBy:     target.RequestedBy,
@@ -3545,9 +3468,9 @@ func buildRunCompletionComment(run state.Run, target runResponseTarget, repo str
 		TotalTokens:     totalTokens,
 	})
 	if err != nil {
-		return "", fmt.Errorf("build run completion comment: %w", err)
+		return "", fmt.Errorf("render completion comment: %w", err)
 	}
-	return runCompletionCommentBodyMarker + "\n\n" + body, nil
+	return body, nil
 }
 
 func loadRunTokenUsage(run state.Run) (state.RunTokenUsage, bool, error) {
@@ -3605,17 +3528,13 @@ func buildRunFailureComment(run state.Run, target runResponseTarget) (string, er
 		header = fmt.Sprintf("@%s %s", requestedBy, header)
 	}
 
-	parts := []string{header}
-	if summary.RetryAt != "" {
-		parts = append(parts, fmt.Sprintf("The provider said to try again at %s.", summary.RetryAt))
-	}
-	if summary.Reason != "" {
-		parts = append(parts, fmt.Sprintf("Reason: %s", summary.Reason))
-	}
-	if details := buildRunFailureDetails(run.Error, agentOutput, agentLogLabel); details != "" {
-		parts = append(parts, "<details><summary>Failure Details</summary>\n\n```text\n"+details+"\n```\n\n</details>")
-	}
-	return runFailureCommentBodyMarker + "\n\n" + strings.Join(parts, "\n\n"), nil
+	return ghapi.RenderFailureComment(
+		runFailureCommentBodyMarker,
+		header,
+		summary.RetryAt,
+		summary.Reason,
+		buildRunFailureDetails(run.Error, agentOutput, agentLogLabel),
+	), nil
 }
 
 func summarizeRunFailure(run state.Run, agentOutput string) runFailureSummary {
@@ -3859,24 +3778,6 @@ func parseRetryDelay(raw string) (time.Duration, bool) {
 		return 0, false
 	}
 	return total, true
-}
-
-func isRascalAutomationComment(body string) bool {
-	trimmed := strings.TrimSpace(body)
-	if trimmed == "" {
-		return false
-	}
-	if strings.Contains(trimmed, runCompletionCommentBodyMarker) {
-		return true
-	}
-	if strings.Contains(trimmed, runStartCommentBodyMarker) {
-		return true
-	}
-	if strings.Contains(trimmed, runFailureCommentBodyMarker) {
-		return true
-	}
-	legacy := strings.ToLower(trimmed)
-	return strings.Contains(legacy, "rascal run `") && strings.Contains(legacy, "completed in ")
 }
 
 func (s *server) requeueRun(runID string) error {

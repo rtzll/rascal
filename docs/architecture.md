@@ -1,7 +1,7 @@
 # Architecture
 
 Rascal has three runtime parts and a small set of internal abstractions that
-keep orchestration, execution, and persistence separate.
+keep control-plane orchestration, execution, and persistence separate.
 
 ## Core Model
 
@@ -10,17 +10,18 @@ from execution-plane responsibilities.
 
 - Control plane: `rascal` and `rascald`
 - Execution plane: detached runner containers launched via the Docker launcher
-- Agent backends: `goose` and `codex`
+- Agent harnesses: `goose` and `codex`
+- Model providers: currently `codex`, with room for future provider-specific harnesses
 - Packaging: separate runner images for Goose and Codex
 
 In simple terms:
 
 - A Task is the long-lived unit of work.
 - A Run is one attempt to advance that task.
-- A Task tracks the backend selected for its latest run.
-- A Task may have one current backend-specific `AgentSession`.
-- A Run uses the backend recorded on that run and may resume the task's session when the backend still matches.
-- A detached container is execution state for a run, not the run itself.
+- A Task tracks the harness selected for its latest run.
+- A Task may have one current task-scoped session record.
+- A Run uses the harness recorded on that run and may resume the task's session when the harness still matches.
+- A detached container is `RunExecution` state for a run, not the run itself.
 
 This split is important during deploys and restarts:
 
@@ -80,7 +81,7 @@ rascal (CLI) or GitHub webhook
 3. Runner container (`rascal-runner`)
 
 - Clones the repository and checks out the target branches.
-- Executes the selected agent backend (`goose` or `codex`).
+- Executes the selected `AgentHarness` (`goose` or `codex`).
 - Commits changes, pushes the head branch, and creates or reuses a PR.
 - Writes canonical artifacts into mounted `/rascal-meta`.
 - Runtime logic lives in Go in `cmd/rascal-runner`.
@@ -98,24 +99,30 @@ These are the main layers in the Go codebase.
 
 2. Agent abstraction
 
-- `internal/agent` defines backend normalization (`goose`, `codex`) and session policy (`off`, `pr-only`, `all`).
-- This keeps backend/session decisions out of the higher-level orchestrator flow.
+- `internal/agent` defines `AgentHarness`, `ModelProvider`, and `SessionPolicy`.
+- Compatibility names like `AgentBackend` still exist at some boundaries, but the deeper abstraction is harness-plus-provider.
 
 3. Execution abstraction
 
-- `internal/runner` defines the `Launcher` interface and `Spec`/`ExecutionHandle` contract.
+- `internal/runner` defines the `Runner` launcher interface and `Spec`/`ExecutionHandle` contract.
 - Current production implementation is Docker; `noop` exists for non-runtime/test scenarios.
 - Session mounting is backend-aware: Goose uses `GOOSE_PATH_ROOT`, Codex uses `CODEX_HOME`.
 
-4. Persistence abstraction
+4. Control-plane and client boundaries
+
+- `internal/github` is the single deep GitHub boundary for API calls, webhook payload interpretation helpers, and comment rendering helpers.
+- `internal/apiclient` owns the CLI transport layer for HTTP and SSH-backed requests to `rascald`.
+- `internal/clientconfig` owns client config load/save/effective-resolution behavior.
+- `internal/remote` owns shared SSH/SCP/shell-quoting primitives reused by CLI and deploy flows.
+
+5. Persistence abstraction
 
 - `internal/state` owns SQLite-backed persistence and state transitions.
 - It stores runs, tasks, run leases, detached run executions, cancel requests, webhook deliveries, task agent session records, and encrypted stored credentials plus credential leases.
 - SQL schema lives in embedded migrations and typed queries are generated under `internal/state/sqlitegen`.
 
-5. Supporting integrations
+6. Supporting integrations
 
-- `internal/github`: GitHub API and webhook payload handling.
 - `internal/runsummary`: PR body and completion comment formatting.
 - `internal/logs`: tailing run log files.
 
@@ -124,7 +131,7 @@ These are the main layers in the Go codebase.
 - Rascal builds and deploys one orchestrator binary: `rascald`.
 - Rascal also builds one runner binary: `rascal-runner`.
 - That runner binary is packaged into separate Docker images for Goose and Codex.
-- `rascald` selects the runner image based on the task/run backend.
+- `rascald` selects the runner image based on the task/run harness.
 - Blue/green deploy replaces the control plane, while runner containers remain detached in the execution plane.
 
 ## Execution Flow
@@ -166,9 +173,9 @@ active slot A running
 ## System Invariants
 
 - A run belongs to exactly one task.
-- A run uses the backend recorded on that run.
-- A task may have at most one current backend-specific session record.
-- Changing a task backend must discard incompatible task-scoped session resume state before the next run starts.
+- A run uses the harness recorded on that run.
+- A task may have at most one current task-scoped session record.
+- Changing a task harness must discard incompatible task-scoped session resume state before the next run starts.
 - At most one orchestrator instance should own a run lease at a time.
 - `run_executions` store detached execution metadata, not user-visible business progress.
 - Only the active slot should process webhook traffic during blue/green overlap.
@@ -178,10 +185,10 @@ active slot A running
 Persistent state is stored on the server in a SQLite database under the Rascal
 data directory.
 
-By default, task-scoped agent session state is also stored on disk under
+By default, task-scoped session state is also stored on disk under
 `${RASCAL_DATA_DIR}/agent-sessions/<task-key>/`. Older Goose-specific env names
 are still accepted as compatibility aliases, but the current abstraction is
-agent-backend-agnostic.
+harness-agnostic and leaves room for multiple model providers.
 
 Runs stay short-lived. Each run mounts its run directory plus, when session
 resume is enabled, a task-scoped session directory. There is no always-on
@@ -194,7 +201,7 @@ Key persisted entities:
 - `run_leases`: supervision ownership and heartbeat expiry.
 - `run_executions`: detached execution handle metadata for adoption and cleanup.
 - `run_cancels`: persisted cancel intent.
-- `task_agent_sessions`: stable backend session identifiers and mounted session roots.
+- `task_agent_sessions`: stable harness session identifiers and mounted session roots.
 - `codex_credentials`: encrypted stored credential payloads and allocation metadata.
 - `credential_leases`: per-run credential assignments and lease expiry state.
 - `deliveries`: webhook dedupe/claim bookkeeping.
@@ -205,7 +212,7 @@ Key persisted entities:
 | --- | --- | --- |
 | SQLite state DB | tasks, runs, leases, execution handles, sessions, credentials | Primary control-plane source of truth |
 | Run directory | per-run artifacts, logs, `meta.json`, transient auth material | Short-lived execution artifacts |
-| Task session directory | resumable backend session state | Optional and task-scoped |
+| Task session directory | resumable harness session state | Optional and task-scoped |
 | Docker runtime | detached runner container process state | Execution-plane state, not the system of record |
 | Caddy and systemd config on host | active slot routing and service activation | Deployment/control-plane topology |
 
@@ -217,7 +224,7 @@ Key persisted entities:
 | Run | `runs` table | User-visible attempt and final outcome |
 | Active supervision owner | `run_leases` table | Coordinates which `rascald` instance supervises |
 | Detached container identity | `run_executions` table | Enables adoption and cleanup across restarts |
-| Session resume state | `task_agent_sessions` plus mounted session directory | Tracks backend session identity and storage root |
+| Session resume state | `task_agent_sessions` plus mounted session directory | Tracks harness session identity and storage root |
 | Run artifacts | run directory on disk | Execution outputs consumed during finalization |
 | Live container process | Docker runtime | Actual execution process while the run is active |
 
@@ -240,8 +247,8 @@ Each run directory stores metadata and artifacts such as:
 - Session policy is configured at the orchestrator via `off`, `pr-only`, or `all`.
 - `pr-only` currently resumes for `pr_comment`, `pr_review`, `pr_review_comment`, `retry`, and `issue_edited`.
 - Goose resumes by named Goose session plus mounted session storage.
-- Codex resumes by reusing a task-scoped `CODEX_HOME` and the discovered backend session id.
-- If a task switches backend between runs, Rascal starts a fresh session for the new backend and replaces the stored task session record.
+- Codex resumes by reusing a task-scoped `CODEX_HOME` and the discovered harness session id.
+- If a task switches harness between runs, Rascal starts a fresh session for the new harness and replaces the stored task session record.
 - If a Goose resume attempt fails because the stored session is missing or invalid, the runner falls back to a fresh session.
 
 ## Failure and Recovery

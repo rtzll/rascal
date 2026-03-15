@@ -26,12 +26,14 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/rtzll/rascal/internal/api"
+	"github.com/rtzll/rascal/internal/apiclient"
+	"github.com/rtzll/rascal/internal/clientconfig"
 	"github.com/rtzll/rascal/internal/config"
 	deployengine "github.com/rtzll/rascal/internal/deploy"
+	"github.com/rtzll/rascal/internal/remote"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 type apiClient struct {
@@ -43,6 +45,19 @@ type apiClient struct {
 	sshUser   string
 	sshKey    string
 	sshPort   int
+}
+
+func toAPIClient(c apiClient) apiclient.Client {
+	return apiclient.Client{
+		BaseURL:   c.baseURL,
+		Token:     c.token,
+		HTTP:      c.http,
+		Transport: c.transport,
+		SSHHost:   c.sshHost,
+		SSHUser:   c.sshUser,
+		SSHKey:    c.sshKey,
+		SSHPort:   c.sshPort,
+	}
 }
 
 type app struct {
@@ -361,121 +376,41 @@ func newRootCmd() *cobra.Command {
 }
 
 func (a *app) initConfig() error {
-	v := viper.New()
-	v.SetConfigFile(a.configPath)
-	v.SetConfigType("toml")
-	v.SetDefault("server_url", "http://127.0.0.1:8080")
-	v.SetEnvPrefix("RASCAL")
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	v.AutomaticEnv()
-
-	if err := v.ReadInConfig(); err != nil {
-		var notFound viper.ConfigFileNotFoundError
-		if !errors.As(err, &notFound) && !os.IsNotExist(err) {
-			return &cliError{
-				Code:    exitConfig,
-				Message: "failed to read config",
-				Hint:    fmt.Sprintf("fix %s or run `rascal init`", a.configPath),
-				Cause:   err,
-			}
+	resolved, err := clientconfig.Resolve(clientconfig.ResolveInput{
+		Path:            a.configPath,
+		ServerURLFlag:   a.serverURLFlag,
+		APITokenFlag:    a.apiTokenFlag,
+		DefaultRepoFlag: a.defaultRepoFlag,
+		TransportFlag:   a.transportFlag,
+		SSHHostFlag:     a.sshHostFlag,
+		SSHUserFlag:     a.sshUserFlag,
+		SSHKeyFlag:      a.sshKeyFlag,
+		SSHPortFlag:     a.sshPortFlag,
+	}, resolveTransport)
+	if err != nil {
+		return &cliError{
+			Code:    exitConfig,
+			Message: "failed to read config",
+			Hint:    fmt.Sprintf("fix %s or run `rascal init`", a.configPath),
+			Cause:   err,
 		}
 	}
-	a.cfg = config.ClientConfig{
-		ServerURL:   strings.TrimSpace(v.GetString("server_url")),
-		APIToken:    strings.TrimSpace(v.GetString("api_token")),
-		DefaultRepo: strings.TrimSpace(v.GetString("default_repo")),
-		Host:        strings.TrimSpace(v.GetString("host")),
-		Domain:      strings.TrimSpace(v.GetString("domain")),
-		Transport:   strings.TrimSpace(v.GetString("transport")),
-		SSHHost:     strings.TrimSpace(v.GetString("ssh_host")),
-		SSHUser:     strings.TrimSpace(v.GetString("ssh_user")),
-		SSHKey:      strings.TrimSpace(v.GetString("ssh_key")),
-		SSHPort:     v.GetInt("ssh_port"),
-	}
 
-	if strings.TrimSpace(a.serverURLFlag) != "" {
-		a.cfg.ServerURL = strings.TrimSpace(a.serverURLFlag)
-		a.serverSource = "flag"
-	} else if strings.TrimSpace(os.Getenv("RASCAL_SERVER_URL")) != "" {
-		a.serverSource = "env"
-	} else if v.InConfig("server_url") {
-		a.serverSource = "config"
-	} else {
-		a.serverSource = "default"
-	}
-	if strings.TrimSpace(a.apiTokenFlag) != "" {
-		a.cfg.APIToken = strings.TrimSpace(a.apiTokenFlag)
-		a.tokenSource = "flag"
-	} else if strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")) != "" {
-		a.tokenSource = "env"
-	} else if v.InConfig("api_token") {
-		a.tokenSource = "config"
-	} else {
-		a.tokenSource = "unset"
-	}
-	if strings.TrimSpace(a.defaultRepoFlag) != "" {
-		a.cfg.DefaultRepo = strings.TrimSpace(a.defaultRepoFlag)
-		a.repoSource = "flag"
-	} else if strings.TrimSpace(os.Getenv("RASCAL_DEFAULT_REPO")) != "" {
-		a.repoSource = "env"
-	} else if v.InConfig("default_repo") {
-		a.repoSource = "config"
-	} else {
-		a.repoSource = "unset"
-	}
-	if strings.TrimSpace(a.transportFlag) != "" {
-		a.cfg.Transport = strings.ToLower(strings.TrimSpace(a.transportFlag))
-		a.transportSource = "flag"
-	} else if strings.TrimSpace(os.Getenv("RASCAL_TRANSPORT")) != "" {
-		a.transportSource = "env"
-	} else if v.InConfig("transport") {
-		a.transportSource = "config"
-	} else {
-		a.transportSource = "default"
-	}
-	if strings.TrimSpace(a.sshHostFlag) != "" {
-		a.cfg.SSHHost = strings.TrimSpace(a.sshHostFlag)
-	}
-	if strings.TrimSpace(a.sshUserFlag) != "" {
-		a.cfg.SSHUser = strings.TrimSpace(a.sshUserFlag)
-	}
-	if strings.TrimSpace(a.sshKeyFlag) != "" {
-		a.cfg.SSHKey = strings.TrimSpace(a.sshKeyFlag)
-	}
-	if a.sshPortFlag > 0 {
-		a.cfg.SSHPort = a.sshPortFlag
-	}
-
-	a.cfg.ServerURL = strings.TrimRight(a.cfg.ServerURL, "/")
-	if a.cfg.ServerURL == "" {
-		a.cfg.ServerURL = "http://127.0.0.1:8080"
-	}
-	if a.cfg.Transport == "" {
-		a.cfg.Transport = "auto"
-	}
-	if a.cfg.SSHHost == "" {
-		a.cfg.SSHHost = strings.TrimSpace(a.cfg.Host)
-	}
-	if a.cfg.SSHUser == "" {
-		a.cfg.SSHUser = "root"
-	}
-	if a.cfg.SSHPort <= 0 {
-		a.cfg.SSHPort = 22
-	}
-	resolvedTransport := resolveTransport(a.cfg.Transport, a.cfg.ServerURL, a.cfg.SSHHost)
+	a.cfg = resolved.Config
+	a.serverSource = resolved.ServerSource
+	a.tokenSource = resolved.TokenSource
+	a.repoSource = resolved.RepoSource
+	a.transportSource = resolved.TransportSource
 
 	a.client = apiClient{
 		baseURL:   a.cfg.ServerURL,
 		token:     a.cfg.APIToken,
 		http:      &http.Client{Timeout: 30 * time.Second},
-		transport: resolvedTransport,
+		transport: resolved.ResolvedTransport,
 		sshHost:   strings.TrimSpace(a.cfg.SSHHost),
 		sshUser:   strings.TrimSpace(a.cfg.SSHUser),
 		sshKey:    strings.TrimSpace(a.cfg.SSHKey),
 		sshPort:   a.cfg.SSHPort,
-	}
-	if a.transportSource == "default" {
-		a.transportSource = "resolved"
 	}
 
 	switch strings.ToLower(strings.TrimSpace(a.output)) {
@@ -2609,64 +2544,27 @@ func decodeServerError(resp *http.Response) error {
 }
 
 func loadFileConfig(path string) (config.ClientConfig, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	v.SetDefault("server_url", "http://127.0.0.1:8080")
-	if err := v.ReadInConfig(); err != nil {
-		var notFound viper.ConfigFileNotFoundError
-		if !errors.As(err, &notFound) && !os.IsNotExist(err) {
-			return config.ClientConfig{}, &cliError{Code: exitConfig, Message: "failed to read config file", Cause: err}
-		}
+	cfg, err := clientconfig.Load(path)
+	if err != nil {
+		return config.ClientConfig{}, &cliError{Code: exitConfig, Message: "failed to read config file", Cause: err}
 	}
-	return config.ClientConfig{
-		ServerURL:   strings.TrimRight(strings.TrimSpace(v.GetString("server_url")), "/"),
-		APIToken:    strings.TrimSpace(v.GetString("api_token")),
-		DefaultRepo: strings.TrimSpace(v.GetString("default_repo")),
-		Host:        strings.TrimSpace(v.GetString("host")),
-		Domain:      strings.TrimSpace(v.GetString("domain")),
-		Transport:   strings.TrimSpace(v.GetString("transport")),
-		SSHHost:     strings.TrimSpace(v.GetString("ssh_host")),
-		SSHUser:     strings.TrimSpace(v.GetString("ssh_user")),
-		SSHKey:      strings.TrimSpace(v.GetString("ssh_key")),
-		SSHPort:     v.GetInt("ssh_port"),
-	}, nil
+	return cfg, nil
 }
 
 func loadClientConfigFile(path string) (clientConfigFile, bool, error) {
-	data, err := os.ReadFile(path)
+	out, exists, err := clientconfig.LoadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return clientConfigFile{}, false, nil
-		}
 		return clientConfigFile{}, false, &cliError{Code: exitConfig, Message: "failed to read config file", Cause: err}
 	}
-	if len(bytes.TrimSpace(data)) == 0 {
-		return clientConfigFile{}, true, nil
-	}
-	var out clientConfigFile
-	if err := toml.Unmarshal(data, &out); err != nil {
-		return clientConfigFile{}, true, &cliError{Code: exitConfig, Message: "failed to parse config file", Cause: err}
-	}
-	return out, true, nil
+	return clientConfigFile(out), exists, nil
 }
 
 func saveClientConfigFile(path string, settings clientConfigFile) error {
 	if path == "" {
 		path = config.DefaultClientConfigPath()
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return &cliError{Code: exitConfig, Message: "failed to create config directory", Cause: err}
-	}
-	data, err := toml.Marshal(settings)
-	if err != nil {
-		return &cliError{Code: exitConfig, Message: "failed to serialize config file", Cause: err}
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := clientconfig.SaveFile(path, clientconfig.File(settings)); err != nil {
 		return &cliError{Code: exitConfig, Message: "failed to write config file", Cause: err}
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return &cliError{Code: exitConfig, Message: "failed to chmod config file", Cause: err}
 	}
 	return nil
 }
@@ -3079,133 +2977,33 @@ func buildCreateTaskPayload(input createTaskPayloadInput) createTaskRequestPaylo
 }
 
 func doJSON[T any](client apiClient, method, path string, payload T) (*http.Response, error) {
-	data, err := json.Marshal(payload)
+	resp, err := apiclient.DoJSON(toAPIClient(client), method, path, payload)
 	if err != nil {
-		return nil, fmt.Errorf("encode payload: %w", err)
+		return nil, fmt.Errorf("send JSON request: %w", err)
 	}
-	return client.do(method, path, bytes.NewReader(data))
+	return resp, nil
 }
 
 func (c apiClient) do(method, path string, body io.Reader) (*http.Response, error) {
-	if strings.EqualFold(c.transport, "ssh") {
-		return c.doOverSSH(method, path, body)
-	}
-	return c.doOverHTTP(method, path, body)
-}
-
-func (c apiClient) doOverHTTP(method, path string, body io.Reader) (*http.Response, error) {
-	req, err := http.NewRequest(method, c.baseURL+path, body)
+	resp, err := toAPIClient(c).Do(method, path, body)
 	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("send request: %w", err)
 	}
 	return resp, nil
 }
 
 func (c apiClient) doOverSSH(method, path string, body io.Reader) (*http.Response, error) {
-	sshHost := strings.TrimSpace(c.sshHost)
-	if sshHost == "" {
-		return nil, fmt.Errorf("ssh transport selected but ssh host is missing")
-	}
-	sshUser := firstNonEmpty(strings.TrimSpace(c.sshUser), "root")
-	sshPort := c.sshPort
-	if sshPort <= 0 {
-		sshPort = 22
-	}
-	sshKey := strings.TrimSpace(c.sshKey)
-
-	var payload []byte
-	if body != nil {
-		data, err := io.ReadAll(body)
-		if err != nil {
-			return nil, fmt.Errorf("read request body: %w", err)
-		}
-		payload = data
-	}
-
-	curlArgs := []string{
-		"curl", "-sS", "-i", "--raw",
-		"-X", shellSingleQuote(strings.TrimSpace(method)),
-		"-H", shellSingleQuote("Accept: application/json"),
-	}
-	if c.token != "" {
-		curlArgs = append(curlArgs, "-H", shellSingleQuote("Authorization: Bearer "+c.token))
-	}
-	if len(payload) > 0 {
-		curlArgs = append(curlArgs, "-H", shellSingleQuote("Content-Type: application/json"), "--data-binary", "@-")
-	}
-	curlCmd := strings.Join(curlArgs, " ")
-	remoteCmd := strings.Join([]string{
-		"set -eu",
-		"slot=''",
-		"if [ -f /etc/rascal/active_slot ]; then slot=$(tr -d '[:space:]' </etc/rascal/active_slot); fi",
-		"case \"$slot\" in",
-		fmt.Sprintf("  %s) port=%d ;;", rascalSlotBlue, rascalSlotBluePort),
-		fmt.Sprintf("  %s) port=%d ;;", rascalSlotGreen, rascalSlotGreenPort),
-		fmt.Sprintf("  *) if systemctl is-active --quiet 'rascal@green'; then port=%d; elif systemctl is-active --quiet 'rascal@blue'; then port=%d; else port=%d; fi ;;", rascalSlotGreenPort, rascalSlotBluePort, rascalSlotBluePort),
-		"esac",
-		"url=$(printf 'http://127.0.0.1:%s%s' \"$port\" " + shellSingleQuote(path) + ")",
-		curlCmd + " \"$url\"",
-	}, "\n")
-
-	cfg := deployConfig{
-		Host:       sshHost,
-		SSHUser:    sshUser,
-		SSHKeyPath: sshKey,
-		SSHPort:    sshPort,
-	}
-	cmd := exec.Command("ssh", sshArgs(cfg, remoteCmd)...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if len(payload) > 0 {
-		cmd.Stdin = bytes.NewReader(payload)
-	}
-	if err := cmd.Run(); err != nil {
-		errOut := strings.TrimSpace(stderr.String())
-		if errOut == "" {
-			errOut = strings.TrimSpace(stdout.String())
-		}
-		if errOut == "" {
-			return nil, fmt.Errorf("ssh request failed: %w", err)
-		}
-		return nil, fmt.Errorf("ssh request failed: %w (%s)", err, errOut)
-	}
-
-	raw := stdout.Bytes()
-	resp, err := parseRawHTTPResponse(raw, method)
+	client := toAPIClient(c)
+	client.Transport = "ssh"
+	resp, err := client.Do(method, path, body)
 	if err != nil {
-		errOut := strings.TrimSpace(stderr.String())
-		if errOut != "" {
-			return nil, fmt.Errorf("parse ssh response: %w (%s)", err, errOut)
-		}
-		return nil, fmt.Errorf("parse ssh response: %w", err)
-	}
-	return resp, nil
-}
-
-func parseRawHTTPResponse(raw []byte, method string) (*http.Response, error) {
-	reader := bufio.NewReader(bytes.NewReader(raw))
-	req := &http.Request{Method: method}
-	resp, err := http.ReadResponse(reader, req)
-	if err != nil {
-		return nil, fmt.Errorf("parse raw HTTP response: %w", err)
+		return nil, fmt.Errorf("send ssh request: %w", err)
 	}
 	return resp, nil
 }
 
 func shellSingleQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+	return remote.ShellQuote(s)
 }
 
 func randomToken(numBytes int) (string, error) {
@@ -3220,13 +3018,6 @@ func randomToken(numBytes int) (string, error) {
 }
 
 type deployConfig = deployengine.Config
-
-const (
-	rascalSlotBlue      = deployengine.SlotBlue
-	rascalSlotGreen     = deployengine.SlotGreen
-	rascalSlotBluePort  = deployengine.SlotBluePort
-	rascalSlotGreenPort = deployengine.SlotGreenPort
-)
 
 func deployToExistingHost(cfg deployConfig) error {
 	if err := deployengine.Execute(cfg); err != nil {
@@ -3275,52 +3066,36 @@ func goarchFromHetznerArchitecture(arch string) (string, bool) {
 }
 
 func sshArgs(cfg deployConfig, remoteCmd string) []string {
-	args := []string{"-p", fmt.Sprintf("%d", cfg.SSHPort), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"}
-	if keyPath := normalizedSSHKeyPath(cfg.SSHKeyPath); keyPath != "" {
-		args = append(args, "-i", keyPath)
-	}
-	args = append(args, fmt.Sprintf("%s@%s", cfg.SSHUser, cfg.Host), remoteCmd)
-	return args
+	return remote.SSHArgs(remote.SSHConfig{
+		Host:    cfg.Host,
+		User:    cfg.SSHUser,
+		KeyPath: cfg.SSHKeyPath,
+		Port:    cfg.SSHPort,
+	}, remoteCmd)
 }
 
 func scpArgs(cfg deployConfig, source, target string) []string {
-	args := []string{"-P", fmt.Sprintf("%d", cfg.SSHPort), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"}
-	if keyPath := normalizedSSHKeyPath(cfg.SSHKeyPath); keyPath != "" {
-		args = append(args, "-i", keyPath)
-	}
-	args = append(args, source, target)
-	return args
-}
-
-func normalizedSSHKeyPath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	expanded, err := expandPath(path)
-	if err != nil {
-		return path
-	}
-	return expanded
+	return remote.SCPArgs(remote.SSHConfig{
+		Host:    cfg.Host,
+		User:    cfg.SSHUser,
+		KeyPath: cfg.SSHKeyPath,
+		Port:    cfg.SSHPort,
+	}, source, target)
 }
 
 func remoteTarget(cfg deployConfig, path string) string {
-	return fmt.Sprintf("%s@%s:%s", cfg.SSHUser, cfg.Host, path)
+	return remote.RemoteTarget(remote.SSHConfig{
+		Host: cfg.Host,
+		User: cfg.SSHUser,
+	}, path)
 }
 
 func expandPath(path string) (string, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "", nil
+	expanded, err := remote.ExpandPath(path)
+	if err != nil {
+		return "", fmt.Errorf("expand path: %w", err)
 	}
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve user home directory: %w", err)
-		}
-		return filepath.Join(home, path[2:]), nil
-	}
-	return path, nil
+	return expanded, nil
 }
 
 func openURLInBrowser(rawURL string) error {
