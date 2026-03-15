@@ -360,10 +360,23 @@ func resolveWebhookTestInput(in webhookTestInput, cfg config.ClientConfig) (webh
 }
 
 func buildWebhookTestPayload(event, repo string) ([]byte, error) {
-	payload, err := buildWebhookTestEvent(event, repo)
-	if err != nil {
-		return nil, fmt.Errorf("build webhook test event: %w", err)
+	switch event {
+	case "issues":
+		return marshalWebhookTestPayload(buildIssuesWebhookTestEvent(repo))
+	case "issue_comment":
+		return marshalWebhookTestPayload(buildIssueCommentWebhookTestEvent(repo))
+	case "pull_request_review":
+		return marshalWebhookTestPayload(buildPullRequestReviewWebhookTestEvent(repo))
+	case "pull_request_review_comment":
+		return marshalWebhookTestPayload(buildPullRequestReviewCommentWebhookTestEvent(repo))
+	case "pull_request":
+		return marshalWebhookTestPayload(buildPullRequestWebhookTestEvent(repo))
+	default:
+		return nil, fmt.Errorf("build webhook test event: unsupported event %q", event)
 	}
+}
+
+func marshalWebhookTestPayload[T any](payload T) ([]byte, error) {
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal webhook test payload: %w", err)
@@ -371,97 +384,113 @@ func buildWebhookTestPayload(event, repo string) ([]byte, error) {
 	return data, nil
 }
 
-func buildWebhookTestEvent(event, repo string) (any, error) {
+func buildIssuesWebhookTestEvent(repo string) ghapi.IssuesEvent {
+	const (
+		issueNumber = 123
+		actorLogin  = "rascal-tester"
+	)
+	return ghapi.IssuesEvent{
+		Action: "labeled",
+		Label:  ghapi.Label{Name: "rascal"},
+		Issue: ghapi.Issue{
+			Number:      issueNumber,
+			Title:       "Rascal webhook test issue",
+			Body:        "Synthetic webhook payload from rascal webhook test.",
+			PullRequest: nil,
+		},
+		Repository: ghapi.Repository{FullName: repo},
+		Sender:     ghapi.User{Login: actorLogin},
+	}
+}
+
+func buildIssueCommentWebhookTestEvent(repo string) ghapi.IssueCommentEvent {
 	const (
 		issueNumber = 123
 		commentID   = 456
-		reviewID    = 789
-		prNumber    = 123
-		baseBranch  = "main"
-		headBranch  = "rascal/webhook-test"
 		actorLogin  = "rascal-tester"
 	)
-
-	switch event {
-	case "issues":
-		return ghapi.IssuesEvent{
-			Action: "labeled",
-			Label:  ghapi.Label{Name: "rascal"},
-			Issue: ghapi.Issue{
-				Number:      issueNumber,
-				Title:       "Rascal webhook test issue",
-				Body:        "Synthetic webhook payload from rascal webhook test.",
-				PullRequest: nil,
-			},
-			Repository: ghapi.Repository{FullName: repo},
-			Sender:     ghapi.User{Login: actorLogin},
-		}, nil
-	case "issue_comment":
-		return ghapi.IssueCommentEvent{
-			Action: "created",
-			Issue: ghapi.Issue{
-				Number:      issueNumber,
-				Title:       "Rascal webhook test PR",
-				Body:        "Synthetic PR for webhook test.",
-				PullRequest: &ghapi.PullRequestRef{URL: "https://example.com/pull/123"},
-			},
-			Comment: ghapi.Comment{
-				ID:   commentID,
-				Body: "Synthetic comment from rascal webhook test.",
-				User: ghapi.User{Login: actorLogin},
-			},
-			Repository: ghapi.Repository{FullName: repo},
-			Sender:     ghapi.User{Login: actorLogin},
-		}, nil
-	case "pull_request_review":
-		pr := ghapi.PullRequest{Number: prNumber, Merged: false}
-		pr.Base.Ref = baseBranch
-		pr.Head.Ref = headBranch
-		return ghapi.PullRequestReviewEvent{
-			Action: "submitted",
-			Review: ghapi.Review{
-				ID:    reviewID,
-				Body:  "Synthetic review from rascal webhook test.",
-				State: "commented",
-				User:  ghapi.User{Login: actorLogin},
-			},
-			PullRequest: pr,
-			Repository:  ghapi.Repository{FullName: repo},
-			Sender:      ghapi.User{Login: actorLogin},
-		}, nil
-	case "pull_request_review_comment":
-		pr := ghapi.PullRequest{Number: prNumber, Merged: false}
-		pr.Base.Ref = baseBranch
-		pr.Head.Ref = headBranch
-		line := 42
-		startLine := 40
-		return ghapi.PullRequestReviewCommentEvent{
-			Action: "created",
-			Comment: ghapi.ReviewComment{
-				ID:        commentID,
-				Body:      "Synthetic inline review comment from rascal webhook test.",
-				Path:      "cmd/rascald/main.go",
-				Line:      &line,
-				StartLine: &startLine,
-				User:      ghapi.User{Login: actorLogin},
-			},
-			PullRequest: pr,
-			Repository:  ghapi.Repository{FullName: repo},
-			Sender:      ghapi.User{Login: actorLogin},
-		}, nil
-	case "pull_request":
-		pr := ghapi.PullRequest{Number: prNumber, Merged: false}
-		pr.Base.Ref = baseBranch
-		pr.Head.Ref = headBranch
-		return ghapi.PullRequestEvent{
-			Action:      "opened",
-			PullRequest: pr,
-			Repository:  ghapi.Repository{FullName: repo},
-			Sender:      ghapi.User{Login: actorLogin},
-		}, nil
-	default:
-		return nil, fmt.Errorf("unsupported event %q", event)
+	return ghapi.IssueCommentEvent{
+		Action: "created",
+		Issue: ghapi.Issue{
+			Number:      issueNumber,
+			Title:       "Rascal webhook test PR",
+			Body:        "Synthetic PR for webhook test.",
+			PullRequest: &ghapi.PullRequestRef{URL: "https://example.com/pull/123"},
+		},
+		Comment: ghapi.Comment{
+			ID:   commentID,
+			Body: "Synthetic comment from rascal webhook test.",
+			User: ghapi.User{Login: actorLogin},
+		},
+		Repository: ghapi.Repository{FullName: repo},
+		Sender:     ghapi.User{Login: actorLogin},
 	}
+}
+
+func buildPullRequestReviewWebhookTestEvent(repo string) ghapi.PullRequestReviewEvent {
+	const (
+		reviewID   = 789
+		actorLogin = "rascal-tester"
+	)
+	pr := buildWebhookTestPullRequest()
+	return ghapi.PullRequestReviewEvent{
+		Action: "submitted",
+		Review: ghapi.Review{
+			ID:    reviewID,
+			Body:  "Synthetic review from rascal webhook test.",
+			State: "commented",
+			User:  ghapi.User{Login: actorLogin},
+		},
+		PullRequest: pr,
+		Repository:  ghapi.Repository{FullName: repo},
+		Sender:      ghapi.User{Login: actorLogin},
+	}
+}
+
+func buildPullRequestReviewCommentWebhookTestEvent(repo string) ghapi.PullRequestReviewCommentEvent {
+	const (
+		commentID  = 456
+		actorLogin = "rascal-tester"
+	)
+	pr := buildWebhookTestPullRequest()
+	line := 42
+	startLine := 40
+	return ghapi.PullRequestReviewCommentEvent{
+		Action: "created",
+		Comment: ghapi.ReviewComment{
+			ID:        commentID,
+			Body:      "Synthetic inline review comment from rascal webhook test.",
+			Path:      "cmd/rascald/main.go",
+			Line:      &line,
+			StartLine: &startLine,
+			User:      ghapi.User{Login: actorLogin},
+		},
+		PullRequest: pr,
+		Repository:  ghapi.Repository{FullName: repo},
+		Sender:      ghapi.User{Login: actorLogin},
+	}
+}
+
+func buildPullRequestWebhookTestEvent(repo string) ghapi.PullRequestEvent {
+	const actorLogin = "rascal-tester"
+	return ghapi.PullRequestEvent{
+		Action:      "opened",
+		PullRequest: buildWebhookTestPullRequest(),
+		Repository:  ghapi.Repository{FullName: repo},
+		Sender:      ghapi.User{Login: actorLogin},
+	}
+}
+
+func buildWebhookTestPullRequest() ghapi.PullRequest {
+	const (
+		prNumber   = 123
+		baseBranch = "main"
+		headBranch = "rascal/webhook-test"
+	)
+	pr := ghapi.PullRequest{Number: prNumber, Merged: false}
+	pr.Base.Ref = baseBranch
+	pr.Head.Ref = headBranch
+	return pr
 }
 
 func webhookTestDeliveryID(dryRun bool) string {
