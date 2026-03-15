@@ -62,7 +62,7 @@ func decodeJSONRequest[T any](t *testing.T, r *http.Request) T {
 	return in
 }
 
-func writeJSONResponse(t *testing.T, w http.ResponseWriter, status int, payload any) {
+func writeJSONResponse[T any](t *testing.T, w http.ResponseWriter, status int, payload T) {
 	t.Helper()
 
 	w.WriteHeader(status)
