@@ -135,7 +135,9 @@ func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string)
 				}
 			}
 			if _, err := tmpFile.Write(lease.AuthBlob); err != nil {
-				_ = tmpFile.Close()
+				if closeErr := tmpFile.Close(); closeErr != nil {
+					log.Printf("close temp auth file %s after write failure failed: %v", tmpPath, closeErr)
+				}
 				cleanupTemp()
 				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
 					log.Printf("release credential lease %s after auth write failure failed: %v", lease.ID, releaseErr)
@@ -143,7 +145,9 @@ func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string)
 				return "", fmt.Errorf("write broker auth file: %w", err)
 			}
 			if err := tmpFile.Chmod(0o600); err != nil {
-				_ = tmpFile.Close()
+				if closeErr := tmpFile.Close(); closeErr != nil {
+					log.Printf("close temp auth file %s after chmod failure failed: %v", tmpPath, closeErr)
+				}
 				cleanupTemp()
 				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
 					log.Printf("release credential lease %s after auth chmod failure failed: %v", lease.ID, releaseErr)
