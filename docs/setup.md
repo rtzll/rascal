@@ -9,7 +9,7 @@
 
 ## Tokens
 
-Rascal uses three tokens for production setup.
+Rascal uses three values during initial setup.
 
 1. `HCLOUD_TOKEN`
 
@@ -46,17 +46,22 @@ Docs:
 
 ## Env File
 
-Rascal auto-loads `./.rascal.env` for all commands.
+Rascal auto-loads `.rascal.env` from the current working directory.
 
 Start from the committed template:
 
 ```bash
-cp ./.rascal.env.example ./.rascal.env
+cp .rascal.env.example .rascal.env
 ```
 
 ```bash
+# Hetzner Cloud API token used locally to provision the server
 HCLOUD_TOKEN=...
+
+# GitHub PAT used locally to create/update repo webhooks and labels
 GITHUB_ADMIN_TOKEN=...
+
+# GitHub PAT stored on the server; controls what Rascal runs can do in the repo
 RASCAL_GITHUB_TOKEN=...
 ```
 
@@ -67,7 +72,7 @@ You can also set a custom env file via `--env-file` or `RASCAL_ENV_FILE`.
 ### A) Provision + Deploy + Webhook (recommended)
 
 ```bash
-./bin/rascal init --provision \
+rascal init --provision \
   --repo OWNER/REPO \
   --domain rascal.example.com
 ```
@@ -75,7 +80,7 @@ You can also set a custom env file via `--env-file` or `RASCAL_ENV_FILE`.
 ### B) Existing Host
 
 ```bash
-./bin/rascal init \
+rascal init \
   --repo OWNER/REPO \
   --host YOUR_SERVER_IP \
   --domain rascal.example.com
@@ -92,6 +97,6 @@ You can run Rascal over host IP without a domain.
 ## Verify Setup
 
 ```bash
-./bin/rascal doctor --host YOUR_SERVER_IP
-./bin/rascal config view
+rascal doctor --host YOUR_SERVER_IP
+rascal config view
 ```

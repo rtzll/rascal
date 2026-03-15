@@ -3,7 +3,7 @@
 ## Health Checks
 
 ```bash
-./bin/rascal doctor --host YOUR_SERVER_IP
+rascal doctor --host YOUR_SERVER_IP
 ```
 
 `doctor` validates local config, server health, transport choice, and remote
@@ -21,7 +21,7 @@ runtime prerequisites.
 ## Live Logs
 
 ```bash
-./bin/rascal logs <run_id> --follow
+rascal logs <run_id> --follow
 ```
 
 Log output includes:
@@ -37,13 +37,13 @@ Log output includes:
 Retry failed/canceled run:
 
 ```bash
-./bin/rascal retry <run_id>
+rascal retry <run_id>
 ```
 
 Cancel active run:
 
 ```bash
-./bin/rascal cancel <run_id>
+rascal cancel <run_id>
 ```
 
 ## Deployment Model
@@ -63,21 +63,21 @@ Operationally this means:
 
 | Symptom                                          | Likely layer                           | First checks                                                                                                                                                         |
 | ------------------------------------------------ | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rascal` command cannot reach server             | Control plane / transport              | `./bin/rascal config view`, `./bin/rascal doctor --host YOUR_SERVER_IP`                                                                                              |
-| Webhook arrives but no run is created            | Control plane / webhook path           | `curl -fsS https://YOUR_DOMAIN/healthz`, `./bin/rascal logs caddy-access --host YOUR_SERVER_IP --follow`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
-| Run is stuck in `queued`                         | Control plane / scheduler              | `./bin/rascal ps`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                                        |
-| Run is `running` but appears idle                | Execution plane / backend              | `./bin/rascal logs <run_id> --follow`, inspect detached containers on host                                                                                           |
-| Cancel does not take effect                      | Execution plane / supervision adoption | `./bin/rascal cancel <run_id>`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                           |
+| `rascal` command cannot reach server             | Control plane / transport              | `rascal config view`, `rascal doctor --host YOUR_SERVER_IP`                                                                                                          |
+| Webhook arrives but no run is created            | Control plane / webhook path           | `curl -fsS https://YOUR_DOMAIN/healthz`, `rascal logs caddy-access --host YOUR_SERVER_IP --follow`, `rascal logs rascald --host YOUR_SERVER_IP --follow`             |
+| Run is stuck in `queued`                         | Control plane / scheduler              | `rascal ps`, `rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                                                    |
+| Run is `running` but appears idle                | Execution plane / backend              | `rascal logs <run_id> --follow`, inspect detached containers on host                                                                                                  |
+| Cancel does not take effect                      | Execution plane / supervision adoption | `rascal cancel <run_id>`, `rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                                       |
 | Auth failures in Codex runs                      | Credential layer                       | inspect run logs, verify stored credential status and lease availability                                                                                             |
 | Deploy succeeds locally but service is unhealthy | Deployment / blue-green cutover        | check active slot, slot readiness, Caddy logs, and rollback readiness                                                                                                |
 
 ## First-Response Commands
 
 ```bash
-./bin/rascal doctor --host YOUR_SERVER_IP
-./bin/rascal ps
-./bin/rascal config view
-./bin/rascal logs rascald --host YOUR_SERVER_IP --lines 200
+rascal doctor --host YOUR_SERVER_IP
+rascal ps
+rascal config view
+rascal logs rascald --host YOUR_SERVER_IP --lines 200
 ```
 
 ## Agent Session Resume

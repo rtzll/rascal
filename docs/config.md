@@ -9,7 +9,7 @@ Default path:
 Inspect current effective values:
 
 ```bash
-./bin/rascal config view
+rascal config view
 ```
 
 ## Resolution Order
@@ -25,7 +25,7 @@ Rascal resolves values in this order:
 
 For convenience, Rascal auto-loads:
 
-- `./.rascal.env` (current working directory)
+- `.rascal.env` (current working directory)
 
 You can override with:
 
@@ -56,15 +56,15 @@ Rascal-owned auth configuration uses these canonical environment variables:
 Set values:
 
 ```bash
-./bin/rascal config set server_url https://rascal.example.com
-./bin/rascal config set default_repo OWNER/REPO
-./bin/rascal config set transport ssh
+rascal config set server_url https://rascal.example.com
+rascal config set default_repo OWNER/REPO
+rascal config set transport ssh
 ```
 
 Tip: use `doctor` to confirm both local and remote resolution.
 
 ```bash
-./bin/rascal doctor --host YOUR_SERVER_IP
+rascal doctor --host YOUR_SERVER_IP
 ```
 
 ## Server Credential Settings

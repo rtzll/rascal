@@ -18,30 +18,35 @@ PR on GitHub.
 
 ## Quickstart (10 Minutes)
 
-1. Build the CLI:
+1. Install the CLI so `rascal` is available on your `PATH`:
 
 ```bash
-go build -o ./bin/rascal ./cmd/rascal
+go install ./cmd/rascal
 ```
 
 2. Copy the local env template and fill in the required tokens:
 
 ```bash
-cp ./.rascal.env.example ./.rascal.env
+cp .rascal.env.example .rascal.env
 ```
 
-Then edit `./.rascal.env`:
+Then edit `.rascal.env`:
 
 ```bash
+# Hetzner Cloud API token used locally to provision the server
 HCLOUD_TOKEN=...
+
+# GitHub PAT used locally to create/update repo webhooks and labels
 GITHUB_ADMIN_TOKEN=...
+
+# GitHub PAT stored on the server; controls what Rascal runs can do in the repo
 RASCAL_GITHUB_TOKEN=...
 ```
 
 3. Initialize Rascal:
 
 ```bash
-./bin/rascal init --provision \
+rascal init --provision \
   --repo OWNER/REPO \
   --domain rascal.example.com
 ```
@@ -49,40 +54,34 @@ RASCAL_GITHUB_TOKEN=...
 4. Verify:
 
 ```bash
-./bin/rascal doctor --host <server_ip>
+rascal doctor --host <server_ip>
 ```
 
 5. Run first task:
 
 ```bash
-./bin/rascal run -t "Add a short CONTRIBUTING.md section for local dev setup"
+rascal run -t "Add a short CONTRIBUTING.md section for local dev setup"
 ```
 
 ## Core Commands
 
 ```bash
-./bin/rascal run -t "..."
-./bin/rascal run --issue OWNER/REPO#123
-./bin/rascal ps
-./bin/rascal task <task_id>
-./bin/rascal logs <run_id> --follow
-./bin/rascal open <run_id>
-./bin/rascal retry <run_id>
-./bin/rascal cancel <run_id>
-./bin/rascal doctor --host <server_ip>
-./bin/rascal config view
+rascal run -t "..."
+rascal run --issue OWNER/REPO#123
+rascal ps
+rascal task <task_id>
+rascal logs <run_id> --follow
+rascal open <run_id>
+rascal retry <run_id>
+rascal cancel <run_id>
+rascal doctor --host <server_ip>
+rascal config view
 ```
 
 ## Learn More
 
 - Contributing and local verification: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Docs index: [docs/README.md](docs/README.md)
 - Setup and token details: [docs/setup.md](docs/setup.md)
 - Config and precedence: [docs/config.md](docs/config.md)
 - Command guide: [docs/commands.md](docs/commands.md)
-- Glossary of core terms: [docs/glossary.md](docs/glossary.md)
-- Webhooks and Cloudflare notes: [docs/webhooks.md](docs/webhooks.md)
-- Operations and troubleshooting: [docs/operations.md](docs/operations.md)
-- Operator runbook (failure modes + exact commands):
-  [docs/runbook.md](docs/runbook.md)
-- Architecture overview: [docs/architecture.md](docs/architecture.md)
-- Deployment flow (blue/green + drain): [docs/deployment.md](docs/deployment.md)

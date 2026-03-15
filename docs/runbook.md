@@ -13,10 +13,10 @@ REPO=OWNER/REPO
 ## 0) Quick Triage
 
 ```bash
-./bin/rascal doctor --host "$HOST"
-./bin/rascal ps
-./bin/rascal config view
-./bin/rascal logs rascald --host "$HOST" --follow
+rascal doctor --host "$HOST"
+rascal ps
+rascal config view
+rascal logs rascald --host "$HOST" --follow
 ```
 
 ## 1) Webhook Not Triggering Runs
@@ -30,15 +30,15 @@ Checks:
 
 ```bash
 curl -fsS "https://${DOMAIN}/healthz"
-./bin/rascal logs caddy-access --host "$HOST" --follow
-./bin/rascal logs rascald --host "$HOST" --follow
+rascal logs caddy-access --host "$HOST" --follow
+rascal logs rascald --host "$HOST" --follow
 ```
 
 Resync webhook/label (no deploy):
 
 ```bash
-set -a; source ./.rascal.env; set +a
-./bin/rascal init \
+set -a; source .rascal.env; set +a
+rascal init \
   --repo "$REPO" \
   --server-url "https://${DOMAIN}" \
   --skip-deploy \
@@ -63,8 +63,8 @@ should survive slot rotation while the active slot adopts supervision.
 Run deploy directly:
 
 ```bash
-set -a; source ./.rascal.env; set +a
-./bin/rascal deploy \
+set -a; source .rascal.env; set +a
+rascal deploy \
   --host "$HOST" \
   --domain "$DOMAIN" \
   --codex-auth ~/.codex/auth.json \
@@ -77,9 +77,9 @@ Codex runs; it is not copied to a static server-side fallback file.
 Inspect remote services:
 
 ```bash
-./bin/rascal logs rascald --host "$HOST" --lines 300
-./bin/rascal logs caddy --host "$HOST" --lines 300
-./bin/rascal logs caddy-access --host "$HOST" --lines 300
+rascal logs rascald --host "$HOST" --lines 300
+rascal logs caddy --host "$HOST" --lines 300
+rascal logs caddy-access --host "$HOST" --lines 300
 ```
 
 Confirm active slot and health:
@@ -98,27 +98,27 @@ See also: [deployment.md](deployment.md)
 Identify run and follow logs:
 
 ```bash
-./bin/rascal ps
-./bin/rascal logs run RUN_ID --follow
+rascal ps
+rascal logs run RUN_ID --follow
 ```
 
 If a run should stop:
 
 ```bash
-./bin/rascal cancel RUN_ID
-./bin/rascal logs run RUN_ID --follow
+rascal cancel RUN_ID
+rascal logs run RUN_ID --follow
 ```
 
 Requeue after fix:
 
 ```bash
-./bin/rascal retry RUN_ID
+rascal retry RUN_ID
 ```
 
 If no progress across runs, inspect server:
 
 ```bash
-./bin/rascal logs rascald --host "$HOST" --follow
+rascal logs rascald --host "$HOST" --follow
 ```
 
 Check detached execution state on host:
@@ -132,8 +132,8 @@ ssh root@"$HOST" "docker ps -a --format '{{.Names}} {{.Status}}' | rg '^rascal-'
 Request cancel:
 
 ```bash
-./bin/rascal cancel RUN_ID
-./bin/rascal logs run RUN_ID --follow
+rascal cancel RUN_ID
+rascal logs run RUN_ID --follow
 ```
 
 Verify container stop on remote host:
@@ -148,8 +148,8 @@ active slot should adopt supervision and continue cancellation/finalization.
 If run remains active unexpectedly, capture:
 
 ```bash
-./bin/rascal logs rascald --host "$HOST" --lines 300
-./bin/rascal logs run RUN_ID --lines 300
+rascal logs rascald --host "$HOST" --lines 300
+rascal logs run RUN_ID --lines 300
 ```
 
 ## 5) Manual Rollback (Blue/Green)
@@ -182,14 +182,14 @@ systemctl stop --no-block rascal@green || true"
 
 ```bash
 curl -fsS "https://${DOMAIN}/readyz"
-./bin/rascal doctor --host "$HOST"
+rascal doctor --host "$HOST"
 ```
 
 ## 6) Post-Incident Checklist
 
 ```bash
-./bin/rascal doctor --host "$HOST"
-./bin/rascal ps
+rascal doctor --host "$HOST"
+rascal ps
 ```
 
 Then:

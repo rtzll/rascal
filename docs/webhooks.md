@@ -12,7 +12,7 @@ The `init` flow configures webhook + `rascal` label when admin token is
 available.
 
 ```bash
-./bin/rascal init --provision --repo OWNER/REPO --domain rascal.example.com
+rascal init --provision --repo OWNER/REPO --domain rascal.example.com
 ```
 
 If needed, you can re-run `init` with `--skip-deploy` to resync webhook
@@ -37,7 +37,7 @@ Without signature, `401/403/405` can be expected. `3xx` redirects are a problem.
 Synthetic webhook test from CLI:
 
 ```bash
-./bin/rascal github webhook test \
+rascal github webhook test \
   --repo OWNER/REPO \
   --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET" \
   --dry-run
