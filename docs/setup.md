@@ -48,6 +48,12 @@ Docs:
 
 Rascal auto-loads `./.rascal.env` for all commands.
 
+Start from the committed template:
+
+```bash
+cp ./.rascal.env.example ./.rascal.env
+```
+
 ```bash
 HCLOUD_TOKEN=...
 GITHUB_ADMIN_TOKEN=...

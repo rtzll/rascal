@@ -24,7 +24,13 @@ PR on GitHub.
 go build -o ./bin/rascal ./cmd/rascal
 ```
 
-2. Create `./.rascal.env` with required tokens:
+2. Copy the local env template and fill in the required tokens:
+
+```bash
+cp ./.rascal.env.example ./.rascal.env
+```
+
+Then edit `./.rascal.env`:
 
 ```bash
 HCLOUD_TOKEN=...
