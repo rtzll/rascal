@@ -121,11 +121,54 @@ func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string)
 			UserID: requesterUserID,
 		})
 		if err == nil {
-			if err := os.WriteFile(authPath, lease.AuthBlob, 0o600); err != nil {
+			tmpFile, err := os.CreateTemp(authDir, "auth-*.tmp")
+			if err != nil {
+				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
+					log.Printf("release credential lease %s after temp auth file create failure failed: %v", lease.ID, releaseErr)
+				}
+				return "", fmt.Errorf("create temp auth file: %w", err)
+			}
+			tmpPath := tmpFile.Name()
+			cleanupTemp := func() {
+				if removeErr := os.Remove(tmpPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+					log.Printf("remove temp auth file %s failed: %v", tmpPath, removeErr)
+				}
+			}
+			if _, err := tmpFile.Write(lease.AuthBlob); err != nil {
+				_ = tmpFile.Close()
+				cleanupTemp()
 				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
 					log.Printf("release credential lease %s after auth write failure failed: %v", lease.ID, releaseErr)
 				}
 				return "", fmt.Errorf("write broker auth file: %w", err)
+			}
+			if err := tmpFile.Chmod(0o600); err != nil {
+				_ = tmpFile.Close()
+				cleanupTemp()
+				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
+					log.Printf("release credential lease %s after auth chmod failure failed: %v", lease.ID, releaseErr)
+				}
+				return "", fmt.Errorf("chmod broker auth file: %w", err)
+			}
+			if err := tmpFile.Close(); err != nil {
+				cleanupTemp()
+				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
+					log.Printf("release credential lease %s after auth close failure failed: %v", lease.ID, releaseErr)
+				}
+				return "", fmt.Errorf("close broker auth file: %w", err)
+			}
+			if err := os.Rename(tmpPath, authPath); err != nil {
+				cleanupTemp()
+				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
+					log.Printf("release credential lease %s after auth rename failure failed: %v", lease.ID, releaseErr)
+				}
+				return "", fmt.Errorf("publish broker auth file: %w", err)
+			}
+			if err := os.Chmod(authPath, 0o600); err != nil {
+				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
+					log.Printf("release credential lease %s after auth final chmod failure failed: %v", lease.ID, releaseErr)
+				}
+				return "", fmt.Errorf("chmod published broker auth file: %w", err)
 			}
 			log.Printf("audit event=credential_lease_acquired run_id=%s credential_id=%s user_id=%s lease_id=%s strategy=%s", runID, lease.CredentialID, requesterUserID, lease.ID, lease.Strategy)
 			return lease.ID, nil
