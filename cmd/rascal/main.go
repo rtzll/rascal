@@ -494,7 +494,7 @@ func (a *app) requireServerAuth() error {
 	return &cliError{
 		Code:    exitConfig,
 		Message: "missing API token",
-		Hint:    "set RASCAL_API_TOKEN, configure ~/.rascal/config.toml, or run `rascal init`",
+		Hint:    "set RASCAL_API_TOKEN, configure the Rascal config file, or run `rascal init`",
 	}
 }
 

@@ -4,7 +4,11 @@
 
 Default path:
 
-`~/.rascal/config.toml`
+`$XDG_CONFIG_HOME/rascal/config.toml`
+
+If `XDG_CONFIG_HOME` is unset, Rascal falls back to:
+
+`~/.config/rascal/config.toml`
 
 Inspect current effective values:
 

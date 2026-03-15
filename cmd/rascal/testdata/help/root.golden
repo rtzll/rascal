@@ -38,7 +38,7 @@ Flags:
       --client-ssh-key string    SSH private key path for API transport=ssh/auto
       --client-ssh-port int      SSH target port for API transport=ssh/auto
       --client-ssh-user string   SSH target user for API transport=ssh/auto
-      --config string            config file path (default "$HOME/.rascal/config.toml")
+      --config string            config file path (default "$HOME/.config/rascal/config.toml")
       --default-repo string      default repository in OWNER/REPO form
       --env-file string          env file path (fallback: ./.rascal.env if present)
   -h, --help                     help for rascal

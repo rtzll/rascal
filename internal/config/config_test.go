@@ -77,6 +77,41 @@ func TestSaveAndLoadClientConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultClientConfigPathUsesExplicitOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "custom.toml")
+	t.Setenv("RASCAL_CONFIG_PATH", path)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "xdg"))
+	t.Setenv("HOME", filepath.Join(t.TempDir(), "home"))
+
+	if got := DefaultClientConfigPath(); got != path {
+		t.Fatalf("DefaultClientConfigPath() = %q, want %q", got, path)
+	}
+}
+
+func TestDefaultClientConfigPathUsesXDGConfigHome(t *testing.T) {
+	xdg := filepath.Join(t.TempDir(), "xdg")
+	t.Setenv("RASCAL_CONFIG_PATH", "")
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("HOME", filepath.Join(t.TempDir(), "home"))
+
+	want := filepath.Join(xdg, "rascal", "config.toml")
+	if got := DefaultClientConfigPath(); got != want {
+		t.Fatalf("DefaultClientConfigPath() = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultClientConfigPathFallsBackToDotConfigInHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("RASCAL_CONFIG_PATH", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", home)
+
+	want := filepath.Join(home, ".config", "rascal", "config.toml")
+	if got := DefaultClientConfigPath(); got != want {
+		t.Fatalf("DefaultClientConfigPath() = %q, want %q", got, want)
+	}
+}
+
 func TestLoadClientConfigEnvOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("server_url = \"https://rascal.example.com\"\napi_token = \"from_file\"\ndefault_repo = \"owner/repo\"\nhost = \"203.0.113.10\"\ndomain = \"rascal.example.com\"\ntransport = \"ssh\"\nssh_host = \"203.0.113.10\"\nssh_user = \"root\"\nssh_key = \"~/.ssh/id_ed25519\"\nssh_port = 22\n"), 0o600); err != nil {

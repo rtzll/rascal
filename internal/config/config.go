@@ -175,11 +175,14 @@ func DefaultClientConfigPath() string {
 	if v := strings.TrimSpace(os.Getenv("RASCAL_CONFIG_PATH")); v != "" {
 		return v
 	}
+	if xdg := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); xdg != "" {
+		return filepath.Join(xdg, "rascal", "config.toml")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".rascal/config.toml"
+		return filepath.Join(".config", "rascal", "config.toml")
 	}
-	return filepath.Join(home, ".rascal", "config.toml")
+	return filepath.Join(home, ".config", "rascal", "config.toml")
 }
 
 func LoadClientConfig() ClientConfig {
