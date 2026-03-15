@@ -527,7 +527,7 @@ func (a *app) println(msg string, args ...any) {
 	fmt.Printf(msg+"\n", args...)
 }
 
-func (a *app) emit(v any, tableFn func() error) error {
+func emit[T any](a *app, v T, tableFn func() error) error {
 	switch a.output {
 	case "table":
 		if tableFn == nil {
@@ -805,7 +805,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 						CodexAuthPath:             codexAuthPath,
 					},
 				}
-				return a.emit(planOut, func() error {
+				return emit(a, planOut, func() error {
 					a.println("bootstrap plan")
 					if ready {
 						a.println("ready: yes")
@@ -998,7 +998,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				out.ProvisionedServer = provisionOut
 				out.Host = host
 			}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				a.println("bootstrap complete")
 				a.println("server_url: %s", serverURL)
 				a.println("api_token: %s", maskSecret(apiToken))
@@ -1095,7 +1095,7 @@ rascal run --issue OWNER/REPO#123
 				if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 					return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 				}
-				return a.emit(out, func() error {
+				return emit(a, out, func() error {
 					a.println("issue run created: %s (%s)", out.Run.ID, out.Run.Status)
 					return nil
 				})
@@ -1127,7 +1127,7 @@ rascal run --issue OWNER/REPO#123
 			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 			}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				if inferredRepo {
 					a.println("hint: using repo from git remote: %s", repo)
 				}
@@ -1180,7 +1180,7 @@ func (a *app) newPSCmd() *cobra.Command {
 			}
 
 			render := func(runs []state.Run) error {
-				return a.emit(api.RunsResponse{Runs: runs}, func() error {
+				return emit(a, api.RunsResponse{Runs: runs}, func() error {
 					tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 					if _, err := fmt.Fprintln(tw, "RUN ID\tSTATUS\tREPO\tISSUE\tPR\tCREATED (UTC)"); err != nil {
 						return fmt.Errorf("write runs table header: %w", err)
@@ -1734,7 +1734,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 				ServerHealthError: healthMessage,
 				Remote:            remote,
 			}
-			return a.emit(diagnostics, func() error {
+			return emit(a, diagnostics, func() error {
 				a.println("local config")
 				a.println("config path: %s", a.configPath)
 				if cfgExists {
@@ -1910,7 +1910,7 @@ rascal retry run_abc123 --debug=false
 			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 			}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				a.println("retry run created: %s (%s)", out.Run.ID, out.Run.Status)
 				return nil
 			})
@@ -1946,7 +1946,7 @@ rascal cancel run_abc123
 			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 				return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
 			}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				a.println("cancel request submitted for %s", args[0])
 				return nil
 			})
@@ -1972,7 +1972,7 @@ rascal task run_abc123
 			if err != nil {
 				return err
 			}
-			return a.emit(api.TaskResponse{Task: task}, func() error {
+			return emit(a, api.TaskResponse{Task: task}, func() error {
 				tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 				if _, err := fmt.Fprintln(tw, "TASK ID\tSTATUS\tREPO\tPR\tPENDING INPUT\tUPDATED"); err != nil {
 					return fmt.Errorf("write task table header: %w", err)
@@ -2034,7 +2034,7 @@ rascal config view --output json
 				TransportSource:   a.transportSource,
 				ResolvedTransport: a.client.transport,
 			}
-			return a.emit(view, func() error {
+			return emit(a, view, func() error {
 				a.println("config_path: %s", view.ConfigPath)
 				a.println("server_url: %s", view.ServerURL)
 				a.println("api_token: %s", view.APIToken)
@@ -2165,7 +2165,7 @@ rascal config unset default_repo
 				Message:    message,
 				ConfigPath: a.configPath,
 			}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				if message != "" {
 					a.println(message)
 				}
@@ -2252,7 +2252,7 @@ rascal auth sync --host "$SERVER_IP"
 				WriteConfig:   writeConfig,
 				SyncedRemote:  strings.TrimSpace(host) != "",
 			}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				a.println("api_token: %s", displayAPI)
 				a.println("webhook_secret: %s", displayWebhook)
 				if strings.TrimSpace(host) != "" {
@@ -2324,7 +2324,7 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 			}); err != nil {
 				return &cliError{Code: exitRuntime, Message: "failed to sync auth", Cause: err}
 			}
-			return a.emit(authSyncOutput{
+			return emit(a, authSyncOutput{
 				Host:             host,
 				SyncedEnvAuth:    true,
 				APIToken:         maskSecret(apiToken),

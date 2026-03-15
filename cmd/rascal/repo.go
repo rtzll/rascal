@@ -159,7 +159,7 @@ func (a *app) newRepoEnableCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.emit(repoEnableOutput{
+			return emit(a, repoEnableOutput{
 				Repo:       result.Repo,
 				Enabled:    true,
 				WebhookURL: result.WebhookURL,
@@ -239,7 +239,7 @@ func (a *app) newRepoDisableCmd() *cobra.Command {
 			if err != nil {
 				return &cliError{Code: exitRuntime, Message: "failed to remove webhook", Cause: err}
 			}
-			return a.emit(repoDisableOutput{
+			return emit(a, repoDisableOutput{
 				Repo:       repo,
 				Removed:    removed,
 				WebhookURL: webhookURL,
@@ -307,7 +307,7 @@ func (a *app) newRepoStatusCmd() *cobra.Command {
 				MissingEvents:        missingEvents,
 				WebhookEventsHealthy: hook != nil && len(missingEvents) == 0,
 			}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				a.println("repo: %s", repo)
 				a.println("label rascal: %t", labelExists)
 				if hook == nil {

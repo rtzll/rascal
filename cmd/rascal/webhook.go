@@ -172,7 +172,7 @@ func (a *app) newWebhookTestCmd() *cobra.Command {
 						Payload: payloadValue,
 					}
 				}
-				return a.emit(out, func() error {
+				return emit(a, out, func() error {
 					return renderWebhookTestTable(a, webhookTestTableInput{
 						WebhookURL: webhookURL,
 						Repo:       resolved.Repo,
@@ -233,7 +233,7 @@ func (a *app) newWebhookTestCmd() *cobra.Command {
 				}
 			}
 
-			err = a.emit(out, func() error {
+			err = emit(a, out, func() error {
 				return renderWebhookTestTable(a, webhookTestTableInput{
 					WebhookURL: webhookURL,
 					Repo:       resolved.Repo,

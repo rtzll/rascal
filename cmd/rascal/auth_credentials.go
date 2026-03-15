@@ -63,7 +63,7 @@ func (a *app) newAuthCredentialsListCmd() *cobra.Command {
 				return err
 			}
 			out := credentialListResponse{Credentials: creds}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				return renderCredentialListTable(creds)
 			})
 		},
@@ -84,7 +84,7 @@ func (a *app) newAuthCredentialsGetCmd() *cobra.Command {
 				return err
 			}
 			out := credentialGetResponse{Credential: cred}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				return renderCredentialDetailTable(cred)
 			})
 		},
@@ -126,7 +126,7 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 				return err
 			}
 			out := credentialGetResponse{Credential: cred}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				return renderCredentialDetailTable(cred)
 			})
 		},
@@ -196,7 +196,7 @@ func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 				return err
 			}
 			out := credentialGetResponse{Credential: cred}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				return renderCredentialDetailTable(cred)
 			})
 		},
@@ -223,7 +223,7 @@ func (a *app) newAuthCredentialsDisableCmd() *cobra.Command {
 				return err
 			}
 			out := credentialDisableResponse{Disabled: true, Credential: &cred}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				return renderCredentialDetailTable(cred)
 			})
 		},
@@ -251,7 +251,7 @@ func (a *app) newAuthCredentialsEnableCmd() *cobra.Command {
 				return err
 			}
 			out := credentialGetResponse{Credential: cred}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				return renderCredentialDetailTable(cred)
 			})
 		},
@@ -302,7 +302,7 @@ func (a *app) newAuthCredentialsCooldownCmd() *cobra.Command {
 				return err
 			}
 			out := credentialGetResponse{Credential: cred}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				return renderCredentialDetailTable(cred)
 			})
 		},

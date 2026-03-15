@@ -174,7 +174,7 @@ func TestDecodeServerErrorIncludesRequestID(t *testing.T) {
 func TestEmitJSONOutput(t *testing.T) {
 	a := &app{output: "json"}
 	stdout, err := captureStdout(func() error {
-		return a.emit(map[string]any{"ok": true}, nil)
+		return emit(a, map[string]any{"ok": true}, nil)
 	})
 	if err != nil {
 		t.Fatalf("emit: %v", err)

@@ -164,7 +164,7 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 				return &cliError{Code: exitRuntime, Message: "hetzner provisioning failed", Cause: err}
 			}
 
-			return a.emit(hcloudProvisionOutput{Server: out}, func() error {
+			return emit(a, hcloudProvisionOutput{Server: out}, func() error {
 				a.println("provisioned %s (%d)", out.ServerName, out.ServerID)
 				a.println("host: %s", out.Host)
 				a.println("location: %s", out.Location)
@@ -287,7 +287,7 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 			if provisionOut != nil {
 				out.ProvisionedServer = provisionOut
 			}
-			return a.emit(out, func() error {
+			return emit(a, out, func() error {
 				a.println("deployed rascald to %s", result.Host)
 				a.println("server_url: %s", result.ServerURL)
 				if strings.TrimSpace(result.APIToken) != "" {
@@ -363,7 +363,7 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.emit(deployCommandOutput{
+			return emit(a, deployCommandOutput{
 				Host:      result.Host,
 				ServerURL: result.ServerURL,
 				APIToken:  maskSecret(result.APIToken),
