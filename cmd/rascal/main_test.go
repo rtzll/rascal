@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/rtzll/rascal/internal/api"
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
@@ -863,7 +864,7 @@ func TestPSUsesDefaultLimitQuery(t *testing.T) {
 		gotLimit = r.URL.Query().Get("limit")
 		gotAll = r.URL.Query().Get("all")
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{}}); err != nil {
+		if err := json.NewEncoder(w).Encode(api.RunsResponse{Runs: []state.Run{}}); err != nil {
 			t.Fatalf("encode response: %v", err)
 		}
 	}))
@@ -910,7 +911,7 @@ func TestPSAllUsesAllQuery(t *testing.T) {
 		gotLimit = r.URL.Query().Get("limit")
 		gotAll = r.URL.Query().Get("all")
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{}}); err != nil {
+		if err := json.NewEncoder(w).Encode(api.RunsResponse{Runs: []state.Run{}}); err != nil {
 			t.Fatalf("encode response: %v", err)
 		}
 	}))
@@ -1007,25 +1008,10 @@ func TestPSStatusFilterRendersOnlyMatchingRuns(t *testing.T) {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{
-			{
-				"id":         "run_queued",
-				"status":     "queued",
-				"repo":       "owner/repo",
-				"created_at": "2026-03-08T13:55:00Z",
-			},
-			{
-				"id":         "run_running",
-				"status":     "running",
-				"repo":       "owner/repo",
-				"created_at": "2026-03-08T13:56:00Z",
-			},
-			{
-				"id":         "run_review",
-				"status":     "review",
-				"repo":       "owner/repo",
-				"created_at": "2026-03-08T13:57:00Z",
-			},
+		if err := json.NewEncoder(w).Encode(api.RunsResponse{Runs: []state.Run{
+			{ID: "run_queued", Status: state.StatusQueued, Repo: "owner/repo", CreatedAt: time.Date(2026, 3, 8, 13, 55, 0, 0, time.UTC)},
+			{ID: "run_running", Status: state.StatusRunning, Repo: "owner/repo", CreatedAt: time.Date(2026, 3, 8, 13, 56, 0, 0, time.UTC)},
+			{ID: "run_review", Status: state.StatusReview, Repo: "owner/repo", CreatedAt: time.Date(2026, 3, 8, 13, 57, 0, 0, time.UTC)},
 		}}); err != nil {
 			t.Fatalf("encode response: %v", err)
 		}
@@ -1150,20 +1136,9 @@ func TestPSRendersIssueColumn(t *testing.T) {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{"runs": []map[string]any{
-			{
-				"id":           "run_issue",
-				"status":       "failed",
-				"repo":         "owner/repo",
-				"issue_number": 119,
-				"created_at":   "2026-03-08T13:56:00Z",
-			},
-			{
-				"id":         "run_no_issue",
-				"status":     "running",
-				"repo":       "owner/repo",
-				"created_at": "2026-03-08T13:57:00Z",
-			},
+		if err := json.NewEncoder(w).Encode(api.RunsResponse{Runs: []state.Run{
+			{ID: "run_issue", Status: state.StatusFailed, Repo: "owner/repo", IssueNumber: 119, CreatedAt: time.Date(2026, 3, 8, 13, 56, 0, 0, time.UTC)},
+			{ID: "run_no_issue", Status: state.StatusRunning, Repo: "owner/repo", CreatedAt: time.Date(2026, 3, 8, 13, 57, 0, 0, time.UTC)},
 		}}); err != nil {
 			t.Fatalf("encode response: %v", err)
 		}
@@ -1211,7 +1186,7 @@ func TestPSRendersIssueColumn(t *testing.T) {
 }
 
 func TestRunCreatesTaskPayload(t *testing.T) {
-	var payload map[string]any
+	var payload api.CreateTaskRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("unexpected method: %s", r.Method)
@@ -1227,9 +1202,7 @@ func TestRunCreatesTaskPayload(t *testing.T) {
 			t.Fatalf("decode payload: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"run": map[string]any{"id": "run_new", "status": "queued"},
-		}); err != nil {
+		if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{ID: "run_new", Status: state.StatusQueued}}); err != nil {
 			t.Fatalf("encode response: %v", err)
 		}
 	}))
@@ -1258,22 +1231,22 @@ func TestRunCreatesTaskPayload(t *testing.T) {
 		t.Fatalf("run --repo --task: %v", err)
 	}
 
-	if payload["repo"] != "owner/repo" {
-		t.Fatalf("unexpected repo payload: %v", payload["repo"])
+	if payload.Repo != "owner/repo" {
+		t.Fatalf("unexpected repo payload: %v", payload.Repo)
 	}
-	if payload["task"] != "Fix flaky tests" {
-		t.Fatalf("unexpected task payload: %v", payload["task"])
+	if payload.Task != "Fix flaky tests" {
+		t.Fatalf("unexpected task payload: %v", payload.Task)
 	}
-	if payload["base_branch"] != "main" {
-		t.Fatalf("expected default base_branch main, got: %v", payload["base_branch"])
+	if payload.BaseBranch != "main" {
+		t.Fatalf("expected default base_branch main, got: %v", payload.BaseBranch)
 	}
-	if _, ok := payload["debug"]; ok {
-		t.Fatalf("did not expect debug payload unless flag is set, got: %v", payload["debug"])
+	if payload.Debug != nil {
+		t.Fatalf("did not expect debug payload unless flag is set, got: %v", payload.Debug)
 	}
 }
 
 func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
-	var payload map[string]any
+	var payload api.CreateIssueTaskRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("unexpected method: %s", r.Method)
@@ -1289,12 +1262,7 @@ func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
 			t.Fatalf("decode payload: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"run": map[string]any{
-				"id":     "run_issue",
-				"status": "queued",
-			},
-		}); err != nil {
+		if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{ID: "run_issue", Status: state.StatusQueued}}); err != nil {
 			t.Fatalf("encode response: %v", err)
 		}
 	}))
@@ -1323,19 +1291,19 @@ func TestRunIssueCreatesIssueRunPayload(t *testing.T) {
 		t.Fatalf("run --issue: %v", err)
 	}
 
-	if payload["repo"] != "owner/repo" {
-		t.Fatalf("unexpected repo payload: %v", payload["repo"])
+	if payload.Repo != "owner/repo" {
+		t.Fatalf("unexpected repo payload: %v", payload.Repo)
 	}
-	if payload["issue_number"] != float64(123) {
-		t.Fatalf("unexpected issue number payload: %v", payload["issue_number"])
+	if payload.IssueNumber != 123 {
+		t.Fatalf("unexpected issue number payload: %v", payload.IssueNumber)
 	}
-	if _, ok := payload["debug"]; ok {
-		t.Fatalf("did not expect debug payload unless flag is set, got: %v", payload["debug"])
+	if payload.Debug != nil {
+		t.Fatalf("did not expect debug payload unless flag is set, got: %v", payload.Debug)
 	}
 }
 
 func TestRunIssueSendsExplicitDebugOverride(t *testing.T) {
-	var payload map[string]any
+	var payload api.CreateIssueTaskRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("unexpected method: %s", r.Method)
@@ -1351,9 +1319,7 @@ func TestRunIssueSendsExplicitDebugOverride(t *testing.T) {
 			t.Fatalf("decode payload: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"run": map[string]any{"id": "run_issue", "status": "queued"},
-		}); err != nil {
+		if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{ID: "run_issue", Status: state.StatusQueued}}); err != nil {
 			t.Fatalf("encode response: %v", err)
 		}
 	}))
@@ -1382,27 +1348,20 @@ func TestRunIssueSendsExplicitDebugOverride(t *testing.T) {
 		t.Fatalf("run --issue --debug=false: %v", err)
 	}
 
-	if payload["debug"] != false {
-		t.Fatalf("expected explicit debug override false, got: %v", payload["debug"])
+	if payload.Debug == nil || *payload.Debug != false {
+		t.Fatalf("expected explicit debug override false, got: %v", payload.Debug)
 	}
 }
 
 func TestRetryOmitsDebugByDefault(t *testing.T) {
-	var retryPayload map[string]any
+	var retryPayload api.CreateTaskRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(map[string]any{
-				"run": map[string]any{
-					"id":          "run_old",
-					"task_id":     "task_1",
-					"repo":        "owner/repo",
-					"task":        "Fix it",
-					"base_branch": "main",
-					"status":      string(state.StatusCanceled),
-				},
-			}); err != nil {
+			if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{
+				ID: "run_old", TaskID: "task_1", Repo: "owner/repo", Task: "Fix it", BaseBranch: "main", Status: state.StatusCanceled,
+			}}); err != nil {
 				t.Fatalf("encode response: %v", err)
 			}
 			return
@@ -1415,9 +1374,7 @@ func TestRetryOmitsDebugByDefault(t *testing.T) {
 				t.Fatalf("decode retry payload: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(map[string]any{
-				"run": map[string]any{"id": "run_retry", "status": "queued"},
-			}); err != nil {
+			if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{ID: "run_retry", Status: state.StatusQueued}}); err != nil {
 				t.Fatalf("encode response: %v", err)
 			}
 			return
@@ -1450,27 +1407,20 @@ func TestRetryOmitsDebugByDefault(t *testing.T) {
 		t.Fatalf("retry: %v", err)
 	}
 
-	if _, ok := retryPayload["debug"]; ok {
-		t.Fatalf("did not expect debug payload unless flag is set, got: %v", retryPayload["debug"])
+	if retryPayload.Debug != nil {
+		t.Fatalf("did not expect debug payload unless flag is set, got: %v", retryPayload.Debug)
 	}
 }
 
 func TestRetrySendsExplicitDebugOverride(t *testing.T) {
-	var retryPayload map[string]any
+	var retryPayload api.CreateTaskRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(map[string]any{
-				"run": map[string]any{
-					"id":          "run_old",
-					"task_id":     "task_1",
-					"repo":        "owner/repo",
-					"task":        "Fix it",
-					"base_branch": "main",
-					"status":      string(state.StatusCanceled),
-				},
-			}); err != nil {
+			if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{
+				ID: "run_old", TaskID: "task_1", Repo: "owner/repo", Task: "Fix it", BaseBranch: "main", Status: state.StatusCanceled,
+			}}); err != nil {
 				t.Fatalf("encode response: %v", err)
 			}
 			return
@@ -1483,9 +1433,7 @@ func TestRetrySendsExplicitDebugOverride(t *testing.T) {
 				t.Fatalf("decode retry payload: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(map[string]any{
-				"run": map[string]any{"id": "run_retry", "status": "queued"},
-			}); err != nil {
+			if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{ID: "run_retry", Status: state.StatusQueued}}); err != nil {
 				t.Fatalf("encode response: %v", err)
 			}
 			return
@@ -1518,27 +1466,20 @@ func TestRetrySendsExplicitDebugOverride(t *testing.T) {
 		t.Fatalf("retry --debug=false: %v", err)
 	}
 
-	if retryPayload["debug"] != false {
-		t.Fatalf("expected explicit debug override false, got: %v", retryPayload["debug"])
+	if retryPayload.Debug == nil || *retryPayload.Debug != false {
+		t.Fatalf("expected explicit debug override false, got: %v", retryPayload.Debug)
 	}
 }
 
 func TestRetryCreatesRunWithRetryTrigger(t *testing.T) {
-	var createPayload map[string]any
+	var createPayload api.CreateTaskRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(map[string]any{
-				"run": map[string]any{
-					"id":          "run_old",
-					"task_id":     "owner/repo#123",
-					"repo":        "owner/repo",
-					"task":        "Fix failing tests",
-					"base_branch": "main",
-					"status":      "failed",
-				},
-			}); err != nil {
+			if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{
+				ID: "run_old", TaskID: "owner/repo#123", Repo: "owner/repo", Task: "Fix failing tests", BaseBranch: "main", Status: state.StatusFailed,
+			}}); err != nil {
 				t.Fatalf("encode response: %v", err)
 			}
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/tasks":
@@ -1550,12 +1491,7 @@ func TestRetryCreatesRunWithRetryTrigger(t *testing.T) {
 				t.Fatalf("decode retry payload: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(map[string]any{
-				"run": map[string]any{
-					"id":     "run_new",
-					"status": "queued",
-				},
-			}); err != nil {
+			if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{ID: "run_new", Status: state.StatusQueued}}); err != nil {
 				t.Fatalf("encode response: %v", err)
 			}
 		default:
@@ -1587,8 +1523,8 @@ func TestRetryCreatesRunWithRetryTrigger(t *testing.T) {
 		t.Fatalf("retry command failed: %v", err)
 	}
 
-	if createPayload["trigger"] != "retry" {
-		t.Fatalf("retry payload trigger = %v, want retry", createPayload["trigger"])
+	if createPayload.Trigger != runtrigger.NameRetry {
+		t.Fatalf("retry payload trigger = %v, want retry", createPayload.Trigger)
 	}
 }
 
@@ -2184,10 +2120,10 @@ func TestLoadGlobalEnvExplicitEnvWinsOverFile(t *testing.T) {
 }
 
 func TestStreamRunLogsFollowAppendsOnlyDiff(t *testing.T) {
-	responses := []map[string]any{
-		{"logs": "alpha\n", "run_status": "running", "done": false},
-		{"logs": "alpha\nbeta\n", "run_status": "running", "done": false},
-		{"logs": "alpha\nbeta\ngamma\n", "run_status": "succeeded", "done": true},
+	responses := []api.RunLogsResponse{
+		{Logs: "alpha\n", RunStatus: state.StatusRunning, Done: false},
+		{Logs: "alpha\nbeta\n", RunStatus: state.StatusRunning, Done: false},
+		{Logs: "alpha\nbeta\ngamma\n", RunStatus: state.StatusSucceeded, Done: true},
 	}
 
 	a, closeServer, _ := newFollowLogsTestApp(t, responses)
@@ -2205,9 +2141,9 @@ func TestStreamRunLogsFollowAppendsOnlyDiff(t *testing.T) {
 }
 
 func TestStreamRunLogsFollowPrintsFullBodyOnReset(t *testing.T) {
-	responses := []map[string]any{
-		{"logs": "one\ntwo\n", "run_status": "running", "done": false},
-		{"logs": "reset\n", "run_status": "running", "done": true},
+	responses := []api.RunLogsResponse{
+		{Logs: "one\ntwo\n", RunStatus: state.StatusRunning, Done: false},
+		{Logs: "reset\n", RunStatus: state.StatusRunning, Done: true},
 	}
 
 	a, closeServer, _ := newFollowLogsTestApp(t, responses)
@@ -2225,8 +2161,8 @@ func TestStreamRunLogsFollowPrintsFullBodyOnReset(t *testing.T) {
 }
 
 func TestStreamRunLogsFollowStopsAfterDone(t *testing.T) {
-	responses := []map[string]any{
-		{"logs": "done-now\n", "run_status": "failed", "done": true},
+	responses := []api.RunLogsResponse{
+		{Logs: "done-now\n", RunStatus: state.StatusFailed, Done: true},
 	}
 
 	a, closeServer, requestCount := newFollowLogsTestApp(t, responses)
@@ -2246,7 +2182,7 @@ func TestStreamRunLogsFollowStopsAfterDone(t *testing.T) {
 	}
 }
 
-func newFollowLogsTestApp(t *testing.T, responses []map[string]any) (*app, func(), func() int) {
+func newFollowLogsTestApp(t *testing.T, responses []api.RunLogsResponse) (*app, func(), func() int) {
 	t.Helper()
 
 	var (

@@ -70,18 +70,16 @@ func TestAuthCredentialsListJSON(t *testing.T) {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"credentials": []map[string]any{
-				{
-					"id":            "cred_one",
-					"owner_user_id": "user_1",
-					"scope":         "personal",
-					"weight":        2,
-					"status":        "active",
-					"created_at":    now,
-					"updated_at":    now,
-				},
-			},
+		if err := json.NewEncoder(w).Encode(credentialListResponse{
+			Credentials: []credentialRecord{{
+				ID:          "cred_one",
+				OwnerUserID: "user_1",
+				Scope:       "personal",
+				Weight:      2,
+				Status:      "active",
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
 		}
@@ -124,15 +122,15 @@ func TestAuthCredentialsCreateUsesAuthFile(t *testing.T) {
 			t.Fatalf("decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"credential": map[string]any{
-				"id":            "cred_create",
-				"owner_user_id": "user_1",
-				"scope":         payload.Scope,
-				"weight":        payload.Weight,
-				"status":        "active",
-				"created_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-				"updated_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+		if err := json.NewEncoder(w).Encode(credentialGetResponse{
+			Credential: credentialRecord{
+				ID:          "cred_create",
+				OwnerUserID: "user_1",
+				Scope:       payload.Scope,
+				Weight:      payload.Weight,
+				Status:      "active",
+				CreatedAt:   time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				UpdatedAt:   time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
 			},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
@@ -178,7 +176,7 @@ func TestAuthCredentialsCreateUsesAuthFile(t *testing.T) {
 }
 
 func TestAuthCredentialsUpdateSendsChangedFields(t *testing.T) {
-	var raw map[string]any
+	var raw credentialUpdateRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
 			t.Fatalf("unexpected method: %s", r.Method)
@@ -190,15 +188,15 @@ func TestAuthCredentialsUpdateSendsChangedFields(t *testing.T) {
 			t.Fatalf("decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"credential": map[string]any{
-				"id":            "cred_update",
-				"owner_user_id": "user_2",
-				"scope":         "personal",
-				"weight":        9,
-				"status":        "active",
-				"created_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-				"updated_at":    time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
+		if err := json.NewEncoder(w).Encode(credentialGetResponse{
+			Credential: credentialRecord{
+				ID:          "cred_update",
+				OwnerUserID: "user_2",
+				Scope:       "personal",
+				Weight:      9,
+				Status:      "active",
+				CreatedAt:   time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				UpdatedAt:   time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
 			},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
@@ -220,17 +218,17 @@ func TestAuthCredentialsUpdateSendsChangedFields(t *testing.T) {
 	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
 		t.Fatalf("credentials update: %v", err)
 	}
-	if raw["scope"] != "personal" {
-		t.Fatalf("unexpected scope payload: %v", raw["scope"])
+	if raw.Scope == nil || *raw.Scope != "personal" {
+		t.Fatalf("unexpected scope payload: %v", raw.Scope)
 	}
-	if raw["owner_user_id"] != "user_2" {
-		t.Fatalf("unexpected owner payload: %v", raw["owner_user_id"])
+	if raw.OwnerUserID == nil || *raw.OwnerUserID != "user_2" {
+		t.Fatalf("unexpected owner payload: %v", raw.OwnerUserID)
 	}
-	if raw["weight"] != float64(9) {
-		t.Fatalf("unexpected weight payload: %v", raw["weight"])
+	if raw.Weight == nil || *raw.Weight != 9 {
+		t.Fatalf("unexpected weight payload: %v", raw.Weight)
 	}
-	if raw["auth_blob"] != `{"token":"updated"}` {
-		t.Fatalf("unexpected auth blob payload: %v", raw["auth_blob"])
+	if raw.AuthBlob == nil || *raw.AuthBlob != `{"token":"updated"}` {
+		t.Fatalf("unexpected auth blob payload: %v", raw.AuthBlob)
 	}
 }
 
