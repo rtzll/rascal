@@ -2,11 +2,43 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/rtzll/rascal/internal/config"
 	ghapi "github.com/rtzll/rascal/internal/github"
 )
+
+type webhookTestJSONRequest struct {
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+	Payload json.RawMessage   `json:"payload"`
+}
+
+type webhookTestJSONResponse struct {
+	Status  string            `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    string            `json:"body"`
+}
+
+type webhookTestJSONOutput struct {
+	WebhookURL      string                   `json:"webhook_url"`
+	Repo            string                   `json:"repo"`
+	Event           string                   `json:"event"`
+	DryRun          bool                     `json:"dry_run"`
+	Signature       string                   `json:"signature"`
+	DeliveryID      string                   `json:"delivery_id"`
+	Payload         json.RawMessage          `json:"payload"`
+	Status          int                      `json:"status"`
+	StatusText      string                   `json:"status_text"`
+	RequestID       string                   `json:"request_id"`
+	ResponseSnippet string                   `json:"response_snippet"`
+	Request         *webhookTestJSONRequest  `json:"request"`
+	Response        *webhookTestJSONResponse `json:"response"`
+}
 
 func TestResolveWebhookTestInputMissingSecret(t *testing.T) {
 	t.Setenv("RASCAL_GITHUB_WEBHOOK_SECRET", "")
@@ -214,5 +246,94 @@ func TestBuildWebhookTestPayloadTemplates(t *testing.T) {
 func TestBuildWebhookTestPayloadUnknownEvent(t *testing.T) {
 	if _, err := buildWebhookTestPayload("unknown", "owner/repo"); err == nil {
 		t.Fatal("expected error for unknown event")
+	}
+}
+
+func TestWebhookTestDryRunJSONOutput(t *testing.T) {
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://localhost:8080",
+		},
+		output: "json",
+		quiet:  true,
+	}
+	cmd := a.newWebhookTestCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--repo", "owner/repo",
+		"--webhook-secret", "secret",
+		"--dry-run",
+		"--verbose",
+	})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("webhook test --dry-run: %v", err)
+	}
+
+	var out webhookTestJSONOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode output: %v\noutput:\n%s", err, stdout)
+	}
+	if !out.DryRun {
+		t.Fatal("expected dry_run=true")
+	}
+	if out.Request == nil {
+		t.Fatal("expected request payload in verbose dry-run output")
+	}
+	if out.Request.Method != http.MethodPost {
+		t.Fatalf("request method = %q, want POST", out.Request.Method)
+	}
+	if len(out.Payload) == 0 || !json.Valid(out.Payload) {
+		t.Fatalf("expected raw JSON payload, got %s", out.Payload)
+	}
+}
+
+func TestWebhookTestLiveJSONOutput(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-ID", "req_123")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		if _, err := w.Write([]byte(`{"ok":true}`)); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: srv.URL,
+		},
+		output: "json",
+		quiet:  true,
+	}
+	cmd := a.newWebhookTestCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--repo", "owner/repo",
+		"--webhook-secret", "secret",
+		"--verbose",
+	})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("webhook test: %v", err)
+	}
+
+	var out webhookTestJSONOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode output: %v\noutput:\n%s", err, stdout)
+	}
+	if out.Status != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", out.Status, http.StatusAccepted)
+	}
+	if out.RequestID != "req_123" {
+		t.Fatalf("request_id = %q, want req_123", out.RequestID)
+	}
+	if out.Response == nil || out.Response.Status != "202 Accepted" {
+		t.Fatalf("unexpected response: %+v", out.Response)
+	}
+	if out.Request == nil {
+		t.Fatal("expected request payload in verbose live output")
 	}
 }

@@ -37,6 +37,58 @@ type webhookTestInput struct {
 	WebhookSecret string
 }
 
+type webhookTestPayloadValue struct {
+	raw        []byte
+	jsonOutput bool
+}
+
+type webhookTestRequestOutput struct {
+	Method  string                  `json:"method"`
+	URL     string                  `json:"url"`
+	Headers map[string]string       `json:"headers"`
+	Payload webhookTestPayloadValue `json:"payload"`
+}
+
+type webhookTestResponseOutput struct {
+	Status  string            `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    string            `json:"body"`
+}
+
+type webhookTestOutput struct {
+	WebhookURL      string                     `json:"webhook_url"`
+	Repo            string                     `json:"repo"`
+	Event           string                     `json:"event"`
+	DryRun          bool                       `json:"dry_run"`
+	Signature       string                     `json:"signature"`
+	DeliveryID      string                     `json:"delivery_id"`
+	Payload         webhookTestPayloadValue    `json:"payload"`
+	Status          int                        `json:"status,omitempty"`
+	StatusText      string                     `json:"status_text,omitempty"`
+	RequestID       string                     `json:"request_id,omitempty"`
+	ResponseSnippet string                     `json:"response_snippet,omitempty"`
+	Request         *webhookTestRequestOutput  `json:"request,omitempty"`
+	Response        *webhookTestResponseOutput `json:"response,omitempty"`
+}
+
+func (v webhookTestPayloadValue) MarshalJSON() ([]byte, error) {
+	if v.jsonOutput {
+		if len(v.raw) == 0 {
+			return []byte("null"), nil
+		}
+		return append([]byte(nil), v.raw...), nil
+	}
+	data, err := json.Marshal(string(v.raw))
+	if err != nil {
+		return nil, fmt.Errorf("marshal webhook payload text: %w", err)
+	}
+	return data, nil
+}
+
+func (v webhookTestPayloadValue) MarshalText() ([]byte, error) {
+	return append([]byte(nil), v.raw...), nil
+}
+
 func (a *app) newWebhookCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "webhook",
@@ -96,28 +148,28 @@ func (a *app) newWebhookTestCmd() *cobra.Command {
 			headers.Set("X-GitHub-Delivery", deliveryID)
 			headers.Set("X-Hub-Signature-256", signature)
 
-			payloadValue := any(string(payload))
-			if a.output == "json" {
-				payloadValue = json.RawMessage(payload)
+			payloadValue := webhookTestPayloadValue{
+				raw:        payload,
+				jsonOutput: a.output == "json",
 			}
 
-			out := map[string]any{
-				"webhook_url": webhookURL,
-				"repo":        resolved.Repo,
-				"event":       resolved.Event,
-				"dry_run":     dryRun,
-				"signature":   signature,
-				"delivery_id": deliveryID,
-				"payload":     payloadValue,
+			out := webhookTestOutput{
+				WebhookURL: webhookURL,
+				Repo:       resolved.Repo,
+				Event:      resolved.Event,
+				DryRun:     dryRun,
+				Signature:  signature,
+				DeliveryID: deliveryID,
+				Payload:    payloadValue,
 			}
 
 			if dryRun {
 				if verbose {
-					out["request"] = map[string]any{
-						"method":  http.MethodPost,
-						"url":     webhookURL,
-						"headers": headerMap(headers),
-						"payload": payloadValue,
+					out.Request = &webhookTestRequestOutput{
+						Method:  http.MethodPost,
+						URL:     webhookURL,
+						Headers: headerMap(headers),
+						Payload: payloadValue,
 					}
 				}
 				return a.emit(out, func() error {
@@ -159,25 +211,25 @@ func (a *app) newWebhookTestCmd() *cobra.Command {
 			reqID := strings.TrimSpace(resp.Header.Get("X-Request-ID"))
 			snippet := webhookResponseSnippet(body, webhookTestResponseSnippetLimit)
 
-			out["status"] = resp.StatusCode
-			out["status_text"] = resp.Status
+			out.Status = resp.StatusCode
+			out.StatusText = resp.Status
 			if reqID != "" {
-				out["request_id"] = reqID
+				out.RequestID = reqID
 			}
 			if snippet != "" {
-				out["response_snippet"] = snippet
+				out.ResponseSnippet = snippet
 			}
 			if verbose {
-				out["request"] = map[string]any{
-					"method":  http.MethodPost,
-					"url":     webhookURL,
-					"headers": headerMap(headers),
-					"payload": payloadValue,
+				out.Request = &webhookTestRequestOutput{
+					Method:  http.MethodPost,
+					URL:     webhookURL,
+					Headers: headerMap(headers),
+					Payload: payloadValue,
 				}
-				out["response"] = map[string]any{
-					"status":  resp.Status,
-					"headers": headerMap(resp.Header),
-					"body":    strings.TrimSpace(string(body)),
+				out.Response = &webhookTestResponseOutput{
+					Status:  resp.Status,
+					Headers: headerMap(resp.Header),
+					Body:    strings.TrimSpace(string(body)),
 				}
 			}
 
