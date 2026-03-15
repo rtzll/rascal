@@ -11,6 +11,11 @@
 
 Rascal uses three values during initial setup.
 
+### Local setup credentials
+
+These are used from your machine while provisioning infrastructure and wiring up
+GitHub.
+
 1. `HCLOUD_TOKEN`
 
 - Used locally to provision Hetzner resources.
@@ -29,6 +34,11 @@ Rascal uses three values during initial setup.
 - Required repository permissions:
   - `Webhooks`: Read and write
   - `Issues`: Read and write
+
+### Server runtime credential
+
+This token is stored on the server and used by Rascal runs after setup
+completes.
 
 3. `RASCAL_GITHUB_TOKEN`
 
