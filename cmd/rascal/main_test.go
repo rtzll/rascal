@@ -173,17 +173,20 @@ func TestDecodeServerErrorIncludesRequestID(t *testing.T) {
 
 func TestEmitJSONOutput(t *testing.T) {
 	a := &app{output: "json"}
+	type emitOutput struct {
+		OK bool `json:"ok"`
+	}
 	stdout, err := captureStdout(func() error {
-		return emit(a, map[string]any{"ok": true}, nil)
+		return emit(a, emitOutput{OK: true}, nil)
 	})
 	if err != nil {
 		t.Fatalf("emit: %v", err)
 	}
-	var out map[string]any
+	var out emitOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("invalid json output: %v", err)
 	}
-	if out["ok"] != true {
+	if !out.OK {
 		t.Fatalf("unexpected output: %v", out)
 	}
 }
@@ -1614,18 +1617,22 @@ func TestConfigUnsetRemovesKeyAndReportsEffectiveValue(t *testing.T) {
 		t.Fatalf("config unset: %v", err)
 	}
 
-	var out map[string]any
+	var out struct {
+		Status string `json:"status"`
+		Source string `json:"source"`
+		Value  string `json:"value"`
+	}
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("invalid json output: %v", err)
 	}
-	if out["status"] != "removed" {
-		t.Fatalf("expected status removed, got %v", out["status"])
+	if out.Status != "removed" {
+		t.Fatalf("expected status removed, got %v", out.Status)
 	}
-	if out["source"] != "default" {
-		t.Fatalf("expected source default, got %v", out["source"])
+	if out.Source != "default" {
+		t.Fatalf("expected source default, got %v", out.Source)
 	}
-	if out["value"] != "http://127.0.0.1:8080" {
-		t.Fatalf("expected default server_url, got %v", out["value"])
+	if out.Value != "http://127.0.0.1:8080" {
+		t.Fatalf("expected default server_url, got %v", out.Value)
 	}
 	if settings := readClientConfigFileForTest(t, cfgPath); settings.ServerURL != nil {
 		t.Fatal("expected server_url to be removed from config file after unset")
@@ -1657,15 +1664,18 @@ func TestConfigUnsetIdempotent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("config unset attempt %d: %v", i+1, err)
 		}
-		var out map[string]any
+		var out struct {
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		}
 		if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 			t.Fatalf("invalid json output attempt %d: %v", i+1, err)
 		}
-		if out["status"] != "absent" {
-			t.Fatalf("expected status absent attempt %d, got %v", i+1, out["status"])
+		if out.Status != "absent" {
+			t.Fatalf("expected status absent attempt %d, got %v", i+1, out.Status)
 		}
-		if msg, ok := out["message"].(string); !ok || strings.TrimSpace(msg) == "" {
-			t.Fatalf("expected message to be set attempt %d, got %v", i+1, out["message"])
+		if strings.TrimSpace(out.Message) == "" {
+			t.Fatalf("expected message to be set attempt %d, got %v", i+1, out.Message)
 		}
 	}
 	if _, err := os.Stat(cfgPath); err == nil || !os.IsNotExist(err) {
