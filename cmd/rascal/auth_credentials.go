@@ -118,7 +118,7 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 			cred, err := a.createCredential(credentialCreateRequest{
 				ID:          strings.TrimSpace(id),
 				OwnerUserID: strings.TrimSpace(ownerUserID),
-				Scope:       string(resolvedScope),
+				Scope:       resolvedScope,
 				AuthBlob:    resolvedAuthBlob,
 				Weight:      weight,
 			})
@@ -163,7 +163,7 @@ func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				value := string(resolvedScope)
+				value := resolvedScope
 				req.Scope = &value
 				changed = true
 			}
@@ -239,7 +239,7 @@ func (a *app) newAuthCredentialsEnableCmd() *cobra.Command {
 			if err := a.requireServerAuth(); err != nil {
 				return err
 			}
-			status := string(state.CredentialStatusActive)
+			status := state.CredentialStatusActive
 			clearCooldown := ""
 			clearError := ""
 			cred, err := a.updateCredential(args[0], credentialUpdateRequest{
@@ -280,14 +280,14 @@ func (a *app) newAuthCredentialsCooldownCmd() *cobra.Command {
 			}
 			req := credentialUpdateRequest{}
 			if clear {
-				status := string(state.CredentialStatusActive)
+				status := state.CredentialStatusActive
 				cooldownUntil := ""
 				lastError := ""
 				req.Status = &status
 				req.CooldownUntil = &cooldownUntil
 				req.LastError = &lastError
 			} else {
-				status := string(state.CredentialStatusCooldown)
+				status := state.CredentialStatusCooldown
 				until := time.Now().UTC().Add(cooldownFor).Format(time.RFC3339)
 				req.Status = &status
 				req.CooldownUntil = &until
@@ -420,14 +420,14 @@ func seedBootstrapSharedCredential(client apiClient, authFilePath string) (crede
 	} else if !found {
 		return createCredentialWithClient(client, credentialCreateRequest{
 			ID:       bootstrapSharedCredentialID,
-			Scope:    string(state.CredentialScopeShared),
+			Scope:    state.CredentialScopeShared,
 			AuthBlob: authBlob,
 			Weight:   1,
 		})
 	}
 
-	scope := string(state.CredentialScopeShared)
-	status := string(state.CredentialStatusActive)
+	scope := state.CredentialScopeShared
+	status := state.CredentialStatusActive
 	clearValue := ""
 	return updateCredentialWithClient(client, bootstrapSharedCredentialID, credentialUpdateRequest{
 		Scope:         &scope,

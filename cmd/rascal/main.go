@@ -28,6 +28,7 @@ import (
 	"github.com/rtzll/rascal/internal/api"
 	"github.com/rtzll/rascal/internal/config"
 	deployengine "github.com/rtzll/rascal/internal/deploy"
+	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -1894,7 +1895,7 @@ rascal retry run_abc123 --debug=false
 				Repo:       run.Repo,
 				Task:       run.Task,
 				BaseBranch: run.BaseBranch,
-				Trigger:    "retry",
+				Trigger:    runtrigger.NameRetry,
 				Debug:      debugValue,
 			})
 			resp, err := req.send(a.client, http.MethodPost)
@@ -3012,7 +3013,7 @@ type createTaskPayloadInput struct {
 	Repo        string
 	Task        string
 	BaseBranch  string
-	Trigger     string
+	Trigger     runtrigger.Name
 	IssueNumber int
 	Debug       *bool
 }
@@ -3065,7 +3066,7 @@ func buildCreateTaskPayload(input createTaskPayloadInput) createTaskRequestPaylo
 	if strings.TrimSpace(input.TaskID) != "" {
 		payload.TaskID = input.TaskID
 	}
-	if strings.TrimSpace(input.Trigger) != "" {
+	if input.Trigger != "" {
 		payload.Trigger = input.Trigger
 	}
 	if input.Debug != nil {

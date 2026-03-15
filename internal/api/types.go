@@ -3,6 +3,7 @@ package api
 import (
 	"time"
 
+	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
 
@@ -13,12 +14,12 @@ type ServiceStatusResponse struct {
 }
 
 type CreateTaskRequest struct {
-	TaskID     string `json:"task_id,omitempty"`
-	Repo       string `json:"repo"`
-	Task       string `json:"task"`
-	BaseBranch string `json:"base_branch"`
-	Trigger    string `json:"trigger,omitempty"`
-	Debug      *bool  `json:"debug,omitempty"`
+	TaskID     string          `json:"task_id,omitempty"`
+	Repo       string          `json:"repo"`
+	Task       string          `json:"task"`
+	BaseBranch string          `json:"base_branch"`
+	Trigger    runtrigger.Name `json:"trigger,omitempty"`
+	Debug      *bool           `json:"debug,omitempty"`
 }
 
 type CreateIssueTaskRequest struct {
@@ -103,19 +104,19 @@ type CredentialDisabledResponse struct {
 }
 
 type CreateCredentialRequest struct {
-	ID          string `json:"id,omitempty"`
-	OwnerUserID string `json:"owner_user_id,omitempty"`
-	Scope       string `json:"scope,omitempty"`
-	AuthBlob    string `json:"auth_blob"`
-	Weight      int    `json:"weight,omitempty"`
+	ID          string                `json:"id,omitempty"`
+	OwnerUserID string                `json:"owner_user_id,omitempty"`
+	Scope       state.CredentialScope `json:"scope,omitempty"`
+	AuthBlob    string                `json:"auth_blob"`
+	Weight      int                   `json:"weight,omitempty"`
 }
 
 type UpdateCredentialRequest struct {
-	OwnerUserID   *string `json:"owner_user_id,omitempty"`
-	Scope         *string `json:"scope,omitempty"`
-	AuthBlob      *string `json:"auth_blob,omitempty"`
-	Weight        *int    `json:"weight,omitempty"`
-	Status        *string `json:"status,omitempty"`
-	CooldownUntil *string `json:"cooldown_until,omitempty"`
-	LastError     *string `json:"last_error,omitempty"`
+	OwnerUserID   *string                 `json:"owner_user_id,omitempty"`
+	Scope         *state.CredentialScope  `json:"scope,omitempty"`
+	AuthBlob      *string                 `json:"auth_blob,omitempty"`
+	Weight        *int                    `json:"weight,omitempty"`
+	Status        *state.CredentialStatus `json:"status,omitempty"`
+	CooldownUntil *string                 `json:"cooldown_until,omitempty"`
+	LastError     *string                 `json:"last_error,omitempty"`
 }

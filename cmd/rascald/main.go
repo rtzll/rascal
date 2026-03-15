@@ -525,7 +525,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repo and task are required", http.StatusBadRequest)
 		return
 	}
-	trigger, err := runtrigger.ParseOrDefault(req.Trigger, runtrigger.NameCLI)
+	trigger, err := runtrigger.ParseOrDefault(req.Trigger.String(), runtrigger.NameCLI)
 	if err != nil {
 		http.Error(w, "invalid trigger", http.StatusBadRequest)
 		return
@@ -655,7 +655,7 @@ func (s *server) handleCredentials(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "auth_blob is required", http.StatusBadRequest)
 			return
 		}
-		scope, ok := state.ParseCredentialScope(req.Scope)
+		scope, ok := state.ParseCredentialScope(string(req.Scope))
 		if !ok {
 			http.Error(w, "invalid scope", http.StatusBadRequest)
 			return
@@ -760,7 +760,7 @@ func (s *server) handleCredentialSubresources(w http.ResponseWriter, r *http.Req
 			updated.OwnerUserID = strings.TrimSpace(*req.OwnerUserID)
 		}
 		if req.Scope != nil {
-			scope, ok := state.ParseCredentialScope(*req.Scope)
+			scope, ok := state.ParseCredentialScope(string(*req.Scope))
 			if !ok {
 				http.Error(w, "invalid scope", http.StatusBadRequest)
 				return
@@ -786,7 +786,7 @@ func (s *server) handleCredentialSubresources(w http.ResponseWriter, r *http.Req
 			updated.Weight = *req.Weight
 		}
 		if req.Status != nil {
-			status, ok := state.ParseCredentialStatus(*req.Status)
+			status, ok := state.ParseCredentialStatus(string(*req.Status))
 			if !ok {
 				http.Error(w, "invalid status", http.StatusBadRequest)
 				return

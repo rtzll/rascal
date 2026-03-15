@@ -16,6 +16,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/rtzll/rascal/internal/config"
+	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
 
@@ -96,7 +97,7 @@ func TestBuildCreateTaskPayloadForRetry(t *testing.T) {
 		Repo:       "owner/repo",
 		Task:       "Retry task",
 		BaseBranch: "main",
-		Trigger:    "retry",
+		Trigger:    runtrigger.NameRetry,
 		Debug:      &debug,
 	})
 
@@ -126,7 +127,7 @@ func TestBuildCreateTaskPayloadForIssue(t *testing.T) {
 		IssueNumber: 42,
 		Task:        "ignored",
 		BaseBranch:  "ignored",
-		Trigger:     "ignored",
+		Trigger:     runtrigger.Name("ignored"),
 		Debug:       &debug,
 	})
 
