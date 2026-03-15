@@ -13,6 +13,7 @@ If `XDG_CONFIG_HOME` is unset, Rascal falls back to:
 Inspect current effective values:
 
 ```bash
+rascal config path
 rascal config view
 ```
 

@@ -1714,6 +1714,48 @@ func TestConfigGetMasksAPITokenFromLocalConfig(t *testing.T) {
 	}
 }
 
+func TestConfigPathPrintsConfiguredPath(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.toml")
+
+	stdout, err := captureStdout(func() error {
+		root := mustNewRootCmd(t)
+		root.SetArgs([]string{"--config", cfgPath, "config", "path"})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatalf("config path: %v", err)
+	}
+
+	if got := strings.TrimSpace(stdout); got != cfgPath {
+		t.Fatalf("config path output = %q, want %q", got, cfgPath)
+	}
+}
+
+func TestConfigPathJSONOutput(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.toml")
+
+	stdout, err := captureStdout(func() error {
+		root := mustNewRootCmd(t)
+		root.SetArgs([]string{"--config", cfgPath, "--output", "json", "config", "path"})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatalf("config path json: %v", err)
+	}
+
+	var out struct {
+		ConfigPath string `json:"config_path"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("invalid json output: %v", err)
+	}
+	if out.ConfigPath != cfgPath {
+		t.Fatalf("config_path = %q, want %q", out.ConfigPath, cfgPath)
+	}
+}
+
 func TestConfigSetSSHPortPersistsInteger(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.toml")

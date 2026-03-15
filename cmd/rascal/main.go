@@ -132,6 +132,10 @@ type configViewOutput struct {
 	ResolvedTransport string `json:"resolved_transport"`
 }
 
+type configPathOutput struct {
+	ConfigPath string `json:"config_path"`
+}
+
 type configUnsetOutput struct {
 	Key        string      `json:"key"`
 	Value      configValue `json:"value"`
@@ -1842,6 +1846,7 @@ Supported keys:
 `), keys),
 		Example: strings.TrimSpace(`
 rascal config view
+rascal config path
 rascal config get default_repo
 rascal config set default_repo OWNER/REPO
 `),
@@ -1849,6 +1854,22 @@ rascal config set default_repo OWNER/REPO
 			return cmd.Help()
 		},
 	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "path",
+		Short: "Show the local config file path",
+		Long:  "Print the local config file path Rascal will read from and write to.",
+		Example: strings.TrimSpace(`
+rascal config path
+rascal config path --output json
+`),
+		RunE: func(_ *cobra.Command, _ []string) error {
+			out := configPathOutput{ConfigPath: a.configPath}
+			return emit(a, out, func() error {
+				a.println("%s", out.ConfigPath)
+				return nil
+			})
+		},
+	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "view",
 		Short: "View effective config (flags/env/file)",
