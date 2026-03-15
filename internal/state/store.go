@@ -689,15 +689,12 @@ func (s *Store) CountRunLeasesByOwner(ownerID string) int {
 
 func (s *Store) UpsertRunExecution(exec RunExecution) (RunExecution, error) {
 	exec.RunID = strings.TrimSpace(exec.RunID)
-	exec.Backend = strings.TrimSpace(exec.Backend)
+	exec.Backend = NormalizeRunExecutionBackend(exec.Backend)
 	exec.ContainerName = strings.TrimSpace(exec.ContainerName)
 	exec.ContainerID = strings.TrimSpace(exec.ContainerID)
-	exec.Status = strings.TrimSpace(exec.Status)
+	exec.Status = NormalizeRunExecutionStatus(exec.Status)
 	if exec.RunID == "" {
 		return RunExecution{}, fmt.Errorf("run id is required")
-	}
-	if exec.Backend == "" {
-		exec.Backend = "docker"
 	}
 	if exec.ContainerName == "" {
 		return RunExecution{}, fmt.Errorf("container name is required")
@@ -705,16 +702,13 @@ func (s *Store) UpsertRunExecution(exec RunExecution) (RunExecution, error) {
 	if exec.ContainerID == "" {
 		return RunExecution{}, fmt.Errorf("container id is required")
 	}
-	if exec.Status == "" {
-		exec.Status = "created"
-	}
 	now := time.Now().UTC()
 	if err := s.q.UpsertRunExecution(context.Background(), sqlitegen.UpsertRunExecutionParams{
 		RunID:          exec.RunID,
-		Backend:        exec.Backend,
+		Backend:        string(exec.Backend),
 		ContainerName:  exec.ContainerName,
 		ContainerID:    exec.ContainerID,
-		Status:         exec.Status,
+		Status:         string(exec.Status),
 		ExitCode:       int64(exec.ExitCode),
 		CreatedAt:      now.UnixNano(),
 		UpdatedAt:      now.UnixNano(),
@@ -729,20 +723,20 @@ func (s *Store) UpsertRunExecution(exec RunExecution) (RunExecution, error) {
 	return fromDBRunExecution(row), nil
 }
 
-func (s *Store) UpdateRunExecutionState(runID, status string, exitCode int, lastObservedAt time.Time) (RunExecution, error) {
+func (s *Store) UpdateRunExecutionState(runID string, status RunExecutionStatus, exitCode int, lastObservedAt time.Time) (RunExecution, error) {
 	runID = strings.TrimSpace(runID)
-	status = strings.TrimSpace(status)
+	parsedStatus, ok := ParseRunExecutionStatus(string(status))
 	if runID == "" {
 		return RunExecution{}, fmt.Errorf("run id is required")
 	}
-	if status == "" {
-		status = "created"
+	if !ok {
+		return RunExecution{}, fmt.Errorf("invalid run execution status %q", status)
 	}
 	if lastObservedAt.IsZero() {
 		lastObservedAt = time.Now().UTC()
 	}
 	rows, err := s.q.UpdateRunExecutionState(context.Background(), sqlitegen.UpdateRunExecutionStateParams{
-		Status:         status,
+		Status:         string(parsedStatus),
 		ExitCode:       int64(exitCode),
 		UpdatedAt:      time.Now().UTC().UnixNano(),
 		LastObservedAt: lastObservedAt.UTC().UnixNano(),
@@ -786,7 +780,7 @@ func (s *Store) DeleteRunExecution(runID string) error {
 
 func (s *Store) UpsertRunTokenUsage(usage RunTokenUsage) (RunTokenUsage, error) {
 	usage.RunID = strings.TrimSpace(usage.RunID)
-	usage.Backend = strings.TrimSpace(usage.Backend)
+	usage.Backend = agent.NormalizeBackend(string(usage.Backend))
 	usage.Provider = strings.TrimSpace(usage.Provider)
 	usage.Model = strings.TrimSpace(usage.Model)
 	usage.RawUsageJSON = strings.TrimSpace(usage.RawUsageJSON)
@@ -799,7 +793,7 @@ func (s *Store) UpsertRunTokenUsage(usage RunTokenUsage) (RunTokenUsage, error) 
 	}
 	row, err := s.q.UpsertRunTokenUsage(context.Background(), sqlitegen.UpsertRunTokenUsageParams{
 		RunID:                 usage.RunID,
-		Backend:               usage.Backend,
+		Backend:               usage.Backend.String(),
 		Provider:              usage.Provider,
 		Model:                 usage.Model,
 		TotalTokens:           usage.TotalTokens,
@@ -1178,10 +1172,10 @@ func fromDBClaimNextQueuedRunForTaskRow(r sqlitegen.ClaimNextQueuedRunForTaskRow
 func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {
 	return RunExecution{
 		RunID:          r.RunID,
-		Backend:        r.Backend,
+		Backend:        NormalizeRunExecutionBackend(RunExecutionBackend(r.Backend)),
 		ContainerName:  r.ContainerName,
 		ContainerID:    r.ContainerID,
-		Status:         r.Status,
+		Status:         NormalizeRunExecutionStatus(RunExecutionStatus(r.Status)),
 		ExitCode:       int(r.ExitCode),
 		CreatedAt:      time.Unix(0, r.CreatedAt).UTC(),
 		UpdatedAt:      time.Unix(0, r.UpdatedAt).UTC(),
@@ -1240,7 +1234,7 @@ func optionalPositiveInt64(v int) sql.NullInt64 {
 func fromDBRunTokenUsage(row sqlitegen.RunTokenUsage) RunTokenUsage {
 	return RunTokenUsage{
 		RunID:                 row.RunID,
-		Backend:               row.Backend,
+		Backend:               agent.NormalizeBackend(row.Backend),
 		Provider:              row.Provider,
 		Model:                 row.Model,
 		TotalTokens:           row.TotalTokens,

@@ -203,32 +203,96 @@ type RunLease struct {
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 }
 
+type RunExecutionBackend string
+
+const (
+	RunExecutionBackendDocker RunExecutionBackend = "docker"
+	RunExecutionBackendNoop   RunExecutionBackend = "noop"
+)
+
+func NormalizeRunExecutionBackend(backend RunExecutionBackend) RunExecutionBackend {
+	switch strings.ToLower(strings.TrimSpace(string(backend))) {
+	case string(RunExecutionBackendNoop):
+		return RunExecutionBackendNoop
+	default:
+		return RunExecutionBackendDocker
+	}
+}
+
+func ParseRunExecutionBackend(raw string) (RunExecutionBackend, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(RunExecutionBackendDocker):
+		return RunExecutionBackendDocker, true
+	case string(RunExecutionBackendNoop):
+		return RunExecutionBackendNoop, true
+	default:
+		return "", false
+	}
+}
+
+type RunExecutionStatus string
+
+const (
+	RunExecutionStatusCreated  RunExecutionStatus = "created"
+	RunExecutionStatusRunning  RunExecutionStatus = "running"
+	RunExecutionStatusStopping RunExecutionStatus = "stopping"
+	RunExecutionStatusExited   RunExecutionStatus = "exited"
+)
+
+func NormalizeRunExecutionStatus(status RunExecutionStatus) RunExecutionStatus {
+	switch strings.ToLower(strings.TrimSpace(string(status))) {
+	case string(RunExecutionStatusRunning):
+		return RunExecutionStatusRunning
+	case string(RunExecutionStatusStopping):
+		return RunExecutionStatusStopping
+	case string(RunExecutionStatusExited):
+		return RunExecutionStatusExited
+	default:
+		return RunExecutionStatusCreated
+	}
+}
+
+func ParseRunExecutionStatus(raw string) (RunExecutionStatus, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(RunExecutionStatusCreated):
+		return RunExecutionStatusCreated, true
+	case string(RunExecutionStatusRunning):
+		return RunExecutionStatusRunning, true
+	case string(RunExecutionStatusStopping):
+		return RunExecutionStatusStopping, true
+	case string(RunExecutionStatusExited):
+		return RunExecutionStatusExited, true
+	default:
+		return "", false
+	}
+}
+
 type RunExecution struct {
-	RunID          string    `json:"run_id"`
-	Backend        string    `json:"backend"`
-	ContainerName  string    `json:"container_name"`
-	ContainerID    string    `json:"container_id"`
-	Status         string    `json:"status"`
-	ExitCode       int       `json:"exit_code"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	LastObservedAt time.Time `json:"last_observed_at"`
+	RunID          string              `json:"run_id"`
+	Backend        RunExecutionBackend `json:"backend"`
+	ContainerName  string              `json:"container_name"`
+	ContainerID    string              `json:"container_id"`
+	Status         RunExecutionStatus  `json:"status"`
+	ExitCode       int                 `json:"exit_code"`
+	CreatedAt      time.Time           `json:"created_at"`
+	UpdatedAt      time.Time           `json:"updated_at"`
+	LastObservedAt time.Time           `json:"last_observed_at"`
 }
 
 type RunTokenUsage struct {
-	RunID                 string    `json:"run_id"`
-	Backend               string    `json:"backend"`
-	Provider              string    `json:"provider,omitempty"`
-	Model                 string    `json:"model,omitempty"`
-	TotalTokens           int64     `json:"total_tokens"`
-	InputTokens           *int64    `json:"input_tokens,omitempty"`
-	OutputTokens          *int64    `json:"output_tokens,omitempty"`
-	CachedInputTokens     *int64    `json:"cached_input_tokens,omitempty"`
-	ReasoningOutputTokens *int64    `json:"reasoning_output_tokens,omitempty"`
-	RawUsageJSON          string    `json:"raw_usage_json,omitempty"`
-	CapturedAt            time.Time `json:"captured_at"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	RunID                 string        `json:"run_id"`
+	Backend               agent.Backend `json:"backend"`
+	Provider              string        `json:"provider,omitempty"`
+	Model                 string        `json:"model,omitempty"`
+	TotalTokens           int64         `json:"total_tokens"`
+	InputTokens           *int64        `json:"input_tokens,omitempty"`
+	OutputTokens          *int64        `json:"output_tokens,omitempty"`
+	CachedInputTokens     *int64        `json:"cached_input_tokens,omitempty"`
+	ReasoningOutputTokens *int64        `json:"reasoning_output_tokens,omitempty"`
+	RawUsageJSON          string        `json:"raw_usage_json,omitempty"`
+	CapturedAt            time.Time     `json:"captured_at"`
+	CreatedAt             time.Time     `json:"created_at"`
+	UpdatedAt             time.Time     `json:"updated_at"`
 }
 
 type RunCancelRequest struct {

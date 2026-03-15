@@ -732,7 +732,7 @@ func waitForRunExecution(t *testing.T, s *server, runID string) state.RunExecuti
 		if !ok {
 			return false
 		}
-		if strings.TrimSpace(rec.Status) != "running" {
+		if rec.Status != state.RunExecutionStatusRunning {
 			return false
 		}
 		execRec = rec
@@ -2743,7 +2743,7 @@ func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected run token usage for %s", run.ID)
 	}
-	if usage.Backend != "codex" {
+	if usage.Backend != agent.BackendCodex {
 		t.Fatalf("backend = %q, want codex", usage.Backend)
 	}
 	if usage.Model != "gpt-5-codex" {
@@ -4201,10 +4201,10 @@ func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
 	}
 	if _, err := s.store.UpsertRunExecution(state.RunExecution{
 		RunID:         run.ID,
-		Backend:       handle.Backend,
+		Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(handle.Backend)),
 		ContainerName: handle.Name,
 		ContainerID:   handle.ID,
-		Status:        "running",
+		Status:        state.RunExecutionStatusRunning,
 	}); err != nil {
 		t.Fatalf("upsert run execution: %v", err)
 	}
@@ -4241,10 +4241,10 @@ func TestRecoverRunningRunMissingDetachedExecutionFails(t *testing.T) {
 	}
 	if _, err := s.store.UpsertRunExecution(state.RunExecution{
 		RunID:         run.ID,
-		Backend:       "docker",
+		Backend:       state.RunExecutionBackendDocker,
 		ContainerName: "rascal-run_recover_missing_exec",
 		ContainerID:   "missing-execution-id",
-		Status:        "running",
+		Status:        state.RunExecutionStatusRunning,
 	}); err != nil {
 		t.Fatalf("upsert run execution: %v", err)
 	}
@@ -4294,10 +4294,10 @@ func TestRecoverRunningRunAdoptsByStableContainerName(t *testing.T) {
 	}
 	if _, err := s.store.UpsertRunExecution(state.RunExecution{
 		RunID:         run.ID,
-		Backend:       handle.Backend,
+		Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(handle.Backend)),
 		ContainerName: handle.Name,
 		ContainerID:   handle.Name,
-		Status:        "created",
+		Status:        state.RunExecutionStatusCreated,
 	}); err != nil {
 		t.Fatalf("upsert placeholder execution: %v", err)
 	}

@@ -382,7 +382,7 @@ func TestStoreUpsertRunTokenUsage(t *testing.T) {
 	reasoningOutputTokens := int64(10)
 	usage, err := store.UpsertRunTokenUsage(RunTokenUsage{
 		RunID:                 run.ID,
-		Backend:               "goose",
+		Backend:               agent.BackendGoose,
 		Provider:              "openai",
 		Model:                 "gpt-5-codex",
 		TotalTokens:           150,
@@ -722,16 +722,16 @@ func TestStoreRunExecutionLifecycle(t *testing.T) {
 
 	exec, err := store.UpsertRunExecution(RunExecution{
 		RunID:         "run_exec_1",
-		Backend:       "docker",
+		Backend:       RunExecutionBackendDocker,
 		ContainerName: "rascal-run_exec_1",
 		ContainerID:   "container-abc",
-		Status:        "running",
+		Status:        RunExecutionStatusRunning,
 		ExitCode:      0,
 	})
 	if err != nil {
 		t.Fatalf("upsert run execution: %v", err)
 	}
-	if exec.Status != "running" {
+	if exec.Status != RunExecutionStatusRunning {
 		t.Fatalf("unexpected initial execution status: %s", exec.Status)
 	}
 
@@ -743,11 +743,11 @@ func TestStoreRunExecutionLifecycle(t *testing.T) {
 		t.Fatalf("unexpected container id: %s", loaded.ContainerID)
 	}
 
-	updated, err := store.UpdateRunExecutionState("run_exec_1", "exited", 137, time.Now().UTC())
+	updated, err := store.UpdateRunExecutionState("run_exec_1", RunExecutionStatusExited, 137, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("update run execution state: %v", err)
 	}
-	if updated.Status != "exited" {
+	if updated.Status != RunExecutionStatusExited {
 		t.Fatalf("expected exited status, got %s", updated.Status)
 	}
 	if updated.ExitCode != 137 {

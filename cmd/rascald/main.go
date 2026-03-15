@@ -313,7 +313,7 @@ func (s *server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 	}
 
 	if execState.Running {
-		if _, err := s.store.UpdateRunExecutionState(run.ID, "running", 0, time.Now().UTC()); err != nil {
+		if _, err := s.store.UpdateRunExecutionState(run.ID, state.RunExecutionStatusRunning, 0, time.Now().UTC()); err != nil {
 			log.Printf("recover run %s update execution running state failed: %v", run.ID, err)
 		}
 		if err := s.store.UpsertRunLease(run.ID, s.instanceID, runLeaseTTL); err != nil {
@@ -328,7 +328,7 @@ func (s *server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 	if execState.ExitCode != nil {
 		exitCode = *execState.ExitCode
 	}
-	if _, err := s.store.UpdateRunExecutionState(run.ID, "exited", exitCode, time.Now().UTC()); err != nil {
+	if _, err := s.store.UpdateRunExecutionState(run.ID, state.RunExecutionStatusExited, exitCode, time.Now().UTC()); err != nil {
 		log.Printf("recover run %s update execution exited state failed: %v", run.ID, err)
 	}
 	s.finalizeDetachedRun(run.ID, execRec, exitCode)
@@ -1868,10 +1868,10 @@ func (s *server) executeRun(runID string) {
 		pendingHandle := runner.ExecutionHandleForRun(run.ID)
 		if _, err := s.store.UpsertRunExecution(state.RunExecution{
 			RunID:         run.ID,
-			Backend:       pendingHandle.Backend,
+			Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(pendingHandle.Backend)),
 			ContainerName: pendingHandle.Name,
 			ContainerID:   pendingHandle.Name,
-			Status:        "created",
+			Status:        state.RunExecutionStatusCreated,
 			ExitCode:      0,
 		}); err != nil {
 			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("persist run execution: %v", err))
@@ -1890,10 +1890,10 @@ func (s *server) executeRun(runID string) {
 		}
 		execRec, err = s.store.UpsertRunExecution(state.RunExecution{
 			RunID:         run.ID,
-			Backend:       strings.TrimSpace(handle.Backend),
+			Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(handle.Backend)),
 			ContainerName: strings.TrimSpace(handle.Name),
 			ContainerID:   strings.TrimSpace(handle.ID),
-			Status:        "running",
+			Status:        state.RunExecutionStatusRunning,
 			ExitCode:      0,
 		})
 		if err != nil {
@@ -2025,9 +2025,9 @@ func (s *server) superviseRun(ctx context.Context, runID string, execRec state.R
 			}
 
 			if execState.Running {
-				execStatus := "running"
+				execStatus := state.RunExecutionStatusRunning
 				if reason, ok := s.pendingRunCancelReason(runID); ok {
-					execStatus = "stopping"
+					execStatus = state.RunExecutionStatusStopping
 					if !stopRequested {
 						stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
 						stopErr := s.launcher.Stop(stopCtx, handle, 10*time.Second)
@@ -2049,7 +2049,7 @@ func (s *server) superviseRun(ctx context.Context, runID string, execRec state.R
 			if execState.ExitCode != nil {
 				exitCode = *execState.ExitCode
 			}
-			if _, err := s.store.UpdateRunExecutionState(runID, "exited", exitCode, now); err != nil {
+			if _, err := s.store.UpdateRunExecutionState(runID, state.RunExecutionStatusExited, exitCode, now); err != nil {
 				log.Printf("run %s update execution exited state failed: %v", runID, err)
 			}
 			s.finalizeDetachedRun(runID, execRec, exitCode)
@@ -2230,7 +2230,7 @@ func (s *server) stopRunExecutionBestEffort(runID string, note string) {
 	if !ok {
 		return
 	}
-	if _, err := s.store.UpdateRunExecutionState(runID, "stopping", execRec.ExitCode, time.Now().UTC()); err != nil {
+	if _, err := s.store.UpdateRunExecutionState(runID, state.RunExecutionStatusStopping, execRec.ExitCode, time.Now().UTC()); err != nil {
 		log.Printf("run %s mark execution stopping failed: %v", runID, err)
 	}
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -2243,7 +2243,7 @@ func (s *server) stopRunExecutionBestEffort(runID string, note string) {
 
 func runExecutionHandle(execRec state.RunExecution) runner.ExecutionHandle {
 	return runner.ExecutionHandle{
-		Backend: strings.TrimSpace(execRec.Backend),
+		Backend: strings.TrimSpace(string(execRec.Backend)),
 		ID:      strings.TrimSpace(execRec.ContainerID),
 		Name:    strings.TrimSpace(execRec.ContainerName),
 	}
@@ -3573,7 +3573,7 @@ func loadRunTokenUsage(run state.Run) (state.RunTokenUsage, bool, error) {
 
 	return state.RunTokenUsage{
 		RunID:                 run.ID,
-		Backend:               run.AgentBackend.String(),
+		Backend:               run.AgentBackend,
 		Provider:              usage.Provider,
 		Model:                 usage.Model,
 		TotalTokens:           usage.TotalTokens,

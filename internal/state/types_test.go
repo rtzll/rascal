@@ -27,6 +27,26 @@ func TestParseRunAndTaskStatus(t *testing.T) {
 	if _, ok := ParseTaskStatus("archived"); ok {
 		t.Fatal("expected invalid task status to be rejected")
 	}
+
+	if got, ok := ParseRunExecutionStatus(" stopping "); !ok || got != RunExecutionStatusStopping {
+		t.Fatalf("ParseRunExecutionStatus(stopping) = %q, %t", got, ok)
+	}
+	if got, ok := ParseRunExecutionStatus(""); !ok || got != RunExecutionStatusCreated {
+		t.Fatalf("ParseRunExecutionStatus(empty) = %q, %t", got, ok)
+	}
+	if _, ok := ParseRunExecutionStatus("paused"); ok {
+		t.Fatal("expected invalid run execution status to be rejected")
+	}
+
+	if got, ok := ParseRunExecutionBackend(" noop "); !ok || got != RunExecutionBackendNoop {
+		t.Fatalf("ParseRunExecutionBackend(noop) = %q, %t", got, ok)
+	}
+	if got, ok := ParseRunExecutionBackend(""); !ok || got != RunExecutionBackendDocker {
+		t.Fatalf("ParseRunExecutionBackend(empty) = %q, %t", got, ok)
+	}
+	if _, ok := ParseRunExecutionBackend("podman"); ok {
+		t.Fatal("expected invalid run execution backend to be rejected")
+	}
 }
 
 func TestFromDBNormalizesTaskAndRunStatus(t *testing.T) {
