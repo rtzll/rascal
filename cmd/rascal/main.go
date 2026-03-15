@@ -1074,7 +1074,9 @@ rascal run --issue OWNER/REPO#123
 	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository in OWNER/REPO form")
 	cmd.Flags().StringVarP(&instruction, "instruction", "t", "", "instruction text")
 	cmd.Flags().StringVar(&legacyTask, "task", "", "deprecated alias for --instruction")
-	_ = cmd.Flags().MarkHidden("task")
+	if err := cmd.Flags().MarkHidden("task"); err != nil {
+		panic(err)
+	}
 	cmd.Flags().StringVarP(&baseBranch, "base-branch", "b", "main", "base branch")
 	cmd.Flags().StringVar(&issueRef, "issue", "", "issue reference in OWNER/REPO#NUMBER form")
 	cmd.Flags().BoolVar(&debug, "debug", true, "stream detailed agent execution logs (use --debug=false to reduce verbosity)")

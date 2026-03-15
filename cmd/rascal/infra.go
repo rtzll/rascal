@@ -314,7 +314,9 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	cmd.Flags().StringVar(&agentBackend, "agent-runtime", string(agent.RuntimeCodex), "agent runtime to use on the server (goose or codex)")
 	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.RuntimeCodex), "deprecated alias for --agent-runtime")
-	_ = cmd.Flags().MarkHidden("agent-backend")
+	if err := cmd.Flags().MarkHidden("agent-backend"); err != nil {
+		panic(err)
+	}
 	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
@@ -393,7 +395,9 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	cmd.Flags().StringVar(&agentBackend, "agent-runtime", string(agent.RuntimeCodex), "agent runtime to use on the server (goose or codex)")
 	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.RuntimeCodex), "deprecated alias for --agent-runtime")
-	_ = cmd.Flags().MarkHidden("agent-backend")
+	if err := cmd.Flags().MarkHidden("agent-backend"); err != nil {
+		panic(err)
+	}
 	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")

@@ -29,7 +29,7 @@ func (m *Meta) UnmarshalJSON(data []byte) error {
 		AgentSessionID string `json:"agent_session_id"`
 	}{}
 	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
+		return fmt.Errorf("decode runner meta: %w", err)
 	}
 	*m = Meta(aux.meta)
 	if m.TaskSessionID == "" {

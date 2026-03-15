@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/rtzll/rascal/internal/runtrigger"
@@ -30,7 +31,7 @@ func (r *CreateTaskRequest) UnmarshalJSON(data []byte) error {
 		Task string `json:"task"`
 	}{}
 	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
+		return fmt.Errorf("decode create task request: %w", err)
 	}
 	*r = CreateTaskRequest(aux.createTaskRequest)
 	if r.Instruction == "" {

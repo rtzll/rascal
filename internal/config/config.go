@@ -332,10 +332,6 @@ func loadAgentRuntime() (agent.Runtime, error) {
 	return runtime, nil
 }
 
-func loadAgentBackend() (agent.Backend, error) {
-	return loadAgentRuntime()
-}
-
 func loadTaskSessionConfig(dataDir string) (TaskSessionConfig, error) {
 	mode, err := loadTaskSessionMode()
 	if err != nil {
@@ -346,10 +342,6 @@ func loadTaskSessionConfig(dataDir string) (TaskSessionConfig, error) {
 		Root:    loadTaskSessionRoot(dataDir),
 		TTLDays: loadTaskSessionTTLDays(),
 	}, nil
-}
-
-func loadAgentSessionConfig(dataDir string) (AgentSessionConfig, error) {
-	return loadTaskSessionConfig(dataDir)
 }
 
 func loadTaskSessionMode() (agent.SessionMode, error) {
@@ -383,10 +375,6 @@ func loadTaskSessionMode() (agent.SessionMode, error) {
 	return agent.SessionModeAll, nil
 }
 
-func loadAgentSessionMode() (agent.SessionMode, error) {
-	return loadTaskSessionMode()
-}
-
 func loadTaskSessionRoot(dataDir string) string {
 	if raw, ok := os.LookupEnv("RASCAL_TASK_SESSION_ROOT"); ok {
 		if strings.TrimSpace(raw) == "" {
@@ -409,10 +397,6 @@ func loadTaskSessionRoot(dataDir string) string {
 	return filepath.Join(dataDir, defaults.AgentSessionDirName)
 }
 
-func loadAgentSessionRoot(dataDir string) string {
-	return loadTaskSessionRoot(dataDir)
-}
-
 func loadTaskSessionTTLDays() int {
 	if _, ok := os.LookupEnv("RASCAL_TASK_SESSION_TTL_DAYS"); ok {
 		return envNonNegativeIntOrDefault("RASCAL_TASK_SESSION_TTL_DAYS", 14)
@@ -424,8 +408,4 @@ func loadTaskSessionTTLDays() int {
 		return 14
 	}
 	return envNonNegativeIntOrDefault("RASCAL_AGENT_SESSION_TTL_DAYS", 14)
-}
-
-func loadAgentSessionTTLDays() int {
-	return loadTaskSessionTTLDays()
 }
