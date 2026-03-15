@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -16,17 +15,12 @@ import (
 	"github.com/rtzll/rascal/internal/credentials"
 	credentialstrategies "github.com/rtzll/rascal/internal/credentials/strategies"
 	"github.com/rtzll/rascal/internal/credentialstrategy"
+	"github.com/rtzll/rascal/internal/orchestrator"
 	"github.com/rtzll/rascal/internal/state"
 )
 
 func withPrincipal(req *http.Request, userID string, role state.UserRole) *http.Request {
-	ctx := req.Context()
-	ctx = context.WithValue(ctx, authPrincipalKey{}, authPrincipal{
-		UserID:        userID,
-		ExternalLogin: userID,
-		Role:          role,
-	})
-	return req.WithContext(ctx)
+	return orchestrator.WithPrincipal(req, userID, userID, role)
 }
 
 func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
@@ -39,16 +33,16 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
 	}
-	s.cipher = cipher
-	s.broker = credentials.NewBroker(s.store, strategy, cipher, 90*time.Second)
+	s.Cipher = cipher
+	s.Broker = credentials.NewBroker(s.Store, strategy, cipher, 90*time.Second)
 
-	if _, err := s.store.UpsertUser(state.UpsertUserInput{ID: "admin", ExternalLogin: "admin", Role: state.UserRoleAdmin}); err != nil {
+	if _, err := s.Store.UpsertUser(state.UpsertUserInput{ID: "admin", ExternalLogin: "admin", Role: state.UserRoleAdmin}); err != nil {
 		t.Fatalf("upsert admin: %v", err)
 	}
-	if _, err := s.store.UpsertUser(state.UpsertUserInput{ID: "owner", ExternalLogin: "owner", Role: state.UserRoleUser}); err != nil {
+	if _, err := s.Store.UpsertUser(state.UpsertUserInput{ID: "owner", ExternalLogin: "owner", Role: state.UserRoleUser}); err != nil {
 		t.Fatalf("upsert owner: %v", err)
 	}
-	if _, err := s.store.UpsertUser(state.UpsertUserInput{ID: "other", ExternalLogin: "other", Role: state.UserRoleUser}); err != nil {
+	if _, err := s.Store.UpsertUser(state.UpsertUserInput{ID: "other", ExternalLogin: "other", Role: state.UserRoleUser}); err != nil {
 		t.Fatalf("upsert other: %v", err)
 	}
 
@@ -56,12 +50,12 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/credentials", bytes.NewReader(body))
 	createReq = withPrincipal(createReq, "owner", state.UserRoleUser)
 	createRec := httptest.NewRecorder()
-	s.handleCredentials(createRec, createReq)
+	s.HandleCredentials(createRec, createReq)
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201 (%s)", createRec.Code, createRec.Body.String())
 	}
 
-	created, ok, err := s.store.GetCodexCredential("cred-owner")
+	created, ok, err := s.Store.GetCodexCredential("cred-owner")
 	if err != nil || !ok {
 		t.Fatalf("credential not found after create: ok=%t err=%v", ok, err)
 	}
@@ -75,7 +69,7 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 	otherGetReq := httptest.NewRequest(http.MethodGet, "/v1/credentials/cred-owner", nil)
 	otherGetReq = withPrincipal(otherGetReq, "other", state.UserRoleUser)
 	otherGetRec := httptest.NewRecorder()
-	s.handleCredentialSubresources(otherGetRec, otherGetReq)
+	s.HandleCredentialSubresources(otherGetRec, otherGetReq)
 	if otherGetRec.Code != http.StatusNotFound {
 		t.Fatalf("other user get status = %d, want 404", otherGetRec.Code)
 	}
@@ -83,7 +77,7 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 	adminGetReq := httptest.NewRequest(http.MethodGet, "/v1/credentials/cred-owner", nil)
 	adminGetReq = withPrincipal(adminGetReq, "admin", state.UserRoleAdmin)
 	adminGetRec := httptest.NewRecorder()
-	s.handleCredentialSubresources(adminGetRec, adminGetReq)
+	s.HandleCredentialSubresources(adminGetRec, adminGetReq)
 	if adminGetRec.Code != http.StatusOK {
 		t.Fatalf("admin get status = %d, want 200", adminGetRec.Code)
 	}
@@ -91,7 +85,7 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 	adminCreateShared := httptest.NewRequest(http.MethodPost, "/v1/credentials", bytes.NewReader([]byte(`{"id":"cred-shared","scope":"shared","auth_blob":"{\"token\":\"y\"}"}`)))
 	adminCreateShared = withPrincipal(adminCreateShared, "admin", state.UserRoleAdmin)
 	adminCreateRec := httptest.NewRecorder()
-	s.handleCredentials(adminCreateRec, adminCreateShared)
+	s.HandleCredentials(adminCreateRec, adminCreateShared)
 	if adminCreateRec.Code != http.StatusCreated {
 		t.Fatalf("admin create shared status = %d, want 201", adminCreateRec.Code)
 	}
@@ -99,7 +93,7 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 	ownerListReq := httptest.NewRequest(http.MethodGet, "/v1/credentials", nil)
 	ownerListReq = withPrincipal(ownerListReq, "owner", state.UserRoleUser)
 	ownerListRec := httptest.NewRecorder()
-	s.handleCredentials(ownerListRec, ownerListReq)
+	s.HandleCredentials(ownerListRec, ownerListReq)
 	if ownerListRec.Code != http.StatusOK {
 		t.Fatalf("owner list status = %d, want 200", ownerListRec.Code)
 	}
@@ -120,8 +114,8 @@ func TestCredentialAPIRejectsInvalidStatusUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	s.cipher = cipher
-	if _, err := s.store.UpsertUser(state.UpsertUserInput{ID: "owner", ExternalLogin: "owner", Role: state.UserRoleUser}); err != nil {
+	s.Cipher = cipher
+	if _, err := s.Store.UpsertUser(state.UpsertUserInput{ID: "owner", ExternalLogin: "owner", Role: state.UserRoleUser}); err != nil {
 		t.Fatalf("upsert owner: %v", err)
 	}
 
@@ -129,7 +123,7 @@ func TestCredentialAPIRejectsInvalidStatusUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encrypt auth blob: %v", err)
 	}
-	if _, err := s.store.CreateCodexCredential(state.CreateCodexCredentialInput{
+	if _, err := s.Store.CreateCodexCredential(state.CreateCodexCredentialInput{
 		ID:                "cred-invalid-status",
 		OwnerUserID:       "owner",
 		Scope:             state.CredentialScopePersonal,
@@ -143,7 +137,7 @@ func TestCredentialAPIRejectsInvalidStatusUpdate(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/v1/credentials/cred-invalid-status", bytes.NewReader([]byte(`{"status":"paused"}`)))
 	req = withPrincipal(req, "owner", state.UserRoleUser)
 	rec := httptest.NewRecorder()
-	s.handleCredentialSubresources(rec, req)
+	s.HandleCredentialSubresources(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
 	}
@@ -155,7 +149,7 @@ func TestCreateTaskPersistsRequesterIdentity(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader([]byte(`{"repo":"owner/repo","task":"do work"}`)))
 	req = withPrincipal(req, "owner", state.UserRoleUser)
 	rec := httptest.NewRecorder()
-	s.handleCreateTask(rec, req)
+	s.HandleCreateTask(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body.String())
 	}
@@ -165,7 +159,7 @@ func TestCreateTaskPersistsRequesterIdentity(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	info, ok := s.store.GetRunCredentialInfo(payload.Run.ID)
+	info, ok := s.Store.GetRunCredentialInfo(payload.Run.ID)
 	if !ok {
 		t.Fatalf("run credential info missing for %s", payload.Run.ID)
 	}
@@ -186,17 +180,17 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
 	}
-	s.cipher = cipher
-	s.broker = credentials.NewBroker(s.store, strategy, cipher, 90*time.Second)
+	s.Cipher = cipher
+	s.Broker = credentials.NewBroker(s.Store, strategy, cipher, 90*time.Second)
 
-	if _, err := s.store.UpsertUser(state.UpsertUserInput{ID: "owner", ExternalLogin: "owner", Role: state.UserRoleUser}); err != nil {
+	if _, err := s.Store.UpsertUser(state.UpsertUserInput{ID: "owner", ExternalLogin: "owner", Role: state.UserRoleUser}); err != nil {
 		t.Fatalf("upsert owner: %v", err)
 	}
 	blob, err := cipher.Encrypt([]byte(`{"token":"run-token"}`))
 	if err != nil {
 		t.Fatalf("encrypt auth blob: %v", err)
 	}
-	if _, err := s.store.CreateCodexCredential(state.CreateCodexCredentialInput{
+	if _, err := s.Store.CreateCodexCredential(state.CreateCodexCredentialInput{
 		ID:                "cred-owner",
 		OwnerUserID:       "owner",
 		Scope:             "personal",
@@ -207,9 +201,9 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 		t.Fatalf("create credential: %v", err)
 	}
 
-	run, err := s.createAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(runRequest{
 		Repo:            "owner/repo",
-		Instruction:            "do work",
+		Instruction:     "do work",
 		CreatedByUserID: "owner",
 	})
 	if err != nil {
@@ -229,13 +223,13 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 	if !bytes.Contains(data, []byte("run-token")) {
 		t.Fatalf("auth file does not contain leased credential payload")
 	}
-	if _, ok, err := s.store.GetActiveCredentialLeaseByRunID(run.ID); err != nil || !ok {
+	if _, ok, err := s.Store.GetActiveCredentialLeaseByRunID(run.ID); err != nil || !ok {
 		t.Fatalf("expected active credential lease, ok=%t err=%v", ok, err)
 	}
 
 	close(waitCh)
 	waitFor(t, 3*time.Second, func() bool {
-		r, ok := s.store.GetRun(run.ID)
+		r, ok := s.Store.GetRun(run.ID)
 		return ok && state.IsFinalRunStatus(r.Status)
 	}, "run completion")
 	waitFor(t, 2*time.Second, func() bool {
@@ -243,7 +237,7 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 		return errors.Is(err, os.ErrNotExist)
 	}, "ephemeral auth cleanup")
 	waitFor(t, 2*time.Second, func() bool {
-		_, ok, err := s.store.GetActiveCredentialLeaseByRunID(run.ID)
+		_, ok, err := s.Store.GetActiveCredentialLeaseByRunID(run.ID)
 		return err == nil && !ok
 	}, "credential lease release")
 }
@@ -261,18 +255,18 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("strategy: %v", err)
 	}
-	s.cipher = cipher
-	s.broker = credentials.NewBroker(s.store, strategy, cipher, 90*time.Second)
-	s.maxConcurrent = 2
+	s.Cipher = cipher
+	s.Broker = credentials.NewBroker(s.Store, strategy, cipher, 90*time.Second)
+	s.MaxConcurrent = 2
 
-	if _, err := s.store.UpsertUser(state.UpsertUserInput{ID: "owner", ExternalLogin: "owner", Role: state.UserRoleUser}); err != nil {
+	if _, err := s.Store.UpsertUser(state.UpsertUserInput{ID: "owner", ExternalLogin: "owner", Role: state.UserRoleUser}); err != nil {
 		t.Fatalf("upsert owner: %v", err)
 	}
 	blob, err := cipher.Encrypt([]byte(`{"token":"shared-token"}`))
 	if err != nil {
 		t.Fatalf("encrypt auth blob: %v", err)
 	}
-	if _, err := s.store.CreateCodexCredential(state.CreateCodexCredentialInput{
+	if _, err := s.Store.CreateCodexCredential(state.CreateCodexCredentialInput{
 		ID:                "cred-shared",
 		Scope:             "shared",
 		EncryptedAuthBlob: blob,
@@ -282,19 +276,19 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 		t.Fatalf("create credential: %v", err)
 	}
 
-	runA, err := s.createAndQueueRun(runRequest{
+	runA, err := s.CreateAndQueueRun(runRequest{
 		TaskID:          "owner/repo#reuse-a",
 		Repo:            "owner/repo",
-		Instruction:            "reuse shared credential a",
+		Instruction:     "reuse shared credential a",
 		CreatedByUserID: "owner",
 	})
 	if err != nil {
 		t.Fatalf("create run A: %v", err)
 	}
-	runB, err := s.createAndQueueRun(runRequest{
+	runB, err := s.CreateAndQueueRun(runRequest{
 		TaskID:          "owner/repo#reuse-b",
 		Repo:            "owner/repo",
-		Instruction:            "reuse shared credential b",
+		Instruction:     "reuse shared credential b",
 		CreatedByUserID: "owner",
 	})
 	if err != nil {
@@ -311,10 +305,10 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(runB.RunDir, "codex", "auth.json")); err != nil {
 			return false
 		}
-		if _, ok, err := s.store.GetActiveCredentialLeaseByRunID(runA.ID); err != nil || !ok {
+		if _, ok, err := s.Store.GetActiveCredentialLeaseByRunID(runA.ID); err != nil || !ok {
 			return false
 		}
-		if _, ok, err := s.store.GetActiveCredentialLeaseByRunID(runB.ID); err != nil || !ok {
+		if _, ok, err := s.Store.GetActiveCredentialLeaseByRunID(runB.ID); err != nil || !ok {
 			return false
 		}
 		return true
@@ -326,8 +320,8 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 
 	close(waitCh)
 	waitFor(t, 3*time.Second, func() bool {
-		a, okA := s.store.GetRun(runA.ID)
-		b, okB := s.store.GetRun(runB.ID)
+		a, okA := s.Store.GetRun(runA.ID)
+		b, okB := s.Store.GetRun(runB.ID)
 		return okA && okB && state.IsFinalRunStatus(a.Status) && state.IsFinalRunStatus(b.Status)
 	}, "both runs complete")
 }

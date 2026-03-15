@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,7 @@ import (
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/credentials"
 	ghapi "github.com/rtzll/rascal/internal/github"
+	"github.com/rtzll/rascal/internal/orchestrator"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
@@ -96,7 +98,7 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 		RunDir:      runDir,
 	}
 
-	if err := s.writeRunFiles(run); err != nil {
+	if err := s.WriteRunFiles(run); err != nil {
 		t.Fatalf("writeRunFiles() error = %v", err)
 	}
 
@@ -105,12 +107,12 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 		t.Fatalf("ReadFile(context.json) error = %v", err)
 	}
 
-	var got runContextFile
+	var got RunContextFile
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("Unmarshal(context.json) error = %v", err)
 	}
 
-	want := runContextFile{
+	want := RunContextFile{
 		RunID:       run.ID,
 		TaskID:      run.TaskID,
 		Repo:        run.Repo,
@@ -619,19 +621,21 @@ func newTestServerWithPaths(t *testing.T, launcher runner.Launcher, dataDir, sta
 	if err != nil {
 		t.Fatalf("new state store: %v", err)
 	}
-	return &server{
-		cfg:                cfg,
-		store:              store,
-		launcher:           launcher,
-		gh:                 ghapi.NewAPIClient(""),
-		runCancels:         make(map[string]context.CancelFunc),
-		maxConcurrent:      defaultMaxConcurrent(),
-		instanceID:         strings.TrimSpace(instanceID),
-		supervisorInterval: 10 * time.Millisecond,
-		retryBackoff: func(_ int) time.Duration {
-			return 10 * time.Millisecond
-		},
+	s := orchestrator.NewServer(
+		cfg,
+		store,
+		launcher,
+		ghapi.NewAPIClient(""),
+		nil,
+		nil,
+		strings.TrimSpace(instanceID),
+	)
+	s.MaxConcurrent = runtime.NumCPU()
+	s.SupervisorInterval = 10 * time.Millisecond
+	s.RetryBackoff = func(_ int) time.Duration {
+		return 10 * time.Millisecond
 	}
+	return s
 }
 
 func prepareTestStatePath(statePath string) error {
@@ -728,7 +732,7 @@ func waitForRunExecution(t *testing.T, s *server, runID string) state.RunExecuti
 	t.Helper()
 	var execRec state.RunExecution
 	waitFor(t, 2*time.Second, func() bool {
-		rec, ok := s.store.GetRunExecution(runID)
+		rec, ok := s.Store.GetRunExecution(runID)
 		if !ok {
 			return false
 		}
@@ -878,26 +882,26 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 func waitForServerIdle(t *testing.T, s *server) {
 	t.Helper()
 	waitFor(t, 2*time.Second, func() bool {
-		return s.activeRunCount() == 0
+		return s.ActiveRunCount() == 0
 	}, "server idle")
 }
 
 func markRunSucceeded(t *testing.T, s *server, runID string) {
 	t.Helper()
-	if _, err := s.store.SetRunStatus(runID, state.StatusRunning, ""); err != nil {
+	if _, err := s.Store.SetRunStatus(runID, state.StatusRunning, ""); err != nil {
 		t.Fatalf("set run running before success: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(runID, state.StatusSucceeded, ""); err != nil {
+	if _, err := s.Store.SetRunStatus(runID, state.StatusSucceeded, ""); err != nil {
 		t.Fatalf("set run succeeded: %v", err)
 	}
 }
 
 func markRunReview(t *testing.T, s *server, runID string) {
 	t.Helper()
-	if _, err := s.store.SetRunStatus(runID, state.StatusRunning, ""); err != nil {
+	if _, err := s.Store.SetRunStatus(runID, state.StatusRunning, ""); err != nil {
 		t.Fatalf("set run running before review: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(runID, state.StatusReview, ""); err != nil {
+	if _, err := s.Store.SetRunStatus(runID, state.StatusReview, ""); err != nil {
 		t.Fatalf("set run review: %v", err)
 	}
 }
@@ -910,35 +914,35 @@ func TestHandleWebhookRecordsDeliveryOnlyAfterSuccess(t *testing.T) {
 
 	badReq := webhookRequest(t, []byte("{"), "issues", deliveryID, "")
 	badRec := httptest.NewRecorder()
-	s.handleWebhook(badRec, badReq)
+	s.HandleWebhook(badRec, badReq)
 	if badRec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 for bad payload, got %d", badRec.Code)
 	}
-	if s.store.DeliverySeen(deliveryID) {
+	if s.Store.DeliverySeen(deliveryID) {
 		t.Fatal("delivery should not be recorded when processing fails")
 	}
 
 	goodPayload := issuesEventPayload(t, "labeled", "owner/repo", "dev", "rascal", testIssue(7, "Title", "Body", nil, false))
 	goodReq := webhookRequest(t, goodPayload, "issues", deliveryID, "")
 	goodRec := httptest.NewRecorder()
-	s.handleWebhook(goodRec, goodReq)
+	s.HandleWebhook(goodRec, goodReq)
 	if goodRec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for good payload, got %d", goodRec.Code)
 	}
-	if !s.store.DeliverySeen(deliveryID) {
+	if !s.Store.DeliverySeen(deliveryID) {
 		t.Fatal("delivery should be recorded after successful processing")
 	}
-	if got := len(s.store.ListRuns(10)); got != 1 {
+	if got := len(s.Store.ListRuns(10)); got != 1 {
 		t.Fatalf("expected one run, got %d", got)
 	}
 
 	dupReq := webhookRequest(t, goodPayload, "issues", deliveryID, "")
 	dupRec := httptest.NewRecorder()
-	s.handleWebhook(dupRec, dupReq)
+	s.HandleWebhook(dupRec, dupReq)
 	if dupRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for duplicate delivery, got %d", dupRec.Code)
 	}
-	if got := len(s.store.ListRuns(10)); got != 1 {
+	if got := len(s.Store.ListRuns(10)); got != 1 {
 		t.Fatalf("expected one run after duplicate, got %d", got)
 	}
 }
@@ -951,11 +955,11 @@ func TestHandleWebhookIgnoresIssueLabeledOnPR(t *testing.T) {
 
 	req := webhookRequest(t, payload, "issues", "delivery-pr", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
-	if got := len(s.store.ListRuns(10)); got != 0 {
+	if got := len(s.Store.ListRuns(10)); got != 0 {
 		t.Fatalf("expected zero runs, got %d", got)
 	}
 }
@@ -968,11 +972,11 @@ func TestHandleWebhookIssueClosedCancelsRunsAndCompletesTask(t *testing.T) {
 	defer waitForServerIdle(t, s)
 	taskID := "owner/repo#7"
 
-	runningRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "work", IssueNumber: 7})
+	runningRun, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "work", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create running run: %v", err)
 	}
-	queuedRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "queued", IssueNumber: 7})
+	queuedRun, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "queued", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create queued run: %v", err)
 	}
@@ -982,18 +986,18 @@ func TestHandleWebhookIssueClosedCancelsRunsAndCompletesTask(t *testing.T) {
 	payload := issuesEventPayload(t, "closed", "owner/repo", "dev", "", testIssue(7, "Title", "Body", []string{"rascal"}, false))
 	req := webhookRequest(t, payload, "issues", "delivery-closed", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for closed issue event, got %d", rec.Code)
 	}
 
-	waitFor(t, time.Second, func() bool { return s.store.IsTaskCompleted(taskID) }, "task marked completed")
+	waitFor(t, time.Second, func() bool { return s.Store.IsTaskCompleted(taskID) }, "task marked completed")
 	waitFor(t, time.Second, func() bool {
-		r, ok := s.store.GetRun(queuedRun.ID)
+		r, ok := s.Store.GetRun(queuedRun.ID)
 		return ok && r.Status == state.StatusCanceled
 	}, "queued run canceled")
 	waitFor(t, 3*time.Second, func() bool {
-		r, ok := s.store.GetRun(runningRun.ID)
+		r, ok := s.Store.GetRun(runningRun.ID)
 		return ok && r.Status == state.StatusCanceled
 	}, "running run canceled")
 
@@ -1006,23 +1010,23 @@ func TestHandleWebhookIssueReopenedReenablesTask(t *testing.T) {
 	defer waitForServerIdle(t, s)
 	taskID := "owner/repo#7"
 
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", IssueNumber: 7}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", IssueNumber: 7}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	if err := s.store.MarkTaskCompleted(taskID); err != nil {
+	if err := s.Store.MarkTaskCompleted(taskID); err != nil {
 		t.Fatalf("mark task completed: %v", err)
 	}
 
 	payload := issuesEventPayload(t, "reopened", "owner/repo", "dev", "", testIssue(7, "Title", "Body", []string{"rascal"}, false))
 	req := webhookRequest(t, payload, "issues", "delivery-reopened", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for reopened issue event, got %d", rec.Code)
 	}
 
-	waitFor(t, time.Second, func() bool { return !s.store.IsTaskCompleted(taskID) }, "task reopened")
-	waitFor(t, time.Second, func() bool { return len(s.store.ListRuns(10)) == 1 }, "run queued")
+	waitFor(t, time.Second, func() bool { return !s.Store.IsTaskCompleted(taskID) }, "task reopened")
+	waitFor(t, time.Second, func() bool { return len(s.Store.ListRuns(10)) == 1 }, "run queued")
 }
 
 func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
@@ -1033,11 +1037,11 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 	defer waitForServerIdle(t, s)
 	taskID := "owner/repo#7"
 
-	runningRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "work", IssueNumber: 7})
+	runningRun, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "work", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create running run: %v", err)
 	}
-	queuedRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "stale", IssueNumber: 7})
+	queuedRun, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "stale", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create queued run: %v", err)
 	}
@@ -1047,19 +1051,19 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 	payload := issuesEventPayload(t, "edited", "owner/repo", "dev", "", testIssue(7, "New Title", "New Body", []string{"rascal"}, false))
 	req := webhookRequest(t, payload, "issues", "delivery-edited", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for edited issue event, got %d", rec.Code)
 	}
 
 	waitFor(t, time.Second, func() bool {
-		r, ok := s.store.GetRun(queuedRun.ID)
+		r, ok := s.Store.GetRun(queuedRun.ID)
 		return ok && r.Status == state.StatusCanceled
 	}, "queued run canceled")
 
 	var editedRun state.Run
 	waitFor(t, time.Second, func() bool {
-		for _, run := range s.store.ListRuns(20) {
+		for _, run := range s.Store.ListRuns(20) {
 			if run.Trigger == "issue_edited" {
 				editedRun = run
 				return true
@@ -1080,7 +1084,7 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 
 	close(waitCh)
 	waitFor(t, 3*time.Second, func() bool {
-		r, ok := s.store.GetRun(editedRun.ID)
+		r, ok := s.Store.GetRun(editedRun.ID)
 		return ok && state.IsFinalRunStatus(r.Status)
 	}, "edited run completed")
 
@@ -1089,11 +1093,11 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
-	s.cfg.TaskSession.Mode = agent.SessionModeAll
+	s.Config.TaskSession.Mode = agent.SessionModeAll
 	defer waitForServerIdle(t, s)
 
 	const taskID = "owner/repo#7"
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
 		ID:           taskID,
 		Repo:         "owner/repo",
 		AgentRuntime: agent.BackendCodex,
@@ -1101,7 +1105,7 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert legacy task: %v", err)
 	}
-	if _, err := s.store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
+	if _, err := s.Store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
 		TaskID:           taskID,
 		AgentRuntime:     agent.BackendCodex,
 		RuntimeSessionID: "legacy-codex-session",
@@ -1115,19 +1119,19 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	payload := issuesEventPayload(t, "labeled", "owner/repo", "dev", "rascal", testIssue(7, "Title", "Body", nil, false))
 	req := webhookRequest(t, payload, "issues", "delivery-backend-migrate", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for migrated labeled issue event, got %d", rec.Code)
 	}
 
-	waitFor(t, time.Second, func() bool { return len(s.store.ListRuns(10)) == 1 }, "run queued")
+	waitFor(t, time.Second, func() bool { return len(s.Store.ListRuns(10)) == 1 }, "run queued")
 
-	run := s.store.ListRuns(10)[0]
+	run := s.Store.ListRuns(10)[0]
 	if run.AgentRuntime != agent.BackendGoose {
 		t.Fatalf("run backend = %s, want %s", run.AgentRuntime, agent.BackendGoose)
 	}
 
-	task, ok := s.store.GetTask(taskID)
+	task, ok := s.Store.GetTask(taskID)
 	if !ok {
 		t.Fatalf("missing task %s", taskID)
 	}
@@ -1138,7 +1142,7 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	var session state.TaskAgentSession
 	waitFor(t, time.Second, func() bool {
 		var ok bool
-		session, ok = s.store.GetTaskAgentSession(taskID)
+		session, ok = s.Store.GetTaskAgentSession(taskID)
 		return ok
 	}, "migrated task session")
 	if session.AgentRuntime != agent.BackendGoose {
@@ -1161,13 +1165,13 @@ func TestHandleWebhookIssueUnlabeledRemovesPastReactions(t *testing.T) {
 
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
 	payload := issuesEventPayload(t, "unlabeled", "owner/repo", "dev", "rascal", testIssue(7, "Title", "Body", nil, false))
 	req := webhookRequest(t, payload, "issues", "delivery-unlabeled", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for unlabeled issue event, got %d", rec.Code)
 	}
@@ -1184,7 +1188,7 @@ func TestHandleListRunsSupportsAllQuery(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	for i := 1; i <= 3; i++ {
-		_, err := s.store.AddRun(state.CreateRunInput{
+		_, err := s.Store.AddRun(state.CreateRunInput{
 			ID:          fmt.Sprintf("run_%d", i),
 			TaskID:      fmt.Sprintf("task_%d", i),
 			Repo:        "owner/repo",
@@ -1197,7 +1201,7 @@ func TestHandleListRunsSupportsAllQuery(t *testing.T) {
 
 	limitReq := httptest.NewRequest(http.MethodGet, "/v1/runs?limit=2", nil)
 	limitRec := httptest.NewRecorder()
-	s.handleListRuns(limitRec, limitReq)
+	s.HandleListRuns(limitRec, limitReq)
 	if limitRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for limit query, got %d", limitRec.Code)
 	}
@@ -1213,7 +1217,7 @@ func TestHandleListRunsSupportsAllQuery(t *testing.T) {
 
 	allReq := httptest.NewRequest(http.MethodGet, "/v1/runs?all=1", nil)
 	allRec := httptest.NewRecorder()
-	s.handleListRuns(allRec, allReq)
+	s.HandleListRuns(allRec, allReq)
 	if allRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for all query, got %d", allRec.Code)
 	}
@@ -1232,7 +1236,7 @@ func TestHandleListRunsAllIgnoresLimitValue(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	for i := 1; i <= 2; i++ {
-		_, err := s.store.AddRun(state.CreateRunInput{
+		_, err := s.Store.AddRun(state.CreateRunInput{
 			ID:          fmt.Sprintf("run_all_%d", i),
 			TaskID:      fmt.Sprintf("task_all_%d", i),
 			Repo:        "owner/repo",
@@ -1245,7 +1249,7 @@ func TestHandleListRunsAllIgnoresLimitValue(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runs?all=true&limit=bad", nil)
 	rec := httptest.NewRecorder()
-	s.handleListRuns(rec, req)
+	s.HandleListRuns(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for all=true with bad limit, got %d", rec.Code)
 	}
@@ -1266,7 +1270,7 @@ func TestHandleListRunsInvalidAllReturnsBadRequest(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runs?all=notabool", nil)
 	rec := httptest.NewRecorder()
-	s.handleListRuns(rec, req)
+	s.HandleListRuns(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid all query, got %d", rec.Code)
 	}
@@ -1281,17 +1285,17 @@ func TestHandleWebhookInactiveSlotIsSkipped(t *testing.T) {
 	if err := os.WriteFile(slotFile, []byte("green\n"), 0o644); err != nil {
 		t.Fatalf("write active slot file: %v", err)
 	}
-	s.cfg.Slot = "blue"
-	s.cfg.ActiveSlotPath = slotFile
+	s.Config.Slot = "blue"
+	s.Config.ActiveSlotPath = slotFile
 
 	payload := issuesEventPayload(t, "labeled", "owner/repo", "dev", "rascal", testIssue(7, "Title", "Body", nil, false))
 	req := webhookRequest(t, payload, "issues", "delivery-slot", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for inactive slot skip, got %d", rec.Code)
 	}
-	if got := len(s.store.ListRuns(10)); got != 0 {
+	if got := len(s.Store.ListRuns(10)); got != 0 {
 		t.Fatalf("expected no runs when inactive slot handles webhook, got %d", got)
 	}
 }
@@ -1300,19 +1304,19 @@ func TestHandleWebhookSignatureValidation(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
-	s.cfg.GitHubWebhookSecret = "secret"
+	s.Config.GitHubWebhookSecret = "secret"
 	payload := issuesEventPayload(t, "labeled", "owner/repo", "dev", "rascal", testIssue(7, "Title", "Body", nil, false))
 
 	badReq := webhookRequest(t, payload, "issues", "sig-1", "wrong-secret")
 	badRec := httptest.NewRecorder()
-	s.handleWebhook(badRec, badReq)
+	s.HandleWebhook(badRec, badReq)
 	if badRec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for invalid signature, got %d", badRec.Code)
 	}
 
 	goodReq := webhookRequest(t, payload, "issues", "sig-2", "secret")
 	goodRec := httptest.NewRecorder()
-	s.handleWebhook(goodRec, goodReq)
+	s.HandleWebhook(goodRec, goodReq)
 	if goodRec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for valid signature, got %d", goodRec.Code)
 	}
@@ -1331,10 +1335,10 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 		baseRef  = "develop"
 		headRef  = "rascal/task-7"
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	seedRun, err := s.store.AddRun(state.CreateRunInput{
+	seedRun, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "seed_run",
 		TaskID:      taskID,
 		Repo:        repo,
@@ -1357,14 +1361,14 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
 	var got state.Run
 	waitFor(t, time.Second, func() bool {
-		runs := s.store.ListRuns(20)
+		runs := s.Store.ListRuns(20)
 		for _, run := range runs {
 			if run.Trigger == "pr_comment" {
 				got = run
@@ -1392,7 +1396,7 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 	if got.Context != "please address review notes" {
 		t.Fatalf("context = %q, want trimmed comment body", got.Context)
 	}
-	task, ok := s.store.GetTask(taskID)
+	task, ok := s.Store.GetTask(taskID)
 	if !ok {
 		t.Fatalf("expected task %q", taskID)
 	}
@@ -1414,10 +1418,10 @@ func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
 		baseRef  = "main"
 		headRef  = "rascal/pr-17"
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	seedRun, err := s.store.AddRun(state.CreateRunInput{
+	seedRun, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "seed_run_edited",
 		TaskID:      taskID,
 		Repo:        repo,
@@ -1440,14 +1444,14 @@ func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
 	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-edited", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
 	var got state.Run
 	waitFor(t, time.Second, func() bool {
-		runs := s.store.ListRuns(20)
+		runs := s.Store.ListRuns(20)
 		for _, run := range runs {
 			if run.Trigger == "pr_comment" {
 				got = run
@@ -1489,12 +1493,12 @@ func TestHandleWebhookIssueCommentEditedSkipsUnchangedBody(t *testing.T) {
 	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-nochange", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
-	for _, run := range s.store.ListRuns(10) {
+	for _, run := range s.Store.ListRuns(10) {
 		if run.Trigger == "pr_comment" {
 			t.Fatalf("expected no pr_comment run for unchanged edit")
 		}
@@ -1506,8 +1510,8 @@ func TestHandleWebhookIssueCommentIgnoresUnmanagedPR(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
 	payload := issueCommentEventPayload(t, "created", "owner/repo", "alice",
 		testIssue(44, "", "", nil, true),
@@ -1516,12 +1520,12 @@ func TestHandleWebhookIssueCommentIgnoresUnmanagedPR(t *testing.T) {
 	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-unmanaged", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
-	for _, run := range s.store.ListRuns(10) {
+	for _, run := range s.Store.ListRuns(10) {
 		if run.Trigger == "pr_comment" {
 			t.Fatalf("expected no pr_comment run for unmanaged pr")
 		}
@@ -1542,10 +1546,10 @@ func TestHandleWebhookIssueCommentResolvesPRBranchWithoutPriorRun(t *testing.T) 
 		issueNum = 96
 		prNum    = 96
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	s.gh = &fakeGitHubClient{
+	s.GitHub = &fakeGitHubClient{
 		pullData: ghapi.PullRequest{
 			Number: prNum,
 			Base: struct {
@@ -1564,14 +1568,14 @@ func TestHandleWebhookIssueCommentResolvesPRBranchWithoutPriorRun(t *testing.T) 
 	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-resolve-branch", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
 	var got state.Run
 	waitFor(t, time.Second, func() bool {
-		runs := s.store.ListRuns(20)
+		runs := s.Store.ListRuns(20)
 		for _, run := range runs {
 			if run.Trigger == "pr_comment" {
 				got = run
@@ -1602,10 +1606,10 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 		baseRef  = "main"
 		headRef  = "rascal/pr-11"
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	seedRun, err := s.store.AddRun(state.CreateRunInput{
+	seedRun, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "seed_review",
 		TaskID:      taskID,
 		Repo:        repo,
@@ -1627,14 +1631,14 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 	)
 	req := webhookRequest(t, payload, "pull_request_review", "delivery-review", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
 	var got state.Run
 	waitFor(t, time.Second, func() bool {
-		runs := s.store.ListRuns(20)
+		runs := s.Store.ListRuns(20)
 		for _, run := range runs {
 			if run.Trigger == "pr_review" {
 				got = run
@@ -1675,7 +1679,7 @@ func TestHandleWebhookPullRequestReviewUsesPayloadPRBranchesWithoutPriorRun(t *t
 		issueNum = 23
 		prNum    = 97
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
 
@@ -1685,14 +1689,14 @@ func TestHandleWebhookPullRequestReviewUsesPayloadPRBranchesWithoutPriorRun(t *t
 	)
 	req := webhookRequest(t, payload, "pull_request_review", "delivery-review-payload-branch", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
 	var got state.Run
 	waitFor(t, time.Second, func() bool {
-		runs := s.store.ListRuns(20)
+		runs := s.Store.ListRuns(20)
 		for _, run := range runs {
 			if run.Trigger == "pr_review" {
 				got = run
@@ -1715,8 +1719,8 @@ func TestHandleWebhookPullRequestReviewIgnoresUnmanagedPR(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
 	payload := pullRequestReviewEventPayload(t, "submitted", "owner/repo", "bob",
 		ghapi.Review{ID: 808, Body: "needs changes", State: "changes_requested", User: ghapi.User{Login: "bob"}},
@@ -1724,12 +1728,12 @@ func TestHandleWebhookPullRequestReviewIgnoresUnmanagedPR(t *testing.T) {
 	)
 	req := webhookRequest(t, payload, "pull_request_review", "delivery-review-unmanaged", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
-	for _, run := range s.store.ListRuns(10) {
+	for _, run := range s.Store.ListRuns(10) {
 		if run.Trigger == "pr_review" {
 			t.Fatalf("expected no pr_review run for unmanaged pr")
 		}
@@ -1752,10 +1756,10 @@ func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.
 		baseRef  = "main"
 		headRef  = "rascal/pr-12"
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	seedRun, err := s.store.AddRun(state.CreateRunInput{
+	seedRun, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "seed_review_comment",
 		TaskID:      taskID,
 		Repo:        repo,
@@ -1780,14 +1784,14 @@ func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.
 	)
 	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
 	var got state.Run
 	waitFor(t, time.Second, func() bool {
-		runs := s.store.ListRuns(20)
+		runs := s.Store.ListRuns(20)
 		for _, run := range runs {
 			if run.Trigger == "pr_review_comment" {
 				got = run
@@ -1831,10 +1835,10 @@ func TestHandleWebhookPullRequestReviewCommentEditedBodyChangedQueuesRun(t *test
 		baseRef  = "main"
 		headRef  = "rascal/pr-13"
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	seedRun, err := s.store.AddRun(state.CreateRunInput{
+	seedRun, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "seed_review_comment_edited",
 		TaskID:      taskID,
 		Repo:        repo,
@@ -1858,14 +1862,14 @@ func TestHandleWebhookPullRequestReviewCommentEditedBodyChangedQueuesRun(t *test
 	)
 	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-edited", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
 	var got state.Run
 	waitFor(t, time.Second, func() bool {
-		runs := s.store.ListRuns(20)
+		runs := s.Store.ListRuns(20)
 		for _, run := range runs {
 			if run.Trigger == "pr_review_comment" {
 				got = run
@@ -1896,12 +1900,12 @@ func TestHandleWebhookPullRequestReviewCommentEditedSkipsUnchangedBody(t *testin
 	)
 	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-nochange", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
-	for _, run := range s.store.ListRuns(10) {
+	for _, run := range s.Store.ListRuns(10) {
 		if run.Trigger == "pr_review_comment" {
 			t.Fatalf("expected no pr_review_comment run for unchanged edit")
 		}
@@ -1913,8 +1917,8 @@ func TestHandleWebhookPullRequestReviewCommentIgnoresUnmanagedPR(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
 	line515 := 515
 	payload := pullRequestReviewCommentEventPayload(t, "created", "owner/repo", "eve",
@@ -1924,12 +1928,12 @@ func TestHandleWebhookPullRequestReviewCommentIgnoresUnmanagedPR(t *testing.T) {
 	)
 	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-unmanaged", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
-	for _, run := range s.store.ListRuns(10) {
+	for _, run := range s.Store.ListRuns(10) {
 		if run.Trigger == "pr_review_comment" {
 			t.Fatalf("expected no pr_review_comment run for unmanaged pr")
 		}
@@ -1952,10 +1956,10 @@ func TestHandleWebhookPullRequestReviewThreadUnresolvedQueuesRun(t *testing.T) {
 		baseRef  = "main"
 		headRef  = "rascal/pr-14"
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: issueNum, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	seedRun, err := s.store.AddRun(state.CreateRunInput{
+	seedRun, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "seed_review_thread",
 		TaskID:      taskID,
 		Repo:        repo,
@@ -1985,14 +1989,14 @@ func TestHandleWebhookPullRequestReviewThreadUnresolvedQueuesRun(t *testing.T) {
 	)
 	req := webhookRequest(t, payload, "pull_request_review_thread", "delivery-review-thread-unresolved", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
 	var got state.Run
 	waitFor(t, time.Second, func() bool {
-		runs := s.store.ListRuns(20)
+		runs := s.Store.ListRuns(20)
 		for _, run := range runs {
 			if run.Trigger == "pr_review_thread" {
 				got = run
@@ -2033,10 +2037,10 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 		taskID = "owner/repo#15"
 		prNum  = 15
 	)
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: 47, PRNumber: prNum}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: repo, IssueNumber: 47, PRNumber: prNum}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	threadRun, err := s.store.AddRun(state.CreateRunInput{
+	threadRun, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "queued_review_thread",
 		TaskID:      taskID,
 		Repo:        repo,
@@ -2051,7 +2055,7 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 	if err := os.MkdirAll(threadRun.RunDir, 0o755); err != nil {
 		t.Fatalf("create thread run dir: %v", err)
 	}
-	if err := s.writeRunResponseTarget(threadRun, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(threadRun, &runResponseTarget{
 		Repo:           repo,
 		IssueNumber:    prNum,
 		Trigger:        "pr_review_thread",
@@ -2059,7 +2063,7 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 	}); err != nil {
 		t.Fatalf("write thread run target: %v", err)
 	}
-	otherThreadRun, err := s.store.AddRun(state.CreateRunInput{
+	otherThreadRun, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "queued_review_thread_other",
 		TaskID:      taskID,
 		Repo:        repo,
@@ -2074,7 +2078,7 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 	if err := os.MkdirAll(otherThreadRun.RunDir, 0o755); err != nil {
 		t.Fatalf("create other thread run dir: %v", err)
 	}
-	if err := s.writeRunResponseTarget(otherThreadRun, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(otherThreadRun, &runResponseTarget{
 		Repo:           repo,
 		IssueNumber:    prNum,
 		Trigger:        "pr_review_thread",
@@ -2082,7 +2086,7 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 	}); err != nil {
 		t.Fatalf("write other thread run target: %v", err)
 	}
-	otherRun, err := s.store.AddRun(state.CreateRunInput{
+	otherRun, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "queued_pr_comment",
 		TaskID:      taskID,
 		Repo:        repo,
@@ -2102,12 +2106,12 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 	)
 	req := webhookRequest(t, payload, "pull_request_review_thread", "delivery-review-thread-resolved", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 
-	updatedThreadRun, ok := s.store.GetRun(threadRun.ID)
+	updatedThreadRun, ok := s.Store.GetRun(threadRun.ID)
 	if !ok {
 		t.Fatalf("missing run %s", threadRun.ID)
 	}
@@ -2115,7 +2119,7 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 		t.Fatalf("thread run status = %s, want %s", updatedThreadRun.Status, state.StatusCanceled)
 	}
 
-	updatedOtherThreadRun, ok := s.store.GetRun(otherThreadRun.ID)
+	updatedOtherThreadRun, ok := s.Store.GetRun(otherThreadRun.ID)
 	if !ok {
 		t.Fatalf("missing run %s", otherThreadRun.ID)
 	}
@@ -2123,7 +2127,7 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 		t.Fatalf("non-matching thread run status = %s, want %s", updatedOtherThreadRun.Status, state.StatusQueued)
 	}
 
-	updatedOtherRun, ok := s.store.GetRun(otherRun.ID)
+	updatedOtherRun, ok := s.Store.GetRun(otherRun.ID)
 	if !ok {
 		t.Fatalf("missing run %s", otherRun.ID)
 	}
@@ -2137,7 +2141,7 @@ func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(runRequest{
 		TaskID:      "owner/repo#99",
 		Repo:        "owner/repo",
 		Instruction: "Address PR #99 feedback",
@@ -2180,7 +2184,7 @@ func TestCreateAndQueueRunWritesReviewThreadResponseTarget(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(runRequest{
 		TaskID:      "owner/repo#100",
 		Repo:        "owner/repo",
 		Instruction: "Address PR #100 unresolved review thread",
@@ -2214,12 +2218,12 @@ func TestCreateAndQueueRunDoesNotCreateRunDirWhenEnqueueFails(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 
-	runsDir := filepath.Join(s.cfg.DataDir, "runs")
-	if err := s.store.Close(); err != nil {
+	runsDir := filepath.Join(s.Config.DataDir, "runs")
+	if err := s.Store.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
 
-	_, err := s.createAndQueueRun(runRequest{
+	_, err := s.CreateAndQueueRun(runRequest{
 		TaskID:      "owner/repo#101",
 		Repo:        "owner/repo",
 		Instruction: "fail before enqueue persists",
@@ -2249,11 +2253,11 @@ func TestHandleWebhookIssueCommentIgnoresBotActor(t *testing.T) {
 	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-bot", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
-	if got := len(s.store.ListRuns(10)); got != 0 {
+	if got := len(s.Store.ListRuns(10)); got != 0 {
 		t.Fatalf("expected zero runs for bot-authored comment, got %d", got)
 	}
 }
@@ -2270,11 +2274,11 @@ func TestHandleWebhookIssueCommentIgnoresRascalAutomationComment(t *testing.T) {
 	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-automation", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
-	if got := len(s.store.ListRuns(10)); got != 0 {
+	if got := len(s.Store.ListRuns(10)); got != 0 {
 		t.Fatalf("expected zero runs for rascal automation comment, got %d", got)
 	}
 }
@@ -2286,11 +2290,11 @@ func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	_, err := s.createAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
+	_, err := s.CreateAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	second, err := s.createAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "second"})
+	second, err := s.CreateAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "second"})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
@@ -2306,7 +2310,7 @@ func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
 	if firstSpecCount == 0 || !firstSpecDebug {
 		t.Fatalf("expected first run spec debug=true, got count=%d debug=%t", firstSpecCount, firstSpecDebug)
 	}
-	r2, ok := s.store.GetRun(second.ID)
+	r2, ok := s.Store.GetRun(second.ID)
 	if !ok {
 		t.Fatalf("missing second run %s", second.ID)
 	}
@@ -2319,7 +2323,7 @@ func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
 		return launcher.Calls() == 2
 	}, "second run to start after first completes")
 	waitFor(t, 2*time.Second, func() bool {
-		r, ok := s.store.GetRun(second.ID)
+		r, ok := s.Store.GetRun(second.ID)
 		return ok && r.Status == state.StatusSucceeded
 	}, "second run to complete")
 }
@@ -2329,20 +2333,20 @@ func TestCreateAndQueueRunRespectsGlobalConcurrencyLimit(t *testing.T) {
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
-	s.maxConcurrent = 1
+	s.MaxConcurrent = 1
 	defer waitForServerIdle(t, s)
 
-	_, err := s.createAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
+	_, err := s.CreateAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	second, err := s.createAndQueueRun(runRequest{TaskID: "task-2", Repo: "owner/repo", Instruction: "second"})
+	second, err := s.CreateAndQueueRun(runRequest{TaskID: "task-2", Repo: "owner/repo", Instruction: "second"})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
 
 	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "only one run starts while at concurrency limit")
-	r2, ok := s.store.GetRun(second.ID)
+	r2, ok := s.Store.GetRun(second.ID)
 	if !ok {
 		t.Fatalf("missing second run %s", second.ID)
 	}
@@ -2355,7 +2359,7 @@ func TestCreateAndQueueRunRespectsGlobalConcurrencyLimit(t *testing.T) {
 		return launcher.Calls() == 2
 	}, "second run to start after slot is available")
 	waitFor(t, 2*time.Second, func() bool {
-		r, ok := s.store.GetRun(second.ID)
+		r, ok := s.Store.GetRun(second.ID)
 		return ok && r.Status == state.StatusSucceeded
 	}, "second run to complete")
 }
@@ -2368,24 +2372,24 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	defer waitForServerIdle(t, s)
 	defer close(waitCh)
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 	taskID := "owner/repo#123"
 
-	_, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "first", PRNumber: 55})
+	_, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "first", PRNumber: 55})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	queuedRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "queued", PRNumber: 55})
+	queuedRun, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "queued", PRNumber: 55})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
 	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to be active")
 
-	if err := s.store.SetTaskPR(taskID, "owner/repo", 55); err != nil {
+	if err := s.Store.SetTaskPR(taskID, "owner/repo", 55); err != nil {
 		t.Fatalf("set task pr: %v", err)
 	}
-	awaitingRun, err := s.store.AddRun(state.CreateRunInput{
+	awaitingRun, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_awaiting_merge",
 		TaskID:      taskID,
 		Repo:        "owner/repo",
@@ -2403,18 +2407,18 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	payload := pullRequestEventPayload(t, "closed", "owner/repo", "dev", testPullRequest(55, true, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-merged", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for merged pr event, got %d", rec.Code)
 	}
 
-	waitFor(t, time.Second, func() bool { return s.store.IsTaskCompleted(taskID) }, "task marked completed")
+	waitFor(t, time.Second, func() bool { return s.Store.IsTaskCompleted(taskID) }, "task marked completed")
 	waitFor(t, time.Second, func() bool {
-		r, ok := s.store.GetRun(queuedRun.ID)
+		r, ok := s.Store.GetRun(queuedRun.ID)
 		return ok && r.Status == state.StatusCanceled
 	}, "queued run canceled")
 	waitFor(t, time.Second, func() bool {
-		r, ok := s.store.GetRun(awaitingRun.ID)
+		r, ok := s.Store.GetRun(awaitingRun.ID)
 		return ok && r.Status == state.StatusSucceeded
 	}, "awaiting-feedback run marked succeeded on merge")
 	reactions := fakeGH.postedReactions()
@@ -2437,10 +2441,10 @@ func TestMergedPRMatchesRepositoryCaseInsensitively(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	taskID := "owner/repo#123"
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 55}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 55}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_case_insensitive_merge",
 		TaskID:      taskID,
 		Repo:        "owner/repo",
@@ -2458,14 +2462,14 @@ func TestMergedPRMatchesRepositoryCaseInsensitively(t *testing.T) {
 	payload := pullRequestEventPayload(t, "closed", "Owner/Repo", "dev", testPullRequest(55, true, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-merged-mixed-case", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for mixed-case merged pr event, got %d", rec.Code)
 	}
 
-	waitFor(t, time.Second, func() bool { return s.store.IsTaskCompleted(taskID) }, "task marked completed")
+	waitFor(t, time.Second, func() bool { return s.Store.IsTaskCompleted(taskID) }, "task marked completed")
 	waitFor(t, time.Second, func() bool {
-		updated, ok := s.store.GetRun(run.ID)
+		updated, ok := s.Store.GetRun(run.ID)
 		return ok && updated.Status == state.StatusSucceeded
 	}, "awaiting-feedback run marked succeeded on merge")
 }
@@ -2475,18 +2479,18 @@ func TestPullRequestClosedIgnoresUnmanagedPR(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
 	payload := pullRequestEventPayload(t, "closed", "owner/repo", "dev", testPullRequest(456, true, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-merged-unmanaged", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for unmanaged pr event, got %d", rec.Code)
 	}
 
-	if _, ok := s.store.FindTaskByPR("owner/repo", 456); ok {
+	if _, ok := s.Store.FindTaskByPR("owner/repo", 456); ok {
 		t.Fatal("expected no task to be created for unmanaged pr")
 	}
 	if got := fakeGH.postedReactions(); len(got) != 0 {
@@ -2498,13 +2502,13 @@ func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 	taskID := "owner/repo#987"
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 99}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 99}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_unmerged",
 		TaskID:      taskID,
 		Repo:        "owner/repo",
@@ -2522,12 +2526,12 @@ func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
 	payload := pullRequestEventPayload(t, "closed", "owner/repo", "dev", testPullRequest(99, false, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-closed-unmerged", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for closed unmerged pr event, got %d", rec.Code)
 	}
 
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("run %s not found", run.ID)
 	}
@@ -2554,10 +2558,10 @@ func TestClosedUnmergedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	taskID := "owner/repo#321"
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 321}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 321}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_merged_guard",
 		TaskID:      taskID,
 		Repo:        "owner/repo",
@@ -2572,7 +2576,7 @@ func TestClosedUnmergedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 		t.Fatalf("add run: %v", err)
 	}
 	markRunSucceeded(t, s, run.ID)
-	if _, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
+	if _, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
 		r.PRStatus = state.PRStatusMerged
 		return nil
 	}); err != nil {
@@ -2582,12 +2586,12 @@ func TestClosedUnmergedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 	payload := pullRequestEventPayload(t, "closed", "owner/repo", "dev", testPullRequest(321, false, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-stale-closed", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for stale closed event, got %d", rec.Code)
 	}
 
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("run %s not found", run.ID)
 	}
@@ -2603,10 +2607,10 @@ func TestReopenedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	taskID := "owner/repo#654"
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 654}); err != nil {
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 654}); err != nil {
 		t.Fatalf("upsert task: %v", err)
 	}
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_reopened_guard",
 		TaskID:      taskID,
 		Repo:        "owner/repo",
@@ -2621,7 +2625,7 @@ func TestReopenedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 		t.Fatalf("add run: %v", err)
 	}
 	markRunSucceeded(t, s, run.ID)
-	if _, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
+	if _, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
 		r.PRStatus = state.PRStatusMerged
 		return nil
 	}); err != nil {
@@ -2631,12 +2635,12 @@ func TestReopenedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 	payload := pullRequestEventPayload(t, "reopened", "owner/repo", "dev", testPullRequest(654, false, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-stale-reopened", "")
 	rec := httptest.NewRecorder()
-	s.handleWebhook(rec, req)
+	s.HandleWebhook(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for stale reopened event, got %d", rec.Code)
 	}
 
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("run %s not found", run.ID)
 	}
@@ -2657,10 +2661,10 @@ func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
 		},
 	}
 	s := newTestServer(t, launcher)
-	s.cfg.RunnerMaxAttempts = 2
+	s.Config.RunnerMaxAttempts = 2
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(runRequest{
 		TaskID:      "owner/repo#retry",
 		Repo:        "owner/repo",
 		Instruction: "retry task",
@@ -2670,7 +2674,7 @@ func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
 	}
 
 	waitFor(t, 4*time.Second, func() bool {
-		r, ok := s.store.GetRun(run.ID)
+		r, ok := s.Store.GetRun(run.ID)
 		return ok && r.Status == state.StatusSucceeded
 	}, "run to succeed after retry")
 
@@ -2685,15 +2689,15 @@ func TestExecuteRunSetsAgentSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	s.cfg.AgentRuntime = agent.BackendGoose
+	s.Config.AgentRuntime = agent.BackendGoose
 	sessionRoot := filepath.Join(t.TempDir(), "goose-sessions")
-	s.cfg.TaskSession = config.AgentSessionConfig{
+	s.Config.TaskSession = config.AgentSessionConfig{
 		Mode:    agent.SessionModePROnly,
 		Root:    sessionRoot,
 		TTLDays: 0,
 	}
 
-	run, err := s.createAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(runRequest{
 		TaskID:      "owner/repo#123",
 		Repo:        "owner/repo",
 		Instruction: "Address PR #123 feedback",
@@ -2704,7 +2708,7 @@ func TestExecuteRunSetsAgentSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 	}
 
 	waitFor(t, 2*time.Second, func() bool {
-		r, ok := s.store.GetRun(run.ID)
+		r, ok := s.Store.GetRun(run.ID)
 		return ok && r.Status == state.StatusSucceeded
 	}, "run completion")
 
@@ -2732,14 +2736,14 @@ func TestExecuteRunDisablesAgentSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	s.cfg.AgentRuntime = agent.BackendGoose
-	s.cfg.TaskSession = config.AgentSessionConfig{
+	s.Config.AgentRuntime = agent.BackendGoose
+	s.Config.TaskSession = config.AgentSessionConfig{
 		Mode:    agent.SessionModePROnly,
 		Root:    filepath.Join(t.TempDir(), "goose-sessions"),
 		TTLDays: 0,
 	}
 
-	run, err := s.createAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(runRequest{
 		TaskID:      "owner/repo#124",
 		Repo:        "owner/repo",
 		Instruction: "Initial issue run",
@@ -2750,7 +2754,7 @@ func TestExecuteRunDisablesAgentSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	}
 
 	waitFor(t, 2*time.Second, func() bool {
-		r, ok := s.store.GetRun(run.ID)
+		r, ok := s.Store.GetRun(run.ID)
 		return ok && r.Status == state.StatusSucceeded
 	}, "run completion")
 
@@ -2813,10 +2817,10 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_comment_completion",
 		TaskID:      "owner/repo#77",
 		Repo:        "owner/repo",
@@ -2831,7 +2835,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 77,
 		RequestedBy: "alice",
@@ -2846,7 +2850,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 		t.Fatalf("write goose log: %v", err)
 	}
 
-	s.executeRun(run.ID)
+	s.ExecuteRun(run.ID)
 
 	comments := fakeGH.postedComments()
 	if len(comments) != 2 {
@@ -2884,7 +2888,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	if !strings.Contains(completionComment.body, "Rascal run `run_comment_completion` completed in ") || !strings.Contains(completionComment.body, "123K tokens") {
 		t.Fatalf("expected runtime and token summary, got:\n%s", completionComment.body)
 	}
-	usage, ok := s.store.GetRunTokenUsage(run.ID)
+	usage, ok := s.Store.GetRunTokenUsage(run.ID)
 	if !ok {
 		t.Fatalf("expected persisted token usage for %s", run.ID)
 	}
@@ -2903,7 +2907,7 @@ func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_token_usage",
 		TaskID:      "owner/repo#88",
 		Repo:        "owner/repo",
@@ -2921,9 +2925,9 @@ func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 		t.Fatalf("write agent log: %v", err)
 	}
 
-	s.executeRun(run.ID)
+	s.ExecuteRun(run.ID)
 
-	usage, ok := s.store.GetRunTokenUsage(run.ID)
+	usage, ok := s.Store.GetRunTokenUsage(run.ID)
 	if !ok {
 		t.Fatalf("expected run token usage for %s", run.ID)
 	}
@@ -2966,10 +2970,10 @@ func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *tes
 	defer waitForServerIdle(t, s)
 
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_comment_no_commit",
 		TaskID:      "owner/repo#16",
 		Repo:        "owner/repo",
@@ -2984,7 +2988,7 @@ func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *tes
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 52,
 		RequestedBy: "alice",
@@ -2996,7 +3000,7 @@ func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *tes
 		t.Fatalf("write goose log: %v", err)
 	}
 
-	s.executeRun(run.ID)
+	s.ExecuteRun(run.ID)
 
 	comments := fakeGH.postedComments()
 	if len(comments) != 2 {
@@ -3036,10 +3040,10 @@ func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_comment_usage_limit",
 		TaskID:      "owner/repo#53",
 		Repo:        "owner/repo",
@@ -3054,7 +3058,7 @@ func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 53,
 		RequestedBy: "alice",
@@ -3067,9 +3071,9 @@ func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 		t.Fatalf("write goose log: %v", err)
 	}
 
-	s.executeRun(run.ID)
+	s.ExecuteRun(run.ID)
 
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
@@ -3092,10 +3096,10 @@ func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 	if calls := launcher.Calls(); calls != 1 {
 		t.Fatalf("expected run not to restart before pause expiry, got launcher calls=%d", calls)
 	}
-	if _, err := os.Stat(runFailureCommentMarkerPath(run.RunDir)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(RunFailureCommentMarkerPath(run.RunDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected no failure marker, got err=%v", err)
 	}
-	if pauseUntil, reason, ok, err := s.store.ActiveSchedulerPause(workerPauseScope, time.Now().UTC()); err != nil {
+	if pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(workerPauseScope, time.Now().UTC()); err != nil {
 		t.Fatalf("load scheduler pause: %v", err)
 	} else if !ok {
 		t.Fatal("expected active scheduler pause after usage limit")
@@ -3121,10 +3125,10 @@ func TestExecuteRunRequeuesIssueTriggeredRunForUsageLimit(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_issue_usage_limit",
 		TaskID:      "owner/repo#16",
 		Repo:        "owner/repo",
@@ -3138,7 +3142,7 @@ func TestExecuteRunRequeuesIssueTriggeredRunForUsageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 16,
 		RequestedBy: "alice",
@@ -3151,9 +3155,9 @@ func TestExecuteRunRequeuesIssueTriggeredRunForUsageLimit(t *testing.T) {
 		t.Fatalf("write goose log: %v", err)
 	}
 
-	s.executeRun(run.ID)
+	s.ExecuteRun(run.ID)
 
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
@@ -3185,7 +3189,7 @@ func TestExecuteRunDoesNotRequeueSuccessfulRunWhenTranscriptMentionsUsageLimit(t
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_success_usage_limit_false_positive",
 		TaskID:      "owner/repo#54",
 		Repo:        "owner/repo",
@@ -3207,16 +3211,16 @@ func TestExecuteRunDoesNotRequeueSuccessfulRunWhenTranscriptMentionsUsageLimit(t
 		t.Fatalf("write agent transcript: %v", err)
 	}
 
-	s.executeRun(run.ID)
+	s.ExecuteRun(run.ID)
 
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
 	if updated.Status != state.StatusReview {
 		t.Fatalf("expected review status after successful run, got %s", updated.Status)
 	}
-	if pauseUntil, reason, ok, err := s.store.ActiveSchedulerPause(workerPauseScope, time.Now().UTC()); err != nil {
+	if pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(workerPauseScope, time.Now().UTC()); err != nil {
 		t.Fatalf("load scheduler pause: %v", err)
 	} else if ok {
 		t.Fatalf("did not expect scheduler pause, got until=%s reason=%q", pauseUntil, reason)
@@ -3230,11 +3234,11 @@ func TestExecuteRunPostsTerminalFailureFeedbackForCredentialLeaseFailure(t *test
 	defer waitForServerIdle(t, s)
 
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
-	s.broker = credentials.NewBroker(nil, nil, nil, 0)
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
+	s.Broker = credentials.NewBroker(nil, nil, nil, 0)
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_credential_failure_feedback",
 		TaskID:      "owner/repo#42",
 		Repo:        "owner/repo",
@@ -3249,9 +3253,9 @@ func TestExecuteRunPostsTerminalFailureFeedbackForCredentialLeaseFailure(t *test
 		t.Fatalf("add run: %v", err)
 	}
 
-	s.executeRun(run.ID)
+	s.ExecuteRun(run.ID)
 
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
@@ -3295,11 +3299,11 @@ func TestScheduleRunsResumesAfterPauseDeadline(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	pauseUntil := time.Now().UTC().Add(150 * time.Millisecond)
-	if _, err := s.store.PauseScheduler(workerPauseScope, "test pause", pauseUntil); err != nil {
+	if _, err := s.Store.PauseScheduler(workerPauseScope, "test pause", pauseUntil); err != nil {
 		t.Fatalf("pause scheduler: %v", err)
 	}
 
-	if _, err := s.createAndQueueRun(runRequest{
+	if _, err := s.CreateAndQueueRun(runRequest{
 		TaskID:      "owner/repo#resume",
 		Repo:        "owner/repo",
 		Instruction: "resume after pause",
@@ -3365,10 +3369,10 @@ func TestPostRunStartCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_start_comment_dedupe",
 		TaskID:      "owner/repo#87",
 		Repo:        "owner/repo",
@@ -3384,7 +3388,7 @@ func TestPostRunStartCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	run.StartedAt = &now
-	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 87,
 		RequestedBy: "alice",
@@ -3393,8 +3397,8 @@ func TestPostRunStartCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 		t.Fatalf("write response target: %v", err)
 	}
 
-	s.postRunStartCommentBestEffort(run, agent.SessionModeAll, true)
-	s.postRunStartCommentBestEffort(run, agent.SessionModeAll, true)
+	s.PostRunStartCommentBestEffort(run, agent.SessionModeAll, true)
+	s.PostRunStartCommentBestEffort(run, agent.SessionModeAll, true)
 
 	if calls := fakeGH.createCommentCalls(); calls != 1 {
 		t.Fatalf("expected a single github comment call, got %d", calls)
@@ -3406,12 +3410,12 @@ func TestPostRunStartCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	if !strings.Contains(comments[0].body, runStartCommentBodyMarker) {
 		t.Fatalf("expected start marker in comment body, got:\n%s", comments[0].body)
 	}
-	markerPath := runStartCommentMarkerPath(run.RunDir)
+	markerPath := RunStartCommentMarkerPath(run.RunDir)
 	markerData, err := os.ReadFile(markerPath)
 	if err != nil {
 		t.Fatalf("read start marker: %v", err)
 	}
-	var marker runCommentMarker
+	var marker RunCommentMarker
 	if err := json.Unmarshal(markerData, &marker); err != nil {
 		t.Fatalf("decode start marker: %v", err)
 	}
@@ -3431,10 +3435,10 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 			nil,
 		},
 	}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_start_comment_retry",
 		TaskID:      "owner/repo#86",
 		Repo:        "owner/repo",
@@ -3450,7 +3454,7 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	run.StartedAt = &now
-	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 86,
 		RequestedBy: "alice",
@@ -3459,7 +3463,7 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 		t.Fatalf("write response target: %v", err)
 	}
 
-	s.postRunStartCommentBestEffort(run, agent.SessionModeAll, false)
+	s.PostRunStartCommentBestEffort(run, agent.SessionModeAll, false)
 
 	if calls := fakeGH.createCommentCalls(); calls != 1 {
 		t.Fatalf("expected one github comment call after first attempt, got %d", calls)
@@ -3467,11 +3471,11 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 0 {
 		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
 	}
-	if _, err := os.Stat(runStartCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
+	if _, err := os.Stat(RunStartCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
 		t.Fatalf("expected start marker to be absent after failed post, stat err=%v", err)
 	}
 
-	s.postRunStartCommentBestEffort(run, agent.SessionModeAll, false)
+	s.PostRunStartCommentBestEffort(run, agent.SessionModeAll, false)
 
 	if calls := fakeGH.createCommentCalls(); calls != 2 {
 		t.Fatalf("expected second github comment call on retry, got %d", calls)
@@ -3479,7 +3483,7 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 1 {
 		t.Fatalf("expected one posted start comment after retry, got %d", len(comments))
 	}
-	if _, err := os.Stat(runStartCommentMarkerPath(run.RunDir)); err != nil {
+	if _, err := os.Stat(RunStartCommentMarkerPath(run.RunDir)); err != nil {
 		t.Fatalf("expected start marker after successful retry: %v", err)
 	}
 }
@@ -3490,10 +3494,10 @@ func TestPostRunStartCommentIncludesRunnerBuildCommit(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_start_comment_commit",
 		TaskID:      "owner/repo#85",
 		Repo:        "owner/repo",
@@ -3520,7 +3524,7 @@ func TestPostRunStartCommentIncludesRunnerBuildCommit(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write meta: %v", err)
 	}
-	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 85,
 		RequestedBy: "alice",
@@ -3529,7 +3533,7 @@ func TestPostRunStartCommentIncludesRunnerBuildCommit(t *testing.T) {
 		t.Fatalf("write response target: %v", err)
 	}
 
-	s.postRunStartCommentBestEffort(run, agent.SessionModeAll, false)
+	s.PostRunStartCommentBestEffort(run, agent.SessionModeAll, false)
 
 	comments := fakeGH.postedComments()
 	if len(comments) != 1 {
@@ -3546,10 +3550,10 @@ func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	fakeGH := &fakeGitHubClient{}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_comment_dedupe",
 		TaskID:      "owner/repo#88",
 		Repo:        "owner/repo",
@@ -3563,7 +3567,7 @@ func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 88,
 		RequestedBy: "alice",
@@ -3572,8 +3576,8 @@ func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 		t.Fatalf("write response target: %v", err)
 	}
 
-	s.postRunCompletionCommentBestEffort(run)
-	s.postRunCompletionCommentBestEffort(run)
+	s.PostRunCompletionCommentBestEffort(run)
+	s.PostRunCompletionCommentBestEffort(run)
 
 	if calls := fakeGH.createCommentCalls(); calls != 1 {
 		t.Fatalf("expected a single github comment call, got %d", calls)
@@ -3582,12 +3586,12 @@ func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	if len(comments) != 1 {
 		t.Fatalf("expected one posted comment, got %d", len(comments))
 	}
-	markerPath := runCompletionCommentMarkerPath(run.RunDir)
+	markerPath := RunCompletionCommentMarkerPath(run.RunDir)
 	markerData, err := os.ReadFile(markerPath)
 	if err != nil {
 		t.Fatalf("read completion marker: %v", err)
 	}
-	var marker runCommentMarker
+	var marker RunCommentMarker
 	if err := json.Unmarshal(markerData, &marker); err != nil {
 		t.Fatalf("decode completion marker: %v", err)
 	}
@@ -3607,10 +3611,10 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 			nil,
 		},
 	}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_comment_retry",
 		TaskID:      "owner/repo#89",
 		Repo:        "owner/repo",
@@ -3624,7 +3628,7 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 89,
 		RequestedBy: "alice",
@@ -3633,7 +3637,7 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 		t.Fatalf("write response target: %v", err)
 	}
 
-	s.postRunCompletionCommentBestEffort(run)
+	s.PostRunCompletionCommentBestEffort(run)
 
 	if calls := fakeGH.createCommentCalls(); calls != 1 {
 		t.Fatalf("expected one github comment call after first attempt, got %d", calls)
@@ -3641,11 +3645,11 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 0 {
 		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
 	}
-	if _, err := os.Stat(runCompletionCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
+	if _, err := os.Stat(RunCompletionCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
 		t.Fatalf("expected marker to be absent after failed post, stat err=%v", err)
 	}
 
-	s.postRunCompletionCommentBestEffort(run)
+	s.PostRunCompletionCommentBestEffort(run)
 
 	if calls := fakeGH.createCommentCalls(); calls != 2 {
 		t.Fatalf("expected second github comment call on retry, got %d", calls)
@@ -3653,7 +3657,7 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 1 {
 		t.Fatalf("expected one posted comment after retry, got %d", len(comments))
 	}
-	if _, err := os.Stat(runCompletionCommentMarkerPath(run.RunDir)); err != nil {
+	if _, err := os.Stat(RunCompletionCommentMarkerPath(run.RunDir)); err != nil {
 		t.Fatalf("expected marker after successful retry: %v", err)
 	}
 }
@@ -3669,10 +3673,10 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 			nil,
 		},
 	}
-	s.gh = fakeGH
-	s.cfg.GitHubToken = "token"
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_failure_retry",
 		TaskID:      "owner/repo#90",
 		Repo:        "owner/repo",
@@ -3687,7 +3691,7 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 		t.Fatalf("add run: %v", err)
 	}
 	run.Error = "goose run failed: exit status 1"
-	if err := s.writeRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 90,
 		RequestedBy: "alice",
@@ -3696,7 +3700,7 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 		t.Fatalf("write response target: %v", err)
 	}
 
-	s.postRunFailureCommentBestEffort(run)
+	s.PostRunFailureCommentBestEffort(run)
 
 	if calls := fakeGH.createCommentCalls(); calls != 1 {
 		t.Fatalf("expected one github comment call after first attempt, got %d", calls)
@@ -3704,11 +3708,11 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 0 {
 		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
 	}
-	if _, err := os.Stat(runFailureCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
+	if _, err := os.Stat(RunFailureCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
 		t.Fatalf("expected failure marker to be absent after failed post, stat err=%v", err)
 	}
 
-	s.postRunFailureCommentBestEffort(run)
+	s.PostRunFailureCommentBestEffort(run)
 
 	if calls := fakeGH.createCommentCalls(); calls != 2 {
 		t.Fatalf("expected second github comment call on retry, got %d", calls)
@@ -3720,7 +3724,7 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 	if !strings.Contains(comments[0].body, "Reason: goose run failed: exit status 1") {
 		t.Fatalf("expected generic failure reason in comment, got body:\n%s", comments[0].body)
 	}
-	if _, err := os.Stat(runFailureCommentMarkerPath(run.RunDir)); err != nil {
+	if _, err := os.Stat(RunFailureCommentMarkerPath(run.RunDir)); err != nil {
 		t.Fatalf("expected failure marker after successful retry: %v", err)
 	}
 }
@@ -3731,7 +3735,7 @@ func TestHandleTaskSubresourcesGet(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	taskID := "owner/repo#22"
-	if _, err := s.store.UpsertTask(state.UpsertTaskInput{
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
 		ID:          taskID,
 		Repo:        "owner/repo",
 		IssueNumber: 22,
@@ -3741,7 +3745,7 @@ func TestHandleTaskSubresourcesGet(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/owner%2Frepo%2322", nil)
 	rec := httptest.NewRecorder()
-	s.handleTaskSubresources(rec, req)
+	s.HandleTaskSubresources(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -3758,7 +3762,7 @@ func TestHandleCreateTaskRespectsProvidedTaskID(t *testing.T) {
 		strings.NewReader(`{"task_id":"owner/repo#99","repo":"owner/repo","task":"follow-up","base_branch":"main"}`),
 	)
 	rec := httptest.NewRecorder()
-	s.handleCreateTask(rec, req)
+	s.HandleCreateTask(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
@@ -3788,7 +3792,7 @@ func TestHandleCreateTaskAcceptsDebugFalse(t *testing.T) {
 		strings.NewReader(`{"task_id":"owner/repo#100","repo":"owner/repo","task":"quiet debug","base_branch":"main","debug":false}`),
 	)
 	rec := httptest.NewRecorder()
-	s.handleCreateTask(rec, req)
+	s.HandleCreateTask(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
@@ -3815,7 +3819,7 @@ func TestHandleCreateTaskRejectsInvalidTrigger(t *testing.T) {
 		strings.NewReader(`{"repo":"owner/repo","task":"bad trigger","trigger":"issue"}`),
 	)
 	rec := httptest.NewRecorder()
-	s.handleCreateTask(rec, req)
+	s.HandleCreateTask(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
@@ -3832,7 +3836,7 @@ func TestHandleCreateIssueTaskNormalizesRepositoryCase(t *testing.T) {
 		strings.NewReader(`{"repo":"Owner/Repo","issue_number":7}`),
 	)
 	rec := httptest.NewRecorder()
-	s.handleCreateIssueTask(rec, req)
+	s.HandleCreateIssueTask(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
@@ -3850,7 +3854,7 @@ func TestHandleCreateIssueTaskNormalizesRepositoryCase(t *testing.T) {
 		t.Fatalf("run task id = %q, want owner/repo#7", out.Run.TaskID)
 	}
 
-	task, ok := s.store.GetTask("owner/repo#7")
+	task, ok := s.Store.GetTask("owner/repo#7")
 	if !ok {
 		t.Fatal("expected normalized task to be persisted")
 	}
@@ -3869,23 +3873,23 @@ func TestHandleCancelRunQueued(t *testing.T) {
 		waitForServerIdle(t, s)
 	}()
 
-	first, err := s.createAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Instruction: "first"})
+	first, err := s.CreateAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	second, err := s.createAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Instruction: "second"})
+	second, err := s.CreateAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Instruction: "second"})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
 	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run start")
 
 	rec := httptest.NewRecorder()
-	s.handleCancelRun(rec, second.ID)
+	s.HandleCancelRun(rec, second.ID)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for queued cancel, got %d", rec.Code)
 	}
 
-	updated, ok := s.store.GetRun(second.ID)
+	updated, ok := s.Store.GetRun(second.ID)
 	if !ok {
 		t.Fatalf("missing run %s", second.ID)
 	}
@@ -3903,21 +3907,21 @@ func TestHandleCancelRunActiveUsesUserReason(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "active-cancel", Repo: "owner/repo", Instruction: "cancel me"})
+	run, err := s.CreateAndQueueRun(runRequest{TaskID: "active-cancel", Repo: "owner/repo", Instruction: "cancel me"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	_ = waitForRunExecution(t, s, run.ID)
 
 	rec := httptest.NewRecorder()
-	s.handleCancelRun(rec, run.ID)
+	s.HandleCancelRun(rec, run.ID)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for active cancel, got %d", rec.Code)
 	}
 
 	close(waitCh)
 	waitFor(t, 2*time.Second, func() bool {
-		updated, ok := s.store.GetRun(run.ID)
+		updated, ok := s.Store.GetRun(run.ID)
 		return ok && updated.Status == state.StatusCanceled && strings.Contains(updated.Error, "canceled by user")
 	}, "active run canceled with user reason")
 }
@@ -3936,11 +3940,11 @@ func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "cancel-guard", Repo: "owner/repo", Instruction: "guard cancel"})
+	run, err := s.CreateAndQueueRun(runRequest{TaskID: "cancel-guard", Repo: "owner/repo", Instruction: "guard cancel"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	s.afterRunCleanup = func(runID string) {
+	s.AfterRunCleanup = func(runID string) {
 		if runID == run.ID {
 			select {
 			case <-cleanupDone:
@@ -3953,18 +3957,18 @@ func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
 	_ = waitForRunExecution(t, s, run.ID)
 
 	rec := httptest.NewRecorder()
-	s.handleCancelRun(rec, run.ID)
+	s.HandleCancelRun(rec, run.ID)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for active cancel, got %d", rec.Code)
 	}
 
 	close(done)
 	waitFor(t, 2*time.Second, func() bool {
-		current, ok := s.store.GetRun(run.ID)
+		current, ok := s.Store.GetRun(run.ID)
 		return ok && current.Status == state.StatusCanceled
 	}, "run remains canceled after launcher returns success")
 
-	current, ok := s.store.GetRun(run.ID)
+	current, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
@@ -3988,17 +3992,17 @@ func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "drain-reason", Repo: "owner/repo", Instruction: "drain"})
+	run, err := s.CreateAndQueueRun(runRequest{TaskID: "drain-reason", Repo: "owner/repo", Instruction: "drain"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	_ = waitForRunExecution(t, s, run.ID)
 
-	s.cancelActiveRuns("orchestrator shutdown drain timeout")
+	s.CancelActiveRuns("orchestrator shutdown drain timeout")
 	close(waitCh)
 
 	waitFor(t, 2*time.Second, func() bool {
-		current, ok := s.store.GetRun(run.ID)
+		current, ok := s.Store.GetRun(run.ID)
 		return ok && current.Status == state.StatusCanceled && strings.Contains(current.Error, "drain timeout")
 	}, "run canceled with drain reason")
 }
@@ -4009,7 +4013,7 @@ func TestExecuteRunHonorsPersistedCancelBeforeStart(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_pre_cancel",
 		TaskID:      "task_pre_cancel",
 		Repo:        "owner/repo",
@@ -4020,16 +4024,16 @@ func TestExecuteRunHonorsPersistedCancelBeforeStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.store.RequestRunCancel(run.ID, "persisted cancel", "user"); err != nil {
+	if err := s.Store.RequestRunCancel(run.ID, "persisted cancel", "user"); err != nil {
 		t.Fatalf("request run cancel: %v", err)
 	}
 
-	s.executeRun(run.ID)
+	s.ExecuteRun(run.ID)
 
 	if calls := launcher.Calls(); calls != 0 {
 		t.Fatalf("expected launcher not to start, got calls=%d", calls)
 	}
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
@@ -4051,21 +4055,21 @@ func TestPersistedRunCancelStopsActiveRun(t *testing.T) {
 		waitForServerIdle(t, s)
 	}()
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "persisted-cancel", Repo: "owner/repo", Instruction: "cancel while running"})
+	run, err := s.CreateAndQueueRun(runRequest{TaskID: "persisted-cancel", Repo: "owner/repo", Instruction: "cancel while running"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	_ = waitForRunExecution(t, s, run.ID)
 
-	if err := s.store.RequestRunCancel(run.ID, "cancel from store", "user"); err != nil {
+	if err := s.Store.RequestRunCancel(run.ID, "cancel from store", "user"); err != nil {
 		t.Fatalf("request run cancel: %v", err)
 	}
 
 	waitFor(t, 4*time.Second, func() bool {
-		current, ok := s.store.GetRun(run.ID)
+		current, ok := s.Store.GetRun(run.ID)
 		return ok && current.Status == state.StatusCanceled
 	}, "run canceled from persisted request")
-	current, ok := s.store.GetRun(run.ID)
+	current, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
@@ -4079,7 +4083,7 @@ func TestRecoverQueueStateAppliesPersistedCancel(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_recover_cancel",
 		TaskID:      "task_recover_cancel",
 		Repo:        "owner/repo",
@@ -4090,12 +4094,12 @@ func TestRecoverQueueStateAppliesPersistedCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.store.RequestRunCancel(run.ID, "queued canceled before restart", "user"); err != nil {
+	if err := s.Store.RequestRunCancel(run.ID, "queued canceled before restart", "user"); err != nil {
 		t.Fatalf("request run cancel: %v", err)
 	}
 
-	s.recoverQueuedCancels()
-	updated, ok := s.store.GetRun(run.ID)
+	s.RecoverQueuedCancels()
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
@@ -4112,7 +4116,7 @@ func TestRecoverRunningRunExpiredLeaseRequeues(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_recover_expired_lease",
 		TaskID:      "task_recover_expired_lease",
 		Repo:        "owner/repo",
@@ -4123,17 +4127,17 @@ func TestRecoverRunningRunExpiredLeaseRequeues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+	if _, err := s.Store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
 		t.Fatalf("set running: %v", err)
 	}
-	if err := s.store.UpsertRunLease(run.ID, "other-instance", time.Nanosecond); err != nil {
+	if err := s.Store.UpsertRunLease(run.ID, "other-instance", time.Nanosecond); err != nil {
 		t.Fatalf("upsert run lease: %v", err)
 	}
 	time.Sleep(2 * time.Millisecond)
 
-	s.recoverRunningRuns()
+	s.RecoverRunningRuns()
 
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
@@ -4143,7 +4147,7 @@ func TestRecoverRunningRunExpiredLeaseRequeues(t *testing.T) {
 	if updated.StartedAt != nil {
 		t.Fatalf("expected started_at cleared on requeue")
 	}
-	if _, ok := s.store.GetRunLease(run.ID); ok {
+	if _, ok := s.Store.GetRunLease(run.ID); ok {
 		t.Fatalf("expected stale run lease deleted")
 	}
 }
@@ -4153,7 +4157,7 @@ func TestRecoverRunningRunValidLeaseKeepsRunning(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_recover_valid_lease",
 		TaskID:      "task_recover_valid_lease",
 		Repo:        "owner/repo",
@@ -4164,16 +4168,16 @@ func TestRecoverRunningRunValidLeaseKeepsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+	if _, err := s.Store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
 		t.Fatalf("set running: %v", err)
 	}
-	if err := s.store.UpsertRunLease(run.ID, "other-instance", 2*time.Minute); err != nil {
+	if err := s.Store.UpsertRunLease(run.ID, "other-instance", 2*time.Minute); err != nil {
 		t.Fatalf("upsert run lease: %v", err)
 	}
 
-	s.recoverRunningRuns()
+	s.RecoverRunningRuns()
 
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
@@ -4187,7 +4191,7 @@ func TestRecoverRunningRunWithoutLeaseOldStartRequeues(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_recover_no_lease_old",
 		TaskID:      "task_recover_no_lease_old",
 		Repo:        "owner/repo",
@@ -4198,20 +4202,20 @@ func TestRecoverRunningRunWithoutLeaseOldStartRequeues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+	if _, err := s.Store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
 		t.Fatalf("set running: %v", err)
 	}
 	oldStart := time.Now().UTC().Add(-2 * runLeaseTTL)
-	if _, err := s.store.UpdateRun(run.ID, func(r *state.Run) error {
+	if _, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
 		r.StartedAt = &oldStart
 		return nil
 	}); err != nil {
 		t.Fatalf("set old started_at: %v", err)
 	}
 
-	s.recoverRunningRuns()
+	s.RecoverRunningRuns()
 
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
@@ -4227,7 +4231,7 @@ func TestExecuteRunPersistsRunExecutionHandle(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "task_exec_handle", Repo: "owner/repo", Instruction: "persist execution handle"})
+	run, err := s.CreateAndQueueRun(runRequest{TaskID: "task_exec_handle", Repo: "owner/repo", Instruction: "persist execution handle"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4239,7 +4243,7 @@ func TestExecuteRunPersistsRunExecutionHandle(t *testing.T) {
 
 	close(waitCh)
 	waitFor(t, 2*time.Second, func() bool {
-		updated, ok := s.store.GetRun(run.ID)
+		updated, ok := s.Store.GetRun(run.ID)
 		return ok && updated.Status == state.StatusSucceeded
 	}, "run completion")
 }
@@ -4252,33 +4256,33 @@ func TestRecoverRunningRunAdoptsDetachedExecution(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_adopt", Repo: "owner/repo", Instruction: "adopt detached"})
+	run, err := s1.CreateAndQueueRun(runRequest{TaskID: "task_adopt", Repo: "owner/repo", Instruction: "adopt detached"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	execRec := waitForRunExecution(t, s1, run.ID)
 
 	waitFor(t, 2*time.Second, func() bool {
-		lease, ok := s1.store.GetRunLease(run.ID)
+		lease, ok := s1.Store.GetRunLease(run.ID)
 		return ok && lease.OwnerID == "instance-a"
 	}, "instance-a lease ownership")
 
-	s1.beginDrain()
-	s1.stopRunSupervisors()
-	if err := s1.store.DeleteRunLease(run.ID); err != nil {
+	s1.BeginDrain()
+	s1.StopRunSupervisors()
+	if err := s1.Store.DeleteRunLease(run.ID); err != nil {
 		t.Fatalf("delete s1 lease: %v", err)
 	}
 
 	s2 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-b")
 	defer waitForServerIdle(t, s2)
-	s2.recoverRunningRuns()
+	s2.RecoverRunningRuns()
 
 	waitFor(t, 2*time.Second, func() bool {
-		lease, ok := s2.store.GetRunLease(run.ID)
+		lease, ok := s2.Store.GetRunLease(run.ID)
 		return ok && lease.OwnerID == "instance-b"
 	}, "instance-b lease ownership")
 
-	adoptedExec, ok := s2.store.GetRunExecution(run.ID)
+	adoptedExec, ok := s2.Store.GetRunExecution(run.ID)
 	if !ok {
 		t.Fatalf("expected execution after adoption")
 	}
@@ -4288,7 +4292,7 @@ func TestRecoverRunningRunAdoptsDetachedExecution(t *testing.T) {
 
 	close(waitCh)
 	waitFor(t, 3*time.Second, func() bool {
-		updated, ok := s2.store.GetRun(run.ID)
+		updated, ok := s2.Store.GetRun(run.ID)
 		return ok && updated.Status == state.StatusSucceeded
 	}, "adopted run completion")
 }
@@ -4301,7 +4305,7 @@ func TestDrainReleaseDoesNotDeleteAdoptedLease(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_safe_lease_release", Repo: "owner/repo", Instruction: "safe lease release"})
+	run, err := s1.CreateAndQueueRun(runRequest{TaskID: "task_safe_lease_release", Repo: "owner/repo", Instruction: "safe lease release"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4309,27 +4313,27 @@ func TestDrainReleaseDoesNotDeleteAdoptedLease(t *testing.T) {
 
 	s2 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-b")
 	defer waitForServerIdle(t, s2)
-	s2.recoverRunningRuns()
+	s2.RecoverRunningRuns()
 
 	waitFor(t, 2*time.Second, func() bool {
-		lease, ok := s2.store.GetRunLease(run.ID)
+		lease, ok := s2.Store.GetRunLease(run.ID)
 		return ok && lease.OwnerID == "instance-b"
 	}, "instance-b lease ownership")
 
-	s1.beginDrain()
-	s1.stopRunSupervisors()
-	if err := s1.waitForNoActiveRuns(3 * time.Second); err != nil {
+	s1.BeginDrain()
+	s1.StopRunSupervisors()
+	if err := s1.WaitForNoActiveRuns(3 * time.Second); err != nil {
 		t.Fatalf("wait for s1 idle: %v", err)
 	}
 
-	lease, ok := s2.store.GetRunLease(run.ID)
+	lease, ok := s2.Store.GetRunLease(run.ID)
 	if !ok || lease.OwnerID != "instance-b" {
 		t.Fatalf("expected adopted lease to remain with instance-b, got %+v ok=%t", lease, ok)
 	}
 
 	close(waitCh)
 	waitFor(t, 3*time.Second, func() bool {
-		updated, ok := s2.store.GetRun(run.ID)
+		updated, ok := s2.Store.GetRun(run.ID)
 		return ok && updated.Status == state.StatusSucceeded
 	}, "completion after safe lease release")
 }
@@ -4340,7 +4344,7 @@ func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_recover_exited_exec",
 		TaskID:      "task_recover_exited_exec",
 		Repo:        "owner/repo",
@@ -4352,7 +4356,7 @@ func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+	if _, err := s.Store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
 		t.Fatalf("set running: %v", err)
 	}
 
@@ -4383,7 +4387,7 @@ func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write meta: %v", err)
 	}
-	if _, err := s.store.UpsertRunExecution(state.RunExecution{
+	if _, err := s.Store.UpsertRunExecution(state.RunExecution{
 		RunID:         run.ID,
 		Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(string(handle.Backend))),
 		ContainerName: handle.Name,
@@ -4393,12 +4397,12 @@ func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
 		t.Fatalf("upsert run execution: %v", err)
 	}
 
-	s.recoverRunningRuns()
+	s.RecoverRunningRuns()
 	waitFor(t, 3*time.Second, func() bool {
-		updated, ok := s.store.GetRun(run.ID)
+		updated, ok := s.Store.GetRun(run.ID)
 		return ok && updated.Status == state.StatusSucceeded
 	}, "recover exited execution finalization")
-	if _, ok := s.store.GetRunExecution(run.ID); ok {
+	if _, ok := s.Store.GetRunExecution(run.ID); ok {
 		t.Fatalf("expected execution record to be removed after finalization")
 	}
 }
@@ -4409,7 +4413,7 @@ func TestRecoverRunningRunMissingDetachedExecutionFails(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_recover_missing_exec",
 		TaskID:      "task_recover_missing_exec",
 		Repo:        "owner/repo",
@@ -4420,10 +4424,10 @@ func TestRecoverRunningRunMissingDetachedExecutionFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+	if _, err := s.Store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
 		t.Fatalf("set running: %v", err)
 	}
-	if _, err := s.store.UpsertRunExecution(state.RunExecution{
+	if _, err := s.Store.UpsertRunExecution(state.RunExecution{
 		RunID:         run.ID,
 		Backend:       state.RunExecutionBackendDocker,
 		ContainerName: "rascal-run_recover_missing_exec",
@@ -4433,12 +4437,12 @@ func TestRecoverRunningRunMissingDetachedExecutionFails(t *testing.T) {
 		t.Fatalf("upsert run execution: %v", err)
 	}
 
-	s.recoverRunningRuns()
+	s.RecoverRunningRuns()
 	waitFor(t, 3*time.Second, func() bool {
-		updated, ok := s.store.GetRun(run.ID)
+		updated, ok := s.Store.GetRun(run.ID)
 		return ok && updated.Status == state.StatusFailed && strings.Contains(updated.Error, "detached container missing during adoption")
 	}, "recover missing execution failure")
-	if _, ok := s.store.GetRunExecution(run.ID); ok {
+	if _, ok := s.Store.GetRunExecution(run.ID); ok {
 		t.Fatalf("expected missing execution record to be cleared")
 	}
 }
@@ -4450,7 +4454,7 @@ func TestRecoverRunningRunAdoptsByStableContainerName(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_recover_by_name",
 		TaskID:      "task_recover_by_name",
 		Repo:        "owner/repo",
@@ -4461,7 +4465,7 @@ func TestRecoverRunningRunAdoptsByStableContainerName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if _, err := s.store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
+	if _, err := s.Store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
 		t.Fatalf("set running: %v", err)
 	}
 
@@ -4476,7 +4480,7 @@ func TestRecoverRunningRunAdoptsByStableContainerName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start detached fake execution: %v", err)
 	}
-	if _, err := s.store.UpsertRunExecution(state.RunExecution{
+	if _, err := s.Store.UpsertRunExecution(state.RunExecution{
 		RunID:         run.ID,
 		Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(string(handle.Backend))),
 		ContainerName: handle.Name,
@@ -4486,15 +4490,15 @@ func TestRecoverRunningRunAdoptsByStableContainerName(t *testing.T) {
 		t.Fatalf("upsert placeholder execution: %v", err)
 	}
 
-	s.recoverRunningRuns()
+	s.RecoverRunningRuns()
 	waitFor(t, 2*time.Second, func() bool {
-		lease, ok := s.store.GetRunLease(run.ID)
-		return ok && lease.OwnerID == s.instanceID
+		lease, ok := s.Store.GetRunLease(run.ID)
+		return ok && lease.OwnerID == s.InstanceID
 	}, "name-based adoption lease ownership")
 
 	close(waitCh)
 	waitFor(t, 3*time.Second, func() bool {
-		updated, ok := s.store.GetRun(run.ID)
+		updated, ok := s.Store.GetRun(run.ID)
 		return ok && updated.Status == state.StatusSucceeded
 	}, "name-based adoption completion")
 }
@@ -4507,34 +4511,34 @@ func TestCancelRunWorksAfterAdoptionByDifferentInstance(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_cancel_adopt", Repo: "owner/repo", Instruction: "cancel after adopt"})
+	run, err := s1.CreateAndQueueRun(runRequest{TaskID: "task_cancel_adopt", Repo: "owner/repo", Instruction: "cancel after adopt"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	_ = waitForRunExecution(t, s1, run.ID)
 
-	s1.beginDrain()
-	s1.stopRunSupervisors()
-	if err := s1.waitForNoActiveRuns(3 * time.Second); err != nil {
+	s1.BeginDrain()
+	s1.StopRunSupervisors()
+	if err := s1.WaitForNoActiveRuns(3 * time.Second); err != nil {
 		t.Fatalf("wait for s1 idle: %v", err)
 	}
 
 	s2 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-b")
 	defer waitForServerIdle(t, s2)
-	s2.recoverRunningRuns()
+	s2.RecoverRunningRuns()
 	waitFor(t, 2*time.Second, func() bool {
-		lease, ok := s2.store.GetRunLease(run.ID)
+		lease, ok := s2.Store.GetRunLease(run.ID)
 		return ok && lease.OwnerID == "instance-b"
 	}, "instance-b lease ownership")
 
 	rec := httptest.NewRecorder()
-	s2.handleCancelRun(rec, run.ID)
+	s2.HandleCancelRun(rec, run.ID)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for adopted run cancel, got %d", rec.Code)
 	}
 
 	waitFor(t, 3*time.Second, func() bool {
-		updated, ok := s2.store.GetRun(run.ID)
+		updated, ok := s2.Store.GetRun(run.ID)
 		return ok && updated.Status == state.StatusCanceled && strings.Contains(updated.Error, "canceled by user")
 	}, "adopted run canceled")
 }
@@ -4549,12 +4553,12 @@ func TestStopRunSupervisorsCatchesInFlightSupervisorRegistration(t *testing.T) {
 	s := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
 	reachedBeforeSupervise := make(chan struct{})
 	releaseBeforeSupervise := make(chan struct{})
-	s.beforeSupervise = func(_ string) {
+	s.BeforeSupervise = func(_ string) {
 		close(reachedBeforeSupervise)
 		<-releaseBeforeSupervise
 	}
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "task_stop_supervisor_race", Repo: "owner/repo", Instruction: "stop supervisor race"})
+	run, err := s.CreateAndQueueRun(runRequest{TaskID: "task_stop_supervisor_race", Repo: "owner/repo", Instruction: "stop supervisor race"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4568,11 +4572,11 @@ func TestStopRunSupervisorsCatchesInFlightSupervisorRegistration(t *testing.T) {
 		}
 	}, "reach pre-supervisor hook")
 
-	s.beginDrain()
-	s.stopRunSupervisors()
+	s.BeginDrain()
+	s.StopRunSupervisors()
 	close(releaseBeforeSupervise)
 
-	if err := s.waitForNoActiveRuns(500 * time.Millisecond); err != nil {
+	if err := s.WaitForNoActiveRuns(500 * time.Millisecond); err != nil {
 		t.Fatalf("wait for idle after stop supervisors: %v", err)
 	}
 }
@@ -4584,7 +4588,7 @@ func TestLateCancelDoesNotOverwriteSuccessfulCompletion(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "task_late_cancel_success", Repo: "owner/repo", Instruction: "late cancel success"})
+	run, err := s.CreateAndQueueRun(runRequest{TaskID: "task_late_cancel_success", Repo: "owner/repo", Instruction: "late cancel success"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4593,13 +4597,13 @@ func TestLateCancelDoesNotOverwriteSuccessfulCompletion(t *testing.T) {
 	close(waitCh)
 
 	rec := httptest.NewRecorder()
-	s.handleCancelRun(rec, run.ID)
+	s.HandleCancelRun(rec, run.ID)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for running cancel, got %d", rec.Code)
 	}
 
 	waitFor(t, 3*time.Second, func() bool {
-		updated, ok := s.store.GetRun(run.ID)
+		updated, ok := s.Store.GetRun(run.ID)
 		return ok && updated.Status == state.StatusSucceeded
 	}, "successful completion wins over late cancel")
 }
@@ -4612,25 +4616,25 @@ func TestRepeatedHandoffPreservesDetachedExecutionHandle(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_repeated_handoff", Repo: "owner/repo", Instruction: "repeated handoff"})
+	run, err := s1.CreateAndQueueRun(runRequest{TaskID: "task_repeated_handoff", Repo: "owner/repo", Instruction: "repeated handoff"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	execRec := waitForRunExecution(t, s1, run.ID)
 
-	s1.beginDrain()
-	s1.stopRunSupervisors()
-	if err := s1.waitForNoActiveRuns(3 * time.Second); err != nil {
+	s1.BeginDrain()
+	s1.StopRunSupervisors()
+	if err := s1.WaitForNoActiveRuns(3 * time.Second); err != nil {
 		t.Fatalf("wait for s1 idle: %v", err)
 	}
 
 	s2 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-b")
-	s2.recoverRunningRuns()
+	s2.RecoverRunningRuns()
 	waitFor(t, 2*time.Second, func() bool {
-		lease, ok := s2.store.GetRunLease(run.ID)
+		lease, ok := s2.Store.GetRunLease(run.ID)
 		return ok && lease.OwnerID == "instance-b"
 	}, "instance-b lease ownership")
-	midExec, ok := s2.store.GetRunExecution(run.ID)
+	midExec, ok := s2.Store.GetRunExecution(run.ID)
 	if !ok {
 		t.Fatalf("expected execution after first handoff")
 	}
@@ -4638,20 +4642,20 @@ func TestRepeatedHandoffPreservesDetachedExecutionHandle(t *testing.T) {
 		t.Fatalf("expected same container id after first handoff: got %s want %s", midExec.ContainerID, execRec.ContainerID)
 	}
 
-	s2.beginDrain()
-	s2.stopRunSupervisors()
-	if err := s2.store.DeleteRunLease(run.ID); err != nil {
+	s2.BeginDrain()
+	s2.StopRunSupervisors()
+	if err := s2.Store.DeleteRunLease(run.ID); err != nil {
 		t.Fatalf("delete s2 lease: %v", err)
 	}
 
 	s3 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-c")
 	defer waitForServerIdle(t, s3)
-	s3.recoverRunningRuns()
+	s3.RecoverRunningRuns()
 	waitFor(t, 2*time.Second, func() bool {
-		lease, ok := s3.store.GetRunLease(run.ID)
+		lease, ok := s3.Store.GetRunLease(run.ID)
 		return ok && lease.OwnerID == "instance-c"
 	}, "instance-c lease ownership")
-	lastExec, ok := s3.store.GetRunExecution(run.ID)
+	lastExec, ok := s3.Store.GetRunExecution(run.ID)
 	if !ok {
 		t.Fatalf("expected execution after second handoff")
 	}
@@ -4661,7 +4665,7 @@ func TestRepeatedHandoffPreservesDetachedExecutionHandle(t *testing.T) {
 
 	close(waitCh)
 	waitFor(t, 3*time.Second, func() bool {
-		updated, ok := s3.store.GetRun(run.ID)
+		updated, ok := s3.Store.GetRun(run.ID)
 		return ok && updated.Status == state.StatusSucceeded
 	}, "run completion after repeated handoff")
 }
@@ -4672,26 +4676,26 @@ func TestDrainStopsSupervisionWithoutCancelingDetachedRun(t *testing.T) {
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "task_drain_detached", Repo: "owner/repo", Instruction: "drain without cancel"})
+	run, err := s.CreateAndQueueRun(runRequest{TaskID: "task_drain_detached", Repo: "owner/repo", Instruction: "drain without cancel"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	execRec := waitForRunExecution(t, s, run.ID)
 
-	s.beginDrain()
-	s.stopRunSupervisors()
-	if err := s.waitForNoActiveRuns(3 * time.Second); err != nil {
+	s.BeginDrain()
+	s.StopRunSupervisors()
+	if err := s.WaitForNoActiveRuns(3 * time.Second); err != nil {
 		t.Fatalf("wait for no active runs: %v", err)
 	}
 
-	updated, ok := s.store.GetRun(run.ID)
+	updated, ok := s.Store.GetRun(run.ID)
 	if !ok {
 		t.Fatalf("missing run %s", run.ID)
 	}
 	if updated.Status != state.StatusRunning {
 		t.Fatalf("expected run to remain running during drain, got %s", updated.Status)
 	}
-	afterExec, ok := s.store.GetRunExecution(run.ID)
+	afterExec, ok := s.Store.GetRunExecution(run.ID)
 	if !ok {
 		t.Fatalf("expected execution record to remain after drain")
 	}
@@ -4708,7 +4712,7 @@ func TestHandleRunLogsRespectsLines(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	runDir := t.TempDir()
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_logs",
 		TaskID:      "task_logs",
 		Repo:        "owner/repo",
@@ -4734,7 +4738,7 @@ func TestHandleRunLogsRespectsLines(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/logs?lines=2", nil)
 	rec := httptest.NewRecorder()
-	s.handleRunSubresources(rec, req)
+	s.HandleRunSubresources(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -4753,7 +4757,7 @@ func TestHandleRunLogsJSONIncludesStatusAndDone(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	runDir := t.TempDir()
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_logs_json",
 		TaskID:      "task_logs_json",
 		Repo:        "owner/repo",
@@ -4775,7 +4779,7 @@ func TestHandleRunLogsJSONIncludesStatusAndDone(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/logs?lines=1&format=json", nil)
 	rec := httptest.NewRecorder()
-	s.handleRunSubresources(rec, req)
+	s.HandleRunSubresources(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -4810,7 +4814,7 @@ func TestHandleRunLogsMissingAgentFileStillReturnsRunnerLogs(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	runDir := t.TempDir()
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_logs_missing_goose",
 		TaskID:      "task_logs_missing_goose",
 		Repo:        "owner/repo",
@@ -4828,7 +4832,7 @@ func TestHandleRunLogsMissingAgentFileStillReturnsRunnerLogs(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/logs?lines=5", nil)
 	rec := httptest.NewRecorder()
-	s.handleRunSubresources(rec, req)
+	s.HandleRunSubresources(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -4851,7 +4855,7 @@ func TestHandleRunLogsFallsBackToLegacyGooseLogFile(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	runDir := t.TempDir()
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_logs_legacy_goose",
 		TaskID:      "task_logs_legacy_goose",
 		Repo:        "owner/repo",
@@ -4872,7 +4876,7 @@ func TestHandleRunLogsFallsBackToLegacyGooseLogFile(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/logs?lines=5", nil)
 	rec := httptest.NewRecorder()
-	s.handleRunSubresources(rec, req)
+	s.HandleRunSubresources(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -4895,7 +4899,7 @@ func TestHandleRunLogsRejectsInvalidFormat(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	runDir := t.TempDir()
-	run, err := s.store.AddRun(state.CreateRunInput{
+	run, err := s.Store.AddRun(state.CreateRunInput{
 		ID:          "run_logs_bad_format",
 		TaskID:      "task_logs_bad_format",
 		Repo:        "owner/repo",
@@ -4915,7 +4919,7 @@ func TestHandleRunLogsRejectsInvalidFormat(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runs/"+run.ID+"/logs?format=xml", nil)
 	rec := httptest.NewRecorder()
-	s.handleRunSubresources(rec, req)
+	s.HandleRunSubresources(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
@@ -4954,16 +4958,16 @@ func TestHandleReadyReflectsDrainingState(t *testing.T) {
 
 	readyReq := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	readyRec := httptest.NewRecorder()
-	s.handleReady(readyRec, readyReq)
+	s.HandleReady(readyRec, readyReq)
 	if readyRec.Code != http.StatusOK {
 		t.Fatalf("expected ready 200 before drain, got %d", readyRec.Code)
 	}
 
-	s.beginDrain()
+	s.BeginDrain()
 
 	notReadyReq := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	notReadyRec := httptest.NewRecorder()
-	s.handleReady(notReadyRec, notReadyReq)
+	s.HandleReady(notReadyRec, notReadyReq)
 	if notReadyRec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected ready 503 during drain, got %d", notReadyRec.Code)
 	}
@@ -4974,8 +4978,8 @@ func TestCreateAndQueueRunRejectedWhenDraining(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	s.beginDrain()
-	_, err := s.createAndQueueRun(runRequest{
+	s.BeginDrain()
+	_, err := s.CreateAndQueueRun(runRequest{
 		TaskID:      "owner/repo#1",
 		Repo:        "owner/repo",
 		Instruction: "should be rejected",
@@ -4995,21 +4999,21 @@ func TestBeginDrainLeavesQueuedRunsForNextSlot(t *testing.T) {
 		waitForServerIdle(t, s)
 	}()
 
-	first, err := s.createAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Instruction: "first"})
+	first, err := s.CreateAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	queued, err := s.createAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Instruction: "queued"})
+	queued, err := s.CreateAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Instruction: "queued"})
 	if err != nil {
 		t.Fatalf("create queued run: %v", err)
 	}
 	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to be active")
 	_ = waitForRunExecution(t, s, first.ID)
 
-	s.beginDrain()
+	s.BeginDrain()
 
 	waitFor(t, time.Second, func() bool {
-		r, ok := s.store.GetRun(queued.ID)
+		r, ok := s.Store.GetRun(queued.ID)
 		return ok && r.Status == state.StatusQueued
 	}, "queued run remains queued during drain")
 }
