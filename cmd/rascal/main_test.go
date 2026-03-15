@@ -1601,7 +1601,7 @@ func TestConfigUnsetRemovesKeyAndReportsEffectiveValue(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("config set: %v", err)
 	}
-	if _, ok := readConfigMap(t, cfgPath)["server_url"]; !ok {
+	if settings := readClientConfigFileForTest(t, cfgPath); settings.ServerURL == nil {
 		t.Fatal("expected server_url to exist in config file after set")
 	}
 
@@ -1627,7 +1627,7 @@ func TestConfigUnsetRemovesKeyAndReportsEffectiveValue(t *testing.T) {
 	if out["value"] != "http://127.0.0.1:8080" {
 		t.Fatalf("expected default server_url, got %v", out["value"])
 	}
-	if _, ok := readConfigMap(t, cfgPath)["server_url"]; ok {
+	if settings := readClientConfigFileForTest(t, cfgPath); settings.ServerURL != nil {
 		t.Fatal("expected server_url to be removed from config file after unset")
 	}
 }
@@ -2304,18 +2304,15 @@ func containsExact(items []string, needle string) bool {
 	return false
 }
 
-func readConfigMap(t *testing.T, path string) map[string]any {
+func readClientConfigFileForTest(t *testing.T, path string) clientConfigFile {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
 	}
-	var out map[string]any
+	var out clientConfigFile
 	if err := toml.Unmarshal(data, &out); err != nil {
 		t.Fatalf("parse config file: %v", err)
-	}
-	if out == nil {
-		out = map[string]any{}
 	}
 	return out
 }
