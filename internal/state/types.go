@@ -60,11 +60,54 @@ func IsFinalRunStatus(status RunStatus) bool {
 	}
 }
 
-func ValidateRunStatusTransition(from, to RunStatus) error {
-	next, ok := runStatusTransitions[from]
-	if !ok {
-		return fmt.Errorf("invalid current run status %q", from)
+func NormalizeRunStatus(status RunStatus) RunStatus {
+	switch strings.ToLower(strings.TrimSpace(string(status))) {
+	case string(StatusRunning):
+		return StatusRunning
+	case string(StatusReview):
+		return StatusReview
+	case string(StatusSucceeded):
+		return StatusSucceeded
+	case string(StatusFailed):
+		return StatusFailed
+	case string(StatusCanceled):
+		return StatusCanceled
+	default:
+		return StatusQueued
 	}
+}
+
+func ParseRunStatus(raw string) (RunStatus, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(StatusQueued):
+		return StatusQueued, true
+	case string(StatusRunning):
+		return StatusRunning, true
+	case string(StatusReview):
+		return StatusReview, true
+	case string(StatusSucceeded):
+		return StatusSucceeded, true
+	case string(StatusFailed):
+		return StatusFailed, true
+	case string(StatusCanceled):
+		return StatusCanceled, true
+	default:
+		return "", false
+	}
+}
+
+func ValidateRunStatusTransition(from, to RunStatus) error {
+	fromRaw := string(from)
+	toRaw := string(to)
+	from, ok := ParseRunStatus(fromRaw)
+	if !ok {
+		return fmt.Errorf("invalid current run status %q", fromRaw)
+	}
+	to, ok = ParseRunStatus(toRaw)
+	if !ok {
+		return fmt.Errorf("invalid target run status %q", toRaw)
+	}
+	next := runStatusTransitions[from]
 	if _, ok := next[to]; !ok {
 		return fmt.Errorf("invalid run status transition %q -> %q", from, to)
 	}
@@ -90,6 +133,26 @@ const (
 	TaskOpen      TaskStatus = "open"
 	TaskCompleted TaskStatus = "completed"
 )
+
+func NormalizeTaskStatus(status TaskStatus) TaskStatus {
+	switch strings.ToLower(strings.TrimSpace(string(status))) {
+	case string(TaskCompleted):
+		return TaskCompleted
+	default:
+		return TaskOpen
+	}
+}
+
+func ParseTaskStatus(raw string) (TaskStatus, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(TaskOpen):
+		return TaskOpen, true
+	case string(TaskCompleted):
+		return TaskCompleted, true
+	default:
+		return "", false
+	}
+}
 
 type Run struct {
 	ID           string          `json:"id"`

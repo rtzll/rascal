@@ -292,6 +292,12 @@ func TestStoreRejectsInvalidRunStatusTransition(t *testing.T) {
 	if got.Status != StatusSucceeded {
 		t.Fatalf("status = %s, want succeeded", got.Status)
 	}
+
+	if _, err := store.SetRunStatus(run.ID, RunStatus("paused"), ""); err == nil {
+		t.Fatal("expected invalid run status to be rejected")
+	} else if !strings.Contains(err.Error(), "invalid run status") {
+		t.Fatalf("unexpected invalid status error: %v", err)
+	}
 }
 
 func TestParseCredentialScopeAndStatus(t *testing.T) {

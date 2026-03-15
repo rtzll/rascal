@@ -465,6 +465,11 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 	if err := fn(&r); err != nil {
 		return Run{}, fmt.Errorf("apply run update for %q: %w", id, err)
 	}
+	parsedStatus, ok := ParseRunStatus(string(r.Status))
+	if !ok {
+		return Run{}, fmt.Errorf("invalid run status %q", r.Status)
+	}
+	r.Status = parsedStatus
 	if err := ValidateRunStatusTransition(prevStatus, r.Status); err != nil {
 		return Run{}, fmt.Errorf("validate run status transition for %q: %w", id, err)
 	}
@@ -505,13 +510,17 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 }
 
 func (s *Store) SetRunStatus(runID string, status RunStatus, errText string) (Run, error) {
+	parsedStatus, ok := ParseRunStatus(string(status))
+	if !ok {
+		return Run{}, fmt.Errorf("invalid run status %q", status)
+	}
 	return s.UpdateRun(runID, func(r *Run) error {
 		now := time.Now().UTC()
-		r.Status = status
-		if status == StatusRunning {
+		r.Status = parsedStatus
+		if parsedStatus == StatusRunning {
 			r.StartedAt = &now
 		}
-		if IsFinalRunStatus(status) {
+		if IsFinalRunStatus(parsedStatus) {
 			r.CompletedAt = &now
 		}
 		r.Error = errText
@@ -1084,7 +1093,7 @@ func fromDBTaskParts(id, repo, agentBackend string, issueNumber, prNumber int64,
 		AgentBackend: agent.NormalizeBackend(agentBackend),
 		IssueNumber:  int(issueNumber),
 		PRNumber:     int(prNumber),
-		Status:       TaskStatus(status),
+		Status:       NormalizeTaskStatus(TaskStatus(status)),
 		PendingInput: pendingInput != 0,
 		LastRunID:    lastRunID,
 		CreatedAt:    time.Unix(0, createdAt).UTC(),
@@ -1111,7 +1120,7 @@ func fromDBRunParts(id, taskID, repo, task, agentBackend, baseBranch, headBranch
 		HeadBranch:   headBranch,
 		Trigger:      runtrigger.Normalize(trigger),
 		Debug:        debug,
-		Status:       RunStatus(status),
+		Status:       NormalizeRunStatus(RunStatus(status)),
 		RunDir:       runDir,
 		IssueNumber:  int(issueNumber),
 		PRNumber:     int(prNumber),
