@@ -72,6 +72,20 @@ type webhookAPIResponse struct {
 	Config webhookConfig `json:"config"`
 }
 
+type labelCreateRequest struct {
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	Description string `json:"description"`
+}
+
+type reactionRequest struct {
+	Content string `json:"content"`
+}
+
+type issueCommentRequest struct {
+	Body string `json:"body"`
+}
+
 func NewAPIClient(token string) *APIClient {
 	return &APIClient{
 		token:   strings.TrimSpace(token),
@@ -90,7 +104,7 @@ func (c *APIClient) GetIssue(ctx context.Context, repo string, issueNumber int) 
 	}
 
 	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, name, issueNumber)
-	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	resp, err := c.do(ctx, http.MethodGet, path)
 	if err != nil {
 		return IssueData{}, err
 	}
@@ -128,7 +142,7 @@ func (c *APIClient) GetPullRequest(ctx context.Context, repo string, pullNumber 
 	}
 
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, name, pullNumber)
-	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	resp, err := c.do(ctx, http.MethodGet, path)
 	if err != nil {
 		return PullRequest{}, err
 	}
@@ -155,7 +169,7 @@ func (c *APIClient) EnsureLabel(ctx context.Context, repo, name, color, descript
 	}
 
 	path := fmt.Sprintf("/repos/%s/%s/labels/%s", owner, repoName, url.PathEscape(name))
-	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	resp, err := c.do(ctx, http.MethodGet, path)
 	if err != nil {
 		return err
 	}
@@ -168,13 +182,13 @@ func (c *APIClient) EnsureLabel(ctx context.Context, repo, name, color, descript
 		return fmt.Errorf("github get label failed (%d): %s", resp.StatusCode, readResponseBody(resp.Body))
 	}
 
-	payload := map[string]string{
-		"name":        name,
-		"color":       color,
-		"description": description,
+	payload := labelCreateRequest{
+		Name:        name,
+		Color:       color,
+		Description: description,
 	}
 	createPath := fmt.Sprintf("/repos/%s/%s/labels", owner, repoName)
-	createResp, err := c.do(ctx, http.MethodPost, createPath, payload)
+	createResp, err := doJSONRequest(ctx, c, http.MethodPost, createPath, payload)
 	if err != nil {
 		return err
 	}
@@ -191,7 +205,7 @@ func (c *APIClient) LabelExists(ctx context.Context, repo, name string) (bool, e
 		return false, err
 	}
 	path := fmt.Sprintf("/repos/%s/%s/labels/%s", owner, repoName, url.PathEscape(name))
-	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	resp, err := c.do(ctx, http.MethodGet, path)
 	if err != nil {
 		return false, err
 	}
@@ -220,7 +234,7 @@ func (c *APIClient) AddIssueReaction(ctx context.Context, repo string, issueNumb
 		return err
 	}
 	path := fmt.Sprintf("/repos/%s/%s/issues/%d/reactions", owner, repoName, issueNumber)
-	resp, err := c.do(ctx, http.MethodPost, path, map[string]string{"content": content})
+	resp, err := doJSONRequest(ctx, c, http.MethodPost, path, reactionRequest{Content: content})
 	if err != nil {
 		return err
 	}
@@ -245,7 +259,7 @@ func (c *APIClient) RemoveIssueReactions(ctx context.Context, repo string, issue
 	}
 
 	path := fmt.Sprintf("/repos/%s/%s/issues/%d/reactions?per_page=100", owner, repoName, issueNumber)
-	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	resp, err := c.do(ctx, http.MethodGet, path)
 	if err != nil {
 		return err
 	}
@@ -263,7 +277,7 @@ func (c *APIClient) RemoveIssueReactions(ctx context.Context, repo string, issue
 			continue
 		}
 		deletePath := fmt.Sprintf("/repos/%s/%s/issues/%d/reactions/%d", owner, repoName, issueNumber, reaction.ID)
-		deleteResp, err := c.do(ctx, http.MethodDelete, deletePath, nil)
+		deleteResp, err := c.do(ctx, http.MethodDelete, deletePath)
 		if err != nil {
 			return err
 		}
@@ -295,7 +309,7 @@ func (c *APIClient) AddIssueCommentReaction(ctx context.Context, repo string, co
 		return err
 	}
 	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", owner, repoName, commentID)
-	resp, err := c.do(ctx, http.MethodPost, path, map[string]string{"content": content})
+	resp, err := doJSONRequest(ctx, c, http.MethodPost, path, reactionRequest{Content: content})
 	if err != nil {
 		return err
 	}
@@ -320,7 +334,7 @@ func (c *APIClient) CreateIssueComment(ctx context.Context, repo string, issueNu
 		return err
 	}
 	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repoName, issueNumber)
-	resp, err := c.do(ctx, http.MethodPost, path, map[string]string{"body": body})
+	resp, err := doJSONRequest(ctx, c, http.MethodPost, path, issueCommentRequest{Body: body})
 	if err != nil {
 		return err
 	}
@@ -347,7 +361,7 @@ func (c *APIClient) AddPullRequestReviewReaction(ctx context.Context, repo strin
 		return err
 	}
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews/%d/reactions", owner, repoName, pullNumber, reviewID)
-	resp, err := c.do(ctx, http.MethodPost, path, map[string]string{"content": content})
+	resp, err := doJSONRequest(ctx, c, http.MethodPost, path, reactionRequest{Content: content})
 	if err != nil {
 		return err
 	}
@@ -371,7 +385,7 @@ func (c *APIClient) AddPullRequestReviewCommentReaction(ctx context.Context, rep
 		return err
 	}
 	path := fmt.Sprintf("/repos/%s/%s/pulls/comments/%d/reactions", owner, repoName, commentID)
-	resp, err := c.do(ctx, http.MethodPost, path, map[string]string{"content": content})
+	resp, err := doJSONRequest(ctx, c, http.MethodPost, path, reactionRequest{Content: content})
 	if err != nil {
 		return err
 	}
@@ -393,7 +407,7 @@ func validateReactionContent(content string) (string, error) {
 }
 
 func (c *APIClient) viewerLogin(ctx context.Context) (string, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/user", nil)
+	resp, err := c.do(ctx, http.MethodGet, "/user")
 	if err != nil {
 		return "", err
 	}
@@ -424,7 +438,7 @@ func (c *APIClient) UpsertWebhook(ctx context.Context, repo, webhookURL, secret 
 	}
 
 	listPath := fmt.Sprintf("/repos/%s/%s/hooks", owner, repoName)
-	listResp, err := c.do(ctx, http.MethodGet, listPath, nil)
+	listResp, err := c.do(ctx, http.MethodGet, listPath)
 	if err != nil {
 		return err
 	}
@@ -453,7 +467,7 @@ func (c *APIClient) UpsertWebhook(ctx context.Context, repo, webhookURL, secret 
 			continue
 		}
 		updatePath := fmt.Sprintf("/repos/%s/%s/hooks/%d", owner, repoName, h.ID)
-		updateResp, err := c.do(ctx, http.MethodPatch, updatePath, payload)
+		updateResp, err := doJSONRequest(ctx, c, http.MethodPatch, updatePath, payload)
 		if err != nil {
 			return err
 		}
@@ -464,7 +478,7 @@ func (c *APIClient) UpsertWebhook(ctx context.Context, repo, webhookURL, secret 
 		return nil
 	}
 
-	createResp, err := c.do(ctx, http.MethodPost, listPath, payload)
+	createResp, err := doJSONRequest(ctx, c, http.MethodPost, listPath, payload)
 	if err != nil {
 		return err
 	}
@@ -503,7 +517,7 @@ func (c *APIClient) DeleteWebhookByURL(ctx context.Context, repo, webhookURL str
 		return false, nil
 	}
 	deletePath := fmt.Sprintf("/repos/%s/%s/hooks/%d", owner, repoName, hook.ID)
-	resp, err := c.do(ctx, http.MethodDelete, deletePath, nil)
+	resp, err := c.do(ctx, http.MethodDelete, deletePath)
 	if err != nil {
 		return false, err
 	}
@@ -520,7 +534,7 @@ func (c *APIClient) listWebhooks(ctx context.Context, repo string) ([]WebhookDat
 		return nil, err
 	}
 	listPath := fmt.Sprintf("/repos/%s/%s/hooks", owner, repoName)
-	listResp, err := c.do(ctx, http.MethodGet, listPath, nil)
+	listResp, err := c.do(ctx, http.MethodGet, listPath)
 	if err != nil {
 		return nil, err
 	}
@@ -544,25 +558,37 @@ func (c *APIClient) listWebhooks(ctx context.Context, repo string) ([]WebhookDat
 	return out, nil
 }
 
-func (c *APIClient) do(ctx context.Context, method, path string, payload any) (*http.Response, error) {
-	var body io.Reader
-	if payload != nil {
-		data, err := json.Marshal(payload)
-		if err != nil {
-			return nil, fmt.Errorf("encode payload: %w", err)
-		}
-		body = bytes.NewReader(data)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+func (c *APIClient) do(ctx context.Context, method, path string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build github request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("github request failed: %w", err)
+	}
+	return resp, nil
+}
+
+func doJSONRequest[T any](ctx context.Context, c *APIClient, method, path string, payload T) (*http.Response, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("build github request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("Content-Type", "application/json")
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
