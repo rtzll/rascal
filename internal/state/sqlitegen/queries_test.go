@@ -9,6 +9,17 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+type testRunExecutionStatus string
+
+const (
+	testRunExecutionStatusRunning testRunExecutionStatus = "running"
+	testRunExecutionStatusExited  testRunExecutionStatus = "exited"
+)
+
+type testDeliveryStatus string
+
+const testDeliveryStatusProcessing testDeliveryStatus = "processing"
+
 func newQueriesForTest(t *testing.T) (*sql.DB, *Queries) {
 	t.Helper()
 	db := testdb.OpenMigratedSQLite(t)
@@ -409,7 +420,7 @@ func TestQueriesCoverage(t *testing.T) {
 		Backend:        "docker",
 		ContainerName:  "rascal-run_exec_1",
 		ContainerID:    "container-1",
-		Status:         "running",
+		Status:         string(testRunExecutionStatusRunning),
 		ExitCode:       0,
 		CreatedAt:      later + 60,
 		UpdatedAt:      later + 60,
@@ -418,7 +429,7 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatalf("UpsertRunExecution: %v", err)
 	}
 	if rows, err := q.UpdateRunExecutionState(ctx, UpdateRunExecutionStateParams{
-		Status:         "exited",
+		Status:         string(testRunExecutionStatusExited),
 		ExitCode:       137,
 		UpdatedAt:      later + 61,
 		LastObservedAt: later + 61,
@@ -432,7 +443,7 @@ func TestQueriesCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRunExecution: %v", err)
 	}
-	if execRow.Status != "exited" || execRow.ExitCode != 137 {
+	if got := testRunExecutionStatus(execRow.Status); got != testRunExecutionStatusExited || execRow.ExitCode != 137 {
 		t.Fatalf("unexpected run execution state: status=%s exit=%d", execRow.Status, execRow.ExitCode)
 	}
 	if rows, err := q.DeleteRunExecution(ctx, "run_exec_1"); err != nil {
@@ -489,7 +500,7 @@ func TestQueriesCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimDelivery delivery_1: %v", err)
 	}
-	if claim1.Status != "processing" || claim1.ClaimToken != delivery1Token {
+	if got := testDeliveryStatus(claim1.Status); got != testDeliveryStatusProcessing || claim1.ClaimToken != delivery1Token {
 		t.Fatalf("expected claimed delivery_1 token=%s, got status=%s token=%s", delivery1Token, claim1.Status, claim1.ClaimToken)
 	}
 
