@@ -11,6 +11,7 @@ rascal run --issue OWNER/REPO#123
 Flags:
   -b, --base-branch string   base branch (default "main")
       --debug                stream detailed agent execution logs (use --debug=false to reduce verbosity) (default true)
+      --dry-run-brief        compile and print the normalized run brief without creating a run
   -h, --help                 help for run
   -t, --instruction string   instruction text
       --issue string         issue reference in OWNER/REPO#NUMBER form

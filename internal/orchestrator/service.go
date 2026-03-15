@@ -16,6 +16,7 @@ import (
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/credentials"
 	ghapi "github.com/rtzll/rascal/internal/github"
+	"github.com/rtzll/rascal/internal/planning"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
@@ -102,6 +103,7 @@ type RunRequest struct {
 	Context         string
 	Debug           *bool
 	CreatedByUserID string
+	Plan            *planning.Compiled
 
 	ResponseTarget *RunResponseTarget
 }

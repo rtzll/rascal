@@ -30,6 +30,7 @@ import (
 	"github.com/rtzll/rascal/internal/clientconfig"
 	"github.com/rtzll/rascal/internal/config"
 	deployengine "github.com/rtzll/rascal/internal/deploy"
+	"github.com/rtzll/rascal/internal/planning"
 	"github.com/rtzll/rascal/internal/remote"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
@@ -897,6 +898,7 @@ rascal deploy --host "$SERVER_IP" --codex-auth ~/.codex/auth.json
 func (a *app) newRunCmd() *cobra.Command {
 	var repo, instruction, baseBranch, issueRef string
 	var debug bool
+	var dryRunBrief bool
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Start a run",
@@ -920,11 +922,15 @@ rascal run --issue OWNER/REPO#123
 					return &cliError{Code: exitInput, Message: err.Error()}
 				}
 				debugValue := optionalBoolFlagValue(cmd, "debug", debug)
-				req := buildCreateTaskPayload(createTaskPayloadInput{
+				payloadInput := createTaskPayloadInput{
 					Repo:        repo,
 					IssueNumber: issueNumber,
 					Debug:       debugValue,
-				})
+				}
+				req := buildCreateTaskPayload(payloadInput)
+				if dryRunBrief {
+					req = buildCompileBriefPayload(payloadInput)
+				}
 				resp, err := req.send(a.client, http.MethodPost)
 				if err != nil {
 					return &cliError{Code: exitServer, Message: "request failed", Cause: err}
@@ -932,6 +938,13 @@ rascal run --issue OWNER/REPO#123
 				defer closeWithLog("close issue task response body", resp.Body)
 				if resp.StatusCode >= 300 {
 					return decodeServerError(resp)
+				}
+				if dryRunBrief {
+					var out api.RunBriefResponse
+					if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+						return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+					}
+					return emitRunBrief(a, out)
 				}
 				var out api.RunResponse
 				if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -951,12 +964,16 @@ rascal run --issue OWNER/REPO#123
 			}
 
 			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
-			req := buildCreateTaskPayload(createTaskPayloadInput{
+			payloadInput := createTaskPayloadInput{
 				Repo:        repo,
 				Instruction: instruction,
 				BaseBranch:  baseBranch,
 				Debug:       debugValue,
-			})
+			}
+			req := buildCreateTaskPayload(payloadInput)
+			if dryRunBrief {
+				req = buildCompileBriefPayload(payloadInput)
+			}
 			resp, err := req.send(a.client, http.MethodPost)
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
@@ -964,6 +981,13 @@ rascal run --issue OWNER/REPO#123
 			defer closeWithLog("close task creation response body", resp.Body)
 			if resp.StatusCode >= 300 {
 				return decodeServerError(resp)
+			}
+			if dryRunBrief {
+				var out api.RunBriefResponse
+				if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+					return &cliError{Code: exitServer, Message: "failed to decode server response", Cause: err}
+				}
+				return emitRunBrief(a, out)
 			}
 			var out api.RunResponse
 			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -983,6 +1007,7 @@ rascal run --issue OWNER/REPO#123
 	cmd.Flags().StringVarP(&baseBranch, "base-branch", "b", "main", "base branch")
 	cmd.Flags().StringVar(&issueRef, "issue", "", "issue reference in OWNER/REPO#NUMBER form")
 	cmd.Flags().BoolVar(&debug, "debug", true, "stream detailed agent execution logs (use --debug=false to reduce verbosity)")
+	cmd.Flags().BoolVar(&dryRunBrief, "dry-run-brief", false, "compile and print the normalized run brief without creating a run")
 	return cmd
 }
 
@@ -2860,6 +2885,47 @@ func buildCreateTaskPayload(input createTaskPayloadInput) createTaskRequestPaylo
 		path: "/v1/tasks",
 		task: &payload,
 	}
+}
+
+func buildCompileBriefPayload(input createTaskPayloadInput) createTaskRequestPayload {
+	payload := buildCreateTaskPayload(input)
+	if input.IssueNumber > 0 {
+		payload.path = "/v1/briefs/issue"
+		return payload
+	}
+	payload.path = "/v1/briefs"
+	return payload
+}
+
+func emitRunBrief(a *app, out api.RunBriefResponse) error {
+	return emit(a, out, func() error {
+		fmt.Print(planning.RenderMarkdown(out.Brief, planning.RenderOptions{
+			IncludeProvenance: true,
+			Title:             "Run Brief",
+		}))
+		if summary := planning.RenderSourceSummary(planning.Input{Sources: summariesToSources(out.SourceSummary)}); summary != "" {
+			fmt.Print("\n" + summary)
+		}
+		return nil
+	})
+}
+
+func summariesToSources(summaries []planning.SourceSummary) []planning.Source {
+	if len(summaries) == 0 {
+		return nil
+	}
+	sources := make([]planning.Source, 0, len(summaries))
+	for _, summary := range summaries {
+		sources = append(sources, planning.Source{
+			ID:       summary.ID,
+			Kind:     summary.Kind,
+			Label:    summary.Label,
+			URL:      summary.URL,
+			Location: summary.Location,
+			Text:     summary.Preview,
+		})
+	}
+	return sources
 }
 
 func doJSON[T any](client apiClient, method, path string, payload T) (*http.Response, error) {

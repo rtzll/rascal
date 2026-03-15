@@ -8,8 +8,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rtzll/rascal/internal/planning"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
+)
+
+const (
+	RunBriefJSONFile     = "run-brief.json"
+	RunBriefMarkdownFile = "run-brief.md"
+	TriggerInputFile     = "trigger-input.json"
 )
 
 func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
@@ -36,6 +43,10 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 		if !req.Trigger.IsKnown() {
 			return state.Run{}, fmt.Errorf("unknown workflow trigger %q", req.Trigger)
 		}
+	}
+	compiled, err := compileRunPlan(req)
+	if err != nil {
+		return state.Run{}, fmt.Errorf("compile run brief: %w", err)
 	}
 	if req.PRStatus == "" {
 		if req.PRNumber > 0 {
@@ -120,7 +131,7 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 		return state.Run{}, fmt.Errorf("set run requester: %w", err)
 	}
 
-	if err := s.WriteRunFiles(run); err != nil {
+	if err := s.writeRunFilesWithPlan(run, compiled); err != nil {
 		s.setRunStatusBestEffort(run.ID, state.StatusFailed, err.Error())
 		return state.Run{}, fmt.Errorf("prepare run files: %w", err)
 	}
@@ -133,6 +144,22 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 }
 
 func (s *Server) WriteRunFiles(run state.Run) (err error) {
+	compiled, err := compileRunPlan(RunRequest{
+		TaskID:      run.TaskID,
+		Repo:        run.Repo,
+		Instruction: run.Instruction,
+		Trigger:     run.Trigger,
+		IssueNumber: run.IssueNumber,
+		PRNumber:    run.PRNumber,
+		Context:     run.Context,
+	})
+	if err != nil {
+		return fmt.Errorf("compile run brief: %w", err)
+	}
+	return s.writeRunFilesWithPlan(run, compiled)
+}
+
+func (s *Server) writeRunFilesWithPlan(run state.Run, compiled planning.Compiled) (err error) {
 	if err := os.MkdirAll(filepath.Join(run.RunDir, "codex"), 0o755); err != nil {
 		return fmt.Errorf("create codex run directory: %w", err)
 	}
@@ -156,7 +183,31 @@ func (s *Server) WriteRunFiles(run state.Run) (err error) {
 		return fmt.Errorf("write run context file: %w", err)
 	}
 
-	instructions := InstructionText(run)
+	inputData, err := json.MarshalIndent(compiled.Input, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal trigger input: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, TriggerInputFile), inputData, 0o644); err != nil {
+		return fmt.Errorf("write trigger input file: %w", err)
+	}
+
+	briefData, err := json.MarshalIndent(compiled.Brief, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal run brief: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.RunDir, RunBriefJSONFile), briefData, 0o644); err != nil {
+		return fmt.Errorf("write run brief json: %w", err)
+	}
+
+	briefMarkdown := planning.RenderMarkdown(compiled.Brief, planning.RenderOptions{
+		IncludeProvenance: true,
+		Title:             "Run Brief",
+	})
+	if err := os.WriteFile(filepath.Join(run.RunDir, RunBriefMarkdownFile), []byte(briefMarkdown), 0o644); err != nil {
+		return fmt.Errorf("write run brief markdown: %w", err)
+	}
+
+	instructions := instructionTextFromBrief(run, compiled.Brief)
 	if err := os.WriteFile(filepath.Join(run.RunDir, "instructions.md"), []byte(instructions), 0o644); err != nil {
 		return fmt.Errorf("write run instructions: %w", err)
 	}
@@ -176,6 +227,27 @@ func (s *Server) WriteRunFiles(run state.Run) (err error) {
 		return fmt.Errorf("write runner log entry: %w", err)
 	}
 	return nil
+}
+
+func compileRunPlan(req RunRequest) (planning.Compiled, error) {
+	if req.Plan != nil {
+		return *req.Plan, nil
+	}
+	compiled, err := planning.Compile(planning.Input{
+		Trigger:     req.Trigger,
+		Repo:        req.Repo,
+		Instruction: req.Instruction,
+		Context:     req.Context,
+		IssueNumber: req.IssueNumber,
+		PRNumber:    req.PRNumber,
+		Sources: []planning.Source{
+			planning.ManualPromptSource(req.Instruction),
+		},
+	})
+	if err != nil {
+		return planning.Compiled{}, fmt.Errorf("compile plan from run request: %w", err)
+	}
+	return compiled, nil
 }
 
 type RunContextFile struct {
@@ -226,6 +298,26 @@ func (s *Server) WriteRunResponseTarget(run state.Run, target *RunResponseTarget
 }
 
 func InstructionText(run state.Run) string {
+	compiled, err := compileRunPlan(RunRequest{
+		TaskID:      run.TaskID,
+		Repo:        run.Repo,
+		Instruction: run.Instruction,
+		Trigger:     run.Trigger,
+		IssueNumber: run.IssueNumber,
+		PRNumber:    run.PRNumber,
+		Context:     run.Context,
+	})
+	if err != nil {
+		return instructionTextFromBrief(run, planning.RunBrief{
+			Version:          planning.SchemaVersion,
+			Trigger:          run.Trigger,
+			PrimaryObjective: planning.Field{Text: strings.TrimSpace(run.Instruction)},
+		})
+	}
+	return instructionTextFromBrief(run, compiled.Brief)
+}
+
+func instructionTextFromBrief(run state.Run, brief planning.RunBrief) string {
 	var b strings.Builder
 	_, _ = fmt.Fprintf(&b, `# Rascal Run Instructions
 
@@ -239,14 +331,12 @@ Repository: %s
 	if run.PRNumber > 0 {
 		_, _ = fmt.Fprintf(&b, "Pull Request: #%d\n", run.PRNumber)
 	}
-	b.WriteString(`
-## Task
-
-`)
-	b.WriteString(run.Instruction)
-	b.WriteString(`
-
-`)
+	b.WriteString("\n")
+	b.WriteString(planning.RenderMarkdown(brief, planning.RenderOptions{
+		IncludeProvenance: false,
+		Title:             "Execution Brief",
+	}))
+	b.WriteString("\n")
 	if shouldIncludeGitContext(run) {
 		b.WriteString(`## Git Context
 
@@ -280,15 +370,6 @@ Repository: %s
 - If you make changes, write /rascal-meta/commit_message.txt using a conventional commit title on the first line.
 - Optionally add a commit body after a blank line in /rascal-meta/commit_message.txt.
 `)
-	if strings.TrimSpace(run.Context) != "" {
-		b.WriteString(`
-## Additional Context
-
-`)
-		b.WriteString(run.Context)
-		b.WriteString(`
-`)
-	}
 	return b.String()
 }
 
