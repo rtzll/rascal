@@ -3477,7 +3477,7 @@ func buildRunStartComment(run state.Run, target runResponseTarget, requestedBy s
 		RunID:             run.ID,
 		RequestedBy:       requestedBy,
 		Trigger:           runtrigger.Normalize(firstNonEmpty(target.Trigger.String(), run.Trigger.String())),
-		Backend:           run.AgentBackend.String(),
+		Backend:           run.AgentBackend,
 		RunnerCommit:      loadRunBuildCommit(run.RunDir),
 		BaseBranch:        run.BaseBranch,
 		HeadBranch:        run.HeadBranch,

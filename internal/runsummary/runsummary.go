@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
@@ -30,7 +31,7 @@ type StartCommentInput struct {
 	RunID             string
 	RequestedBy       string
 	Trigger           runtrigger.Name
-	Backend           string
+	Backend           agent.Backend
 	RunnerCommit      string
 	BaseBranch        string
 	HeadBranch        string
@@ -192,7 +193,7 @@ func BuildStartComment(in StartCommentInput) string {
 	if trigger := strings.TrimSpace(in.Trigger.String()); trigger != "" {
 		details = append(details, fmt.Sprintf("- Trigger: `%s`", trigger))
 	}
-	if backend := strings.TrimSpace(in.Backend); backend != "" {
+	if backend := strings.TrimSpace(in.Backend.String()); backend != "" {
 		details = append(details, fmt.Sprintf("- Backend: `%s`", backend))
 	}
 	if runnerCommit := strings.TrimSpace(in.RunnerCommit); runnerCommit != "" {
