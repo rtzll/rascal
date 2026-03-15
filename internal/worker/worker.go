@@ -147,6 +147,12 @@ func RunWithExecutor(ex CommandExecutor) error {
 		if err := os.MkdirAll(cfg.CodexHome, 0o755); err != nil {
 			return fmt.Errorf("create codex home: %w", err)
 		}
+		if err := os.MkdirAll(filepath.Join(cfg.MetaDir, "pi"), 0o755); err != nil {
+			return fmt.Errorf("create pi dir: %w", err)
+		}
+		if err := os.MkdirAll(cfg.PiSessionDir, 0o755); err != nil {
+			return fmt.Errorf("create pi session dir: %w", err)
+		}
 		if err := os.MkdirAll(cfg.WorkRoot, 0o755); err != nil {
 			return fmt.Errorf("create work dir: %w", err)
 		}

@@ -22,6 +22,7 @@ type Runtime string
 const (
 	RuntimeGooseCodex  Runtime = "goose-codex"
 	RuntimeCodex       Runtime = "codex"
+	RuntimePi          Runtime = "pi"
 	RuntimeClaude      Runtime = "claude"
 	RuntimeGooseClaude Runtime = "goose-claude"
 )
@@ -129,6 +130,8 @@ func ParseRuntime(raw string) (Runtime, error) {
 		return RuntimeGooseCodex, nil
 	case string(RuntimeCodex):
 		return RuntimeCodex, nil
+	case string(RuntimePi):
+		return RuntimePi, nil
 	case string(RuntimeClaude):
 		return RuntimeClaude, nil
 	case string(RuntimeGooseClaude):
@@ -154,6 +157,8 @@ func (r Runtime) Provider() ModelProvider {
 	switch NormalizeRuntime(string(r)) {
 	case RuntimeGooseCodex, RuntimeCodex:
 		return ModelProviderCodex
+	case RuntimePi:
+		return ModelProviderPi
 	case RuntimeClaude, RuntimeGooseClaude:
 		return ModelProviderAnthropic
 	default:

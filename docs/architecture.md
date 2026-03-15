@@ -10,11 +10,11 @@ from execution-plane responsibilities.
 
 - Control plane: `rascal` and `rascald`
 - Execution plane: detached runner containers launched via the Docker launcher
-- Runtimes: `goose-codex`, `codex`, `claude`, and `goose-claude`
+- Runtimes: `goose-codex`, `codex`, `pi`, `claude`, and `goose-claude`
 - Harnesses (derived from runtime): `goose` and `direct`
-- Model providers (derived from runtime): `codex` and `anthropic`
-- Packaging: separate runner images per runtime (Goose-Codex, Codex, Claude,
-  Goose-Claude)
+- Model providers (derived from runtime): `codex`, `pi`, and `anthropic`
+- Packaging: separate runner images per runtime (Goose-Codex, Codex, Pi,
+  Claude, Goose-Claude)
 
 In simple terms:
 
@@ -53,7 +53,7 @@ rascal (CLI) or GitHub webhook
             v
    rascal-runner in container
   - clone repo
-  - run goose or codex
+  - run the selected runtime
   - write artifacts and meta.json
   - push branch / update PR
             |
@@ -86,7 +86,7 @@ rascal (CLI) or GitHub webhook
 3. Runner container (`rascal-runner`)
 
 - Clones the repository and checks out the target branches.
-- Executes the selected runtime (`goose-codex`, `codex`, `claude`, or
+- Executes the selected runtime (`goose-codex`, `codex`, `pi`, `claude`, or
   `goose-claude`).
 - Commits changes, pushes the head branch, and creates or reuses a PR.
 - Writes canonical artifacts into mounted `/rascal-meta`.
@@ -106,7 +106,7 @@ These are the main layers in the Go codebase.
 
 2. Agent abstraction
 
-- `internal/agent` defines `Runtime`, `Harness`, `ModelProvider`, and
+- `internal/runtime` defines `Runtime`, `Harness`, `ModelProvider`, and
   `SessionMode`.
 - `Runtime` is the user-facing selection; `Harness` and `ModelProvider` are
   derived from it via `Runtime.Harness()` and `Runtime.Provider()` methods.
@@ -117,8 +117,9 @@ These are the main layers in the Go codebase.
   `Spec`/`ExecutionHandle` contract.
 - Current production implementation is Docker; `noop` exists for
   non-runtime/test scenarios.
-- Session mounting is harness-aware: Goose uses `GOOSE_PATH_ROOT`, Codex uses
-  `CODEX_HOME`, Claude uses `CLAUDE_CONFIG_DIR`.
+- Session mounting is runtime-aware: Goose uses `GOOSE_PATH_ROOT`, Codex uses
+  `CODEX_HOME`, Pi uses `PI_SESSION_DIR`, and Claude uses
+  `CLAUDE_CONFIG_DIR`.
 
 4. Control-plane and client boundaries
 
@@ -149,8 +150,8 @@ These are the main layers in the Go codebase.
 
 - Rascal builds and deploys one orchestrator binary: `rascald`.
 - Rascal also builds one runner binary: `rascal-runner`.
-- That runner binary is packaged into separate Docker images for Goose and
-  Codex.
+- That runner binary is packaged into separate Docker images for Goose-Codex,
+  Codex, Pi, Claude, and Goose-Claude.
 - `rascald` selects the runner image based on the task/run runtime.
 - Blue/green deploy replaces the control plane, while runner containers remain
   detached in the execution plane.
@@ -314,6 +315,8 @@ Rascal uses stored credentials tagged by provider and managed by `rascald`.
   which runtimes can use it:
   - `codex` credentials (default, including legacy credentials with empty
     provider): used by `codex` and `goose-codex` runtimes via `auth.json`.
+  - `pi`: env/API-key auth only in the current rollout; no stored credential
+    lease is used.
   - `anthropic` credentials: used by `claude` and `goose-claude` runtimes via
     OAuth token.
 - Each credential is either `personal` (owned by a user) or `shared`.

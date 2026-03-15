@@ -22,7 +22,8 @@ Rascal deploy uploads/builds these artifacts on the server:
 - `/etc/caddy/Caddyfile` + `/etc/caddy/rascal-upstream.caddy` (proxy target)
 - Docker images for the configured runner tags (defaults:
   `rascal-runner-goose-codex:latest`, `rascal-runner-codex:latest`,
-  `rascal-runner-claude:latest`, and `rascal-runner-goose-claude:latest`)
+  `rascal-runner-pi:latest`, `rascal-runner-claude:latest`, and
+  `rascal-runner-goose-claude:latest`)
 
 It also writes:
 
@@ -45,8 +46,8 @@ default):
 - `RASCAL_TASK_SESSION_ROOT=/var/lib/rascal/agent-sessions`
 - `RASCAL_TASK_SESSION_TTL_DAYS=14`
 - `RASCAL_RUNNER_IMAGE_GOOSE_CODEX`, `RASCAL_RUNNER_IMAGE_CODEX`,
-  `RASCAL_RUNNER_IMAGE_CLAUDE`, and `RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE` set the
-  runtime-specific runner images
+  `RASCAL_RUNNER_IMAGE_PI`, `RASCAL_RUNNER_IMAGE_CLAUDE`, and
+  `RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE` set the runtime-specific runner images
 - `RASCAL_AGENT_RUNTIME` is optional and overrides the default runtime when set
 
 ## Blue/Green Sequence

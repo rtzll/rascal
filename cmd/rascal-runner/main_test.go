@@ -286,6 +286,7 @@ func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
 	t.Setenv("GOOSE_PATH_ROOT", "")
+	t.Setenv("GOOSE_MOIM_MESSAGE_FILE", "")
 	t.Setenv("RASCAL_TASK_SESSION_MODE", "")
 	t.Setenv("RASCAL_TASK_SESSION_RESUME", "")
 	t.Setenv("RASCAL_TASK_SESSION_KEY", "")
@@ -345,6 +346,37 @@ func TestLoadConfigRespectsTaskSessionEnv(t *testing.T) {
 	}
 	if cfg.GoosePathRoot != "/rascal-goose-session" {
 		t.Fatalf("GoosePathRoot = %q, want /rascal-goose-session", cfg.GoosePathRoot)
+	}
+}
+
+func TestLoadConfigRespectsPiSessionEnv(t *testing.T) {
+	metaDir := filepath.Join(t.TempDir(), "meta")
+	workRoot := filepath.Join(t.TempDir(), "work")
+	t.Setenv("RASCAL_RUN_ID", "run_pi")
+	t.Setenv("RASCAL_TASK_ID", "owner/repo#pi")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_AGENT_RUNTIME", "pi")
+	t.Setenv("RASCAL_META_DIR", metaDir)
+	t.Setenv("RASCAL_WORK_ROOT", workRoot)
+	t.Setenv("RASCAL_TASK_SESSION_MODE", "all")
+	t.Setenv("RASCAL_TASK_SESSION_RESUME", "true")
+	t.Setenv("RASCAL_TASK_SESSION_KEY", "owner-repo-pi-abc123")
+	t.Setenv("RASCAL_TASK_SESSION_ID", "pi-session-123")
+	t.Setenv("PI_SESSION_DIR", "/rascal-pi-session")
+
+	cfg, err := worker.LoadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if cfg.AgentRuntime != runtime.RuntimePi {
+		t.Fatalf("AgentRuntime = %q, want %q", cfg.AgentRuntime, runtime.RuntimePi)
+	}
+	if cfg.PiSessionDir != "/rascal-pi-session" {
+		t.Fatalf("PiSessionDir = %q, want /rascal-pi-session", cfg.PiSessionDir)
+	}
+	if cfg.TaskSession.RuntimeSessionID != "pi-session-123" {
+		t.Fatalf("RuntimeSessionID = %q, want pi-session-123", cfg.TaskSession.RuntimeSessionID)
 	}
 }
 
@@ -1019,6 +1051,130 @@ func TestRunCodexSkipsRecordedUsageWhenSessionUsageInvalid(t *testing.T) {
 	}
 }
 
+func TestRunPiFreshSession(t *testing.T) {
+	root := t.TempDir()
+	cfg := worker.Config{
+		RepoDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
+		PiSessionDir:     filepath.Join(root, "pi-sessions"),
+		AgentRuntime:     runtime.RuntimePi,
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do pi thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var gotArgs []string
+	ex := fakeExecutor{
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "pi" {
+				t.Fatalf("unexpected command: %s", name)
+			}
+			gotArgs = append([]string(nil), args...)
+			if _, err := io.WriteString(stdout, `{"type":"session","id":"pi-session-1"}`+"\n"); err != nil {
+				return fmt.Errorf("write fake pi session: %w", err)
+			}
+			if _, err := io.WriteString(stdout, `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"final pi response"}]}}`+"\n"); err != nil {
+				return fmt.Errorf("write fake pi assistant message: %w", err)
+			}
+			return nil
+		},
+	}
+
+	output, sessionID, err := worker.RunPi(ex, cfg)
+	if err != nil {
+		t.Fatalf("RunPi returned error: %v", err)
+	}
+	if output != "final pi response" {
+		t.Fatalf("output = %q, want final pi response", output)
+	}
+	if sessionID != "pi-session-1" {
+		t.Fatalf("sessionID = %q, want pi-session-1", sessionID)
+	}
+	argsText := strings.Join(gotArgs, " ")
+	for _, want := range []string{"--mode", "json", "--session-dir", cfg.PiSessionDir, "do pi thing"} {
+		if !strings.Contains(argsText, want) {
+			t.Fatalf("expected %q in args, got %q", want, argsText)
+		}
+	}
+	if strings.Contains(argsText, "--session pi-session-") {
+		t.Fatalf("did not expect explicit session selection in fresh pi run, got %q", argsText)
+	}
+	if !strings.Contains(argsText, "--no-session") {
+		t.Fatalf("expected --no-session in fresh pi run, got %q", argsText)
+	}
+	data, err := os.ReadFile(cfg.AgentOutputPath)
+	if err != nil {
+		t.Fatalf("read pi agent output: %v", err)
+	}
+	if string(data) != "final pi response" {
+		t.Fatalf("agent output file = %q, want final pi response", string(data))
+	}
+}
+
+func TestRunPiResumeSession(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := filepath.Join(root, "pi-sessions", "nested", "session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatalf("mkdir pi sessions: %v", err)
+	}
+	if err := os.WriteFile(sessionPath, []byte(`{"type":"session","id":"pi-session-abc"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write pi session file: %v", err)
+	}
+
+	cfg := worker.Config{
+		RepoDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
+		PiSessionDir:     filepath.Join(root, "pi-sessions"),
+		AgentRuntime:     runtime.RuntimePi,
+		TaskSession: runner.TaskSessionSpec{
+			Mode:             runtime.SessionModeAll,
+			Resume:           true,
+			RuntimeSessionID: "pi-session-abc",
+		},
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("continue pi task"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var gotArgs []string
+	ex := fakeExecutor{
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "pi" {
+				t.Fatalf("unexpected command: %s", name)
+			}
+			gotArgs = append([]string(nil), args...)
+			if _, err := io.WriteString(stdout, `{"type":"session","id":"pi-session-abc"}`+"\n"); err != nil {
+				return fmt.Errorf("write fake pi resumed session: %w", err)
+			}
+			if _, err := io.WriteString(stdout, `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"continued pi response"}]}}`+"\n"); err != nil {
+				return fmt.Errorf("write fake pi continued assistant message: %w", err)
+			}
+			return nil
+		},
+	}
+
+	_, sessionID, err := worker.RunPi(ex, cfg)
+	if err != nil {
+		t.Fatalf("RunPi returned error: %v", err)
+	}
+	if sessionID != "pi-session-abc" {
+		t.Fatalf("sessionID = %q, want pi-session-abc", sessionID)
+	}
+	argsText := strings.Join(gotArgs, " ")
+	for _, want := range []string{"--mode", "json", "--session-dir", cfg.PiSessionDir, "--session", "pi-session-abc"} {
+		if !strings.Contains(argsText, want) {
+			t.Fatalf("expected %q in args, got %q", want, argsText)
+		}
+	}
+	if strings.Contains(argsText, "--no-session") {
+		t.Fatalf("did not expect --no-session in resumed pi run, got %q", argsText)
+	}
+}
+
 func TestRunClaudeFreshSession(t *testing.T) {
 	root := t.TempDir()
 	cfg := worker.Config{
@@ -1636,6 +1792,7 @@ func TestRunWithExecutorFailsWhenRequiredCommandMissing(t *testing.T) {
 	}{
 		{name: "goose", backend: "goose", missingCommand: "goose"},
 		{name: "codex", backend: "codex", missingCommand: "codex"},
+		{name: "pi", backend: "pi", missingCommand: "pi"},
 	}
 
 	for _, tc := range tests {

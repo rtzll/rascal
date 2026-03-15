@@ -37,11 +37,17 @@ func TestRunRemoteDoctorUsesSlotUnitsOnly(t *testing.T) {
 	if status.RunnerImageCodex != "rascal-runner-codex:latest" {
 		t.Fatalf("runner image codex = %q, want rascal-runner-codex:latest", status.RunnerImageCodex)
 	}
+	if status.RunnerImagePi != "rascal-runner-pi:latest" {
+		t.Fatalf("runner image pi = %q, want rascal-runner-pi:latest", status.RunnerImagePi)
+	}
 	if status.RunnerImageGooseCodexID != "sha256:goose123" {
 		t.Fatalf("runner image goose-codex id = %q, want sha256:goose123", status.RunnerImageGooseCodexID)
 	}
 	if status.RunnerImageCodexID != "sha256:codex456" {
 		t.Fatalf("runner image codex id = %q, want sha256:codex456", status.RunnerImageCodexID)
+	}
+	if status.RunnerImagePiID != "sha256:pi789" {
+		t.Fatalf("runner image pi id = %q, want sha256:pi789", status.RunnerImagePiID)
 	}
 
 	sshLog, err := os.ReadFile(filepath.Join(logDir, "ssh_calls.log"))
@@ -99,12 +105,12 @@ if [[ "$cmd" == *"case \"\$slot\" in blue|green) echo \"\$slot\" ;;"* ]]; then
   printf 'blue'
   exit 0
 fi
-if [[ "$cmd" == *"printf 'goose=%s\\ncodex=%s\\n'"* ]]; then
-  printf 'goose=rascal-runner-goose-codex:latest\ncodex=rascal-runner-codex:latest\n'
+if [[ "$cmd" == *"printf 'goose=%s\\ncodex=%s\\npi=%s\\n'"* ]]; then
+  printf 'goose=rascal-runner-goose-codex:latest\ncodex=rascal-runner-codex:latest\npi=rascal-runner-pi:latest\n'
   exit 0
 fi
 if [[ "$cmd" == *"printf 'goose_id=%s\\n'"* ]]; then
-  printf 'goose_id=sha256:goose123\ncodex_id=sha256:codex456\n'
+  printf 'goose_id=sha256:goose123\ncodex_id=sha256:codex456\npi_id=sha256:pi789\n'
   exit 0
 fi
 if [[ "$cmd" == *"echo ok"* ]]; then

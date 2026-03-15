@@ -113,6 +113,8 @@ Agent runtime notes:
   directory.
 - Codex resumes by reusing a task-scoped `CODEX_HOME` and the last discovered
   runtime session id.
+- Pi resumes by reusing a task-scoped `PI_SESSION_DIR` and the last discovered
+  runtime session id.
 - Claude resumes by reusing a named Claude Code session with `--resume`.
 - Goose-Claude uses Goose with Claude Code as provider, sharing the same session
   resume behavior as Goose.
@@ -121,12 +123,15 @@ Agent runtime notes:
 
 ## Credential Leasing
 
-Rascal uses leased stored credentials tagged by provider for all agent runs.
+Rascal uses leased stored credentials tagged by provider for runtimes that
+support brokered auth.
 
 Each credential is tagged with a `provider` (`codex` or `anthropic`). The
 broker automatically selects credentials matching the run's runtime:
 
 - `codex` and `goose-codex` runs use `codex` credentials (auth.json format).
+- `pi` runs currently use env/API-key auth only and do not lease stored
+  credentials.
 - `claude` and `goose-claude` runs use `anthropic` credentials (OAuth token
   format).
 - Legacy credentials with no provider tag are treated as `codex` credentials.

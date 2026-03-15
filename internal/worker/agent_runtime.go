@@ -24,6 +24,8 @@ func runAgent(ex CommandExecutor, cfg Config) (string, string, error) {
 	switch configuredAgentRuntime(cfg) {
 	case runtime.RuntimeCodex:
 		return RunCodex(ex, cfg)
+	case runtime.RuntimePi:
+		return RunPi(ex, cfg)
 	case runtime.RuntimeClaude:
 		return RunClaude(ex, cfg)
 	case runtime.RuntimeGooseClaude:
@@ -201,6 +203,81 @@ func CodexRunArgs(cfg Config) []string {
 		args = append(args, sessionID)
 	}
 	args = append(args, "-")
+	return args
+}
+
+func RunPi(ex CommandExecutor, cfg Config) (output string, sessionID string, err error) {
+	sessionID = configuredRuntimeSessionID(cfg)
+	resume := configuredSessionResume(cfg)
+	if resume && sessionID != "" {
+		exists, existsErr := piSessionExists(cfg.PiSessionDir, sessionID)
+		if existsErr != nil {
+			log.Printf("[%s] pi session preflight warning: id=%s error=%v", nowUTC(), sessionID, existsErr)
+		} else if !exists {
+			log.Printf("[%s] pi session missing; starting fresh session id=%s", nowUTC(), sessionID)
+			resume = false
+		}
+	}
+
+	args := PiRunArgs(cfg, resume)
+	log.Printf("[%s] running pi (backend=%s session_mode=%s session_key=%s session_id=%s resume=%t session_dir=%s)",
+		nowUTC(),
+		configuredAgentRuntime(cfg),
+		configuredSessionMode(cfg),
+		configuredSessionKey(cfg),
+		sessionID,
+		resume && sessionID != "",
+		cfg.PiSessionDir,
+	)
+
+	logFile, err := os.OpenFile(cfg.GooseLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return "", sessionID, fmt.Errorf("open pi log: %w", err)
+	}
+	defer func() {
+		if closeErr := logFile.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close pi log: %w", closeErr)
+		}
+	}()
+
+	instructions, err := os.ReadFile(cfg.InstructionsPath)
+	if err != nil {
+		return "", sessionID, fmt.Errorf("read instructions: %w", err)
+	}
+	if err := ex.Run(cfg.RepoDir, nil, logFile, logFile, "pi", append(args, string(instructions))...); err != nil {
+		discoveredSessionID, discoverErr := discoverPiSessionID(cfg.GooseLogPath, cfg.PiSessionDir)
+		if discoverErr != nil {
+			log.Printf("[%s] pi session discovery warning: %v", nowUTC(), discoverErr)
+		}
+		if strings.TrimSpace(discoveredSessionID) != "" {
+			sessionID = strings.TrimSpace(discoveredSessionID)
+		}
+		return "", sessionID, fmt.Errorf("pi run failed: %w", err)
+	}
+
+	discoveredSessionID, err := discoverPiSessionID(cfg.GooseLogPath, cfg.PiSessionDir)
+	if err != nil {
+		return "", sessionID, fmt.Errorf("discover pi session: %w", err)
+	}
+	if strings.TrimSpace(discoveredSessionID) != "" {
+		sessionID = strings.TrimSpace(discoveredSessionID)
+	}
+
+	output, err = loadPiOutput(cfg.AgentOutputPath, cfg.GooseLogPath)
+	if err != nil {
+		return "", sessionID, err
+	}
+	return output, sessionID, nil
+}
+
+func PiRunArgs(cfg Config, resume bool) []string {
+	args := []string{"--mode", "json", "--session-dir", cfg.PiSessionDir}
+	sessionID := strings.TrimSpace(configuredRuntimeSessionID(cfg))
+	if configuredSessionMode(cfg) == runtime.SessionModeOff {
+		args = append(args, "--no-session")
+	} else if resume && sessionID != "" {
+		args = append(args, "--session", sessionID)
+	}
 	return args
 }
 
@@ -409,6 +486,17 @@ func loadAgentOutput(outputPath, fallbackLogPath, backend string) (string, error
 	return string(data), nil
 }
 
+func loadPiOutput(outputPath, logPath string) (string, error) {
+	output, err := extractPiAssistantText(logPath)
+	if err != nil {
+		return "", fmt.Errorf("extract pi assistant output: %w", err)
+	}
+	if writeErr := os.WriteFile(outputPath, []byte(output), 0o644); writeErr != nil {
+		return "", fmt.Errorf("write pi agent output: %w", writeErr)
+	}
+	return output, nil
+}
+
 func discoverLatestCodexSessionID(codexHome string) (string, error) {
 	sessionFiles, err := listCodexSessionFiles(filepath.Join(strings.TrimSpace(codexHome), defaultCodexSessionDir))
 	if err != nil {
@@ -498,6 +586,203 @@ func parseCodexSessionID(path string) (sessionID string, err error) {
 		return "", fmt.Errorf("decode codex session metadata: %w", err)
 	}
 	return strings.TrimSpace(record.Payload.ID), nil
+}
+
+func piSessionExists(sessionRoot, wantID string) (bool, error) {
+	sessionFiles, err := listPiSessionFiles(sessionRoot)
+	if err != nil {
+		return false, err
+	}
+	for _, sessionFile := range sessionFiles {
+		sessionID, err := parsePiSessionID(sessionFile)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(sessionID) == strings.TrimSpace(wantID) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func discoverPiSessionID(logPath, sessionRoot string) (string, error) {
+	if sessionID, err := parsePiSessionIDFromLog(logPath); err == nil && strings.TrimSpace(sessionID) != "" {
+		return strings.TrimSpace(sessionID), nil
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+
+	sessionFiles, err := listPiSessionFiles(sessionRoot)
+	if err != nil {
+		return "", err
+	}
+	for _, sessionFile := range sessionFiles {
+		sessionID, err := parsePiSessionID(sessionFile)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(sessionID) != "" {
+			return strings.TrimSpace(sessionID), nil
+		}
+	}
+	return "", nil
+}
+
+func listPiSessionFiles(root string) ([]string, error) {
+	if strings.TrimSpace(root) == "" {
+		return nil, nil
+	}
+	if _, err := os.Stat(root); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat pi sessions root: %w", err)
+	}
+
+	type sessionFile struct {
+		path    string
+		modTime time.Time
+	}
+	var sessionFiles []sessionFile
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk pi sessions: %w", err)
+		}
+		if info.IsDir() || filepath.Ext(path) != ".jsonl" {
+			return nil
+		}
+		sessionFiles = append(sessionFiles, sessionFile{path: path, modTime: info.ModTime()})
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("walk pi sessions: %w", err)
+	}
+
+	sort.Slice(sessionFiles, func(i, j int) bool {
+		if sessionFiles[i].modTime.Equal(sessionFiles[j].modTime) {
+			return sessionFiles[i].path > sessionFiles[j].path
+		}
+		return sessionFiles[i].modTime.After(sessionFiles[j].modTime)
+	})
+
+	paths := make([]string, 0, len(sessionFiles))
+	for _, sessionFile := range sessionFiles {
+		paths = append(paths, sessionFile.path)
+	}
+	return paths, nil
+}
+
+func parsePiSessionID(path string) (sessionID string, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open pi session file: %w", err)
+	}
+	defer func() {
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close pi session file: %w", closeErr)
+		}
+	}()
+	return parsePiSessionIDFromReader(file)
+}
+
+func parsePiSessionIDFromLog(path string) (sessionID string, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open pi log %s: %w", path, err)
+	}
+	defer func() {
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close pi log: %w", closeErr)
+		}
+	}()
+	return parsePiSessionIDFromReader(file)
+}
+
+func parsePiSessionIDFromReader(r io.Reader) (string, error) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var record struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			continue
+		}
+		if record.Type == "session" && strings.TrimSpace(record.ID) != "" {
+			return strings.TrimSpace(record.ID), nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("read pi session stream: %w", err)
+	}
+	return "", nil
+}
+
+func extractPiAssistantText(logPath string) (output string, err error) {
+	file, err := os.Open(logPath)
+	if err != nil {
+		return "", fmt.Errorf("open pi log: %w", err)
+	}
+	defer func() {
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close pi log: %w", closeErr)
+		}
+	}()
+
+	scanner := bufio.NewScanner(file)
+	lastText := ""
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var record struct {
+			Type    string `json:"type"`
+			Message struct {
+				Role    string `json:"role"`
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			continue
+		}
+		if record.Type != "message_end" || record.Message.Role != "assistant" {
+			continue
+		}
+		var b strings.Builder
+		for _, content := range record.Message.Content {
+			if content.Type != "text" || content.Text == "" {
+				continue
+			}
+			if b.Len() > 0 {
+				b.WriteString("\n\n")
+			}
+			b.WriteString(content.Text)
+		}
+		if strings.TrimSpace(b.String()) != "" {
+			lastText = b.String()
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("read pi log: %w", err)
+	}
+	if strings.TrimSpace(lastText) == "" {
+		data, err := os.ReadFile(logPath)
+		if err != nil {
+			return "", fmt.Errorf("read pi log: %w", err)
+		}
+		if strings.TrimSpace(string(data)) == "" {
+			return "(no pi output captured)", nil
+		}
+		return string(data), nil
+	}
+	return lastText, nil
 }
 
 func samePath(left, right string) bool {

@@ -40,6 +40,7 @@ type Config struct {
 
 	GoosePathRoot   string
 	CodexHome       string
+	PiSessionDir    string
 	ClaudeConfigDir string
 	TaskSession     runner.TaskSessionSpec
 }
@@ -126,6 +127,7 @@ func LoadConfig() (Config, error) {
 	}
 	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))
 	codexHome := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CODEX_HOME")), filepath.Join(metaDir, "codex"))
+	piSessionDir := firstNonEmptyValue(strings.TrimSpace(os.Getenv("PI_SESSION_DIR")), filepath.Join(metaDir, "pi", defaultCodexSessionDir))
 	claudeConfigDir := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")), filepath.Join(metaDir, "claude"))
 	persistentInstructionsPath := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_MOIM_MESSAGE_FILE")), filepath.Join(metaDir, defaultPersistentInstructionsFile))
 
@@ -153,6 +155,7 @@ func LoadConfig() (Config, error) {
 		AgentRuntime:               agentRuntime,
 		GoosePathRoot:              goosePathRoot,
 		CodexHome:                  codexHome,
+		PiSessionDir:               piSessionDir,
 		ClaudeConfigDir:            claudeConfigDir,
 		TaskSession: runner.TaskSessionSpec{
 			Mode:             agentSessionMode,
@@ -279,6 +282,8 @@ func validateCommands(ex CommandExecutor, cfg Config) error {
 	switch configuredAgentRuntime(cfg) {
 	case runtime.RuntimeCodex:
 		names = append(names, "codex")
+	case runtime.RuntimePi:
+		names = append(names, "pi")
 	case runtime.RuntimeClaude:
 		names = append(names, "claude")
 	case runtime.RuntimeGooseClaude:

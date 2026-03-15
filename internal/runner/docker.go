@@ -33,8 +33,10 @@ const (
 	containerWorkDir          = "/work"
 	containerGooseStateDir    = "/rascal-meta/goose"
 	containerCodexStateDir    = "/rascal-meta/codex"
+	containerPiStateDir       = "/rascal-meta/pi"
 	containerGooseSessionDir  = "/rascal-goose-session"
 	containerCodexSessionDir  = "/rascal-codex-session"
+	containerPiSessionDir     = "/rascal-pi-session"
 	containerClaudeStateDir   = "/rascal-meta/claude"
 	containerClaudeSessionDir = "/rascal-claude-session"
 	containerContextJSONPath  = "/rascal-meta/context.json"
@@ -91,6 +93,7 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 
 	codexHome := containerCodexStateDir
 	goosePathRoot := containerGooseStateDir
+	piSessionDir := containerPiStateDir
 	claudeConfigDir := containerClaudeStateDir
 	sessionMountTarget := ""
 	if sessionResume && sessionDir != "" {
@@ -98,6 +101,9 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		case runtime.RuntimeCodex:
 			codexHome = containerCodexSessionDir
 			sessionMountTarget = containerCodexSessionDir
+		case runtime.RuntimePi:
+			piSessionDir = containerPiSessionDir
+			sessionMountTarget = containerPiSessionDir
 		case runtime.RuntimeClaude:
 			claudeConfigDir = containerClaudeSessionDir
 			sessionMountTarget = containerClaudeSessionDir
@@ -125,6 +131,7 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		"RASCAL_TASK_SESSION_KEY":    sessionKey,
 		"RASCAL_TASK_SESSION_ID":     runtimeSessionID,
 		"CODEX_HOME":                 codexHome,
+		"PI_SESSION_DIR":             piSessionDir,
 		"GH_PROMPT_DISABLED":         "1",
 		"GIT_TERMINAL_PROMPT":        "0",
 	}
@@ -184,7 +191,7 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		sessionResume,
 		sessionKey,
 		runtimeSessionID,
-		firstNonEmptySessionPath(sessionMountTarget, goosePathRoot),
+		firstNonEmptySessionPath(sessionMountTarget, goosePathRoot, piSessionDir, codexHome, claudeConfigDir),
 	); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("write runner session log: %w", err)
 	}

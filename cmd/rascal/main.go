@@ -1637,6 +1637,12 @@ func (a *app) newDoctorCmd() *cobra.Command {
 						if codexImageID := strings.TrimSpace(remote.RunnerImageCodexID); codexImageID != "" {
 							a.println("remote codex runner image id: %s", codexImageID)
 						}
+						if piImage := strings.TrimSpace(remote.RunnerImagePi); piImage != "" {
+							a.println("remote pi runner image: %s", piImage)
+						}
+						if piImageID := strings.TrimSpace(remote.RunnerImagePiID); piImageID != "" {
+							a.println("remote pi runner image id: %s", piImageID)
+						}
 					}
 				}
 				if !cfgExists {
@@ -1657,7 +1663,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					if strings.TrimSpace(remote.Error) == "" && !remote.RunnerImageConfigured {
 						targetUser := firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root")
 						targetHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
-						a.println("hint: remote rascal.env must set explicit runner images: `ssh %s@%s 'printf \"RASCAL_RUNNER_IMAGE_GOOSE_CODEX=rascal-runner-goose-codex:latest\\nRASCAL_RUNNER_IMAGE_CODEX=rascal-runner-codex:latest\\n\" >> /etc/rascal/rascal.env'`", targetUser, targetHost)
+						a.println("hint: remote rascal.env must set explicit runner images: `ssh %s@%s 'printf \"RASCAL_RUNNER_IMAGE_GOOSE_CODEX=rascal-runner-goose-codex:latest\\nRASCAL_RUNNER_IMAGE_CODEX=rascal-runner-codex:latest\\nRASCAL_RUNNER_IMAGE_PI=rascal-runner-pi:latest\\n\" >> /etc/rascal/rascal.env'`", targetUser, targetHost)
 					}
 				}
 				return nil
