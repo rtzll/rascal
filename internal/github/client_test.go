@@ -52,11 +52,10 @@ func TestGetPullRequest(t *testing.T) {
 	t.Run("returns base and head refs", func(t *testing.T) {
 		client := newGitHubMockClient(t,
 			githubRoute(http.MethodGet, "/repos/owner/repo/pulls/42", func(w http.ResponseWriter, _ *http.Request) {
-				writeJSONResponse(t, w, http.StatusOK, map[string]any{
-					"number": 42,
-					"base":   map[string]any{"ref": "main"},
-					"head":   map[string]any{"ref": "feature/fix-readme"},
-				})
+				pr := PullRequest{Number: 42}
+				pr.Base.Ref = "main"
+				pr.Head.Ref = "feature/fix-readme"
+				writeJSONResponse(t, w, http.StatusOK, pr)
 			}),
 		)
 		pr, err := client.GetPullRequest(context.Background(), "owner/repo", 42)
@@ -160,8 +159,8 @@ func TestAddIssueReaction(t *testing.T) {
 	t.Run("posts reaction", func(t *testing.T) {
 		client := newGitHubMockClient(t,
 			githubRoute(http.MethodPost, "/repos/owner/repo/issues/42/reactions", func(w http.ResponseWriter, r *http.Request) {
-				in := decodeJSONRequest[map[string]string](t, r)
-				if in["content"] != ReactionEyes {
+				in := decodeJSONRequest[reactionRequest](t, r)
+				if in.Content != ReactionEyes {
 					t.Fatalf("unexpected reaction payload: %v", in)
 				}
 				w.WriteHeader(http.StatusCreated)
@@ -201,13 +200,21 @@ func TestRemoveIssueReactions(t *testing.T) {
 		deleted := []string{}
 		client := newGitHubMockClient(t,
 			githubRoute(http.MethodGet, "/user", func(w http.ResponseWriter, _ *http.Request) {
-				writeJSONResponse(t, w, http.StatusOK, map[string]any{"login": "rascalbot"})
+				writeJSONResponse(t, w, http.StatusOK, struct {
+					Login string `json:"login"`
+				}{Login: "rascalbot"})
 			}),
 			githubRoute(http.MethodGet, "/repos/owner/repo/issues/42/reactions", func(w http.ResponseWriter, _ *http.Request) {
-				writeJSONResponse(t, w, http.StatusOK, []map[string]any{
-					{"id": 1, "user": map[string]any{"login": "rascalbot"}},
-					{"id": 2, "user": map[string]any{"login": "someone-else"}},
-					{"id": 3, "user": map[string]any{"login": "RASCALBOT"}},
+				writeJSONResponse(t, w, http.StatusOK, []issueReaction{
+					{ID: 1, User: struct {
+						Login string `json:"login"`
+					}{Login: "rascalbot"}},
+					{ID: 2, User: struct {
+						Login string `json:"login"`
+					}{Login: "someone-else"}},
+					{ID: 3, User: struct {
+						Login string `json:"login"`
+					}{Login: "RASCALBOT"}},
 				})
 			}),
 			githubRoute(http.MethodDelete, "/repos/owner/repo/issues/42/reactions/1", func(w http.ResponseWriter, _ *http.Request) {
@@ -240,8 +247,8 @@ func TestAddIssueCommentReaction(t *testing.T) {
 	t.Run("posts reaction", func(t *testing.T) {
 		client := newGitHubMockClient(t,
 			githubRoute(http.MethodPost, "/repos/owner/repo/issues/comments/123/reactions", func(w http.ResponseWriter, r *http.Request) {
-				in := decodeJSONRequest[map[string]string](t, r)
-				if in["content"] != ReactionEyes {
+				in := decodeJSONRequest[reactionRequest](t, r)
+				if in.Content != ReactionEyes {
 					t.Fatalf("unexpected reaction payload: %v", in)
 				}
 				w.WriteHeader(http.StatusCreated)
@@ -265,8 +272,8 @@ func TestCreateIssueComment(t *testing.T) {
 	t.Run("posts issue comment", func(t *testing.T) {
 		client := newGitHubMockClient(t,
 			githubRoute(http.MethodPost, "/repos/owner/repo/issues/42/comments", func(w http.ResponseWriter, r *http.Request) {
-				in := decodeJSONRequest[map[string]string](t, r)
-				if in["body"] != "hello from rascal" {
+				in := decodeJSONRequest[issueCommentRequest](t, r)
+				if in.Body != "hello from rascal" {
 					t.Fatalf("unexpected comment payload: %v", in)
 				}
 				w.WriteHeader(http.StatusCreated)
@@ -298,8 +305,8 @@ func TestAddPullRequestReviewReaction(t *testing.T) {
 	t.Run("posts reaction", func(t *testing.T) {
 		client := newGitHubMockClient(t,
 			githubRoute(http.MethodPost, "/repos/owner/repo/pulls/42/reviews/999/reactions", func(w http.ResponseWriter, r *http.Request) {
-				in := decodeJSONRequest[map[string]string](t, r)
-				if in["content"] != ReactionEyes {
+				in := decodeJSONRequest[reactionRequest](t, r)
+				if in.Content != ReactionEyes {
 					t.Fatalf("unexpected reaction payload: %v", in)
 				}
 				w.WriteHeader(http.StatusCreated)
@@ -327,8 +334,8 @@ func TestAddPullRequestReviewCommentReaction(t *testing.T) {
 	t.Run("posts reaction", func(t *testing.T) {
 		client := newGitHubMockClient(t,
 			githubRoute(http.MethodPost, "/repos/owner/repo/pulls/comments/777/reactions", func(w http.ResponseWriter, r *http.Request) {
-				in := decodeJSONRequest[map[string]string](t, r)
-				if in["content"] != ReactionEyes {
+				in := decodeJSONRequest[reactionRequest](t, r)
+				if in.Content != ReactionEyes {
 					t.Fatalf("unexpected reaction payload: %v", in)
 				}
 				w.WriteHeader(http.StatusCreated)

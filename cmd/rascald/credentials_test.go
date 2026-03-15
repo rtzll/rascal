@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rtzll/rascal/internal/api"
 	"github.com/rtzll/rascal/internal/credentials"
 	credentialstrategies "github.com/rtzll/rascal/internal/credentials/strategies"
 	"github.com/rtzll/rascal/internal/credentialstrategy"
@@ -102,13 +103,12 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 	if ownerListRec.Code != http.StatusOK {
 		t.Fatalf("owner list status = %d, want 200", ownerListRec.Code)
 	}
-	var payload map[string][]map[string]any
+	var payload api.CredentialListResponse
 	if err := json.Unmarshal(ownerListRec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode owner list: %v", err)
 	}
-	for _, c := range payload["credentials"] {
-		id, ok := c["id"].(string)
-		if ok && id == "cred-shared" {
+	for _, c := range payload.Credentials {
+		if c.ID == "cred-shared" {
 			t.Fatalf("owner should not list shared credential")
 		}
 	}

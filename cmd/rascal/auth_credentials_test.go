@@ -239,22 +239,22 @@ func TestAuthCredentialsDisableFetchesUpdatedCredential(t *testing.T) {
 		case r.Method == http.MethodDelete && r.URL.Path == "/v1/credentials/cred_disable":
 			deletes++
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(map[string]any{"disabled": true}); err != nil {
+			if err := json.NewEncoder(w).Encode(credentialDisableResponse{Disabled: true}); err != nil {
 				t.Fatalf("encode delete response: %v", err)
 			}
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/credentials/cred_disable":
 			gets++
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(map[string]any{
-				"credential": map[string]any{
-					"id":            "cred_disable",
-					"owner_user_id": "user_1",
-					"scope":         "personal",
-					"weight":        1,
-					"status":        "disabled",
-					"last_error":    "disabled by API",
-					"created_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-					"updated_at":    time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
+			if err := json.NewEncoder(w).Encode(credentialGetResponse{
+				Credential: credentialRecord{
+					ID:          "cred_disable",
+					OwnerUserID: "user_1",
+					Scope:       "personal",
+					Weight:      1,
+					Status:      "disabled",
+					LastError:   "disabled by API",
+					CreatedAt:   time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					UpdatedAt:   time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
 				},
 			}); err != nil {
 				t.Fatalf("encode get response: %v", err)
@@ -307,14 +307,14 @@ func TestSeedBootstrapSharedCredentialCreatesWhenMissing(t *testing.T) {
 				t.Fatalf("unexpected create request: %+v", req)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(map[string]any{
-				"credential": map[string]any{
-					"id":         bootstrapSharedCredentialID,
-					"scope":      "shared",
-					"weight":     1,
-					"status":     "active",
-					"created_at": time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-					"updated_at": time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+			if err := json.NewEncoder(w).Encode(credentialGetResponse{
+				Credential: credentialRecord{
+					ID:        bootstrapSharedCredentialID,
+					Scope:     "shared",
+					Weight:    1,
+					Status:    "active",
+					CreatedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					UpdatedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
 				},
 			}); err != nil {
 				t.Fatalf("encode create response: %v", err)
@@ -348,19 +348,19 @@ func TestSeedBootstrapSharedCredentialUpdatesWhenPresent(t *testing.T) {
 		t.Fatalf("write auth file: %v", err)
 	}
 
-	var raw map[string]any
+	var raw credentialUpdateRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/credentials/"+bootstrapSharedCredentialID:
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(map[string]any{
-				"credential": map[string]any{
-					"id":         bootstrapSharedCredentialID,
-					"scope":      "shared",
-					"weight":     2,
-					"status":     "cooldown",
-					"created_at": time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-					"updated_at": time.Date(2026, 3, 8, 12, 1, 0, 0, time.UTC),
+			if err := json.NewEncoder(w).Encode(credentialGetResponse{
+				Credential: credentialRecord{
+					ID:        bootstrapSharedCredentialID,
+					Scope:     "shared",
+					Weight:    2,
+					Status:    "cooldown",
+					CreatedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					UpdatedAt: time.Date(2026, 3, 8, 12, 1, 0, 0, time.UTC),
 				},
 			}); err != nil {
 				t.Fatalf("encode get response: %v", err)
@@ -370,14 +370,14 @@ func TestSeedBootstrapSharedCredentialUpdatesWhenPresent(t *testing.T) {
 				t.Fatalf("decode patch request: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(map[string]any{
-				"credential": map[string]any{
-					"id":         bootstrapSharedCredentialID,
-					"scope":      "shared",
-					"weight":     2,
-					"status":     "active",
-					"created_at": time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-					"updated_at": time.Date(2026, 3, 8, 12, 2, 0, 0, time.UTC),
+			if err := json.NewEncoder(w).Encode(credentialGetResponse{
+				Credential: credentialRecord{
+					ID:        bootstrapSharedCredentialID,
+					Scope:     "shared",
+					Weight:    2,
+					Status:    "active",
+					CreatedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+					UpdatedAt: time.Date(2026, 3, 8, 12, 2, 0, 0, time.UTC),
 				},
 			}); err != nil {
 				t.Fatalf("encode patch response: %v", err)
@@ -396,16 +396,16 @@ func TestSeedBootstrapSharedCredentialUpdatesWhenPresent(t *testing.T) {
 	if _, err := seedBootstrapSharedCredential(client, authPath); err != nil {
 		t.Fatalf("seedBootstrapSharedCredential: %v", err)
 	}
-	if raw["scope"] != "shared" || raw["status"] != "active" || raw["auth_blob"] != `{"token":"updated"}` {
+	if raw.Scope == nil || *raw.Scope != "shared" || raw.Status == nil || *raw.Status != "active" || raw.AuthBlob == nil || *raw.AuthBlob != `{"token":"updated"}` {
 		t.Fatalf("unexpected patch payload: %+v", raw)
 	}
-	if raw["cooldown_until"] != "" || raw["last_error"] != "" {
+	if raw.CooldownUntil == nil || *raw.CooldownUntil != "" || raw.LastError == nil || *raw.LastError != "" {
 		t.Fatalf("expected cooldown state cleared, got %+v", raw)
 	}
 }
 
 func TestAuthCredentialsEnableClearsCooldown(t *testing.T) {
-	var raw map[string]any
+	var raw credentialUpdateRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
 			t.Fatalf("unexpected method: %s", r.Method)
@@ -417,15 +417,15 @@ func TestAuthCredentialsEnableClearsCooldown(t *testing.T) {
 			t.Fatalf("decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"credential": map[string]any{
-				"id":            "cred_enable",
-				"owner_user_id": "user_1",
-				"scope":         "personal",
-				"weight":        1,
-				"status":        "active",
-				"created_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-				"updated_at":    time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
+		if err := json.NewEncoder(w).Encode(credentialGetResponse{
+			Credential: credentialRecord{
+				ID:          "cred_enable",
+				OwnerUserID: "user_1",
+				Scope:       "personal",
+				Weight:      1,
+				Status:      "active",
+				CreatedAt:   time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				UpdatedAt:   time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
 			},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
@@ -441,19 +441,19 @@ func TestAuthCredentialsEnableClearsCooldown(t *testing.T) {
 	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
 		t.Fatalf("credentials enable: %v", err)
 	}
-	if raw["status"] != "active" {
-		t.Fatalf("unexpected status payload: %v", raw["status"])
+	if raw.Status == nil || *raw.Status != "active" {
+		t.Fatalf("unexpected status payload: %v", raw.Status)
 	}
-	if raw["cooldown_until"] != "" {
-		t.Fatalf("expected cooldown_until clear payload, got %v", raw["cooldown_until"])
+	if raw.CooldownUntil == nil || *raw.CooldownUntil != "" {
+		t.Fatalf("expected cooldown_until clear payload, got %v", raw.CooldownUntil)
 	}
-	if raw["last_error"] != "" {
-		t.Fatalf("expected last_error clear payload, got %v", raw["last_error"])
+	if raw.LastError == nil || *raw.LastError != "" {
+		t.Fatalf("expected last_error clear payload, got %v", raw.LastError)
 	}
 }
 
 func TestAuthCredentialsCooldownSetsCooldown(t *testing.T) {
-	var raw map[string]any
+	var raw credentialUpdateRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
 			t.Fatalf("unexpected method: %s", r.Method)
@@ -465,17 +465,17 @@ func TestAuthCredentialsCooldownSetsCooldown(t *testing.T) {
 			t.Fatalf("decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"credential": map[string]any{
-				"id":             "cred_cooldown",
-				"owner_user_id":  "user_1",
-				"scope":          "personal",
-				"weight":         1,
-				"status":         "cooldown",
-				"cooldown_until": time.Date(2026, 3, 8, 13, 0, 0, 0, time.UTC),
-				"last_error":     "manual cooldown",
-				"created_at":     time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-				"updated_at":     time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
+		if err := json.NewEncoder(w).Encode(credentialGetResponse{
+			Credential: credentialRecord{
+				ID:            "cred_cooldown",
+				OwnerUserID:   "user_1",
+				Scope:         "personal",
+				Weight:        1,
+				Status:        "cooldown",
+				CooldownUntil: timePtr(time.Date(2026, 3, 8, 13, 0, 0, 0, time.UTC)),
+				LastError:     "manual cooldown",
+				CreatedAt:     time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				UpdatedAt:     time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
 			},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
@@ -491,23 +491,22 @@ func TestAuthCredentialsCooldownSetsCooldown(t *testing.T) {
 	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
 		t.Fatalf("credentials cooldown: %v", err)
 	}
-	if raw["status"] != "cooldown" {
-		t.Fatalf("unexpected status payload: %v", raw["status"])
+	if raw.Status == nil || *raw.Status != "cooldown" {
+		t.Fatalf("unexpected status payload: %v", raw.Status)
 	}
-	if raw["last_error"] != "manual cooldown" {
-		t.Fatalf("unexpected last_error payload: %v", raw["last_error"])
+	if raw.LastError == nil || *raw.LastError != "manual cooldown" {
+		t.Fatalf("unexpected last_error payload: %v", raw.LastError)
 	}
-	until, ok := raw["cooldown_until"].(string)
-	if !ok || strings.TrimSpace(until) == "" {
-		t.Fatalf("expected cooldown_until payload, got %v", raw["cooldown_until"])
+	if raw.CooldownUntil == nil || strings.TrimSpace(*raw.CooldownUntil) == "" {
+		t.Fatalf("expected cooldown_until payload, got %v", raw.CooldownUntil)
 	}
-	if _, err := time.Parse(time.RFC3339, until); err != nil {
-		t.Fatalf("cooldown_until should be RFC3339, got %q (%v)", until, err)
+	if _, err := time.Parse(time.RFC3339, *raw.CooldownUntil); err != nil {
+		t.Fatalf("cooldown_until should be RFC3339, got %q (%v)", *raw.CooldownUntil, err)
 	}
 }
 
 func TestAuthCredentialsCooldownClear(t *testing.T) {
-	var raw map[string]any
+	var raw credentialUpdateRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
 			t.Fatalf("unexpected method: %s", r.Method)
@@ -516,15 +515,15 @@ func TestAuthCredentialsCooldownClear(t *testing.T) {
 			t.Fatalf("decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"credential": map[string]any{
-				"id":            "cred_clear",
-				"owner_user_id": "user_1",
-				"scope":         "personal",
-				"weight":        1,
-				"status":        "active",
-				"created_at":    time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
-				"updated_at":    time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
+		if err := json.NewEncoder(w).Encode(credentialGetResponse{
+			Credential: credentialRecord{
+				ID:          "cred_clear",
+				OwnerUserID: "user_1",
+				Scope:       "personal",
+				Weight:      1,
+				Status:      "active",
+				CreatedAt:   time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				UpdatedAt:   time.Date(2026, 3, 8, 12, 5, 0, 0, time.UTC),
 			},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
@@ -540,11 +539,11 @@ func TestAuthCredentialsCooldownClear(t *testing.T) {
 	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
 		t.Fatalf("credentials cooldown --clear: %v", err)
 	}
-	if raw["status"] != "active" {
-		t.Fatalf("unexpected status payload: %v", raw["status"])
+	if raw.Status == nil || *raw.Status != "active" {
+		t.Fatalf("unexpected status payload: %v", raw.Status)
 	}
-	if raw["cooldown_until"] != "" {
-		t.Fatalf("expected cooldown_until clear payload, got %v", raw["cooldown_until"])
+	if raw.CooldownUntil == nil || *raw.CooldownUntil != "" {
+		t.Fatalf("expected cooldown_until clear payload, got %v", raw.CooldownUntil)
 	}
 }
 
@@ -563,4 +562,8 @@ func newCredentialTestApp(srv *httptest.Server) *app {
 		},
 		output: "json",
 	}
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
 }
