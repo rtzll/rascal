@@ -2,8 +2,10 @@ package runsummary
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -23,6 +25,8 @@ type usageCandidate struct {
 	priority int
 }
 
+type jsonObject map[string]json.RawMessage
+
 func ExtractTokenUsage(agentOutput string) (TokenUsage, bool) {
 	scanner := bufio.NewScanner(strings.NewReader(agentOutput))
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -38,30 +42,25 @@ func ExtractTokenUsage(agentOutput string) (TokenUsage, bool) {
 			continue
 		}
 
-		var root any
-		if err := json.Unmarshal([]byte(line), &root); err != nil {
-			continue
-		}
-
-		rootMap, ok := root.(map[string]any)
-		if !ok {
+		var root jsonObject
+		if err := decodeJSONObject([]byte(line), &root); err != nil {
 			continue
 		}
 
 		if model := firstNonEmptyString(
-			readString(rootMap, "model"),
-			readString(rootMap, "model_name"),
+			readString(root, "model"),
+			readString(root, "model_name"),
 		); model != "" {
 			lastMeta.Model = model
 		}
 		if provider := firstNonEmptyString(
-			readString(rootMap, "provider"),
-			readString(rootMap, "provider_name"),
+			readString(root, "provider"),
+			readString(root, "provider_name"),
 		); provider != "" {
 			lastMeta.Provider = provider
 		}
 
-		candidate, ok := extractUsageCandidate(rootMap)
+		candidate, ok := extractUsageCandidate(root)
 		if !ok {
 			continue
 		}
@@ -92,7 +91,7 @@ func ExtractTotalTokens(agentOutput string) (int64, bool) {
 	return usage.TotalTokens, true
 }
 
-func extractUsageCandidate(root map[string]any) (usageCandidate, bool) {
+func extractUsageCandidate(root jsonObject) (usageCandidate, bool) {
 	rootPriority := 1
 	if isFinalUsageEvent(root) {
 		rootPriority = 3
@@ -114,7 +113,7 @@ func extractUsageCandidate(root map[string]any) (usageCandidate, bool) {
 	return usageCandidate{TokenUsage: usage, priority: rootPriority}, true
 }
 
-func parseUsageMap(raw map[string]any) (TokenUsage, bool) {
+func parseUsageMap(raw jsonObject) (TokenUsage, bool) {
 	total := firstNonNilInt64(
 		readInt64(raw, "accumulated_total_tokens"),
 		readInt64(raw, "total_tokens"),
@@ -160,7 +159,7 @@ func parseUsageMap(raw map[string]any) (TokenUsage, bool) {
 	return out, true
 }
 
-func isFinalUsageEvent(raw map[string]any) bool {
+func isFinalUsageEvent(raw jsonObject) bool {
 	kind := strings.ToLower(firstNonEmptyString(
 		readString(raw, "type"),
 		readString(raw, "event"),
@@ -174,21 +173,31 @@ func isFinalUsageEvent(raw map[string]any) bool {
 	}
 }
 
-func readMap(raw map[string]any, key string) map[string]any {
-	if child, ok := raw[key].(map[string]any); ok {
-		return child
+func readMap(raw jsonObject, key string) jsonObject {
+	childRaw, ok := raw[key]
+	if !ok || len(childRaw) == 0 {
+		return nil
 	}
-	return nil
+	var child jsonObject
+	if err := decodeJSONObject(childRaw, &child); err != nil {
+		return nil
+	}
+	return child
 }
 
-func readString(raw map[string]any, key string) string {
-	if value, ok := raw[key].(string); ok {
-		return strings.TrimSpace(value)
+func readString(raw jsonObject, key string) string {
+	valueRaw, ok := raw[key]
+	if !ok || len(valueRaw) == 0 {
+		return ""
 	}
-	return ""
+	var value string
+	if err := json.Unmarshal(valueRaw, &value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
 }
 
-func readNestedInt64(raw map[string]any, parentKey, childKey string) *int64 {
+func readNestedInt64(raw jsonObject, parentKey, childKey string) *int64 {
 	parent := readMap(raw, parentKey)
 	if parent == nil {
 		return nil
@@ -196,30 +205,33 @@ func readNestedInt64(raw map[string]any, parentKey, childKey string) *int64 {
 	return readInt64(parent, childKey)
 }
 
-func readInt64(raw map[string]any, key string) *int64 {
-	value, ok := raw[key]
-	if !ok {
+func readInt64(raw jsonObject, key string) *int64 {
+	valueRaw, ok := raw[key]
+	if !ok || len(valueRaw) == 0 {
 		return nil
 	}
-	switch v := value.(type) {
-	case float64:
-		n := int64(v)
-		if float64(n) != v {
-			return nil
-		}
-		return &n
-	case int64:
-		n := v
-		return &n
-	case json.Number:
-		n, err := v.Int64()
+	text := strings.TrimSpace(string(valueRaw))
+	if text == "" || text == "null" {
+		return nil
+	}
+
+	if strings.Contains(text, ".") || strings.ContainsAny(text, "eE") {
+		f, err := strconv.ParseFloat(text, 64)
 		if err != nil {
 			return nil
 		}
+		n := int64(f)
+		if float64(n) != f {
+			return nil
+		}
 		return &n
-	default:
+	}
+
+	n, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
 		return nil
 	}
+	return &n
 }
 
 func firstNonNilInt64(values ...*int64) *int64 {
@@ -240,10 +252,19 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func marshalJSONCompact(value any) string {
+func marshalJSONCompact[T any](value T) string {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Sprintf("%v", value)
 	}
 	return string(data)
+}
+
+func decodeJSONObject(data []byte, dst *jsonObject) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(dst); err != nil {
+		return fmt.Errorf("decode json object: %w", err)
+	}
+	return nil
 }
