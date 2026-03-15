@@ -23,7 +23,7 @@ var requiredWebhookEvents = []string{
 
 type repoEnableInput struct {
 	Repo                       string
-	GitHubToken                string
+	GitHubAdminToken           string
 	WebhookSecret              string
 	UseServerWebhookSecret     bool
 	ResolveServerWebhookSecret func() (string, error)
@@ -71,9 +71,9 @@ func (a *app) runRepoEnable(input repoEnableInput) (repoEnableResult, error) {
 	if repo == "" {
 		return repoEnableResult{}, &cliError{Code: exitInput, Message: "repo is required", Hint: "pass OWNER/REPO or set --default-repo"}
 	}
-	githubToken := firstNonEmpty(strings.TrimSpace(input.GitHubToken), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
-	if githubToken == "" {
-		return repoEnableResult{}, &cliError{Code: exitInput, Message: "missing GitHub token", Hint: "set --github-token or GITHUB_TOKEN"}
+	githubAdminToken := firstNonEmpty(strings.TrimSpace(input.GitHubAdminToken), strings.TrimSpace(os.Getenv("GITHUB_ADMIN_TOKEN")))
+	if githubAdminToken == "" {
+		return repoEnableResult{}, &cliError{Code: exitInput, Message: "missing GitHub admin token", Hint: "set --github-admin-token or GITHUB_ADMIN_TOKEN"}
 	}
 	webhookSecret := strings.TrimSpace(input.WebhookSecret)
 	if webhookSecret == "" {
@@ -114,7 +114,7 @@ func (a *app) runRepoEnable(input repoEnableInput) (repoEnableResult, error) {
 
 	client := input.Client
 	if client == nil {
-		client = ghapi.NewAPIClient(githubToken)
+		client = ghapi.NewAPIClient(githubAdminToken)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -136,7 +136,7 @@ func (a *app) runRepoEnable(input repoEnableInput) (repoEnableResult, error) {
 
 func (a *app) newRepoEnableCmd() *cobra.Command {
 	var (
-		githubToken            string
+		githubAdminToken       string
 		webhookSecret          string
 		useServerWebhookSecret bool
 		webhookURL             string
@@ -150,7 +150,7 @@ func (a *app) newRepoEnableCmd() *cobra.Command {
 			repo := resolveRepoArg(args, a.cfg.DefaultRepo)
 			result, err := a.runRepoEnable(repoEnableInput{
 				Repo:                   repo,
-				GitHubToken:            githubToken,
+				GitHubAdminToken:       githubAdminToken,
 				WebhookSecret:          webhookSecret,
 				UseServerWebhookSecret: useServerWebhookSecret,
 				WebhookURL:             webhookURL,
@@ -171,7 +171,7 @@ func (a *app) newRepoEnableCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token (or GITHUB_TOKEN)")
+	cmd.Flags().StringVar(&githubAdminToken, "github-admin-token", "", "GitHub admin token (or GITHUB_ADMIN_TOKEN)")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret (must match server secret)")
 	cmd.Flags().BoolVar(&useServerWebhookSecret, "use-server-webhook-secret", false, "resolve webhook secret from remote /etc/rascal/rascal.env over SSH")
 	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "override webhook URL (default: <orchestrator-url>/v1/webhooks/github)")
@@ -210,9 +210,9 @@ func (a *app) fetchServerWebhookSecret() (string, error) {
 
 func (a *app) newRepoDisableCmd() *cobra.Command {
 	var (
-		githubToken string
-		webhookURL  string
-		timeout     time.Duration
+		githubAdminToken string
+		webhookURL       string
+		timeout          time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "disable [OWNER/REPO]",
@@ -223,9 +223,9 @@ func (a *app) newRepoDisableCmd() *cobra.Command {
 			if repo == "" {
 				return &cliError{Code: exitInput, Message: "repo is required", Hint: "pass OWNER/REPO or set --default-repo"}
 			}
-			githubToken = firstNonEmpty(strings.TrimSpace(githubToken), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
-			if githubToken == "" {
-				return &cliError{Code: exitInput, Message: "missing GitHub token", Hint: "set --github-token or GITHUB_TOKEN"}
+			githubAdminToken = firstNonEmpty(strings.TrimSpace(githubAdminToken), strings.TrimSpace(os.Getenv("GITHUB_ADMIN_TOKEN")))
+			if githubAdminToken == "" {
+				return &cliError{Code: exitInput, Message: "missing GitHub admin token", Hint: "set --github-admin-token or GITHUB_ADMIN_TOKEN"}
 			}
 			webhookURL = firstNonEmpty(strings.TrimSpace(webhookURL), strings.TrimSpace(a.cfg.ServerURL)+"/v1/webhooks/github")
 			webhookURL = strings.TrimRight(webhookURL, "/")
@@ -234,7 +234,7 @@ func (a *app) newRepoDisableCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
-			gh := ghapi.NewAPIClient(githubToken)
+			gh := ghapi.NewAPIClient(githubAdminToken)
 			removed, err := gh.DeleteWebhookByURL(ctx, repo, webhookURL)
 			if err != nil {
 				return &cliError{Code: exitRuntime, Message: "failed to remove webhook", Cause: err}
@@ -253,7 +253,7 @@ func (a *app) newRepoDisableCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token (or GITHUB_TOKEN)")
+	cmd.Flags().StringVar(&githubAdminToken, "github-admin-token", "", "GitHub admin token (or GITHUB_ADMIN_TOKEN)")
 	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "override webhook URL (default: <orchestrator-url>/v1/webhooks/github)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "GitHub API timeout")
 	return cmd
@@ -261,9 +261,9 @@ func (a *app) newRepoDisableCmd() *cobra.Command {
 
 func (a *app) newRepoStatusCmd() *cobra.Command {
 	var (
-		githubToken string
-		webhookURL  string
-		timeout     time.Duration
+		githubAdminToken string
+		webhookURL       string
+		timeout          time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "status [OWNER/REPO]",
@@ -274,9 +274,9 @@ func (a *app) newRepoStatusCmd() *cobra.Command {
 			if repo == "" {
 				return &cliError{Code: exitInput, Message: "repo is required", Hint: "pass OWNER/REPO or set --default-repo"}
 			}
-			githubToken = firstNonEmpty(strings.TrimSpace(githubToken), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
-			if githubToken == "" {
-				return &cliError{Code: exitInput, Message: "missing GitHub token", Hint: "set --github-token or GITHUB_TOKEN"}
+			githubAdminToken = firstNonEmpty(strings.TrimSpace(githubAdminToken), strings.TrimSpace(os.Getenv("GITHUB_ADMIN_TOKEN")))
+			if githubAdminToken == "" {
+				return &cliError{Code: exitInput, Message: "missing GitHub admin token", Hint: "set --github-admin-token or GITHUB_ADMIN_TOKEN"}
 			}
 			webhookURL = firstNonEmpty(strings.TrimSpace(webhookURL), strings.TrimSpace(a.cfg.ServerURL)+"/v1/webhooks/github")
 			webhookURL = strings.TrimRight(webhookURL, "/")
@@ -285,7 +285,7 @@ func (a *app) newRepoStatusCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
-			gh := ghapi.NewAPIClient(githubToken)
+			gh := ghapi.NewAPIClient(githubAdminToken)
 			labelExists, err := gh.LabelExists(ctx, repo, "rascal")
 			if err != nil {
 				return &cliError{Code: exitRuntime, Message: "failed to check label", Cause: err}
@@ -325,7 +325,7 @@ func (a *app) newRepoStatusCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token (or GITHUB_TOKEN)")
+	cmd.Flags().StringVar(&githubAdminToken, "github-admin-token", "", "GitHub admin token (or GITHUB_ADMIN_TOKEN)")
 	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "override webhook URL (default: <orchestrator-url>/v1/webhooks/github)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "GitHub API timeout")
 	return cmd

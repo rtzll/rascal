@@ -646,7 +646,7 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 			domain = firstNonEmpty(strings.TrimSpace(domain), strings.TrimSpace(a.cfg.Domain))
 			serverURL = strings.TrimSpace(serverURL)
 			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")))
-			githubAdminToken = firstNonEmpty(strings.TrimSpace(githubAdminToken), strings.TrimSpace(os.Getenv("GITHUB_ADMIN_TOKEN")), strings.TrimSpace(os.Getenv("GITHUB_TOKEN")))
+			githubAdminToken = firstNonEmpty(strings.TrimSpace(githubAdminToken), strings.TrimSpace(os.Getenv("GITHUB_ADMIN_TOKEN")))
 			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")))
 			webhookSecret = firstNonEmpty(strings.TrimSpace(webhookSecret), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")))
 			host = firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.Host))
@@ -877,12 +877,12 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 
 			if !skipWebhook {
 				if _, err := a.runRepoEnable(repoEnableInput{
-					Repo:          repo,
-					GitHubToken:   githubAdminToken,
-					WebhookSecret: webhookSecret,
-					WebhookURL:    serverURL + "/v1/webhooks/github",
-					Timeout:       45 * time.Second,
-					RawErrors:     true,
+					Repo:             repo,
+					GitHubAdminToken: githubAdminToken,
+					WebhookSecret:    webhookSecret,
+					WebhookURL:       serverURL + "/v1/webhooks/github",
+					Timeout:          45 * time.Second,
+					RawErrors:        true,
 				}); err != nil {
 					return err
 				}

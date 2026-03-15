@@ -534,7 +534,6 @@ func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
 	for _, k := range []string{
 		"RASCAL_API_TOKEN",
 		"GITHUB_ADMIN_TOKEN",
-		"GITHUB_TOKEN",
 		"RASCAL_GITHUB_TOKEN",
 		"RASCAL_GITHUB_WEBHOOK_SECRET",
 		"HCLOUD_TOKEN",
@@ -726,7 +725,6 @@ func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
 	}
 	for _, k := range []string{
 		"GITHUB_ADMIN_TOKEN",
-		"GITHUB_TOKEN",
 		"RASCAL_GITHUB_TOKEN",
 	} {
 		t.Setenv(k, "")

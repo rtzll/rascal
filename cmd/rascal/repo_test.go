@@ -90,11 +90,11 @@ func TestRunRepoEnableUsesProvidedClient(t *testing.T) {
 		},
 	}
 	result, err := a.runRepoEnable(repoEnableInput{
-		Repo:          "owner/repo",
-		GitHubToken:   "token",
-		WebhookSecret: "secret",
-		Client:        client,
-		Timeout:       5 * time.Second,
+		Repo:             "owner/repo",
+		GitHubAdminToken: "token",
+		WebhookSecret:    "secret",
+		Client:           client,
+		Timeout:          5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("runRepoEnable failed: %v", err)
@@ -128,7 +128,7 @@ func TestRunRepoEnableResolvesServerWebhookSecret(t *testing.T) {
 	}
 	result, err := a.runRepoEnable(repoEnableInput{
 		Repo:                   "owner/repo",
-		GitHubToken:            "token",
+		GitHubAdminToken:       "token",
 		UseServerWebhookSecret: true,
 		ResolveServerWebhookSecret: func() (string, error) {
 			return "server-secret", nil
@@ -156,7 +156,7 @@ func TestRunRepoEnablePrefersExplicitWebhookSecretOverServerResolve(t *testing.T
 	}
 	result, err := a.runRepoEnable(repoEnableInput{
 		Repo:                   "owner/repo",
-		GitHubToken:            "token",
+		GitHubAdminToken:       "token",
 		WebhookSecret:          "explicit-secret",
 		UseServerWebhookSecret: true,
 		ResolveServerWebhookSecret: func() (string, error) {
@@ -186,7 +186,7 @@ func TestRunRepoEnableServerSecretResolveFailure(t *testing.T) {
 	}
 	_, err := a.runRepoEnable(repoEnableInput{
 		Repo:                   "owner/repo",
-		GitHubToken:            "token",
+		GitHubAdminToken:       "token",
 		UseServerWebhookSecret: true,
 		ResolveServerWebhookSecret: func() (string, error) {
 			return "", errors.New("ssh unavailable")
