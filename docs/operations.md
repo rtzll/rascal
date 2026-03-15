@@ -92,6 +92,7 @@ Server env controls:
 - `pr_comment`
 - `pr_review`
 - `pr_review_comment`
+- `pr_review_thread`
 - `retry`
 - `issue_edited` (same task)
 

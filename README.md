@@ -64,6 +64,7 @@ RASCAL_GITHUB_TOKEN=...
 ./bin/rascal run -t "..."
 ./bin/rascal run --issue OWNER/REPO#123
 ./bin/rascal ps
+./bin/rascal task <task_id>
 ./bin/rascal logs <run_id> --follow
 ./bin/rascal open <run_id>
 ./bin/rascal retry <run_id>

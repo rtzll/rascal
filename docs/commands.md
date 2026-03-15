@@ -29,6 +29,7 @@ Issue-driven task:
 ./bin/rascal ps
 ./bin/rascal ps --limit 10
 ./bin/rascal ps --all
+./bin/rascal task <task_id>
 ./bin/rascal logs <run_id> --follow
 ./bin/rascal logs run <run_id> --follow
 ./bin/rascal logs rascald --follow

@@ -243,7 +243,7 @@ Each run directory stores metadata and artifacts such as:
 ## Session Behavior
 
 - Session policy is configured at the orchestrator via `off`, `pr-only`, or `all`.
-- `pr-only` currently resumes for `pr_comment`, `pr_review`, `pr_review_comment`, `retry`, and `issue_edited`.
+- `pr-only` currently resumes for `pr_comment`, `pr_review`, `pr_review_comment`, `pr_review_thread`, `retry`, and `issue_edited`.
 - Goose resumes by named Goose session plus mounted session storage.
 - Codex resumes by reusing a task-scoped `CODEX_HOME` and the discovered harness session id.
 - If a task switches harness between runs, Rascal starts a fresh session for the new harness and replaces the stored task session record.
@@ -297,7 +297,7 @@ Common optional:
 - `RASCAL_INSTRUCTION`
 - `RASCAL_AGENT_RUNTIME` (`goose` or `codex`; defaults to `goose` when unset)
 - `RASCAL_BASE_BRANCH` (default: `main`)
-- `RASCAL_HEAD_BRANCH` (default: `rascal/<run_id>`)
+- `RASCAL_HEAD_BRANCH` (runner fallback default: `rascal/<run_id>` when unset; `rascald` normally sets a task-derived branch and may reuse the previous head branch for PR comment/review follow-ups)
 - `RASCAL_ISSUE_NUMBER` (default: `0`)
 - `RASCAL_PR_NUMBER` (default: `0`)
 - `RASCAL_TRIGGER` (default: `cli`)
