@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -156,6 +157,53 @@ func TestAuthSyncCommandUsesConfiguredSSHHost(t *testing.T) {
 	sshCalls := string(sshLog)
 	if !strings.Contains(sshCalls, "root@configured-host") {
 		t.Fatalf("expected configured ssh host in calls, got:\n%s", sshCalls)
+	}
+}
+
+func TestAuthSyncCommandJSONOutput(t *testing.T) {
+	setupSyncCommandFakes(t)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			SSHHost:  "configured-host",
+			APIToken: "api-token",
+		},
+		output: "json",
+	}
+	t.Setenv("RASCAL_GITHUB_TOKEN", "runtime-token")
+
+	stdout, err := captureStdout(func() error {
+		cmd := a.newAuthSyncCmd()
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs([]string{
+			"--webhook-secret", "webhook-secret",
+			"--restart-service=false",
+		})
+		return cmd.Execute()
+	})
+	if err != nil {
+		t.Fatalf("auth sync command: %v", err)
+	}
+
+	var out authSyncOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("unmarshal auth sync output: %v", err)
+	}
+	if out.Host != "configured-host" {
+		t.Fatalf("host = %q, want configured-host", out.Host)
+	}
+	if !out.SyncedEnvAuth {
+		t.Fatal("expected synced_env_auth=true")
+	}
+	if out.RestartedService {
+		t.Fatal("expected restarted_service=false")
+	}
+	if out.APIToken != maskSecret("api-token") {
+		t.Fatalf("api_token = %q, want masked value", out.APIToken)
+	}
+	if out.WebhookSecret != maskSecret("webhook-secret") {
+		t.Fatalf("webhook_secret = %q, want masked value", out.WebhookSecret)
 	}
 }
 

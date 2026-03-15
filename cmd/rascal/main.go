@@ -182,6 +182,14 @@ type authRotateOutput struct {
 	SyncedRemote  bool   `json:"synced_remote"`
 }
 
+type authSyncOutput struct {
+	Host             string `json:"host"`
+	SyncedEnvAuth    bool   `json:"synced_env_auth"`
+	APIToken         string `json:"api_token"`
+	WebhookSecret    string `json:"webhook_secret"`
+	RestartedService bool   `json:"restarted_service"`
+}
+
 type bootstrapCompleteOutput struct {
 	Status            string                 `json:"status"`
 	ServerURL         string                 `json:"server_url"`
@@ -2315,12 +2323,12 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 			}); err != nil {
 				return &cliError{Code: exitRuntime, Message: "failed to sync auth", Cause: err}
 			}
-			return a.emit(map[string]any{
-				"host":              host,
-				"synced_env_auth":   true,
-				"api_token":         maskSecret(apiToken),
-				"webhook_secret":    maskSecret(webhookSecret),
-				"restarted_service": restartSvc,
+			return a.emit(authSyncOutput{
+				Host:             host,
+				SyncedEnvAuth:    true,
+				APIToken:         maskSecret(apiToken),
+				WebhookSecret:    maskSecret(webhookSecret),
+				RestartedService: restartSvc,
 			}, func() error {
 				a.println("synced server env auth on %s", host)
 				if restartSvc {
