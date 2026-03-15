@@ -378,7 +378,7 @@ func getCredentialWithClient(client apiClient, id string) (credentialRecord, boo
 }
 
 func createCredentialWithClient(client apiClient, req credentialCreateRequest) (credentialRecord, error) {
-	resp, err := client.doJSON(http.MethodPost, "/v1/credentials", req)
+	resp, err := doJSON(client, http.MethodPost, "/v1/credentials", req)
 	if err != nil {
 		return credentialRecord{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}
@@ -394,7 +394,7 @@ func createCredentialWithClient(client apiClient, req credentialCreateRequest) (
 }
 
 func updateCredentialWithClient(client apiClient, id string, req credentialUpdateRequest) (credentialRecord, error) {
-	resp, err := client.doJSON(http.MethodPatch, "/v1/credentials/"+url.PathEscape(strings.TrimSpace(id)), req)
+	resp, err := doJSON(client, http.MethodPatch, "/v1/credentials/"+url.PathEscape(strings.TrimSpace(id)), req)
 	if err != nil {
 		return credentialRecord{}, &cliError{Code: exitServer, Message: "request failed", Cause: err}
 	}

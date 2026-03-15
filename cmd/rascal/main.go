@@ -1069,12 +1069,12 @@ rascal run --issue OWNER/REPO#123
 					return &cliError{Code: exitInput, Message: err.Error()}
 				}
 				debugValue := optionalBoolFlagValue(cmd, "debug", debug)
-				path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+				req := buildCreateTaskPayload(createTaskPayloadInput{
 					Repo:        repo,
 					IssueNumber: issueNumber,
 					Debug:       debugValue,
 				})
-				resp, err := a.client.doJSON(http.MethodPost, path, payload)
+				resp, err := req.send(a.client, http.MethodPost)
 				if err != nil {
 					return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 				}
@@ -1100,13 +1100,13 @@ rascal run --issue OWNER/REPO#123
 			}
 
 			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
-			path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+			req := buildCreateTaskPayload(createTaskPayloadInput{
 				Repo:       repo,
 				Task:       task,
 				BaseBranch: baseBranch,
 				Debug:      debugValue,
 			})
-			resp, err := a.client.doJSON(http.MethodPost, path, payload)
+			resp, err := req.send(a.client, http.MethodPost)
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Hint: "verify server URL and network access", Cause: err}
 			}
@@ -1881,7 +1881,7 @@ rascal retry run_abc123 --debug=false
 				return &cliError{Code: exitInput, Message: "retry only supports failed or canceled runs"}
 			}
 			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
-			path, payload := buildCreateTaskPayload(createTaskPayloadInput{
+			req := buildCreateTaskPayload(createTaskPayloadInput{
 				TaskID:     run.TaskID,
 				Repo:       run.Repo,
 				Task:       run.Task,
@@ -1889,7 +1889,7 @@ rascal retry run_abc123 --debug=false
 				Trigger:    "retry",
 				Debug:      debugValue,
 			})
-			resp, err := a.client.doJSON(http.MethodPost, path, payload)
+			resp, err := req.send(a.client, http.MethodPost)
 			if err != nil {
 				return &cliError{Code: exitServer, Message: "request failed", Cause: err}
 			}
@@ -3009,6 +3009,23 @@ type createTaskPayloadInput struct {
 	Debug       *bool
 }
 
+type createTaskRequestPayload struct {
+	path      string
+	task      *api.CreateTaskRequest
+	issueTask *api.CreateIssueTaskRequest
+}
+
+func (p createTaskRequestPayload) send(client apiClient, method string) (*http.Response, error) {
+	switch {
+	case p.issueTask != nil:
+		return doJSON(client, method, p.path, *p.issueTask)
+	case p.task != nil:
+		return doJSON(client, method, p.path, *p.task)
+	default:
+		return nil, fmt.Errorf("missing create task request payload")
+	}
+}
+
 func optionalBoolFlagValue(cmd *cobra.Command, name string, value bool) *bool {
 	if !cmd.Flags().Changed(name) {
 		return nil
@@ -3017,7 +3034,7 @@ func optionalBoolFlagValue(cmd *cobra.Command, name string, value bool) *bool {
 	return &v
 }
 
-func buildCreateTaskPayload(input createTaskPayloadInput) (string, any) {
+func buildCreateTaskPayload(input createTaskPayloadInput) createTaskRequestPayload {
 	if input.IssueNumber > 0 {
 		payload := api.CreateIssueTaskRequest{
 			Repo:        input.Repo,
@@ -3026,7 +3043,10 @@ func buildCreateTaskPayload(input createTaskPayloadInput) (string, any) {
 		if input.Debug != nil {
 			payload.Debug = input.Debug
 		}
-		return "/v1/tasks/issue", payload
+		return createTaskRequestPayload{
+			path:      "/v1/tasks/issue",
+			issueTask: &payload,
+		}
 	}
 
 	payload := api.CreateTaskRequest{
@@ -3043,15 +3063,18 @@ func buildCreateTaskPayload(input createTaskPayloadInput) (string, any) {
 	if input.Debug != nil {
 		payload.Debug = input.Debug
 	}
-	return "/v1/tasks", payload
+	return createTaskRequestPayload{
+		path: "/v1/tasks",
+		task: &payload,
+	}
 }
 
-func (c apiClient) doJSON(method, path string, payload any) (*http.Response, error) {
+func doJSON[T any](client apiClient, method, path string, payload T) (*http.Response, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("encode payload: %w", err)
 	}
-	return c.do(method, path, bytes.NewReader(data))
+	return client.do(method, path, bytes.NewReader(data))
 }
 
 func (c apiClient) do(method, path string, body io.Reader) (*http.Response, error) {
