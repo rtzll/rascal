@@ -755,6 +755,114 @@ func webhookRequest(t *testing.T, payload []byte, eventType, deliveryID, secret 
 	return req
 }
 
+func mustMarshalJSONBytes(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal json payload: %v", err)
+	}
+	return data
+}
+
+func testIssue(number int, title, body string, labels []string, isPR bool) ghapi.Issue {
+	issue := ghapi.Issue{
+		Number: number,
+		Title:  title,
+		Body:   body,
+		Labels: make([]ghapi.Label, 0, len(labels)),
+	}
+	for _, label := range labels {
+		issue.Labels = append(issue.Labels, ghapi.Label{Name: label})
+	}
+	if isPR {
+		issue.PullRequest = &ghapi.PullRequestRef{}
+	}
+	return issue
+}
+
+func testPullRequest(number int, merged bool, baseRef, headRef string) ghapi.PullRequest {
+	pr := ghapi.PullRequest{
+		Number: number,
+		Merged: merged,
+	}
+	pr.Base.Ref = baseRef
+	pr.Head.Ref = headRef
+	return pr
+}
+
+func issuesEventPayload(t *testing.T, action, repo, sender, label string, issue ghapi.Issue) []byte {
+	t.Helper()
+	return mustMarshalJSONBytes(t, ghapi.IssuesEvent{
+		Action:     action,
+		Label:      ghapi.Label{Name: label},
+		Issue:      issue,
+		Repository: ghapi.Repository{FullName: repo},
+		Sender:     ghapi.User{Login: sender},
+	})
+}
+
+func issueCommentEventPayload(t *testing.T, action, repo, sender string, issue ghapi.Issue, comment ghapi.Comment, bodyFrom string) []byte {
+	t.Helper()
+	event := ghapi.IssueCommentEvent{
+		Action:     action,
+		Issue:      issue,
+		Comment:    comment,
+		Repository: ghapi.Repository{FullName: repo},
+		Sender:     ghapi.User{Login: sender},
+	}
+	if bodyFrom != "" {
+		event.Changes.Body = &ghapi.IssueCommentBodyChange{From: bodyFrom}
+	}
+	return mustMarshalJSONBytes(t, event)
+}
+
+func pullRequestReviewEventPayload(t *testing.T, action, repo, sender string, review ghapi.Review, pr ghapi.PullRequest) []byte {
+	t.Helper()
+	return mustMarshalJSONBytes(t, ghapi.PullRequestReviewEvent{
+		Action:      action,
+		Review:      review,
+		PullRequest: pr,
+		Repository:  ghapi.Repository{FullName: repo},
+		Sender:      ghapi.User{Login: sender},
+	})
+}
+
+func pullRequestReviewCommentEventPayload(t *testing.T, action, repo, sender string, comment ghapi.ReviewComment, pr ghapi.PullRequest, bodyFrom string) []byte {
+	t.Helper()
+	event := ghapi.PullRequestReviewCommentEvent{
+		Action:      action,
+		Comment:     comment,
+		PullRequest: pr,
+		Repository:  ghapi.Repository{FullName: repo},
+		Sender:      ghapi.User{Login: sender},
+	}
+	if bodyFrom != "" {
+		event.Changes.Body = &ghapi.IssueCommentBodyChange{From: bodyFrom}
+	}
+	return mustMarshalJSONBytes(t, event)
+}
+
+func pullRequestReviewThreadEventPayload(t *testing.T, action, repo, sender string, thread ghapi.ReviewThread, pr ghapi.PullRequest) []byte {
+	t.Helper()
+	return mustMarshalJSONBytes(t, ghapi.PullRequestReviewThreadEvent{
+		Action:      action,
+		Thread:      thread,
+		PullRequest: pr,
+		Repository:  ghapi.Repository{FullName: repo},
+		Sender:      ghapi.User{Login: sender},
+	})
+}
+
+func pullRequestEventPayload(t *testing.T, action, repo, sender string, pr ghapi.PullRequest) []byte {
+	t.Helper()
+	return mustMarshalJSONBytes(t, ghapi.PullRequestEvent{
+		Action:      action,
+		PullRequest: pr,
+		Repository:  ghapi.Repository{FullName: repo},
+		Sender:      ghapi.User{Login: sender},
+	})
+}
+
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -810,7 +918,7 @@ func TestHandleWebhookRecordsDeliveryOnlyAfterSuccess(t *testing.T) {
 		t.Fatal("delivery should not be recorded when processing fails")
 	}
 
-	goodPayload := []byte(`{"action":"labeled","label":{"name":"rascal"},"issue":{"number":7,"title":"Title","body":"Body"},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	goodPayload := issuesEventPayload(t, "labeled", "owner/repo", "dev", "rascal", testIssue(7, "Title", "Body", nil, false))
 	goodReq := webhookRequest(t, goodPayload, "issues", deliveryID, "")
 	goodRec := httptest.NewRecorder()
 	s.handleWebhook(goodRec, goodReq)
@@ -839,7 +947,7 @@ func TestHandleWebhookIgnoresIssueLabeledOnPR(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
-	payload := []byte(`{"action":"labeled","label":{"name":"rascal"},"issue":{"number":7,"title":"Title","body":"Body","pull_request":{}},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := issuesEventPayload(t, "labeled", "owner/repo", "dev", "rascal", testIssue(7, "Title", "Body", nil, true))
 
 	req := webhookRequest(t, payload, "issues", "delivery-pr", "")
 	rec := httptest.NewRecorder()
@@ -871,7 +979,7 @@ func TestHandleWebhookIssueClosedCancelsRunsAndCompletesTask(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to be active")
 	_ = waitForRunExecution(t, s, runningRun.ID)
 
-	payload := []byte(`{"action":"closed","issue":{"number":7,"title":"Title","body":"Body","labels":[{"name":"rascal"}]},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := issuesEventPayload(t, "closed", "owner/repo", "dev", "", testIssue(7, "Title", "Body", []string{"rascal"}, false))
 	req := webhookRequest(t, payload, "issues", "delivery-closed", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -905,7 +1013,7 @@ func TestHandleWebhookIssueReopenedReenablesTask(t *testing.T) {
 		t.Fatalf("mark task completed: %v", err)
 	}
 
-	payload := []byte(`{"action":"reopened","issue":{"number":7,"title":"Title","body":"Body","labels":[{"name":"rascal"}]},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := issuesEventPayload(t, "reopened", "owner/repo", "dev", "", testIssue(7, "Title", "Body", []string{"rascal"}, false))
 	req := webhookRequest(t, payload, "issues", "delivery-reopened", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -936,7 +1044,7 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to be active")
 	_ = waitForRunExecution(t, s, runningRun.ID)
 
-	payload := []byte(`{"action":"edited","issue":{"number":7,"title":"New Title","body":"New Body","labels":[{"name":"rascal"}]},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := issuesEventPayload(t, "edited", "owner/repo", "dev", "", testIssue(7, "New Title", "New Body", []string{"rascal"}, false))
 	req := webhookRequest(t, payload, "issues", "delivery-edited", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1004,7 +1112,7 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 		t.Fatalf("upsert legacy task session: %v", err)
 	}
 
-	payload := []byte(`{"action":"labeled","label":{"name":"rascal"},"issue":{"number":7,"title":"Title","body":"Body"},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := issuesEventPayload(t, "labeled", "owner/repo", "dev", "rascal", testIssue(7, "Title", "Body", nil, false))
 	req := webhookRequest(t, payload, "issues", "delivery-backend-migrate", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1053,7 +1161,7 @@ func TestHandleWebhookIssueUnlabeledRemovesPastReactions(t *testing.T) {
 	s.gh = fakeGH
 	s.cfg.GitHubToken = "token"
 
-	payload := []byte(`{"action":"unlabeled","label":{"name":"rascal"},"issue":{"number":7,"title":"Title","body":"Body","labels":[]},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := issuesEventPayload(t, "unlabeled", "owner/repo", "dev", "rascal", testIssue(7, "Title", "Body", nil, false))
 	req := webhookRequest(t, payload, "issues", "delivery-unlabeled", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1173,7 +1281,7 @@ func TestHandleWebhookInactiveSlotIsSkipped(t *testing.T) {
 	s.cfg.Slot = "blue"
 	s.cfg.ActiveSlotPath = slotFile
 
-	payload := []byte(`{"action":"labeled","label":{"name":"rascal"},"issue":{"number":7,"title":"Title","body":"Body"},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := issuesEventPayload(t, "labeled", "owner/repo", "dev", "rascal", testIssue(7, "Title", "Body", nil, false))
 	req := webhookRequest(t, payload, "issues", "delivery-slot", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1190,7 +1298,7 @@ func TestHandleWebhookSignatureValidation(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 	s.cfg.GitHubWebhookSecret = "secret"
-	payload := []byte(`{"action":"labeled","label":{"name":"rascal"},"issue":{"number":7,"title":"Title","body":"Body"},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := issuesEventPayload(t, "labeled", "owner/repo", "dev", "rascal", testIssue(7, "Title", "Body", nil, false))
 
 	badReq := webhookRequest(t, payload, "issues", "sig-1", "wrong-secret")
 	badRec := httptest.NewRecorder()
@@ -1239,7 +1347,11 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 	}
 	markRunSucceeded(t, s, seedRun.ID)
 
-	payload := []byte(`{"action":"created","issue":{"number":7,"pull_request":{}},"comment":{"id":101,"body":"  please address review notes  ","user":{"login":"alice"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
+	payload := issueCommentEventPayload(t, "created", "owner/repo", "alice",
+		testIssue(7, "", "", nil, true),
+		ghapi.Comment{ID: 101, Body: "  please address review notes  ", User: ghapi.User{Login: "alice"}},
+		"",
+	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1318,7 +1430,11 @@ func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
 	}
 	markRunSucceeded(t, s, seedRun.ID)
 
-	payload := []byte(`{"action":"edited","issue":{"number":17,"pull_request":{}},"comment":{"id":202,"body":"  updated feedback  ","user":{"login":"alice"}},"changes":{"body":{"from":"prior feedback"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
+	payload := issueCommentEventPayload(t, "edited", "owner/repo", "alice",
+		testIssue(17, "", "", nil, true),
+		ghapi.Comment{ID: 202, Body: "  updated feedback  ", User: ghapi.User{Login: "alice"}},
+		"prior feedback",
+	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-edited", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1363,7 +1479,11 @@ func TestHandleWebhookIssueCommentEditedSkipsUnchangedBody(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	payload := []byte(`{"action":"edited","issue":{"number":9,"pull_request":{}},"comment":{"id":303,"body":"  same feedback  ","user":{"login":"alice"}},"changes":{"body":{"from":"same feedback"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
+	payload := issueCommentEventPayload(t, "edited", "owner/repo", "alice",
+		testIssue(9, "", "", nil, true),
+		ghapi.Comment{ID: 303, Body: "  same feedback  ", User: ghapi.User{Login: "alice"}},
+		"same feedback",
+	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-nochange", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1386,7 +1506,11 @@ func TestHandleWebhookIssueCommentIgnoresUnmanagedPR(t *testing.T) {
 	s.gh = fakeGH
 	s.cfg.GitHubToken = "token"
 
-	payload := []byte(`{"action":"created","issue":{"number":44,"pull_request":{}},"comment":{"id":707,"body":"please fix this","user":{"login":"alice"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
+	payload := issueCommentEventPayload(t, "created", "owner/repo", "alice",
+		testIssue(44, "", "", nil, true),
+		ghapi.Comment{ID: 707, Body: "please fix this", User: ghapi.User{Login: "alice"}},
+		"",
+	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-unmanaged", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1430,7 +1554,11 @@ func TestHandleWebhookIssueCommentResolvesPRBranchWithoutPriorRun(t *testing.T) 
 		},
 	}
 
-	payload := []byte(`{"action":"created","issue":{"number":96,"pull_request":{}},"comment":{"id":101,"body":"please address review notes","user":{"login":"alice"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"alice"}}`)
+	payload := issueCommentEventPayload(t, "created", "owner/repo", "alice",
+		testIssue(96, "", "", nil, true),
+		ghapi.Comment{ID: 101, Body: "please address review notes", User: ghapi.User{Login: "alice"}},
+		"",
+	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-resolve-branch", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1490,7 +1618,10 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 	}
 	markRunSucceeded(t, s, seedRun.ID)
 
-	payload := []byte(`{"action":"submitted","review":{"id":303,"body":"   ","state":"changes_requested","user":{"login":"bob"}},"pull_request":{"number":11},"repository":{"full_name":"owner/repo"},"sender":{"login":"bob"}}`)
+	payload := pullRequestReviewEventPayload(t, "submitted", "owner/repo", "bob",
+		ghapi.Review{ID: 303, Body: "   ", State: "changes_requested", User: ghapi.User{Login: "bob"}},
+		testPullRequest(11, false, "", ""),
+	)
 	req := webhookRequest(t, payload, "pull_request_review", "delivery-review", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1545,7 +1676,10 @@ func TestHandleWebhookPullRequestReviewUsesPayloadPRBranchesWithoutPriorRun(t *t
 		t.Fatalf("upsert task: %v", err)
 	}
 
-	payload := []byte(`{"action":"submitted","review":{"id":303,"body":"needs a small fix","state":"changes_requested","user":{"login":"bob"}},"pull_request":{"number":97,"base":{"ref":"main"},"head":{"ref":"add-goreleaser"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"bob"}}`)
+	payload := pullRequestReviewEventPayload(t, "submitted", "owner/repo", "bob",
+		ghapi.Review{ID: 303, Body: "needs a small fix", State: "changes_requested", User: ghapi.User{Login: "bob"}},
+		testPullRequest(97, false, "main", "add-goreleaser"),
+	)
 	req := webhookRequest(t, payload, "pull_request_review", "delivery-review-payload-branch", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1581,7 +1715,10 @@ func TestHandleWebhookPullRequestReviewIgnoresUnmanagedPR(t *testing.T) {
 	s.gh = fakeGH
 	s.cfg.GitHubToken = "token"
 
-	payload := []byte(`{"action":"submitted","review":{"id":808,"body":"needs changes","state":"changes_requested","user":{"login":"bob"}},"pull_request":{"number":45},"repository":{"full_name":"owner/repo"},"sender":{"login":"bob"}}`)
+	payload := pullRequestReviewEventPayload(t, "submitted", "owner/repo", "bob",
+		ghapi.Review{ID: 808, Body: "needs changes", State: "changes_requested", User: ghapi.User{Login: "bob"}},
+		testPullRequest(45, false, "", ""),
+	)
 	req := webhookRequest(t, payload, "pull_request_review", "delivery-review-unmanaged", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1631,7 +1768,13 @@ func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.
 	}
 	markRunSucceeded(t, s, seedRun.ID)
 
-	payload := []byte(`{"action":"created","comment":{"id":404,"body":"Please rename this helper","path":"cmd/rascald/main.go","line":515,"start_line":512,"user":{"login":"eve"}},"pull_request":{"number":12},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	line515 := 515
+	startLine512 := 512
+	payload := pullRequestReviewCommentEventPayload(t, "created", "owner/repo", "eve",
+		ghapi.ReviewComment{ID: 404, Body: "Please rename this helper", Path: "cmd/rascald/main.go", Line: &line515, StartLine: &startLine512, User: ghapi.User{Login: "eve"}},
+		testPullRequest(12, false, "", ""),
+		"",
+	)
 	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1704,7 +1847,12 @@ func TestHandleWebhookPullRequestReviewCommentEditedBodyChangedQueuesRun(t *test
 	}
 	markRunSucceeded(t, s, seedRun.ID)
 
-	payload := []byte(`{"action":"edited","comment":{"id":505,"body":"Refined inline feedback","path":"cmd/rascald/main.go","line":600,"user":{"login":"eve"}},"changes":{"body":{"from":"Old inline feedback"}},"pull_request":{"number":13},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	line600 := 600
+	payload := pullRequestReviewCommentEventPayload(t, "edited", "owner/repo", "eve",
+		ghapi.ReviewComment{ID: 505, Body: "Refined inline feedback", Path: "cmd/rascald/main.go", Line: &line600, User: ghapi.User{Login: "eve"}},
+		testPullRequest(13, false, "", ""),
+		"Old inline feedback",
+	)
 	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-edited", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1737,7 +1885,12 @@ func TestHandleWebhookPullRequestReviewCommentEditedSkipsUnchangedBody(t *testin
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	payload := []byte(`{"action":"edited","comment":{"id":506,"body":"  same inline feedback  ","path":"cmd/rascald/main.go","line":601,"user":{"login":"eve"}},"changes":{"body":{"from":"same inline feedback"}},"pull_request":{"number":13},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	line601 := 601
+	payload := pullRequestReviewCommentEventPayload(t, "edited", "owner/repo", "eve",
+		ghapi.ReviewComment{ID: 506, Body: "  same inline feedback  ", Path: "cmd/rascald/main.go", Line: &line601, User: ghapi.User{Login: "eve"}},
+		testPullRequest(13, false, "", ""),
+		"same inline feedback",
+	)
 	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-nochange", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1760,7 +1913,12 @@ func TestHandleWebhookPullRequestReviewCommentIgnoresUnmanagedPR(t *testing.T) {
 	s.gh = fakeGH
 	s.cfg.GitHubToken = "token"
 
-	payload := []byte(`{"action":"created","comment":{"id":909,"body":"Please rename this helper","path":"cmd/rascald/main.go","line":515,"user":{"login":"eve"}},"pull_request":{"number":46},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	line515 := 515
+	payload := pullRequestReviewCommentEventPayload(t, "created", "owner/repo", "eve",
+		ghapi.ReviewComment{ID: 909, Body: "Please rename this helper", Path: "cmd/rascald/main.go", Line: &line515, User: ghapi.User{Login: "eve"}},
+		testPullRequest(46, false, "", ""),
+		"",
+	)
 	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-unmanaged", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1810,7 +1968,18 @@ func TestHandleWebhookPullRequestReviewThreadUnresolvedQueuesRun(t *testing.T) {
 	}
 	markRunSucceeded(t, s, seedRun.ID)
 
-	payload := []byte(`{"action":"unresolved","thread":{"id":12,"path":"cmd/rascald/main.go","line":777,"start_line":775,"comments":[{"id":1,"body":"Please split this logic","user":{"login":"eve"}}]},"pull_request":{"number":14},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	line777 := 777
+	startLine775 := 775
+	payload := pullRequestReviewThreadEventPayload(t, "unresolved", "owner/repo", "eve",
+		ghapi.ReviewThread{
+			ID:        12,
+			Path:      "cmd/rascald/main.go",
+			Line:      &line777,
+			StartLine: &startLine775,
+			Comments:  []ghapi.ReviewComment{{ID: 1, Body: "Please split this logic", User: ghapi.User{Login: "eve"}}},
+		},
+		testPullRequest(14, false, "", ""),
+	)
 	req := webhookRequest(t, payload, "pull_request_review_thread", "delivery-review-thread-unresolved", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -1923,7 +2092,11 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 		t.Fatalf("seed comment run: %v", err)
 	}
 
-	payload := []byte(`{"action":"resolved","thread":{"id":13,"path":"cmd/rascald/main.go","line":800},"pull_request":{"number":15},"repository":{"full_name":"owner/repo"},"sender":{"login":"eve"}}`)
+	line800 := 800
+	payload := pullRequestReviewThreadEventPayload(t, "resolved", "owner/repo", "eve",
+		ghapi.ReviewThread{ID: 13, Path: "cmd/rascald/main.go", Line: &line800},
+		testPullRequest(15, false, "", ""),
+	)
 	req := webhookRequest(t, payload, "pull_request_review_thread", "delivery-review-thread-resolved", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -2066,7 +2239,11 @@ func TestHandleWebhookIssueCommentIgnoresBotActor(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	payload := []byte(`{"action":"created","issue":{"number":9,"pull_request":{}},"comment":{"id":501,"body":"please fix","user":{"login":"rascal[bot]"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"human"}}`)
+	payload := issueCommentEventPayload(t, "created", "owner/repo", "human",
+		testIssue(9, "", "", nil, true),
+		ghapi.Comment{ID: 501, Body: "please fix", User: ghapi.User{Login: "rascal[bot]"}},
+		"",
+	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-bot", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -2083,7 +2260,11 @@ func TestHandleWebhookIssueCommentIgnoresRascalAutomationComment(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	payload := []byte(`{"action":"created","issue":{"number":9,"pull_request":{}},"comment":{"id":502,"body":"<!-- rascal:completion-comment -->\n\nRascal run ` + "`run_123`" + ` completed in 12s.","user":{"login":"rascal"}},"repository":{"full_name":"owner/repo"},"sender":{"login":"rascal"}}`)
+	payload := issueCommentEventPayload(t, "created", "owner/repo", "rascal",
+		testIssue(9, "", "", nil, true),
+		ghapi.Comment{ID: 502, Body: "<!-- rascal:completion-comment -->\n\nRascal run `run_123` completed in 12s.", User: ghapi.User{Login: "rascal"}},
+		"",
+	)
 	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-automation", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -2216,7 +2397,7 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	}
 	markRunReview(t, s, awaitingRun.ID)
 
-	payload := []byte(`{"action":"closed","pull_request":{"number":55,"merged":true},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := pullRequestEventPayload(t, "closed", "owner/repo", "dev", testPullRequest(55, true, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-merged", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -2271,7 +2452,7 @@ func TestMergedPRMatchesRepositoryCaseInsensitively(t *testing.T) {
 	}
 	markRunReview(t, s, run.ID)
 
-	payload := []byte(`{"action":"closed","pull_request":{"number":55,"merged":true},"repository":{"full_name":"Owner/Repo"},"sender":{"login":"dev"}}`)
+	payload := pullRequestEventPayload(t, "closed", "Owner/Repo", "dev", testPullRequest(55, true, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-merged-mixed-case", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -2294,7 +2475,7 @@ func TestPullRequestClosedIgnoresUnmanagedPR(t *testing.T) {
 	s.gh = fakeGH
 	s.cfg.GitHubToken = "token"
 
-	payload := []byte(`{"action":"closed","pull_request":{"number":456,"merged":true},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := pullRequestEventPayload(t, "closed", "owner/repo", "dev", testPullRequest(456, true, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-merged-unmanaged", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -2335,7 +2516,7 @@ func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
 	}
 	markRunReview(t, s, run.ID)
 
-	payload := []byte(`{"action":"closed","pull_request":{"number":99,"merged":false},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := pullRequestEventPayload(t, "closed", "owner/repo", "dev", testPullRequest(99, false, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-closed-unmerged", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -2395,7 +2576,7 @@ func TestClosedUnmergedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 		t.Fatalf("set merged pr status: %v", err)
 	}
 
-	payload := []byte(`{"action":"closed","pull_request":{"number":321,"merged":false},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := pullRequestEventPayload(t, "closed", "owner/repo", "dev", testPullRequest(321, false, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-stale-closed", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
@@ -2444,7 +2625,7 @@ func TestReopenedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 		t.Fatalf("set merged pr status: %v", err)
 	}
 
-	payload := []byte(`{"action":"reopened","pull_request":{"number":654},"repository":{"full_name":"owner/repo"},"sender":{"login":"dev"}}`)
+	payload := pullRequestEventPayload(t, "reopened", "owner/repo", "dev", testPullRequest(654, false, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-stale-reopened", "")
 	rec := httptest.NewRecorder()
 	s.handleWebhook(rec, req)
