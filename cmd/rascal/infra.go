@@ -859,15 +859,10 @@ func defaultHetznerFirewallRules() []hcloud.FirewallRule {
 }
 
 func defaultFirewallIPNets() []net.IPNet {
-	_, v4, err := net.ParseCIDR("0.0.0.0/0")
-	if err != nil {
-		panic(fmt.Sprintf("parse default IPv4 CIDR: %v", err))
+	return []net.IPNet{
+		{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
+		{IP: net.IPv6zero, Mask: net.CIDRMask(0, 128)},
 	}
-	_, v6, err := net.ParseCIDR("::/0")
-	if err != nil {
-		panic(fmt.Sprintf("parse default IPv6 CIDR: %v", err))
-	}
-	return []net.IPNet{*v4, *v6}
 }
 
 func ptrString(v string) *string {
