@@ -245,7 +245,7 @@ func (f *fakeLauncher) StartDetached(_ context.Context, spec runner.Spec) (runne
 	}
 	f.nextExec++
 	handle := runner.ExecutionHandle{
-		Backend: "fake",
+		Backend: runner.ExecutionBackend("fake"),
 		ID:      fmt.Sprintf("exec-%d", f.nextExec),
 		Name:    fmt.Sprintf("rascal-%s", spec.RunID),
 	}
@@ -346,7 +346,7 @@ func (l *stubbornLauncher) StartDetached(_ context.Context, spec runner.Spec) (r
 	l.lastSpec = spec
 	l.mu.Unlock()
 	return runner.ExecutionHandle{
-		Backend: "fake",
+		Backend: runner.ExecutionBackend("fake"),
 		ID:      "stubborn-exec",
 		Name:    "stubborn-" + spec.RunID,
 	}, nil
@@ -4201,7 +4201,7 @@ func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
 	}
 	if _, err := s.store.UpsertRunExecution(state.RunExecution{
 		RunID:         run.ID,
-		Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(handle.Backend)),
+		Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(string(handle.Backend))),
 		ContainerName: handle.Name,
 		ContainerID:   handle.ID,
 		Status:        state.RunExecutionStatusRunning,
@@ -4294,7 +4294,7 @@ func TestRecoverRunningRunAdoptsByStableContainerName(t *testing.T) {
 	}
 	if _, err := s.store.UpsertRunExecution(state.RunExecution{
 		RunID:         run.ID,
-		Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(handle.Backend)),
+		Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(string(handle.Backend))),
 		ContainerName: handle.Name,
 		ContainerID:   handle.Name,
 		Status:        state.RunExecutionStatusCreated,

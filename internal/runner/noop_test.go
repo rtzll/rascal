@@ -25,7 +25,7 @@ func TestNoopLauncherWritesArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start noop launcher: %v", err)
 	}
-	if handle.Backend != "noop" || handle.ID != spec.RunID {
+	if handle.Backend != ExecutionBackendNoop || handle.ID != spec.RunID {
 		t.Fatalf("unexpected execution handle: %+v", handle)
 	}
 

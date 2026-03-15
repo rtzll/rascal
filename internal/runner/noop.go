@@ -47,7 +47,7 @@ func (NoopLauncher) StartDetached(_ context.Context, spec Spec) (handle Executio
 	}
 
 	return ExecutionHandle{
-		Backend: "noop",
+		Backend: ExecutionBackendNoop,
 		ID:      strings.TrimSpace(spec.RunID),
 		Name:    sanitizeContainerName("rascal-" + spec.RunID),
 	}, nil

@@ -1868,7 +1868,7 @@ func (s *server) executeRun(runID string) {
 		pendingHandle := runner.ExecutionHandleForRun(run.ID)
 		if _, err := s.store.UpsertRunExecution(state.RunExecution{
 			RunID:         run.ID,
-			Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(pendingHandle.Backend)),
+			Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(string(pendingHandle.Backend))),
 			ContainerName: pendingHandle.Name,
 			ContainerID:   pendingHandle.Name,
 			Status:        state.RunExecutionStatusCreated,
@@ -1890,7 +1890,7 @@ func (s *server) executeRun(runID string) {
 		}
 		execRec, err = s.store.UpsertRunExecution(state.RunExecution{
 			RunID:         run.ID,
-			Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(handle.Backend)),
+			Backend:       state.NormalizeRunExecutionBackend(state.RunExecutionBackend(string(handle.Backend))),
 			ContainerName: strings.TrimSpace(handle.Name),
 			ContainerID:   strings.TrimSpace(handle.ID),
 			Status:        state.RunExecutionStatusRunning,
@@ -2243,7 +2243,7 @@ func (s *server) stopRunExecutionBestEffort(runID string, note string) {
 
 func runExecutionHandle(execRec state.RunExecution) runner.ExecutionHandle {
 	return runner.ExecutionHandle{
-		Backend: strings.TrimSpace(string(execRec.Backend)),
+		Backend: runner.ExecutionBackend(strings.TrimSpace(string(execRec.Backend))),
 		ID:      strings.TrimSpace(execRec.ContainerID),
 		Name:    strings.TrimSpace(execRec.ContainerName),
 	}

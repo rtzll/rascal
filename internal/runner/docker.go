@@ -194,7 +194,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		return ExecutionHandle{}, fmt.Errorf("write runner start log: %w", err)
 	}
 	return ExecutionHandle{
-		Backend: "docker",
+		Backend: ExecutionBackendDocker,
 		ID:      containerID,
 		Name:    containerName,
 	}, nil

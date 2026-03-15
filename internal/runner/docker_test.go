@@ -70,7 +70,7 @@ exit 0
 	if err != nil {
 		t.Fatalf("start detached: %v", err)
 	}
-	if handle.Backend != "docker" || handle.ID != "container-123" {
+	if handle.Backend != ExecutionBackendDocker || handle.ID != "container-123" {
 		t.Fatalf("unexpected handle: %+v", handle)
 	}
 	if handle.Name != "rascal-run_detached" {

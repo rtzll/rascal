@@ -39,8 +39,15 @@ const (
 	ModeDocker Mode = "docker"
 )
 
+type ExecutionBackend string
+
+const (
+	ExecutionBackendDocker ExecutionBackend = "docker"
+	ExecutionBackendNoop   ExecutionBackend = "noop"
+)
+
 type ExecutionHandle struct {
-	Backend string
+	Backend ExecutionBackend
 	ID      string
 	Name    string
 }
@@ -54,7 +61,7 @@ func ExecutionHandleForRun(runID string) ExecutionHandle {
 	runID = strings.TrimSpace(runID)
 	name := sanitizeContainerName("rascal-" + runID)
 	return ExecutionHandle{
-		Backend: "docker",
+		Backend: ExecutionBackendDocker,
 		Name:    name,
 	}
 }
