@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -122,6 +123,28 @@ type configUnsetOutput struct {
 	Status     string      `json:"status"`
 	Message    string      `json:"message"`
 	ConfigPath string      `json:"config_path"`
+}
+
+type configKey string
+
+const (
+	configKeyServerURL   configKey = "server_url"
+	configKeyAPIToken    configKey = "api_token"
+	configKeyDefaultRepo configKey = "default_repo"
+	configKeyHost        configKey = "host"
+	configKeyDomain      configKey = "domain"
+	configKeyTransport   configKey = "transport"
+	configKeySSHHost     configKey = "ssh_host"
+	configKeySSHUser     configKey = "ssh_user"
+	configKeySSHKey      configKey = "ssh_key"
+	configKeySSHPort     configKey = "ssh_port"
+)
+
+type configKeySpec struct {
+	key            configKey
+	readFileValue  func(config.ClientConfig) string
+	writeFileValue func(*config.ClientConfig, string) error
+	effectiveValue func(*app, clientConfigFile) (configValue, string)
 }
 
 type bootstrapPlanResolved struct {
@@ -2042,31 +2065,11 @@ rascal config get default_repo
 			if err != nil {
 				return err
 			}
-			key := strings.TrimSpace(args[0])
-			switch key {
-			case "server_url":
-				a.println(cfg.ServerURL)
-			case "api_token":
-				a.println(maskSecret(cfg.APIToken))
-			case "default_repo":
-				a.println(cfg.DefaultRepo)
-			case "host":
-				a.println(cfg.Host)
-			case "domain":
-				a.println(cfg.Domain)
-			case "transport":
-				a.println(cfg.Transport)
-			case "ssh_host":
-				a.println(cfg.SSHHost)
-			case "ssh_user":
-				a.println(cfg.SSHUser)
-			case "ssh_key":
-				a.println(cfg.SSHKey)
-			case "ssh_port":
-				a.println("%d", cfg.SSHPort)
-			default:
+			spec, ok := lookupConfigKeySpec(args[0])
+			if !ok {
 				return &cliError{Code: exitInput, Message: "invalid key", Hint: configKeysHint()}
 			}
+			a.println("%s", spec.readFileValue(cfg))
 			return nil
 		},
 	})
@@ -2089,45 +2092,17 @@ rascal config set transport ssh
 			if err != nil {
 				return err
 			}
-			key, val := strings.TrimSpace(args[0]), strings.TrimSpace(args[1])
-			switch key {
-			case "server_url":
-				cfg.ServerURL = strings.TrimRight(val, "/")
-			case "api_token":
-				cfg.APIToken = val
-			case "default_repo":
-				cfg.DefaultRepo = val
-			case "host":
-				cfg.Host = val
-			case "domain":
-				cfg.Domain = val
-			case "transport":
-				transport := strings.ToLower(val)
-				switch transport {
-				case "auto", "http", "ssh":
-					cfg.Transport = transport
-				default:
-					return &cliError{Code: exitInput, Message: "invalid transport", Hint: "transport must be one of: auto|http|ssh"}
-				}
-			case "ssh_host":
-				cfg.SSHHost = val
-			case "ssh_user":
-				cfg.SSHUser = val
-			case "ssh_key":
-				cfg.SSHKey = val
-			case "ssh_port":
-				var port int
-				if _, err := fmt.Sscanf(val, "%d", &port); err != nil || port <= 0 {
-					return &cliError{Code: exitInput, Message: "invalid ssh_port", Hint: "ssh_port must be a positive integer"}
-				}
-				cfg.SSHPort = port
-			default:
+			spec, ok := lookupConfigKeySpec(args[0])
+			if !ok {
 				return &cliError{Code: exitInput, Message: "invalid key", Hint: configKeysHint()}
+			}
+			if err := spec.writeFileValue(&cfg, args[1]); err != nil {
+				return err
 			}
 			if err := config.SaveClientConfig(a.configPath, cfg); err != nil {
 				return &cliError{Code: exitConfig, Message: "failed to write config", Cause: err}
 			}
-			a.println("updated %s in %s", key, a.configPath)
+			a.println("updated %s in %s", spec.key, a.configPath)
 			return nil
 		},
 	})
@@ -2146,35 +2121,35 @@ rascal config unset default_repo
 `),
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			key := strings.TrimSpace(args[0])
-			if !isSupportedConfigKey(key) {
+			spec, ok := lookupConfigKeySpec(args[0])
+			if !ok {
 				return &cliError{Code: exitInput, Message: "invalid key", Hint: configKeysHint()}
 			}
 			settings, exists, err := loadClientConfigFile(a.configPath)
 			if err != nil {
 				return err
 			}
-			hadKey := settings.Has(key)
+			hadKey := settings.Has(string(spec.key))
 			status := "absent"
 			message := ""
 			if hadKey {
-				settings.Unset(key)
+				settings.Unset(string(spec.key))
 				if err := saveClientConfigFile(a.configPath, settings); err != nil {
 					return err
 				}
 				status = "removed"
-				message = fmt.Sprintf("removed %s from %s", key, a.configPath)
+				message = fmt.Sprintf("removed %s from %s", spec.key, a.configPath)
 			} else if exists {
-				message = fmt.Sprintf("%s already absent in %s", key, a.configPath)
+				message = fmt.Sprintf("%s already absent in %s", spec.key, a.configPath)
 			} else {
-				message = fmt.Sprintf("%s already absent (config file missing)", key)
+				message = fmt.Sprintf("%s already absent (config file missing)", spec.key)
 			}
 			if err := a.initConfig(); err != nil {
 				return err
 			}
-			value, source := a.effectiveConfigValue(key, settings)
+			value, source := spec.effectiveValue(a, settings)
 			out := configUnsetOutput{
-				Key:        key,
+				Key:        string(spec.key),
 				Value:      value,
 				Source:     source,
 				Status:     status,
@@ -2185,7 +2160,7 @@ rascal config unset default_repo
 				if message != "" {
 					a.println(message)
 				}
-				a.println("effective %s: %s (%s)", key, value.String(), source)
+				a.println("effective %s: %s (%s)", spec.key, value.String(), source)
 				return nil
 			})
 		},
@@ -3439,32 +3414,148 @@ func firstPositive(values ...int) int {
 	return 0
 }
 
-func supportedConfigKeys() []string {
-	return []string{
-		"server_url",
-		"api_token",
-		"default_repo",
-		"host",
-		"domain",
-		"transport",
-		"ssh_host",
-		"ssh_user",
-		"ssh_key",
-		"ssh_port",
-	}
+var configKeySpecs = []configKeySpec{
+	{
+		key:           configKeyServerURL,
+		readFileValue: func(cfg config.ClientConfig) string { return cfg.ServerURL },
+		writeFileValue: func(cfg *config.ClientConfig, raw string) error {
+			cfg.ServerURL = strings.TrimRight(strings.TrimSpace(raw), "/")
+			return nil
+		},
+		effectiveValue: func(a *app, _ clientConfigFile) (configValue, string) {
+			return newConfigStringValue(a.cfg.ServerURL), a.serverSource
+		},
+	},
+	{
+		key:           configKeyAPIToken,
+		readFileValue: func(cfg config.ClientConfig) string { return maskSecret(cfg.APIToken) },
+		writeFileValue: func(cfg *config.ClientConfig, raw string) error {
+			cfg.APIToken = strings.TrimSpace(raw)
+			return nil
+		},
+		effectiveValue: func(a *app, _ clientConfigFile) (configValue, string) {
+			return newConfigStringValue(maskSecret(a.cfg.APIToken)), a.tokenSource
+		},
+	},
+	{
+		key:           configKeyDefaultRepo,
+		readFileValue: func(cfg config.ClientConfig) string { return cfg.DefaultRepo },
+		writeFileValue: func(cfg *config.ClientConfig, raw string) error {
+			cfg.DefaultRepo = strings.TrimSpace(raw)
+			return nil
+		},
+		effectiveValue: func(a *app, _ clientConfigFile) (configValue, string) {
+			return newConfigStringValue(a.cfg.DefaultRepo), a.repoSource
+		},
+	},
+	{
+		key:           configKeyHost,
+		readFileValue: func(cfg config.ClientConfig) string { return cfg.Host },
+		writeFileValue: func(cfg *config.ClientConfig, raw string) error {
+			cfg.Host = strings.TrimSpace(raw)
+			return nil
+		},
+		effectiveValue: func(a *app, settings clientConfigFile) (configValue, string) {
+			return newConfigStringValue(a.cfg.Host), configSourceFromEnvConfig("RASCAL_HOST", configKeyHost, settings, "unset")
+		},
+	},
+	{
+		key:           configKeyDomain,
+		readFileValue: func(cfg config.ClientConfig) string { return cfg.Domain },
+		writeFileValue: func(cfg *config.ClientConfig, raw string) error {
+			cfg.Domain = strings.TrimSpace(raw)
+			return nil
+		},
+		effectiveValue: func(a *app, settings clientConfigFile) (configValue, string) {
+			return newConfigStringValue(a.cfg.Domain), configSourceFromEnvConfig("RASCAL_DOMAIN", configKeyDomain, settings, "unset")
+		},
+	},
+	{
+		key:           configKeyTransport,
+		readFileValue: func(cfg config.ClientConfig) string { return cfg.Transport },
+		writeFileValue: func(cfg *config.ClientConfig, raw string) error {
+			transport := strings.ToLower(strings.TrimSpace(raw))
+			switch transport {
+			case "auto", "http", "ssh":
+				cfg.Transport = transport
+				return nil
+			default:
+				return &cliError{Code: exitInput, Message: "invalid transport", Hint: "transport must be one of: auto|http|ssh"}
+			}
+		},
+		effectiveValue: func(a *app, _ clientConfigFile) (configValue, string) {
+			return newConfigStringValue(a.cfg.Transport), a.transportSource
+		},
+	},
+	{
+		key:           configKeySSHHost,
+		readFileValue: func(cfg config.ClientConfig) string { return cfg.SSHHost },
+		writeFileValue: func(cfg *config.ClientConfig, raw string) error {
+			cfg.SSHHost = strings.TrimSpace(raw)
+			return nil
+		},
+		effectiveValue: func(a *app, settings clientConfigFile) (configValue, string) {
+			return newConfigStringValue(a.cfg.SSHHost), a.sshHostSource(settings)
+		},
+	},
+	{
+		key:           configKeySSHUser,
+		readFileValue: func(cfg config.ClientConfig) string { return cfg.SSHUser },
+		writeFileValue: func(cfg *config.ClientConfig, raw string) error {
+			cfg.SSHUser = strings.TrimSpace(raw)
+			return nil
+		},
+		effectiveValue: func(a *app, settings clientConfigFile) (configValue, string) {
+			return newConfigStringValue(a.cfg.SSHUser), a.configSourceFromFlagEnvConfig(strings.TrimSpace(a.sshUserFlag) != "", "RASCAL_SSH_USER", configKeySSHUser, settings, "default")
+		},
+	},
+	{
+		key:           configKeySSHKey,
+		readFileValue: func(cfg config.ClientConfig) string { return cfg.SSHKey },
+		writeFileValue: func(cfg *config.ClientConfig, raw string) error {
+			cfg.SSHKey = strings.TrimSpace(raw)
+			return nil
+		},
+		effectiveValue: func(a *app, settings clientConfigFile) (configValue, string) {
+			return newConfigStringValue(a.cfg.SSHKey), a.configSourceFromFlagEnvConfig(strings.TrimSpace(a.sshKeyFlag) != "", "RASCAL_SSH_KEY", configKeySSHKey, settings, "unset")
+		},
+	},
+	{
+		key:           configKeySSHPort,
+		readFileValue: func(cfg config.ClientConfig) string { return strconv.Itoa(cfg.SSHPort) },
+		writeFileValue: func(cfg *config.ClientConfig, raw string) error {
+			port, err := strconv.Atoi(strings.TrimSpace(raw))
+			if err != nil || port <= 0 {
+				return &cliError{Code: exitInput, Message: "invalid ssh_port", Hint: "ssh_port must be a positive integer"}
+			}
+			cfg.SSHPort = port
+			return nil
+		},
+		effectiveValue: func(a *app, settings clientConfigFile) (configValue, string) {
+			return newConfigIntValue(a.cfg.SSHPort), a.configSourceFromFlagEnvConfig(a.sshPortFlag > 0, "RASCAL_SSH_PORT", configKeySSHPort, settings, "default")
+		},
+	},
 }
 
-func isSupportedConfigKey(key string) bool {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return false
+func supportedConfigKeys() []string {
+	keys := make([]string, 0, len(configKeySpecs))
+	for _, spec := range configKeySpecs {
+		keys = append(keys, string(spec.key))
 	}
-	for _, supported := range supportedConfigKeys() {
-		if key == supported {
-			return true
+	return keys
+}
+
+func lookupConfigKeySpec(raw string) (configKeySpec, bool) {
+	key := configKey(strings.TrimSpace(raw))
+	if key == "" {
+		return configKeySpec{}, false
+	}
+	for _, spec := range configKeySpecs {
+		if spec.key == key {
+			return spec, true
 		}
 	}
-	return false
+	return configKeySpec{}, false
 }
 
 func configKeysHint() string {
@@ -3475,21 +3566,21 @@ func configKeysHelpText() string {
 	return strings.Join(supportedConfigKeys(), "\n")
 }
 
-func configSourceFromEnvConfig(envKey, configKey string, settings clientConfigFile, fallback string) string {
+func configSourceFromEnvConfig(envKey string, key configKey, settings clientConfigFile, fallback string) string {
 	if strings.TrimSpace(os.Getenv(envKey)) != "" {
 		return "env"
 	}
-	if settings.Has(configKey) {
+	if settings.Has(string(key)) {
 		return "config"
 	}
 	return fallback
 }
 
-func (a *app) configSourceFromFlagEnvConfig(flagSet bool, envKey, configKey string, settings clientConfigFile, fallback string) string {
+func (a *app) configSourceFromFlagEnvConfig(flagSet bool, envKey string, key configKey, settings clientConfigFile, fallback string) string {
 	if flagSet {
 		return "flag"
 	}
-	return configSourceFromEnvConfig(envKey, configKey, settings, fallback)
+	return configSourceFromEnvConfig(envKey, key, settings, fallback)
 }
 
 func (a *app) sshHostSource(settings clientConfigFile) string {
@@ -3499,40 +3590,13 @@ func (a *app) sshHostSource(settings clientConfigFile) string {
 	if strings.TrimSpace(os.Getenv("RASCAL_SSH_HOST")) != "" {
 		return "env"
 	}
-	if settings.Has("ssh_host") {
+	if settings.Has(string(configKeySSHHost)) {
 		return "config"
 	}
 	if strings.TrimSpace(a.cfg.Host) != "" {
 		return "derived"
 	}
 	return "unset"
-}
-
-func (a *app) effectiveConfigValue(key string, settings clientConfigFile) (configValue, string) {
-	switch key {
-	case "server_url":
-		return newConfigStringValue(a.cfg.ServerURL), a.serverSource
-	case "api_token":
-		return newConfigStringValue(maskSecret(a.cfg.APIToken)), a.tokenSource
-	case "default_repo":
-		return newConfigStringValue(a.cfg.DefaultRepo), a.repoSource
-	case "host":
-		return newConfigStringValue(a.cfg.Host), configSourceFromEnvConfig("RASCAL_HOST", "host", settings, "unset")
-	case "domain":
-		return newConfigStringValue(a.cfg.Domain), configSourceFromEnvConfig("RASCAL_DOMAIN", "domain", settings, "unset")
-	case "transport":
-		return newConfigStringValue(a.cfg.Transport), a.transportSource
-	case "ssh_host":
-		return newConfigStringValue(a.cfg.SSHHost), a.sshHostSource(settings)
-	case "ssh_user":
-		return newConfigStringValue(a.cfg.SSHUser), a.configSourceFromFlagEnvConfig(strings.TrimSpace(a.sshUserFlag) != "", "RASCAL_SSH_USER", "ssh_user", settings, "default")
-	case "ssh_key":
-		return newConfigStringValue(a.cfg.SSHKey), a.configSourceFromFlagEnvConfig(strings.TrimSpace(a.sshKeyFlag) != "", "RASCAL_SSH_KEY", "ssh_key", settings, "unset")
-	case "ssh_port":
-		return newConfigIntValue(a.cfg.SSHPort), a.configSourceFromFlagEnvConfig(a.sshPortFlag > 0, "RASCAL_SSH_PORT", "ssh_port", settings, "default")
-	default:
-		return newConfigStringValue(""), "unset"
-	}
 }
 
 func resolveTransport(configured, serverURL, sshHost string) string {

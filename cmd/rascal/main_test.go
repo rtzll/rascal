@@ -1734,6 +1734,46 @@ func TestConfigUnsetIdempotent(t *testing.T) {
 	}
 }
 
+func TestConfigGetMasksAPITokenFromLocalConfig(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.toml")
+	if err := config.SaveClientConfig(cfgPath, config.ClientConfig{APIToken: "secret-token-value"}); err != nil {
+		t.Fatalf("SaveClientConfig: %v", err)
+	}
+
+	stdout, err := captureStdout(func() error {
+		root := newRootCmd()
+		root.SetArgs([]string{"--config", cfgPath, "config", "get", "api_token"})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatalf("config get: %v", err)
+	}
+
+	if got := strings.TrimSpace(stdout); got != maskSecret("secret-token-value") {
+		t.Fatalf("expected masked token, got %q", got)
+	}
+}
+
+func TestConfigSetSSHPortPersistsInteger(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.toml")
+
+	root := newRootCmd()
+	root.SetArgs([]string{"--config", cfgPath, "config", "set", "ssh_port", "2222"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("config set: %v", err)
+	}
+
+	cfg, err := loadFileConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("loadFileConfig: %v", err)
+	}
+	if cfg.SSHPort != 2222 {
+		t.Fatalf("expected ssh_port 2222, got %d", cfg.SSHPort)
+	}
+}
+
 func TestHelpGoldenSnapshots(t *testing.T) {
 	cases := []struct {
 		name string
