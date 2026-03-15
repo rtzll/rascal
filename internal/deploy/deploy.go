@@ -14,6 +14,7 @@ import (
 
 	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/defaults"
+	"github.com/rtzll/rascal/internal/remote"
 	"github.com/rtzll/rascal/internal/runner"
 )
 
@@ -590,37 +591,28 @@ fi
 }
 
 func sshArgs(cfg Config, remoteCmd string) []string {
-	args := []string{"-p", fmt.Sprintf("%d", cfg.SSHPort), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"}
-	if keyPath := normalizedSSHKeyPath(cfg.SSHKeyPath); keyPath != "" {
-		args = append(args, "-i", keyPath)
-	}
-	args = append(args, fmt.Sprintf("%s@%s", cfg.SSHUser, cfg.Host), remoteCmd)
-	return args
+	return remote.SSHArgs(remote.SSHConfig{
+		Host:    cfg.Host,
+		User:    cfg.SSHUser,
+		KeyPath: cfg.SSHKeyPath,
+		Port:    cfg.SSHPort,
+	}, remoteCmd)
 }
 
 func scpArgs(cfg Config, source, target string) []string {
-	args := []string{"-P", fmt.Sprintf("%d", cfg.SSHPort), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"}
-	if keyPath := normalizedSSHKeyPath(cfg.SSHKeyPath); keyPath != "" {
-		args = append(args, "-i", keyPath)
-	}
-	args = append(args, source, target)
-	return args
-}
-
-func normalizedSSHKeyPath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	expanded, err := expandPath(path)
-	if err != nil {
-		return path
-	}
-	return expanded
+	return remote.SCPArgs(remote.SSHConfig{
+		Host:    cfg.Host,
+		User:    cfg.SSHUser,
+		KeyPath: cfg.SSHKeyPath,
+		Port:    cfg.SSHPort,
+	}, source, target)
 }
 
 func remoteTarget(cfg Config, path string) string {
-	return fmt.Sprintf("%s@%s:%s", cfg.SSHUser, cfg.Host, path)
+	return remote.RemoteTarget(remote.SSHConfig{
+		Host: cfg.Host,
+		User: cfg.SSHUser,
+	}, path)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -723,21 +715,6 @@ func renderCaddyfile(domain string) (string, error) {
 	return strings.TrimSpace(out) + "\n", nil
 }
 
-func expandPath(path string) (string, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "", nil
-	}
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve user home directory: %w", err)
-		}
-		return filepath.Join(home, path[2:]), nil
-	}
-	return path, nil
-}
-
 func repoRootPath() string {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -747,5 +724,5 @@ func repoRootPath() string {
 }
 
 func shellSingleQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+	return remote.ShellQuote(s)
 }

@@ -236,9 +236,14 @@ func TestLoadConfig(t *testing.T) {
 	t.Setenv("RASCAL_TRIGGER", "")
 	t.Setenv("GOOSE_PATH_ROOT", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "")
+	t.Setenv("RASCAL_AGENT_SESSION_MODE", "")
+	t.Setenv("RASCAL_GOOSE_SESSION_RESUME", "")
+	t.Setenv("RASCAL_AGENT_SESSION_RESUME", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_RESUME", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_KEY", "")
+	t.Setenv("RASCAL_AGENT_SESSION_KEY", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_NAME", "")
+	t.Setenv("RASCAL_AGENT_SESSION_ID", "")
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatalf("loadConfig returned error: %v", err)
@@ -282,9 +287,13 @@ func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
 	t.Setenv("GOOSE_PATH_ROOT", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "")
+	t.Setenv("RASCAL_AGENT_SESSION_MODE", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_RESUME", "")
+	t.Setenv("RASCAL_AGENT_SESSION_RESUME", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_KEY", "")
+	t.Setenv("RASCAL_AGENT_SESSION_KEY", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_NAME", "")
+	t.Setenv("RASCAL_AGENT_SESSION_ID", "")
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -361,7 +370,14 @@ func TestLoadConfigRejectsInvalidAgentSessionMode(t *testing.T) {
 	t.Setenv("RASCAL_TASK_ID", "task_invalid_session_mode")
 	t.Setenv("RASCAL_REPO", "owner/repo")
 	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "")
 	t.Setenv("RASCAL_AGENT_SESSION_MODE", "sometimes")
+	t.Setenv("RASCAL_GOOSE_SESSION_RESUME", "")
+	t.Setenv("RASCAL_AGENT_SESSION_RESUME", "")
+	t.Setenv("RASCAL_GOOSE_SESSION_KEY", "")
+	t.Setenv("RASCAL_AGENT_SESSION_KEY", "")
+	t.Setenv("RASCAL_GOOSE_SESSION_NAME", "")
+	t.Setenv("RASCAL_AGENT_SESSION_ID", "")
 
 	_, err := loadConfig()
 	if err == nil {

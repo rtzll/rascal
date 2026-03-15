@@ -93,19 +93,25 @@ func ParseMode(raw string) (Mode, error) {
 	}
 }
 
-// Launcher starts a run inside an execution environment (Docker in v1).
-type Launcher interface {
+// Runner starts a run inside an execution environment (Docker in v1).
+type Runner interface {
 	StartDetached(ctx context.Context, spec Spec) (ExecutionHandle, error)
 	Inspect(ctx context.Context, handle ExecutionHandle) (ExecutionState, error)
 	Stop(ctx context.Context, handle ExecutionHandle, timeout time.Duration) error
 	Remove(ctx context.Context, handle ExecutionHandle) error
 }
 
-func NewLauncher(mode Mode, image, githubToken string) Launcher {
+type Launcher = Runner
+
+func NewRunner(mode Mode, image, githubToken string) Runner {
 	switch NormalizeMode(string(mode)) {
 	case ModeDocker:
 		return DockerLauncher{DefaultImage: image, GitHubToken: githubToken}
 	default:
 		return NoopLauncher{}
 	}
+}
+
+func NewLauncher(mode Mode, image, githubToken string) Launcher {
+	return NewRunner(mode, image, githubToken)
 }

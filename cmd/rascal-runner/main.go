@@ -520,7 +520,9 @@ func firstNonEmptyValue(values ...string) string {
 func firstSetEnvValue(keys ...string) string {
 	for _, key := range keys {
 		if raw, ok := os.LookupEnv(key); ok {
-			return strings.TrimSpace(raw)
+			if trimmed := strings.TrimSpace(raw); trimmed != "" {
+				return trimmed
+			}
 		}
 	}
 	return ""

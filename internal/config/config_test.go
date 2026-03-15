@@ -122,6 +122,7 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "rascal-data")
 	t.Setenv("RASCAL_DATA_DIR", dataDir)
 	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "")
+	t.Setenv("RASCAL_AGENT_SESSION_MODE", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_ROOT", "")
 	t.Setenv("RASCAL_GOOSE_SESSION_TTL_DAYS", "")
 
@@ -230,6 +231,8 @@ func TestLoadServerConfigRejectsInvalidEnumEnv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("RASCAL_GOOSE_SESSION_MODE", "")
+			t.Setenv("RASCAL_AGENT_SESSION_MODE", "")
 			t.Setenv(tt.key, tt.value)
 			_, err := LoadServerConfig()
 			if err == nil {
