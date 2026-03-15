@@ -773,6 +773,7 @@ func testIssue(number int, title, body string, labels []string, isPR bool) ghapi
 		Number: number,
 		Title:  title,
 		Body:   body,
+		State:  "open",
 		Labels: make([]ghapi.Label, 0, len(labels)),
 	}
 	for _, label := range labels {
@@ -788,6 +789,7 @@ func testPullRequest(number int, merged bool, baseRef, headRef string) ghapi.Pul
 	pr := ghapi.PullRequest{
 		Number: number,
 		Merged: merged,
+		State:  "open",
 	}
 	pr.Base.Ref = baseRef
 	pr.Head.Ref = headRef
@@ -1532,6 +1534,43 @@ func TestHandleWebhookIssueCommentIgnoresUnmanagedPR(t *testing.T) {
 	}
 	if got := fakeGH.postedIssueCommentReactions(); len(got) != 0 {
 		t.Fatalf("expected no issue comment reactions for unmanaged pr, got %+v", got)
+	}
+}
+
+func TestHandleWebhookIssueCommentIgnoresClosedPR(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeLauncher{})
+	defer waitForServerIdle(t, s)
+	fakeGH := &fakeGitHubClient{}
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
+
+	taskID := "owner/repo#44"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", IssueNumber: 44, PRNumber: 44}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	closedPRIssue := testIssue(44, "", "", nil, true)
+	closedPRIssue.State = "closed"
+	payload := issueCommentEventPayload(t, "created", "owner/repo", "alice",
+		closedPRIssue,
+		ghapi.Comment{ID: 808, Body: "please fix this", User: ghapi.User{Login: "alice"}},
+		"",
+	)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-closed-pr", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	for _, run := range s.Store.ListRuns(10) {
+		if run.Trigger == "pr_comment" {
+			t.Fatalf("expected no pr_comment run for closed pr")
+		}
+	}
+	if got := fakeGH.postedIssueCommentReactions(); len(got) != 0 {
+		t.Fatalf("expected no issue comment reactions for closed pr, got %+v", got)
 	}
 }
 
@@ -2538,6 +2577,9 @@ func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
 	if updated.Status != state.StatusCanceled {
 		t.Fatalf("expected canceled status, got %s", updated.Status)
 	}
+	if updated.StatusReason != state.RunStatusReasonPRClosed {
+		t.Fatalf("expected status reason %q, got %q", state.RunStatusReasonPRClosed, updated.StatusReason)
+	}
 	if !strings.Contains(updated.Error, "without merge") {
 		t.Fatalf("expected unmerged close reason, got %q", updated.Error)
 	}
@@ -2552,6 +2594,59 @@ func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
 	if !foundMinus {
 		t.Fatalf("expected -1 reaction on closed unmerged PR, got %+v", reactions)
 	}
+}
+
+func TestClosedUnmergedPRCancelsRunningRuns(t *testing.T) {
+	t.Parallel()
+	waitCh := make(chan struct{})
+	launcher := &fakeLauncher{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	taskID := "owner/repo#1001"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 1001}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Instruction: "work in progress",
+		IssueNumber: 1001,
+		PRNumber:    1001,
+		Trigger:     runtrigger.NamePRComment,
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	waitFor(t, time.Second, func() bool {
+		current, ok := s.Store.GetRun(run.ID)
+		return ok && current.Status == state.StatusRunning
+	}, "running PR run")
+
+	payload := pullRequestEventPayload(t, "closed", "owner/repo", "dev", testPullRequest(1001, false, "", ""))
+	req := webhookRequest(t, payload, "pull_request", "delivery-closed-running-pr", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for closed unmerged pr event, got %d", rec.Code)
+	}
+
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s.Store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusCanceled
+	}, "running pr run canceled")
+	updated, ok := s.Store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("run %s not found", run.ID)
+	}
+	if updated.StatusReason != state.RunStatusReasonPRClosed {
+		t.Fatalf("expected status reason %q, got %q", state.RunStatusReasonPRClosed, updated.StatusReason)
+	}
+	if !strings.Contains(updated.Error, "pull request closed") {
+		t.Fatalf("expected closed pr cancel reason, got %q", updated.Error)
+	}
+
+	close(waitCh)
 }
 
 func TestClosedUnmergedEventDoesNotDowngradeMergedRunState(t *testing.T) {

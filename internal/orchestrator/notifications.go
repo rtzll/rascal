@@ -843,6 +843,7 @@ func (s *Server) requeueRun(runID string) error {
 		}
 		r.Status = state.StatusQueued
 		r.Error = ""
+		r.StatusReason = state.RunStatusReasonNone
 		r.StartedAt = nil
 		r.CompletedAt = nil
 		return nil

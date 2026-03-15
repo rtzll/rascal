@@ -74,7 +74,7 @@ func TestFromDBNormalizesTaskAndRunStatus(t *testing.T) {
 
 	run := fromDBRunParts(
 		"run-1", "task-1", "owner/repo", "test", "codex", "main", "", "cli", true,
-		" running ", "/tmp/run-1", 0, 0, "", "", "", "", "", 0, 0, sql.NullInt64{}, sql.NullInt64{},
+		" running ", "/tmp/run-1", 0, 0, "", "", "", "", "", "", 0, 0, sql.NullInt64{}, sql.NullInt64{},
 	)
 	if run.Status != StatusRunning {
 		t.Fatalf("run status = %q, want %q", run.Status, StatusRunning)
@@ -82,7 +82,7 @@ func TestFromDBNormalizesTaskAndRunStatus(t *testing.T) {
 
 	fallbackRun := fromDBRunParts(
 		"run-2", "task-1", "owner/repo", "test", "codex", "main", "", "cli", true,
-		"stuck", "/tmp/run-2", 0, 0, "", "", "", "", "", 0, 0, sql.NullInt64{}, sql.NullInt64{},
+		"stuck", "/tmp/run-2", 0, 0, "", "", "", "", "", "", 0, 0, sql.NullInt64{}, sql.NullInt64{},
 	)
 	if fallbackRun.Status != StatusQueued {
 		t.Fatalf("run fallback status = %q, want %q", fallbackRun.Status, StatusQueued)

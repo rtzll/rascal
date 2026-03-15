@@ -20,6 +20,7 @@ type Issue struct {
 	Number      int             `json:"number"`
 	Title       string          `json:"title"`
 	Body        string          `json:"body"`
+	State       string          `json:"state"`
 	Labels      []Label         `json:"labels"`
 	PullRequest *PullRequestRef `json:"pull_request"`
 }
@@ -31,8 +32,9 @@ type Comment struct {
 }
 
 type PullRequest struct {
-	Number int  `json:"number"`
-	Merged bool `json:"merged"`
+	Number int    `json:"number"`
+	Merged bool   `json:"merged"`
+	State  string `json:"state"`
 	Base   struct {
 		Ref string `json:"ref"`
 	} `json:"base"`

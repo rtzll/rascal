@@ -47,14 +47,14 @@ func (s *Server) ScheduleRuns(preferredTaskID string) {
 			return
 		}
 
-		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
-			s.setRunStatusBestEffort(run.ID, state.StatusCanceled, reason)
+		if reason, statusReason, ok := s.pendingRunCancelStatus(run.ID); ok {
+			s.setRunStatusBestEffortWithReason(run.ID, state.StatusCanceled, reason, statusReason)
 			s.clearRunCancelBestEffort(run.ID)
 			continue
 		}
 
 		if s.isDraining() {
-			s.setRunStatusBestEffort(run.ID, state.StatusCanceled, "orchestrator shutting down")
+			s.setRunStatusBestEffortWithReason(run.ID, state.StatusCanceled, "orchestrator shutting down", state.RunStatusReasonShutdown)
 			return
 		}
 		if err := s.Store.UpsertRunLease(run.ID, s.InstanceID, runLeaseTTL); err != nil {
@@ -94,6 +94,7 @@ func (s *Server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {
 			if r.Status == state.StatusReview {
 				r.Status = state.StatusCanceled
 				r.Error = "pull request closed without merge"
+				r.StatusReason = state.RunStatusReasonPRClosed
 				r.CompletedAt = &now
 			}
 			return nil
@@ -218,6 +219,6 @@ func (s *Server) cancelQueuedReviewThreadRuns(taskID, repo string, prNumber int,
 		if !ok || target.ReviewThreadID != reviewThreadID {
 			continue
 		}
-		s.setRunStatusBestEffort(run.ID, state.StatusCanceled, reason)
+		s.setRunStatusBestEffortWithReason(run.ID, state.StatusCanceled, reason, state.RunStatusReasonReviewThreadResolved)
 	}
 }

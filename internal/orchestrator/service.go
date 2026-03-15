@@ -156,15 +156,19 @@ func (s *Server) RecoverQueuedCancels() {
 		if run.Status != state.StatusQueued {
 			continue
 		}
-		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
-			s.setRunStatusBestEffort(run.ID, state.StatusCanceled, reason)
+		if reason, statusReason, ok := s.pendingRunCancelStatus(run.ID); ok {
+			s.setRunStatusBestEffortWithReason(run.ID, state.StatusCanceled, reason, statusReason)
 			s.clearRunCancelBestEffort(run.ID)
 		}
 	}
 }
 
 func (s *Server) setRunStatusWithFallback(run state.Run, status state.RunStatus, errText string) state.Run {
-	updated, err := s.Store.SetRunStatus(run.ID, status, errText)
+	return s.setRunStatusWithFallbackReason(run, status, errText, state.RunStatusReasonNone)
+}
+
+func (s *Server) setRunStatusWithFallbackReason(run state.Run, status state.RunStatus, errText string, statusReason state.RunStatusReason) state.Run {
+	updated, err := s.Store.SetRunStatusWithReason(run.ID, status, errText, statusReason)
 	if err == nil {
 		return updated
 	}
@@ -173,18 +177,25 @@ func (s *Server) setRunStatusWithFallback(run state.Run, status state.RunStatus,
 	now := time.Now().UTC()
 	run.Status = status
 	run.Error = errText
+	run.StatusReason = state.NormalizeRunStatusReason(statusReason)
 	run.UpdatedAt = now
 	if status == state.StatusRunning {
 		run.StartedAt = &now
 	}
 	if state.IsFinalRunStatus(status) {
 		run.CompletedAt = &now
+	} else {
+		run.StatusReason = state.RunStatusReasonNone
 	}
 	return run
 }
 
 func (s *Server) setRunStatusBestEffort(runID string, status state.RunStatus, errText string) {
-	if _, err := s.Store.SetRunStatus(runID, status, errText); err != nil {
+	s.setRunStatusBestEffortWithReason(runID, status, errText, state.RunStatusReasonNone)
+}
+
+func (s *Server) setRunStatusBestEffortWithReason(runID string, status state.RunStatus, errText string, statusReason state.RunStatusReason) {
+	if _, err := s.Store.SetRunStatusWithReason(runID, status, errText, statusReason); err != nil {
 		log.Printf("run %s set status %q failed: %v", runID, status, err)
 	}
 }
@@ -219,8 +230,8 @@ func (s *Server) setTaskPRBestEffort(taskID, repo string, prNumber int) {
 	}
 }
 
-func (s *Server) cancelQueuedRunsBestEffort(taskID, reason string) {
-	if err := s.Store.CancelQueuedRuns(taskID, reason); err != nil {
+func (s *Server) cancelQueuedRunsBestEffort(taskID, reason string, statusReason state.RunStatusReason) {
+	if err := s.Store.CancelQueuedRuns(taskID, reason, statusReason); err != nil {
 		log.Printf("task %s cancel queued runs failed: %v", taskID, err)
 	}
 }
@@ -251,7 +262,7 @@ func (s *Server) finishRun(run state.Run) {
 	taskCompleted := s.Store.IsTaskCompleted(run.TaskID)
 
 	if taskCompleted {
-		s.cancelQueuedRunsBestEffort(run.TaskID, "task completed; canceled pending runs")
+		s.cancelQueuedRunsBestEffort(run.TaskID, "task completed; canceled pending runs", state.RunStatusReasonTaskCompleted)
 	}
 
 	if !s.isDraining() {
@@ -358,16 +369,39 @@ func (s *Server) isActiveWebhookSlot() bool {
 	}
 }
 
-func (s *Server) pendingRunCancelReason(runID string) (string, bool) {
+func (s *Server) pendingRunCancelStatus(runID string) (string, state.RunStatusReason, bool) {
 	req, ok := s.Store.GetRunCancel(runID)
 	if !ok {
-		return "", false
+		return "", state.RunStatusReasonNone, false
 	}
 	reason := strings.TrimSpace(req.Reason)
 	if reason == "" {
 		reason = "canceled"
 	}
-	return reason, true
+	return reason, statusReasonFromCancelSource(req.Source), true
+}
+
+func statusReasonFromCancelSource(source string) state.RunStatusReason {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "user":
+		return state.RunStatusReasonUserCanceled
+	case string(state.RunStatusReasonIssueClosed), "issue":
+		return state.RunStatusReasonIssueClosed
+	case string(state.RunStatusReasonIssueEdited):
+		return state.RunStatusReasonIssueEdited
+	case string(state.RunStatusReasonPRClosed):
+		return state.RunStatusReasonPRClosed
+	case string(state.RunStatusReasonPRMerged):
+		return state.RunStatusReasonPRMerged
+	case string(state.RunStatusReasonReviewThreadResolved):
+		return state.RunStatusReasonReviewThreadResolved
+	case "shutdown":
+		return state.RunStatusReasonShutdown
+	case "broker":
+		return state.RunStatusReasonCredentialLeaseLost
+	default:
+		return state.RunStatusReasonNone
+	}
 }
 
 func isCommentTriggeredRun(trigger runtrigger.Name) bool {

@@ -35,6 +35,7 @@ CREATE TABLE runs (
   head_sha TEXT NOT NULL DEFAULT '',
   context TEXT NOT NULL DEFAULT '',
   error TEXT NOT NULL DEFAULT '',
+  status_reason TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   started_at INTEGER,

@@ -27,8 +27,8 @@ func (s *Server) RecoverRunningRuns() {
 			s.recoverDetachedRun(run, exec)
 			continue
 		}
-		if reason, ok := s.pendingRunCancelReason(run.ID); ok {
-			s.setRunStatusBestEffort(run.ID, state.StatusCanceled, reason)
+		if reason, statusReason, ok := s.pendingRunCancelStatus(run.ID); ok {
+			s.setRunStatusBestEffortWithReason(run.ID, state.StatusCanceled, reason, statusReason)
 			s.clearRunCancelBestEffort(run.ID)
 			continue
 		}
@@ -163,15 +163,15 @@ func (s *Server) ExecuteRun(runID string) {
 	if !ok {
 		return
 	}
-	if reason, ok := s.pendingRunCancelReason(runID); ok {
-		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, reason)
+	if reason, statusReason, ok := s.pendingRunCancelStatus(runID); ok {
+		updated := s.setRunStatusWithFallbackReason(run, state.StatusCanceled, reason, statusReason)
 		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
 	}
 
 	if s.Store.IsTaskCompleted(run.TaskID) {
-		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, "task is already completed")
+		updated := s.setRunStatusWithFallbackReason(run, state.StatusCanceled, "task is already completed", state.RunStatusReasonTaskCompleted)
 		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
@@ -226,8 +226,8 @@ func (s *Server) ExecuteRun(runID string) {
 	}
 	defer s.cleanupRunCredentialAuth(run.RunDir, credentialLeaseID)
 
-	if reason, ok := s.pendingRunCancelReason(runID); ok {
-		updated := s.setRunStatusWithFallback(run, state.StatusCanceled, reason)
+	if reason, statusReason, ok := s.pendingRunCancelStatus(runID); ok {
+		updated := s.setRunStatusWithFallbackReason(run, state.StatusCanceled, reason, statusReason)
 		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
@@ -469,7 +469,7 @@ func (s *Server) superviseRun(ctx context.Context, runID string, execRec state.R
 
 			if execState.Running {
 				execStatus := state.RunExecutionStatusRunning
-				if reason, ok := s.pendingRunCancelReason(runID); ok {
+				if reason, _, ok := s.pendingRunCancelStatus(runID); ok {
 					execStatus = state.RunExecutionStatusStopping
 					if !stopRequested {
 						stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -592,11 +592,13 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		status = state.StatusReview
 		prStatus = state.PRStatusOpen
 	}
-	if reason, canceled := s.pendingRunCancelReason(runID); canceled && status == state.StatusFailed {
+	statusReason := state.RunStatusReasonNone
+	if reason, canceledReason, canceled := s.pendingRunCancelStatus(runID); canceled && status == state.StatusFailed {
 		// Cancellation should explain a stopped execution, but it should not
 		// overwrite a successful terminal result that raced with the request.
 		status = state.StatusCanceled
 		errText = reason
+		statusReason = canceledReason
 	}
 	tokenUsage, hasTokenUsage, tokenUsageErr := loadRunTokenUsage(run)
 	if tokenUsageErr != nil {
@@ -607,6 +609,10 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	updated, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
 		r.Status = status
 		r.Error = errText
+		r.StatusReason = statusReason
+		if !state.IsFinalRunStatus(status) {
+			r.StatusReason = state.RunStatusReasonNone
+		}
 		r.PRNumber = maxInt(r.PRNumber, meta.PRNumber)
 		if strings.TrimSpace(meta.PRURL) != "" {
 			r.PRURL = strings.TrimSpace(meta.PRURL)
@@ -741,7 +747,7 @@ func (s *Server) StopRunSupervisors() {
 	}
 }
 
-func (s *Server) cancelRunningTaskRuns(taskID, reason string) {
+func (s *Server) cancelRunningTaskRuns(taskID, reason string, statusReason state.RunStatusReason) {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
 		return
@@ -754,7 +760,7 @@ func (s *Server) cancelRunningTaskRuns(taskID, reason string) {
 		if run.TaskID != taskID {
 			continue
 		}
-		if err := s.Store.RequestRunCancel(run.ID, reason, "issue"); err != nil {
+		if err := s.Store.RequestRunCancel(run.ID, reason, string(state.NormalizeRunStatusReason(statusReason))); err != nil {
 			log.Printf("failed to request run cancel for %s: %v", run.ID, err)
 			continue
 		}

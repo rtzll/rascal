@@ -82,6 +82,7 @@ type Run struct {
 	HeadSha         string        `json:"head_sha"`
 	Context         string        `json:"context"`
 	Error           string        `json:"error"`
+	StatusReason    string        `json:"status_reason"`
 	CreatedAt       int64         `json:"created_at"`
 	UpdatedAt       int64         `json:"updated_at"`
 	StartedAt       sql.NullInt64 `json:"started_at"`

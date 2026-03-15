@@ -11,7 +11,7 @@ import (
 )
 
 const activeRunForTask = `-- name: ActiveRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ? AND status IN ('queued', 'running')
 ORDER BY seq DESC
@@ -38,6 +38,7 @@ type ActiveRunForTaskRow struct {
 	HeadSha      string        `json:"head_sha"`
 	Context      string        `json:"context"`
 	Error        string        `json:"error"`
+	StatusReason string        `json:"status_reason"`
 	CreatedAt    int64         `json:"created_at"`
 	UpdatedAt    int64         `json:"updated_at"`
 	StartedAt    sql.NullInt64 `json:"started_at"`
@@ -67,6 +68,7 @@ func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (ActiveRu
 		&i.HeadSha,
 		&i.Context,
 		&i.Error,
+		&i.StatusReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -77,20 +79,22 @@ func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (ActiveRu
 
 const cancelQueuedRuns = `-- name: CancelQueuedRuns :exec
 UPDATE runs
-SET status = 'canceled', error = ?, updated_at = ?, completed_at = ?
+SET status = 'canceled', error = ?, status_reason = ?, updated_at = ?, completed_at = ?
 WHERE task_id = ? AND status = 'queued'
 `
 
 type CancelQueuedRunsParams struct {
-	Error       string        `json:"error"`
-	UpdatedAt   int64         `json:"updated_at"`
-	CompletedAt sql.NullInt64 `json:"completed_at"`
-	TaskID      string        `json:"task_id"`
+	Error        string        `json:"error"`
+	StatusReason string        `json:"status_reason"`
+	UpdatedAt    int64         `json:"updated_at"`
+	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	TaskID       string        `json:"task_id"`
 }
 
 func (q *Queries) CancelQueuedRuns(ctx context.Context, arg CancelQueuedRunsParams) error {
 	_, err := q.db.ExecContext(ctx, cancelQueuedRuns,
 		arg.Error,
+		arg.StatusReason,
 		arg.UpdatedAt,
 		arg.CompletedAt,
 		arg.TaskID,
@@ -176,7 +180,7 @@ func (q *Queries) ClaimDelivery(ctx context.Context, arg ClaimDeliveryParams) (C
 
 const claimNextQueuedRun = `-- name: ClaimNextQueuedRun :one
 UPDATE runs
-SET status = 'running', error = '', updated_at = ?1, started_at = ?2
+SET status = 'running', error = '', status_reason = '', updated_at = ?1, started_at = ?2
 WHERE id = (
   SELECT r.id
   FROM runs AS r
@@ -223,6 +227,7 @@ RETURNING
   head_sha,
   context,
   error,
+  status_reason,
   created_at,
   updated_at,
   started_at,
@@ -254,6 +259,7 @@ type ClaimNextQueuedRunRow struct {
 	HeadSha      string        `json:"head_sha"`
 	Context      string        `json:"context"`
 	Error        string        `json:"error"`
+	StatusReason string        `json:"status_reason"`
 	CreatedAt    int64         `json:"created_at"`
 	UpdatedAt    int64         `json:"updated_at"`
 	StartedAt    sql.NullInt64 `json:"started_at"`
@@ -283,6 +289,7 @@ func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRun
 		&i.HeadSha,
 		&i.Context,
 		&i.Error,
+		&i.StatusReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -293,7 +300,7 @@ func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRun
 
 const claimNextQueuedRunForTask = `-- name: ClaimNextQueuedRunForTask :one
 UPDATE runs
-SET status = 'running', error = '', updated_at = ?1, started_at = ?2
+SET status = 'running', error = '', status_reason = '', updated_at = ?1, started_at = ?2
 WHERE id = (
   SELECT r.id
   FROM runs AS r
@@ -341,6 +348,7 @@ RETURNING
   head_sha,
   context,
   error,
+  status_reason,
   created_at,
   updated_at,
   started_at,
@@ -373,6 +381,7 @@ type ClaimNextQueuedRunForTaskRow struct {
 	HeadSha      string        `json:"head_sha"`
 	Context      string        `json:"context"`
 	Error        string        `json:"error"`
+	StatusReason string        `json:"status_reason"`
 	CreatedAt    int64         `json:"created_at"`
 	UpdatedAt    int64         `json:"updated_at"`
 	StartedAt    sql.NullInt64 `json:"started_at"`
@@ -402,6 +411,7 @@ func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQu
 		&i.HeadSha,
 		&i.Context,
 		&i.Error,
+		&i.StatusReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -412,7 +422,7 @@ func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQu
 
 const claimRunStart = `-- name: ClaimRunStart :execrows
 UPDATE runs
-SET status = 'running', error = '', updated_at = ?, started_at = ?
+SET status = 'running', error = '', status_reason = '', updated_at = ?, started_at = ?
 WHERE id = ?
   AND status = 'queued'
   AND NOT EXISTS (
@@ -837,7 +847,7 @@ func (q *Queries) GetCredentialLease(ctx context.Context, id string) (Credential
 }
 
 const getRun = `-- name: GetRun :one
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?
 `
@@ -862,6 +872,7 @@ type GetRunRow struct {
 	HeadSha      string        `json:"head_sha"`
 	Context      string        `json:"context"`
 	Error        string        `json:"error"`
+	StatusReason string        `json:"status_reason"`
 	CreatedAt    int64         `json:"created_at"`
 	UpdatedAt    int64         `json:"updated_at"`
 	StartedAt    sql.NullInt64 `json:"started_at"`
@@ -891,6 +902,7 @@ func (q *Queries) GetRun(ctx context.Context, id string) (GetRunRow, error) {
 		&i.HeadSha,
 		&i.Context,
 		&i.Error,
+		&i.StatusReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -1157,13 +1169,14 @@ INSERT INTO runs (
   head_sha,
   context,
   error,
+  status_reason,
   created_at,
   updated_at,
   started_at,
   completed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 `
 
 type InsertRunParams struct {
@@ -1185,6 +1198,7 @@ type InsertRunParams struct {
 	HeadSha      string        `json:"head_sha"`
 	Context      string        `json:"context"`
 	Error        string        `json:"error"`
+	StatusReason string        `json:"status_reason"`
 	CreatedAt    int64         `json:"created_at"`
 	UpdatedAt    int64         `json:"updated_at"`
 	StartedAt    sql.NullInt64 `json:"started_at"`
@@ -1211,6 +1225,7 @@ type InsertRunRow struct {
 	HeadSha      string        `json:"head_sha"`
 	Context      string        `json:"context"`
 	Error        string        `json:"error"`
+	StatusReason string        `json:"status_reason"`
 	CreatedAt    int64         `json:"created_at"`
 	UpdatedAt    int64         `json:"updated_at"`
 	StartedAt    sql.NullInt64 `json:"started_at"`
@@ -1237,6 +1252,7 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRun
 		arg.HeadSha,
 		arg.Context,
 		arg.Error,
+		arg.StatusReason,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.StartedAt,
@@ -1263,6 +1279,7 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRun
 		&i.HeadSha,
 		&i.Context,
 		&i.Error,
+		&i.StatusReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -1285,7 +1302,7 @@ func (q *Queries) IsTaskCompleted(ctx context.Context, id string) (bool, error) 
 }
 
 const lastRunForTask = `-- name: LastRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ?
 ORDER BY seq DESC
@@ -1312,6 +1329,7 @@ type LastRunForTaskRow struct {
 	HeadSha      string        `json:"head_sha"`
 	Context      string        `json:"context"`
 	Error        string        `json:"error"`
+	StatusReason string        `json:"status_reason"`
 	CreatedAt    int64         `json:"created_at"`
 	UpdatedAt    int64         `json:"updated_at"`
 	StartedAt    sql.NullInt64 `json:"started_at"`
@@ -1341,6 +1359,7 @@ func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (LastRunFor
 		&i.HeadSha,
 		&i.Context,
 		&i.Error,
+		&i.StatusReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -1545,7 +1564,7 @@ func (q *Queries) ListCredentialCandidates(ctx context.Context, arg ListCredenti
 }
 
 const listRunningRuns = `-- name: ListRunningRuns :many
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE status = 'running'
 ORDER BY seq DESC
@@ -1571,6 +1590,7 @@ type ListRunningRunsRow struct {
 	HeadSha      string        `json:"head_sha"`
 	Context      string        `json:"context"`
 	Error        string        `json:"error"`
+	StatusReason string        `json:"status_reason"`
 	CreatedAt    int64         `json:"created_at"`
 	UpdatedAt    int64         `json:"updated_at"`
 	StartedAt    sql.NullInt64 `json:"started_at"`
@@ -1606,6 +1626,7 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]ListRunningRunsRow, er
 			&i.HeadSha,
 			&i.Context,
 			&i.Error,
+			&i.StatusReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.StartedAt,
@@ -1625,7 +1646,7 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]ListRunningRunsRow, er
 }
 
 const listRuns = `-- name: ListRuns :many
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 ORDER BY seq DESC
 LIMIT ?
@@ -1651,6 +1672,7 @@ type ListRunsRow struct {
 	HeadSha      string        `json:"head_sha"`
 	Context      string        `json:"context"`
 	Error        string        `json:"error"`
+	StatusReason string        `json:"status_reason"`
 	CreatedAt    int64         `json:"created_at"`
 	UpdatedAt    int64         `json:"updated_at"`
 	StartedAt    sql.NullInt64 `json:"started_at"`
@@ -1686,6 +1708,7 @@ func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]ListRunsRow, err
 			&i.HeadSha,
 			&i.Context,
 			&i.Error,
+			&i.StatusReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.StartedAt,
@@ -2265,6 +2288,7 @@ SET
   head_sha = ?,
   context = ?,
   error = ?,
+  status_reason = ?,
   created_at = ?,
   updated_at = ?,
   started_at = ?,
@@ -2290,6 +2314,7 @@ type UpdateRunParams struct {
 	HeadSha      string        `json:"head_sha"`
 	Context      string        `json:"context"`
 	Error        string        `json:"error"`
+	StatusReason string        `json:"status_reason"`
 	CreatedAt    int64         `json:"created_at"`
 	UpdatedAt    int64         `json:"updated_at"`
 	StartedAt    sql.NullInt64 `json:"started_at"`
@@ -2316,6 +2341,7 @@ func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (int64, er
 		arg.HeadSha,
 		arg.Context,
 		arg.Error,
+		arg.StatusReason,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.StartedAt,

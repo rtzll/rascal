@@ -20,6 +20,46 @@ const (
 	StatusCanceled  RunStatus = "canceled"
 )
 
+type RunStatusReason string
+
+const (
+	RunStatusReasonNone                 RunStatusReason = ""
+	RunStatusReasonUserCanceled         RunStatusReason = "user_canceled"
+	RunStatusReasonIssueClosed          RunStatusReason = "issue_closed"
+	RunStatusReasonIssueEdited          RunStatusReason = "issue_edited"
+	RunStatusReasonPRClosed             RunStatusReason = "pr_closed"
+	RunStatusReasonPRMerged             RunStatusReason = "pr_merged"
+	RunStatusReasonReviewThreadResolved RunStatusReason = "review_thread_resolved"
+	RunStatusReasonTaskCompleted        RunStatusReason = "task_completed"
+	RunStatusReasonShutdown             RunStatusReason = "shutdown"
+	RunStatusReasonCredentialLeaseLost  RunStatusReason = "credential_lease_lost"
+)
+
+func NormalizeRunStatusReason(reason RunStatusReason) RunStatusReason {
+	switch strings.ToLower(strings.TrimSpace(string(reason))) {
+	case string(RunStatusReasonUserCanceled):
+		return RunStatusReasonUserCanceled
+	case string(RunStatusReasonIssueClosed):
+		return RunStatusReasonIssueClosed
+	case string(RunStatusReasonIssueEdited):
+		return RunStatusReasonIssueEdited
+	case string(RunStatusReasonPRClosed):
+		return RunStatusReasonPRClosed
+	case string(RunStatusReasonPRMerged):
+		return RunStatusReasonPRMerged
+	case string(RunStatusReasonReviewThreadResolved):
+		return RunStatusReasonReviewThreadResolved
+	case string(RunStatusReasonTaskCompleted):
+		return RunStatusReasonTaskCompleted
+	case string(RunStatusReasonShutdown):
+		return RunStatusReasonShutdown
+	case string(RunStatusReasonCredentialLeaseLost):
+		return RunStatusReasonCredentialLeaseLost
+	default:
+		return RunStatusReasonNone
+	}
+}
+
 var runStatusTransitions = map[RunStatus]map[RunStatus]struct{}{
 	StatusQueued: {
 		StatusQueued:   {},
@@ -167,13 +207,14 @@ type Run struct {
 	Status       RunStatus       `json:"status"`
 	RunDir       string          `json:"run_dir"`
 
-	IssueNumber int      `json:"issue_number,omitempty"`
-	PRNumber    int      `json:"pr_number,omitempty"`
-	PRURL       string   `json:"pr_url,omitempty"`
-	PRStatus    PRStatus `json:"pr_status"`
-	HeadSHA     string   `json:"head_sha,omitempty"`
-	Context     string   `json:"context,omitempty"`
-	Error       string   `json:"error,omitempty"`
+	IssueNumber  int             `json:"issue_number,omitempty"`
+	PRNumber     int             `json:"pr_number,omitempty"`
+	PRURL        string          `json:"pr_url,omitempty"`
+	PRStatus     PRStatus        `json:"pr_status"`
+	HeadSHA      string          `json:"head_sha,omitempty"`
+	Context      string          `json:"context,omitempty"`
+	Error        string          `json:"error,omitempty"`
+	StatusReason RunStatusReason `json:"status_reason,omitempty"`
 
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`

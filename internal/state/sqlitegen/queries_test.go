@@ -318,7 +318,7 @@ func TestQueriesCoverage(t *testing.T) {
 		t.Fatal("expected task_1 pending_input=true with queued runs")
 	}
 
-	if err := q.CancelQueuedRuns(ctx, CancelQueuedRunsParams{Error: "stop", UpdatedAt: later + 23, CompletedAt: sql.NullInt64{Int64: later + 23, Valid: true}, TaskID: "task_1"}); err != nil {
+	if err := q.CancelQueuedRuns(ctx, CancelQueuedRunsParams{Error: "stop", StatusReason: "task_completed", UpdatedAt: later + 23, CompletedAt: sql.NullInt64{Int64: later + 23, Valid: true}, TaskID: "task_1"}); err != nil {
 		t.Fatalf("CancelQueuedRuns: %v", err)
 	}
 

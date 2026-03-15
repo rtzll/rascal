@@ -127,7 +127,7 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 				return nil
 			}
 			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
-			if err := s.Store.CancelQueuedRuns(taskID, "issue edited"); err != nil {
+			if err := s.Store.CancelQueuedRuns(taskID, "issue edited", state.RunStatusReasonIssueEdited); err != nil {
 				return fmt.Errorf("cancel queued runs for edited issue: %w", err)
 			}
 			_, err := s.CreateAndQueueRun(RunRequest{
@@ -164,10 +164,10 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if err := s.Store.MarkTaskCompleted(taskID); err != nil {
 				return fmt.Errorf("mark task completed for closed issue: %w", err)
 			}
-			if err := s.Store.CancelQueuedRuns(taskID, "issue closed"); err != nil {
+			if err := s.Store.CancelQueuedRuns(taskID, "issue closed", state.RunStatusReasonIssueClosed); err != nil {
 				return fmt.Errorf("cancel queued runs for closed issue: %w", err)
 			}
-			s.cancelRunningTaskRuns(taskID, "issue closed")
+			s.cancelRunningTaskRuns(taskID, "issue closed", state.RunStatusReasonIssueClosed)
 			return nil
 		case "reopened":
 			if !ghapi.IssueHasLabel(ev.Issue.Labels, "rascal") {
@@ -213,6 +213,9 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 			return fmt.Errorf("decode issue_comment event: %w", err)
 		}
 		if ev.Issue.PullRequest == nil {
+			return nil
+		}
+		if !isOpenGitHubState(ev.Issue.State) {
 			return nil
 		}
 		switch ev.Action {
@@ -268,6 +271,9 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 		if ev.Action != "submitted" {
 			return nil
 		}
+		if !isOpenGitHubState(ev.PullRequest.State) {
+			return nil
+		}
 		if s.isBotActor(ev.Review.User.Login) || s.isBotActor(ev.Sender.Login) {
 			return nil
 		}
@@ -309,6 +315,9 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 		var ev ghapi.PullRequestReviewCommentEvent
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return fmt.Errorf("decode pull_request_review_comment event: %w", err)
+		}
+		if !isOpenGitHubState(ev.PullRequest.State) {
+			return nil
 		}
 		switch ev.Action {
 		case "created":
@@ -366,6 +375,9 @@ Inline comment location: %s`, contextText, location)
 		var ev ghapi.PullRequestReviewThreadEvent
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return fmt.Errorf("decode pull_request_review_thread event: %w", err)
+		}
+		if !isOpenGitHubState(ev.PullRequest.State) {
+			return nil
 		}
 		switch ev.Action {
 		case "unresolved":
@@ -426,12 +438,17 @@ Inline comment location: %s`, contextText, location)
 				if err := s.Store.MarkTaskCompleted(taskID); err != nil {
 					return fmt.Errorf("mark task completed for merged PR: %w", err)
 				}
-				if err := s.Store.CancelQueuedRuns(taskID, "task completed by merged PR"); err != nil {
+				if err := s.Store.CancelQueuedRuns(taskID, "pull request merged", state.RunStatusReasonPRMerged); err != nil {
 					return fmt.Errorf("cancel queued runs for merged PR: %w", err)
 				}
+				s.cancelRunningTaskRuns(taskID, "pull request merged", state.RunStatusReasonPRMerged)
 				s.reconcileClosedPRRuns(ev.Repository.FullName, ev.PullRequest.Number, true)
 				s.addIssueReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ghapi.ReactionRocket)
 			} else {
+				if err := s.Store.CancelQueuedRuns(taskID, "pull request closed", state.RunStatusReasonPRClosed); err != nil {
+					return fmt.Errorf("cancel queued runs for closed PR: %w", err)
+				}
+				s.cancelRunningTaskRuns(taskID, "pull request closed", state.RunStatusReasonPRClosed)
 				s.reconcileClosedPRRuns(ev.Repository.FullName, ev.PullRequest.Number, false)
 				s.addIssueReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ghapi.ReactionMinusOne)
 			}
@@ -443,6 +460,11 @@ Inline comment location: %s`, contextText, location)
 	default:
 		return nil
 	}
+}
+
+func isOpenGitHubState(raw string) bool {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	return raw == "" || raw == "open"
 }
 
 func (s *Server) isBotActor(login string) bool {

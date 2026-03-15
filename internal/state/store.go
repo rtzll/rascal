@@ -369,6 +369,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		HeadSha:      "",
 		Context:      in.Context,
 		Error:        "",
+		StatusReason: string(RunStatusReasonNone),
 		CreatedAt:    now.UnixNano(),
 		UpdatedAt:    now.UnixNano(),
 		StartedAt:    sql.NullInt64{},
@@ -470,6 +471,10 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 		return Run{}, fmt.Errorf("invalid run status %q", r.Status)
 	}
 	r.Status = parsedStatus
+	r.StatusReason = NormalizeRunStatusReason(r.StatusReason)
+	if !IsFinalRunStatus(r.Status) {
+		r.StatusReason = RunStatusReasonNone
+	}
 	if err := ValidateRunStatusTransition(prevStatus, r.Status); err != nil {
 		return Run{}, fmt.Errorf("validate run status transition for %q: %w", id, err)
 	}
@@ -510,10 +515,15 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 }
 
 func (s *Store) SetRunStatus(runID string, status RunStatus, errText string) (Run, error) {
+	return s.SetRunStatusWithReason(runID, status, errText, RunStatusReasonNone)
+}
+
+func (s *Store) SetRunStatusWithReason(runID string, status RunStatus, errText string, statusReason RunStatusReason) (Run, error) {
 	parsedStatus, ok := ParseRunStatus(string(status))
 	if !ok {
 		return Run{}, fmt.Errorf("invalid run status %q", status)
 	}
+	statusReason = NormalizeRunStatusReason(statusReason)
 	return s.UpdateRun(runID, func(r *Run) error {
 		now := time.Now().UTC()
 		r.Status = parsedStatus
@@ -522,6 +532,9 @@ func (s *Store) SetRunStatus(runID string, status RunStatus, errText string) (Ru
 		}
 		if IsFinalRunStatus(parsedStatus) {
 			r.CompletedAt = &now
+			r.StatusReason = statusReason
+		} else {
+			r.StatusReason = RunStatusReasonNone
 		}
 		r.Error = errText
 		return nil
@@ -942,13 +955,15 @@ func (s *Store) LastRunForTask(taskID string) (Run, bool) {
 	return fromDBLastRunForTaskRow(row), true
 }
 
-func (s *Store) CancelQueuedRuns(taskID, reason string) error {
+func (s *Store) CancelQueuedRuns(taskID, reason string, statusReason RunStatusReason) error {
 	now := time.Now().UTC().UnixNano()
+	statusReason = NormalizeRunStatusReason(statusReason)
 	if err := s.q.CancelQueuedRuns(context.Background(), sqlitegen.CancelQueuedRunsParams{
-		Error:       reason,
-		UpdatedAt:   now,
-		CompletedAt: sql.NullInt64{Int64: now, Valid: true},
-		TaskID:      strings.TrimSpace(taskID),
+		Error:        reason,
+		StatusReason: string(statusReason),
+		UpdatedAt:    now,
+		CompletedAt:  sql.NullInt64{Int64: now, Valid: true},
+		TaskID:       strings.TrimSpace(taskID),
 	}); err != nil {
 		return fmt.Errorf("cancel queued runs for task %q: %w", strings.TrimSpace(taskID), err)
 	}
@@ -1104,7 +1119,7 @@ func fromDBFindTaskByPRRow(t sqlitegen.FindTaskByPRRow) Task {
 	return fromDBTaskParts(t.ID, t.Repo, t.AgentBackend, t.IssueNumber, t.PrNumber, t.Status, t.PendingInput, t.LastRunID, t.CreatedAt, t.UpdatedAt)
 }
 
-func fromDBRunParts(id, taskID, repo, task, agentBackend, baseBranch, headBranch, trigger string, debug bool, status, runDir string, issueNumber, prNumber int64, prURL, prStatus, headSHA, contextValue, errText string, createdAt, updatedAt int64, startedAt, completedAt sql.NullInt64) Run {
+func fromDBRunParts(id, taskID, repo, task, agentBackend, baseBranch, headBranch, trigger string, debug bool, status, runDir string, issueNumber, prNumber int64, prURL, prStatus, headSHA, contextValue, errText, statusReason string, createdAt, updatedAt int64, startedAt, completedAt sql.NullInt64) Run {
 	out := Run{
 		ID:           id,
 		TaskID:       taskID,
@@ -1124,6 +1139,7 @@ func fromDBRunParts(id, taskID, repo, task, agentBackend, baseBranch, headBranch
 		HeadSHA:      headSHA,
 		Context:      contextValue,
 		Error:        errText,
+		StatusReason: NormalizeRunStatusReason(RunStatusReason(statusReason)),
 		CreatedAt:    time.Unix(0, createdAt).UTC(),
 		UpdatedAt:    time.Unix(0, updatedAt).UTC(),
 	}
@@ -1139,35 +1155,35 @@ func fromDBRunParts(id, taskID, repo, task, agentBackend, baseBranch, headBranch
 }
 
 func fromDBInsertRunRow(r sqlitegen.InsertRunRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBGetRunRow(r sqlitegen.GetRunRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBListRunsRow(r sqlitegen.ListRunsRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBListRunningRunsRow(r sqlitegen.ListRunningRunsRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBLastRunForTaskRow(r sqlitegen.LastRunForTaskRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBActiveRunForTaskRow(r sqlitegen.ActiveRunForTaskRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBClaimNextQueuedRunRow(r sqlitegen.ClaimNextQueuedRunRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBClaimNextQueuedRunForTaskRow(r sqlitegen.ClaimNextQueuedRunForTaskRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentBackend, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {
@@ -1217,6 +1233,7 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 		HeadSha:      r.HeadSHA,
 		Context:      r.Context,
 		Error:        r.Error,
+		StatusReason: string(NormalizeRunStatusReason(r.StatusReason)),
 		CreatedAt:    fallbackUnixNano(r.CreatedAt, time.Now().UTC()),
 		UpdatedAt:    fallbackUnixNano(r.UpdatedAt, r.CreatedAt),
 		StartedAt:    toNullInt64(r.StartedAt),
