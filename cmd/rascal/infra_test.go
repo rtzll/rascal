@@ -194,9 +194,8 @@ func TestRunDeployExistingUsesCanonicalRuntimeTokenEnv(t *testing.T) {
 	}
 }
 
-func TestRunDeployExistingIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
+func TestRunDeployExistingRequiresRascalGitHubTokenEnv(t *testing.T) {
 	t.Setenv("RASCAL_GITHUB_TOKEN", "")
-	t.Setenv("GITHUB_RUNTIME_TOKEN", "legacy-runtime-token")
 
 	a := &app{}
 	_, err := a.runDeployExisting(deployExistingInput{

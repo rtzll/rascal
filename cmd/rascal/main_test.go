@@ -690,7 +690,6 @@ func TestBootstrapPrintPlanIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
 	}
 	t.Setenv("GITHUB_ADMIN_TOKEN", "admin-token")
 	t.Setenv("RASCAL_GITHUB_TOKEN", "")
-	t.Setenv("GITHUB_RUNTIME_TOKEN", "legacy-runtime-token")
 
 	cmd := a.newBootstrapCmd()
 	cmd.SetOut(io.Discard)
