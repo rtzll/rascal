@@ -43,6 +43,17 @@ type hcloudProvisionResult struct {
 	ProvisionedAt string `json:"provisioned_at"`
 }
 
+type hcloudProvisionOutput struct {
+	Server hcloudProvisionResult `json:"server"`
+}
+
+type deployCommandOutput struct {
+	Host              string                 `json:"host"`
+	ServerURL         string                 `json:"server_url"`
+	APIToken          string                 `json:"api_token"`
+	ProvisionedServer *hcloudProvisionResult `json:"provisioned_server,omitempty"`
+}
+
 type hetznerProvisionInput struct {
 	Token         string
 	Name          string
@@ -88,6 +99,8 @@ func runHetznerProvision(cfg hcloudProvisionConfig, timeout time.Duration) (hclo
 	defer cancel()
 	return provisionHetznerServer(ctx, cfg)
 }
+
+var runHetznerProvisionFn = runHetznerProvision
 
 func (a *app) newInfraCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -146,12 +159,12 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 				return &cliError{Code: exitInput, Message: "invalid ssh public key path", Cause: err}
 			}
 
-			out, err := runHetznerProvision(cfg, timeout)
+			out, err := runHetznerProvisionFn(cfg, timeout)
 			if err != nil {
 				return &cliError{Code: exitRuntime, Message: "hetzner provisioning failed", Cause: err}
 			}
 
-			return a.emit(map[string]any{"server": out}, func() error {
+			return a.emit(hcloudProvisionOutput{Server: out}, func() error {
 				a.println("provisioned %s (%d)", out.ServerName, out.ServerID)
 				a.println("host: %s", out.Host)
 				a.println("location: %s", out.Location)
@@ -235,7 +248,7 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 				if err != nil {
 					return &cliError{Code: exitInput, Message: "invalid default ssh public key path", Cause: err}
 				}
-				out, err := runHetznerProvision(cfg, timeout)
+				out, err := runHetznerProvisionFn(cfg, timeout)
 				if err != nil {
 					return &cliError{Code: exitRuntime, Message: "hetzner provisioning failed", Cause: err}
 				}
@@ -266,13 +279,13 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 				return err
 			}
 
-			out := map[string]any{
-				"host":       result.Host,
-				"server_url": result.ServerURL,
-				"api_token":  maskSecret(result.APIToken),
+			out := deployCommandOutput{
+				Host:      result.Host,
+				ServerURL: result.ServerURL,
+				APIToken:  maskSecret(result.APIToken),
 			}
 			if provisionOut != nil {
-				out["provisioned_server"] = provisionOut
+				out.ProvisionedServer = provisionOut
 			}
 			return a.emit(out, func() error {
 				a.println("deployed rascald to %s", result.Host)
@@ -350,10 +363,10 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.emit(map[string]any{
-				"host":       result.Host,
-				"server_url": result.ServerURL,
-				"api_token":  maskSecret(result.APIToken),
+			return a.emit(deployCommandOutput{
+				Host:      result.Host,
+				ServerURL: result.ServerURL,
+				APIToken:  maskSecret(result.APIToken),
 			}, func() error {
 				a.println("deployed rascald to %s", result.Host)
 				a.println("server_url: %s", result.ServerURL)

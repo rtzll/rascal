@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -292,5 +293,123 @@ func TestRunDeployExistingRequiresAPITokenForCredentialSeeding(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--codex-auth requires API access") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInfraProvisionHetznerJSONOutput(t *testing.T) {
+	origRunHetznerProvision := runHetznerProvisionFn
+	t.Cleanup(func() {
+		runHetznerProvisionFn = origRunHetznerProvision
+	})
+
+	runHetznerProvisionFn = func(cfg hcloudProvisionConfig, timeout time.Duration) (hcloudProvisionResult, error) {
+		return hcloudProvisionResult{
+			ServerID:     123,
+			ServerName:   "rascal-test",
+			Host:         "203.0.113.20",
+			Location:     "fsn1",
+			ServerType:   "cx23",
+			Architecture: "x86",
+		}, nil
+	}
+
+	a := &app{output: "json", quiet: true}
+	cmd := a.newInfraProvisionHetznerCmd()
+	cmd.SetArgs([]string{"--token", "hcloud-token"})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("provision-hetzner: %v", err)
+	}
+
+	var out hcloudProvisionOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if out.Server.ServerID != 123 || out.Server.Host != "203.0.113.20" {
+		t.Fatalf("unexpected output: %+v", out.Server)
+	}
+}
+
+func TestInfraDeployExistingJSONOutput(t *testing.T) {
+	origDeploy := deployToExistingHostFn
+	origHealth := waitForServerHealthSSHFn
+	origSeed := seedBootstrapSharedCredentialFn
+	t.Cleanup(func() {
+		deployToExistingHostFn = origDeploy
+		waitForServerHealthSSHFn = origHealth
+		seedBootstrapSharedCredentialFn = origSeed
+	})
+
+	deployToExistingHostFn = func(cfg deployConfig) error { return nil }
+	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error { return nil }
+	seedBootstrapSharedCredentialFn = func(client apiClient, authFilePath string) (credentialRecord, error) {
+		return credentialRecord{}, nil
+	}
+
+	a := &app{output: "json", quiet: true}
+	cmd := a.newInfraDeployExistingCmd()
+	cmd.SetArgs([]string{"--host", "203.0.113.10", "--goarch", "amd64"})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("deploy-existing: %v", err)
+	}
+
+	var out deployCommandOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if out.Host != "203.0.113.10" {
+		t.Fatalf("host = %q, want 203.0.113.10", out.Host)
+	}
+	if out.ServerURL != "http://203.0.113.10:8080" {
+		t.Fatalf("server_url = %q, want http://203.0.113.10:8080", out.ServerURL)
+	}
+}
+
+func TestInfraUpJSONOutputIncludesProvisionedServer(t *testing.T) {
+	origRunHetznerProvision := runHetznerProvisionFn
+	origDeploy := deployToExistingHostFn
+	origHealth := waitForServerHealthSSHFn
+	origSeed := seedBootstrapSharedCredentialFn
+	t.Cleanup(func() {
+		runHetznerProvisionFn = origRunHetznerProvision
+		deployToExistingHostFn = origDeploy
+		waitForServerHealthSSHFn = origHealth
+		seedBootstrapSharedCredentialFn = origSeed
+	})
+
+	runHetznerProvisionFn = func(cfg hcloudProvisionConfig, timeout time.Duration) (hcloudProvisionResult, error) {
+		return hcloudProvisionResult{
+			ServerID:     456,
+			ServerName:   "rascal-provisioned",
+			Host:         "203.0.113.30",
+			Location:     "fsn1",
+			ServerType:   "cx23",
+			Architecture: "x86",
+		}, nil
+	}
+	deployToExistingHostFn = func(cfg deployConfig) error { return nil }
+	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error { return nil }
+	seedBootstrapSharedCredentialFn = func(client apiClient, authFilePath string) (credentialRecord, error) {
+		return credentialRecord{}, nil
+	}
+
+	a := &app{output: "json", quiet: true}
+	cmd := a.newInfraUpCmd()
+	cmd.SetArgs([]string{"--provision", "--hcloud-token", "hcloud-token", "--goarch", "amd64", "--skip-env-upload"})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("infra up: %v", err)
+	}
+
+	var out deployCommandOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if out.Host != "203.0.113.30" {
+		t.Fatalf("host = %q, want 203.0.113.30", out.Host)
+	}
+	if out.ProvisionedServer == nil || out.ProvisionedServer.ServerID != 456 {
+		t.Fatalf("unexpected provisioned server: %+v", out.ProvisionedServer)
 	}
 }

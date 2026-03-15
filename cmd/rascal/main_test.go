@@ -722,6 +722,49 @@ func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
 	}
 }
 
+func TestBootstrapCompletionJSONOutput(t *testing.T) {
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://127.0.0.1:8080",
+		},
+		output:     "json",
+		configPath: filepath.Join(t.TempDir(), "config.toml"),
+	}
+
+	cmd := a.newBootstrapCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--skip-deploy",
+		"--skip-webhook",
+		"--server-url", "https://rascal.example.com",
+	})
+	stdout, err := captureStdout(func() error { return cmd.Execute() })
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+
+	var out bootstrapCompleteOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
+	}
+	if out.Status != "bootstrap_complete" {
+		t.Fatalf("status = %q, want bootstrap_complete", out.Status)
+	}
+	if out.ServerURL != "https://rascal.example.com" {
+		t.Fatalf("server_url = %q, want https://rascal.example.com", out.ServerURL)
+	}
+	if out.Host != "" {
+		t.Fatalf("host = %q, want empty", out.Host)
+	}
+	if out.APIToken == "" || !strings.Contains(out.APIToken, "*") {
+		t.Fatalf("expected masked api token, got %q", out.APIToken)
+	}
+	if out.WebhookSecret == "" || !strings.Contains(out.WebhookSecret, "*") {
+		t.Fatalf("expected masked webhook secret, got %q", out.WebhookSecret)
+	}
+}
+
 func TestInfraUpValidatesRequiredInputs(t *testing.T) {
 	a := &app{
 		cfg: config.ClientConfig{

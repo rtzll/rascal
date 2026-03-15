@@ -159,6 +159,18 @@ type authRotateOutput struct {
 	SyncedRemote  bool   `json:"synced_remote"`
 }
 
+type bootstrapCompleteOutput struct {
+	Status            string                 `json:"status"`
+	ServerURL         string                 `json:"server_url"`
+	APIToken          string                 `json:"api_token"`
+	DefaultRepo       string                 `json:"default_repo"`
+	WebhookSecret     string                 `json:"webhook_secret"`
+	Host              string                 `json:"host"`
+	Domain            string                 `json:"domain"`
+	ConfigPath        string                 `json:"config_path,omitempty"`
+	ProvisionedServer *hcloudProvisionResult `json:"provisioned_server,omitempty"`
+}
+
 type doctorDiagnostics struct {
 	ConfigPath        string              `json:"config_path"`
 	ConfigExists      bool                `json:"config_exists"`
@@ -938,21 +950,21 @@ func (a *app) newBootstrapCmd() *cobra.Command {
 				}
 			}
 
-			out := map[string]any{
-				"status":         "bootstrap_complete",
-				"server_url":     serverURL,
-				"api_token":      maskSecret(apiToken),
-				"default_repo":   repo,
-				"webhook_secret": maskSecret(webhookSecret),
-				"host":           host,
-				"domain":         domain,
+			out := bootstrapCompleteOutput{
+				Status:        "bootstrap_complete",
+				ServerURL:     serverURL,
+				APIToken:      maskSecret(apiToken),
+				DefaultRepo:   repo,
+				WebhookSecret: maskSecret(webhookSecret),
+				Host:          host,
+				Domain:        domain,
 			}
 			if writeConfig {
-				out["config_path"] = a.configPath
+				out.ConfigPath = a.configPath
 			}
 			if provisionOut != nil {
-				out["provisioned_server"] = provisionOut
-				out["host"] = host
+				out.ProvisionedServer = provisionOut
+				out.Host = host
 			}
 			return a.emit(out, func() error {
 				a.println("bootstrap complete")
