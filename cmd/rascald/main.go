@@ -3105,10 +3105,6 @@ func cleanupStaleAgentSessionDirs(root string, ttlDays int, now time.Time) (int,
 	return removed, firstErr
 }
 
-func cleanupStaleGooseSessionDirs(root string, ttlDays int, now time.Time) (int, error) {
-	return cleanupStaleAgentSessionDirs(root, ttlDays, now)
-}
-
 func resolveRunAgentLogPath(runDir string) (string, error) {
 	primary := filepath.Join(strings.TrimSpace(runDir), agentLogFile)
 	if info, err := os.Stat(primary); err == nil {

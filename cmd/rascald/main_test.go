@@ -2676,7 +2676,7 @@ func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
 	}
 }
 
-func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
+func TestExecuteRunSetsAgentSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 	t.Parallel()
 	launcher := &fakeLauncher{}
 	s := newTestServer(t, launcher)
@@ -2723,7 +2723,7 @@ func TestExecuteRunSetsGooseSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 	}
 }
 
-func TestExecuteRunDisablesGooseSessionSpecForNonPROnlyTrigger(t *testing.T) {
+func TestExecuteRunDisablesAgentSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	t.Parallel()
 	launcher := &fakeLauncher{}
 	s := newTestServer(t, launcher)
@@ -2763,7 +2763,7 @@ func TestExecuteRunDisablesGooseSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	}
 }
 
-func TestCleanupStaleGooseSessionDirs(t *testing.T) {
+func TestCleanupStaleAgentSessionDirs(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "goose-sessions")
 	oldDir := filepath.Join(root, "old")
@@ -2782,9 +2782,9 @@ func TestCleanupStaleGooseSessionDirs(t *testing.T) {
 		t.Fatalf("chtimes fresh dir: %v", err)
 	}
 
-	removed, err := cleanupStaleGooseSessionDirs(root, 14, now)
+	removed, err := cleanupStaleAgentSessionDirs(root, 14, now)
 	if err != nil {
-		t.Fatalf("cleanupStaleGooseSessionDirs: %v", err)
+		t.Fatalf("cleanupStaleAgentSessionDirs: %v", err)
 	}
 	if removed != 1 {
 		t.Fatalf("removed = %d, want 1", removed)
