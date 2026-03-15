@@ -10,7 +10,7 @@
 - `AgentHarness`: the tool wrapper invoked by the worker. Rascal currently supports `goose` and `codex`.
 - `ModelProvider`: the underlying model/service used by a harness. Today the concrete provider in use is `codex`, with room for future providers.
 - `SessionPolicy`: policy governing whether a task-scoped session may resume (`off`, `pr-only`, `all`).
-- `AgentRuntime`: compatibility term still present at some boundaries; it maps to the selected `AgentHarness`.
+- `AgentRuntime`: selected `AgentHarness` runtime for a task or run, currently `goose` or `codex`.
 - `TaskSession`: optional task-scoped harness state used to resume later runs. Rascal resets it when the task switches harnesses.
 - `RunLease`: supervision ownership record for a running run. It tells Rascal which orchestrator instance currently owns supervision.
 

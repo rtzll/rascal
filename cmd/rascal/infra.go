@@ -102,7 +102,7 @@ func runHetznerProvision(cfg hcloudProvisionConfig, timeout time.Duration) (hclo
 
 var runHetznerProvisionFn = runHetznerProvision
 
-func (a *app) newInfraCmd() (*cobra.Command, error) {
+func (a *app) newInfraCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "infra",
 		Short: "Infrastructure operations (provisioning/deploy)",
@@ -116,18 +116,10 @@ rascal infra deploy-existing --host "$SERVER_IP" --ssh-key ~/.ssh/id_ed25519
 			return cmd.Help()
 		},
 	}
-	infraUpCmd, err := a.newInfraUpCmd()
-	if err != nil {
-		return nil, err
-	}
-	cmd.AddCommand(infraUpCmd)
+	cmd.AddCommand(a.newInfraUpCmd())
 	cmd.AddCommand(a.newInfraProvisionHetznerCmd())
-	infraDeployExistingCmd, err := a.newInfraDeployExistingCmd()
-	if err != nil {
-		return nil, err
-	}
-	cmd.AddCommand(infraDeployExistingCmd)
-	return cmd, nil
+	cmd.AddCommand(a.newInfraDeployExistingCmd())
+	return cmd
 }
 
 func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
@@ -200,11 +192,11 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 	return cmd
 }
 
-func (a *app) newInfraDeployExistingCmd() (*cobra.Command, error) {
+func (a *app) newInfraDeployExistingCmd() *cobra.Command {
 	return a.newDeployExistingCmd("deploy-existing", "Deploy rascald to an existing Linux host over SSH")
 }
 
-func (a *app) newInfraUpCmd() (*cobra.Command, error) {
+func (a *app) newInfraUpCmd() *cobra.Command {
 	var (
 		host               string
 		provision          bool
@@ -219,7 +211,7 @@ func (a *app) newInfraUpCmd() (*cobra.Command, error) {
 		webhookSecret      string
 		codexAuthPath      string
 		domain             string
-		agentBackend       string
+		agentRuntime       string
 		runnerImage        string
 		runnerImageGoose   string
 		runnerImageCodex   string
@@ -277,7 +269,7 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 				WebhookSecret:      webhookSecret,
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
-				AgentRuntime:       agentBackend,
+				AgentRuntime:       agentRuntime,
 				RunnerImage:        runnerImage,
 				RunnerImageGoose:   runnerImageGoose,
 				RunnerImageCodex:   runnerImageCodex,
@@ -320,19 +312,15 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
-	cmd.Flags().StringVar(&agentBackend, "agent-runtime", string(agent.RuntimeCodex), "agent runtime to use on the server (goose or codex)")
-	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.RuntimeCodex), "deprecated alias for --agent-runtime")
-	if err := hideFlag(cmd, "agent-backend"); err != nil {
-		return nil, err
-	}
+	cmd.Flags().StringVar(&agentRuntime, "agent-runtime", "", "agent runtime to use on the server (goose or codex)")
 	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
 	cmd.Flags().BoolVar(&skipEnvUpload, "skip-env-upload", false, "keep existing /etc/rascal/rascal.env on server")
-	return cmd, nil
+	return cmd
 }
 
-func (a *app) newDeployExistingCmd(use, short string) (*cobra.Command, error) {
+func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	var (
 		host               string
 		sshUser            string
@@ -344,7 +332,7 @@ func (a *app) newDeployExistingCmd(use, short string) (*cobra.Command, error) {
 		webhookSecret      string
 		codexAuthPath      string
 		domain             string
-		agentBackend       string
+		agentRuntime       string
 		runnerImage        string
 		runnerImageGoose   string
 		runnerImageCodex   string
@@ -366,7 +354,7 @@ func (a *app) newDeployExistingCmd(use, short string) (*cobra.Command, error) {
 				WebhookSecret:      webhookSecret,
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
-				AgentRuntime:       agentBackend,
+				AgentRuntime:       agentRuntime,
 				RunnerImage:        runnerImage,
 				RunnerImageGoose:   runnerImageGoose,
 				RunnerImageCodex:   runnerImageCodex,
@@ -401,16 +389,12 @@ func (a *app) newDeployExistingCmd(use, short string) (*cobra.Command, error) {
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
-	cmd.Flags().StringVar(&agentBackend, "agent-runtime", string(agent.RuntimeCodex), "agent runtime to use on the server (goose or codex)")
-	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.RuntimeCodex), "deprecated alias for --agent-runtime")
-	if err := hideFlag(cmd, "agent-backend"); err != nil {
-		return nil, err
-	}
+	cmd.Flags().StringVar(&agentRuntime, "agent-runtime", "", "agent runtime to use on the server (goose or codex)")
 	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
 	cmd.Flags().BoolVar(&uploadEnv, "upload-env", false, "upload/update /etc/rascal/rascal.env on server")
-	return cmd, nil
+	return cmd
 }
 
 type deployExistingInput struct {
@@ -457,7 +441,14 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	provisionedArch := strings.TrimSpace(input.ProvisionedArch)
 	codexAuthPath := strings.TrimSpace(input.CodexAuthPath)
 	domain := firstNonEmpty(strings.TrimSpace(input.Domain), strings.TrimSpace(a.cfg.Domain))
-	agentBackend := agent.NormalizeBackend(input.AgentRuntime)
+	var agentRuntime agent.Runtime
+	if raw := strings.TrimSpace(input.AgentRuntime); raw != "" {
+		parsedRuntime, err := agent.ParseRuntime(raw)
+		if err != nil {
+			return deployExistingResult{}, &cliError{Code: exitInput, Message: "invalid --agent-runtime", Cause: err}
+		}
+		agentRuntime = parsedRuntime
+	}
 	runnerImage := firstNonEmpty(strings.TrimSpace(input.RunnerImage), defaults.GooseRunnerImageTag)
 	runnerImageGoose := firstNonEmpty(strings.TrimSpace(input.RunnerImageGoose), runnerImage, defaults.GooseRunnerImageTag)
 	runnerImageCodex := firstNonEmpty(strings.TrimSpace(input.RunnerImageCodex), defaults.CodexRunnerImageTag)
@@ -558,7 +549,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		WebhookSecret:      webhookSecret,
 		GitHubRuntimeToken: githubRuntimeToken,
 		RunnerMode:         "docker",
-		AgentRuntime:       agentBackend,
+		AgentRuntime:       agentRuntime,
 		RunnerImage:        runnerImageGoose,
 		RunnerImageGoose:   runnerImageGoose,
 		RunnerImageCodex:   runnerImageCodex,

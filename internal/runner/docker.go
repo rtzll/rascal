@@ -100,32 +100,26 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		}
 	}
 	envPairs := map[string]string{
-		"RASCAL_RUN_ID":               spec.RunID,
-		"RASCAL_TASK_ID":              spec.TaskID,
-		"RASCAL_INSTRUCTION":          spec.Instruction,
-		"RASCAL_TASK":                 spec.Instruction,
-		"RASCAL_REPO":                 spec.Repo,
-		"RASCAL_AGENT_RUNTIME":        backend.String(),
-		"RASCAL_AGENT_BACKEND":        backend.String(),
-		"RASCAL_BASE_BRANCH":          spec.BaseBranch,
-		"RASCAL_HEAD_BRANCH":          spec.HeadBranch,
-		"RASCAL_TRIGGER":              spec.Trigger.String(),
-		"RASCAL_GOOSE_DEBUG":          strconv.FormatBool(spec.Debug),
-		"RASCAL_CONTEXT":              spec.Context,
-		"RASCAL_CONTEXT_JSON":         containerContextJSONPath,
-		"RASCAL_ISSUE_NUMBER":         strconv.Itoa(spec.IssueNumber),
-		"RASCAL_PR_NUMBER":            strconv.Itoa(spec.PRNumber),
-		"RASCAL_TASK_SESSION_MODE":    string(sessionMode),
-		"RASCAL_TASK_SESSION_RESUME":  strconv.FormatBool(sessionResume),
-		"RASCAL_TASK_SESSION_KEY":     sessionKey,
-		"RASCAL_TASK_SESSION_ID":      backendSessionID,
-		"RASCAL_AGENT_SESSION_MODE":   string(sessionMode),
-		"RASCAL_AGENT_SESSION_RESUME": strconv.FormatBool(sessionResume),
-		"RASCAL_AGENT_SESSION_KEY":    sessionKey,
-		"RASCAL_AGENT_SESSION_ID":     backendSessionID,
-		"CODEX_HOME":                  codexHome,
-		"GH_PROMPT_DISABLED":          "1",
-		"GIT_TERMINAL_PROMPT":         "0",
+		"RASCAL_RUN_ID":              spec.RunID,
+		"RASCAL_TASK_ID":             spec.TaskID,
+		"RASCAL_INSTRUCTION":         spec.Instruction,
+		"RASCAL_REPO":                spec.Repo,
+		"RASCAL_AGENT_RUNTIME":       backend.String(),
+		"RASCAL_BASE_BRANCH":         spec.BaseBranch,
+		"RASCAL_HEAD_BRANCH":         spec.HeadBranch,
+		"RASCAL_TRIGGER":             spec.Trigger.String(),
+		"RASCAL_GOOSE_DEBUG":         strconv.FormatBool(spec.Debug),
+		"RASCAL_CONTEXT":             spec.Context,
+		"RASCAL_CONTEXT_JSON":        containerContextJSONPath,
+		"RASCAL_ISSUE_NUMBER":        strconv.Itoa(spec.IssueNumber),
+		"RASCAL_PR_NUMBER":           strconv.Itoa(spec.PRNumber),
+		"RASCAL_TASK_SESSION_MODE":   string(sessionMode),
+		"RASCAL_TASK_SESSION_RESUME": strconv.FormatBool(sessionResume),
+		"RASCAL_TASK_SESSION_KEY":    sessionKey,
+		"RASCAL_TASK_SESSION_ID":     backendSessionID,
+		"CODEX_HOME":                 codexHome,
+		"GH_PROMPT_DISABLED":         "1",
+		"GIT_TERMINAL_PROMPT":        "0",
 	}
 	if backend == agent.RuntimeGoose {
 		envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
@@ -135,10 +129,6 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
 		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
 		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
-		envPairs["RASCAL_GOOSE_SESSION_MODE"] = NormalizeSessionMode(string(sessionMode))
-		envPairs["RASCAL_GOOSE_SESSION_RESUME"] = strconv.FormatBool(sessionResume)
-		envPairs["RASCAL_GOOSE_SESSION_KEY"] = sessionKey
-		envPairs["RASCAL_GOOSE_SESSION_NAME"] = backendSessionID
 	}
 	if strings.TrimSpace(l.GitHubToken) != "" {
 		envPairs["GH_TOKEN"] = l.GitHubToken

@@ -186,9 +186,7 @@ Persistent state is stored on the server in a SQLite database under the Rascal
 data directory.
 
 By default, task-scoped session state is also stored on disk under
-`${RASCAL_DATA_DIR}/agent-sessions/<task-key>/`. Older Goose-specific env names
-are still accepted as compatibility aliases, but the current abstraction is
-harness-agnostic and leaves room for multiple model providers.
+`${RASCAL_DATA_DIR}/agent-sessions/<task-key>/`.
 
 Runs stay short-lived. Each run mounts its run directory plus, when session
 resume is enabled, a task-scoped session directory. There is no always-on
@@ -296,8 +294,8 @@ Required:
 
 Common optional:
 
-- `RASCAL_TASK`
-- `RASCAL_AGENT_RUNTIME` (`goose` or `codex`; default normalization falls back to `codex`)
+- `RASCAL_INSTRUCTION`
+- `RASCAL_AGENT_RUNTIME` (`goose` or `codex`; defaults to `goose` when unset)
 - `RASCAL_BASE_BRANCH` (default: `main`)
 - `RASCAL_HEAD_BRANCH` (default: `rascal/<run_id>`)
 - `RASCAL_ISSUE_NUMBER` (default: `0`)
@@ -314,13 +312,6 @@ Common optional:
 - `RASCAL_TASK_SESSION_ID` (runtime session id when known)
 - `CODEX_HOME` (run-scoped `/rascal-meta/codex` in stateless mode, or task-scoped mount in resume mode for Codex)
 - `GOOSE_PATH_ROOT` (run-scoped `/rascal-meta/goose` in stateless mode, or task-scoped mount in resume mode for Goose)
-
-Goose compatibility aliases still accepted by the runner:
-
-- `RASCAL_GOOSE_SESSION_MODE`
-- `RASCAL_GOOSE_SESSION_RESUME`
-- `RASCAL_GOOSE_SESSION_KEY`
-- `RASCAL_GOOSE_SESSION_NAME`
 
 ## Further Reading
 

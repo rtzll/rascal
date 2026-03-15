@@ -121,10 +121,6 @@ func TestLoadClientConfigEnvOverride(t *testing.T) {
 func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "rascal-data")
 	t.Setenv("RASCAL_DATA_DIR", dataDir)
-	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "")
-	t.Setenv("RASCAL_AGENT_SESSION_MODE", "")
-	t.Setenv("RASCAL_GOOSE_SESSION_ROOT", "")
-	t.Setenv("RASCAL_GOOSE_SESSION_TTL_DAYS", "")
 
 	cfg, err := LoadServerConfig()
 	if err != nil {
@@ -144,7 +140,6 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 
 func TestLoadServerConfigDefaultsAgentRuntimeToGoose(t *testing.T) {
 	t.Setenv("RASCAL_AGENT_RUNTIME", "")
-	t.Setenv("RASCAL_AGENT_BACKEND", "")
 
 	cfg, err := LoadServerConfig()
 	if err != nil {
@@ -163,9 +158,9 @@ func TestLoadServerConfigDefaultsAgentRuntimeToGoose(t *testing.T) {
 
 func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "goose-root")
-	t.Setenv("RASCAL_GOOSE_SESSION_MODE", "PR-ONLY")
-	t.Setenv("RASCAL_GOOSE_SESSION_ROOT", root)
-	t.Setenv("RASCAL_GOOSE_SESSION_TTL_DAYS", "0")
+	t.Setenv("RASCAL_TASK_SESSION_MODE", "PR-ONLY")
+	t.Setenv("RASCAL_TASK_SESSION_ROOT", root)
+	t.Setenv("RASCAL_TASK_SESSION_TTL_DAYS", "0")
 
 	cfg, err := LoadServerConfig()
 	if err != nil {
@@ -226,14 +221,11 @@ func TestLoadServerConfigRejectsInvalidEnumEnv(t *testing.T) {
 		{name: "runner mode", key: "RASCAL_RUNNER_MODE", value: "podman", needle: "unknown runner mode"},
 		{name: "agent runtime", key: "RASCAL_AGENT_RUNTIME", value: "claude", needle: "unknown agent runtime"},
 		{name: "credential strategy", key: "RASCAL_CREDENTIAL_STRATEGY", value: "weighted", needle: "unknown credential strategy"},
-		{name: "agent session mode", key: "RASCAL_AGENT_SESSION_MODE", value: "sometimes", needle: "unknown agent session mode"},
-		{name: "legacy goose session mode", key: "RASCAL_GOOSE_SESSION_MODE", value: "sometimes", needle: "unknown agent session mode"},
+		{name: "task session mode", key: "RASCAL_TASK_SESSION_MODE", value: "sometimes", needle: "unknown agent session mode"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("RASCAL_GOOSE_SESSION_MODE", "")
-			t.Setenv("RASCAL_AGENT_SESSION_MODE", "")
 			t.Setenv(tt.key, tt.value)
 			_, err := LoadServerConfig()
 			if err == nil {

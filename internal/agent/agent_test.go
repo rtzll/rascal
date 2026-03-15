@@ -15,8 +15,8 @@ func TestNormalizeBackend(t *testing.T) {
 		in   string
 		want Backend
 	}{
-		{name: "default empty", in: "", want: BackendCodex},
-		{name: "default unknown", in: "other", want: BackendCodex},
+		{name: "default empty", in: "", want: BackendGoose},
+		{name: "default unknown", in: "other", want: BackendGoose},
 		{name: "codex explicit", in: " codex ", want: BackendCodex},
 		{name: "goose explicit", in: "GOOSE", want: BackendGoose},
 	}
@@ -42,7 +42,7 @@ func TestParseBackend(t *testing.T) {
 		want    Backend
 		wantErr bool
 	}{
-		{name: "default empty", in: "", want: BackendCodex},
+		{name: "default empty", in: "", want: BackendGoose},
 		{name: "codex explicit", in: " codex ", want: BackendCodex},
 		{name: "goose explicit", in: "GOOSE", want: BackendGoose},
 		{name: "invalid", in: "other", wantErr: true},

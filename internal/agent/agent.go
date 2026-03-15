@@ -26,7 +26,7 @@ const (
 func NormalizeRuntime(raw string) Runtime {
 	runtime, err := ParseRuntime(raw)
 	if err != nil {
-		return RuntimeCodex
+		return RuntimeGoose
 	}
 	return runtime
 }
@@ -41,10 +41,10 @@ func (r Runtime) String() string {
 
 func ParseRuntime(raw string) (Runtime, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", string(RuntimeCodex):
-		return RuntimeCodex, nil
-	case string(RuntimeGoose):
+	case "", string(RuntimeGoose):
 		return RuntimeGoose, nil
+	case string(RuntimeCodex):
+		return RuntimeCodex, nil
 	default:
 		return "", fmt.Errorf("unknown agent runtime %q", raw)
 	}

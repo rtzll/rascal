@@ -1096,15 +1096,15 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	if _, err := s.store.UpsertTask(state.UpsertTaskInput{
 		ID:           taskID,
 		Repo:         "owner/repo",
-		AgentRuntime: agent.BackendGoose,
+		AgentRuntime: agent.BackendCodex,
 		IssueNumber:  7,
 	}); err != nil {
 		t.Fatalf("upsert legacy task: %v", err)
 	}
 	if _, err := s.store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
 		TaskID:           taskID,
-		AgentRuntime:     agent.BackendGoose,
-		RuntimeSessionID: "legacy-goose-session",
+		AgentRuntime:     agent.BackendCodex,
+		RuntimeSessionID: "legacy-codex-session",
 		SessionKey:       "legacy",
 		SessionRoot:      filepath.Join(t.TempDir(), "legacy-session"),
 		LastRunID:        "run_legacy",
@@ -1123,16 +1123,16 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return len(s.store.ListRuns(10)) == 1 }, "run queued")
 
 	run := s.store.ListRuns(10)[0]
-	if run.AgentRuntime != agent.BackendCodex {
-		t.Fatalf("run backend = %s, want %s", run.AgentRuntime, agent.BackendCodex)
+	if run.AgentRuntime != agent.BackendGoose {
+		t.Fatalf("run backend = %s, want %s", run.AgentRuntime, agent.BackendGoose)
 	}
 
 	task, ok := s.store.GetTask(taskID)
 	if !ok {
 		t.Fatalf("missing task %s", taskID)
 	}
-	if task.AgentRuntime != agent.BackendCodex {
-		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.BackendCodex)
+	if task.AgentRuntime != agent.BackendGoose {
+		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.BackendGoose)
 	}
 
 	var session state.TaskAgentSession
@@ -1141,11 +1141,14 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 		session, ok = s.store.GetTaskAgentSession(taskID)
 		return ok
 	}, "migrated task session")
-	if session.AgentRuntime != agent.BackendCodex {
-		t.Fatalf("task session backend = %s, want %s", session.AgentRuntime, agent.BackendCodex)
+	if session.AgentRuntime != agent.BackendGoose {
+		t.Fatalf("task session backend = %s, want %s", session.AgentRuntime, agent.BackendGoose)
 	}
-	if session.RuntimeSessionID != "" {
-		t.Fatalf("task session id = %q, want empty after backend migration", session.RuntimeSessionID)
+	if session.RuntimeSessionID == "" {
+		t.Fatal("task session id should be set after runtime migration")
+	}
+	if session.RuntimeSessionID == "legacy-codex-session" {
+		t.Fatalf("task session id = %q, want a fresh goose session id", session.RuntimeSessionID)
 	}
 }
 
@@ -2924,8 +2927,8 @@ func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected run token usage for %s", run.ID)
 	}
-	if usage.AgentRuntime != agent.BackendCodex {
-		t.Fatalf("backend = %q, want codex", usage.AgentRuntime)
+	if usage.AgentRuntime != agent.BackendGoose {
+		t.Fatalf("backend = %q, want goose", usage.AgentRuntime)
 	}
 	if usage.Model != "gpt-5-codex" {
 		t.Fatalf("model = %q, want gpt-5-codex", usage.Model)

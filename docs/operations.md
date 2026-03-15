@@ -87,8 +87,6 @@ Server env controls:
 - `RASCAL_TASK_SESSION_ROOT` (default: `${RASCAL_DATA_DIR}/agent-sessions`)
 - `RASCAL_TASK_SESSION_TTL_DAYS` (default: `14`, set `0` to disable cleanup)
 
-Older Goose-specific env names are still accepted as compatibility aliases.
-
 `pr-only` resumes for iterative PR triggers:
 
 - `pr_comment`

@@ -36,7 +36,7 @@ type Config struct {
 	WebhookSecret      string
 	GitHubRuntimeToken string
 	RunnerMode         runner.Mode
-	AgentRuntime       agent.Backend
+	AgentRuntime       agent.Runtime
 	RunnerImage        string
 	RunnerImageGoose   string
 	RunnerImageCodex   string
@@ -142,7 +142,7 @@ func Execute(cfg Config) error {
 		Host:             cfg.Host,
 		Domain:           strings.TrimSpace(cfg.Domain),
 		GOARCH:           strings.TrimSpace(cfg.GOARCH),
-		AgentRuntime:     string(agent.NormalizeBackend(string(cfg.AgentRuntime))),
+		AgentRuntime:     firstNonEmpty(strings.TrimSpace(string(cfg.AgentRuntime)), string(agent.RuntimeGoose)),
 		RunnerImage:      strings.TrimSpace(cfg.RunnerImage),
 		RunnerImageGoose: strings.TrimSpace(cfg.RunnerImageGoose),
 		RunnerImageCodex: strings.TrimSpace(cfg.RunnerImageCodex),
@@ -625,41 +625,31 @@ func firstNonEmpty(values ...string) string {
 }
 
 func serverEnvFile(cfg Config) string {
-	backend := agent.NormalizeBackend(string(cfg.AgentRuntime))
+	runtime := strings.TrimSpace(string(cfg.AgentRuntime))
 	gooseImage := strings.TrimSpace(cfg.RunnerImageGoose)
 	if gooseImage == "" {
 		gooseImage = firstNonEmpty(strings.TrimSpace(cfg.RunnerImage), defaults.GooseRunnerImageTag)
 	}
 	codexImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageCodex), defaults.CodexRunnerImageTag)
-
-	return fmt.Sprintf(strings.TrimSpace(`
-RASCAL_LISTEN_ADDR=%s
-RASCAL_DATA_DIR=%s
-RASCAL_STATE_PATH=%s
-RASCAL_API_TOKEN=%s
-RASCAL_GITHUB_TOKEN=%s
-RASCAL_GITHUB_WEBHOOK_SECRET=%s
-RASCAL_RUNNER_MODE=%s
-RASCAL_AGENT_RUNTIME=%s
-RASCAL_RUNNER_IMAGE_GOOSE=%s
-RASCAL_RUNNER_IMAGE_CODEX=%s
-RASCAL_RUNNER_MAX_ATTEMPTS=1
-RASCAL_TASK_SESSION_MODE=all
-RASCAL_TASK_SESSION_ROOT=%s
-RASCAL_TASK_SESSION_TTL_DAYS=14
-	`)+"\n",
-		cfg.ServerListenAddr,
-		cfg.ServerDataDir,
-		cfg.ServerStatePath,
-		cfg.APIToken,
-		cfg.GitHubRuntimeToken,
-		cfg.WebhookSecret,
-		cfg.RunnerMode,
-		backend,
-		gooseImage,
-		codexImage,
-		filepath.Join(cfg.ServerDataDir, defaults.AgentSessionDirName),
-	)
+	lines := []string{
+		fmt.Sprintf("RASCAL_LISTEN_ADDR=%s", cfg.ServerListenAddr),
+		fmt.Sprintf("RASCAL_DATA_DIR=%s", cfg.ServerDataDir),
+		fmt.Sprintf("RASCAL_STATE_PATH=%s", cfg.ServerStatePath),
+		fmt.Sprintf("RASCAL_API_TOKEN=%s", cfg.APIToken),
+		fmt.Sprintf("RASCAL_GITHUB_TOKEN=%s", cfg.GitHubRuntimeToken),
+		fmt.Sprintf("RASCAL_GITHUB_WEBHOOK_SECRET=%s", cfg.WebhookSecret),
+		fmt.Sprintf("RASCAL_RUNNER_MODE=%s", cfg.RunnerMode),
+		fmt.Sprintf("RASCAL_RUNNER_IMAGE_GOOSE=%s", gooseImage),
+		fmt.Sprintf("RASCAL_RUNNER_IMAGE_CODEX=%s", codexImage),
+		"RASCAL_RUNNER_MAX_ATTEMPTS=1",
+		"RASCAL_TASK_SESSION_MODE=all",
+		fmt.Sprintf("RASCAL_TASK_SESSION_ROOT=%s", filepath.Join(cfg.ServerDataDir, defaults.AgentSessionDirName)),
+		"RASCAL_TASK_SESSION_TTL_DAYS=14",
+	}
+	if runtime != "" {
+		lines = append(lines, fmt.Sprintf("RASCAL_AGENT_RUNTIME=%s", runtime))
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func systemdServiceContent() string {

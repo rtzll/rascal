@@ -321,7 +321,7 @@ func envDurationOrDefault(key string, fallback time.Duration) time.Duration {
 }
 
 func loadAgentRuntime() (agent.Runtime, error) {
-	raw := firstNonEmptyEnv("RASCAL_AGENT_RUNTIME", "RASCAL_AGENT_BACKEND")
+	raw := strings.TrimSpace(os.Getenv("RASCAL_AGENT_RUNTIME"))
 	if raw == "" {
 		raw = "goose"
 	}
@@ -354,41 +354,11 @@ func loadTaskSessionMode() (agent.SessionMode, error) {
 			return mode, nil
 		}
 	}
-	if raw, ok := os.LookupEnv("RASCAL_GOOSE_SESSION_MODE"); ok {
-		if strings.TrimSpace(raw) != "" {
-			mode, err := agent.ParseSessionMode(raw)
-			if err != nil {
-				return "", fmt.Errorf("parse RASCAL_GOOSE_SESSION_MODE: %w", err)
-			}
-			return mode, nil
-		}
-	}
-	if raw, ok := os.LookupEnv("RASCAL_AGENT_SESSION_MODE"); ok {
-		if strings.TrimSpace(raw) != "" {
-			mode, err := agent.ParseSessionMode(raw)
-			if err != nil {
-				return "", fmt.Errorf("parse RASCAL_AGENT_SESSION_MODE: %w", err)
-			}
-			return mode, nil
-		}
-	}
 	return agent.SessionModeAll, nil
 }
 
 func loadTaskSessionRoot(dataDir string) string {
 	if raw, ok := os.LookupEnv("RASCAL_TASK_SESSION_ROOT"); ok {
-		if strings.TrimSpace(raw) == "" {
-			return filepath.Join(dataDir, defaults.AgentSessionDirName)
-		}
-		return strings.TrimSpace(raw)
-	}
-	if raw, ok := os.LookupEnv("RASCAL_GOOSE_SESSION_ROOT"); ok {
-		if strings.TrimSpace(raw) == "" {
-			return filepath.Join(dataDir, defaults.AgentSessionDirName)
-		}
-		return strings.TrimSpace(raw)
-	}
-	if raw, ok := os.LookupEnv("RASCAL_AGENT_SESSION_ROOT"); ok {
 		if strings.TrimSpace(raw) == "" {
 			return filepath.Join(dataDir, defaults.AgentSessionDirName)
 		}
@@ -401,11 +371,5 @@ func loadTaskSessionTTLDays() int {
 	if _, ok := os.LookupEnv("RASCAL_TASK_SESSION_TTL_DAYS"); ok {
 		return envNonNegativeIntOrDefault("RASCAL_TASK_SESSION_TTL_DAYS", 14)
 	}
-	if _, ok := os.LookupEnv("RASCAL_GOOSE_SESSION_TTL_DAYS"); ok {
-		return envNonNegativeIntOrDefault("RASCAL_GOOSE_SESSION_TTL_DAYS", 14)
-	}
-	if _, ok := os.LookupEnv("RASCAL_AGENT_SESSION_TTL_DAYS"); !ok {
-		return 14
-	}
-	return envNonNegativeIntOrDefault("RASCAL_AGENT_SESSION_TTL_DAYS", 14)
+	return 14
 }

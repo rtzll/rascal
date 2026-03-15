@@ -57,15 +57,15 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest"}
 	handle, err := launcher.StartDetached(context.Background(), Spec{
-		RunID:      "run_detached",
-		TaskID:     "task_detached",
-		Repo:       "owner/repo",
-		Instruction:       "detached",
-		BaseBranch: "main",
-		HeadBranch: "rascal/task-detached",
-		Trigger:    "cli",
-		Debug:      true,
-		RunDir:     runDir,
+		RunID:       "run_detached",
+		TaskID:      "task_detached",
+		Repo:        "owner/repo",
+		Instruction: "detached",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/task-detached",
+		Trigger:     "cli",
+		Debug:       true,
+		RunDir:      runDir,
 	})
 	if err != nil {
 		t.Fatalf("start detached: %v", err)
@@ -206,7 +206,7 @@ exit 0
 		RunID:        "run_1",
 		TaskID:       "owner/repo#1",
 		Repo:         "owner/repo",
-		Instruction:         "task",
+		Instruction:  "task",
 		BaseBranch:   "main",
 		HeadBranch:   "rascal/task-1",
 		Trigger:      "pr_comment",
@@ -232,10 +232,10 @@ exit 0
 	if !strings.Contains(call, "-e GOOSE_PATH_ROOT=/rascal-goose-session") {
 		t.Fatalf("expected persistent goose path root env, got:\n%s", call)
 	}
-	if !strings.Contains(call, "-e RASCAL_GOOSE_SESSION_MODE=pr-only") {
+	if !strings.Contains(call, "-e RASCAL_TASK_SESSION_MODE=pr-only") {
 		t.Fatalf("expected session mode env, got:\n%s", call)
 	}
-	if !strings.Contains(call, "-e RASCAL_GOOSE_SESSION_RESUME=true") {
+	if !strings.Contains(call, "-e RASCAL_TASK_SESSION_RESUME=true") {
 		t.Fatalf("expected resume env, got:\n%s", call)
 	}
 	if !strings.Contains(call, sessionDir+":/rascal-goose-session") {
@@ -287,7 +287,7 @@ exit 0
 		RunID:        "run_2",
 		TaskID:       "owner/repo#2",
 		Repo:         "owner/repo",
-		Instruction:         "task",
+		Instruction:  "task",
 		BaseBranch:   "main",
 		HeadBranch:   "rascal/task-2",
 		Trigger:      "issue_label",
@@ -342,7 +342,7 @@ exit 0
 		RunID:        "run_codex_1",
 		TaskID:       "owner/repo#1",
 		Repo:         "owner/repo",
-		Instruction:         "task",
+		Instruction:  "task",
 		AgentRuntime: agent.BackendCodex,
 		BaseBranch:   "main",
 		HeadBranch:   "rascal/task-1",
@@ -369,8 +369,8 @@ exit 0
 	if !strings.Contains(call, "-e CODEX_HOME=/rascal-codex-session") {
 		t.Fatalf("expected persistent codex home env, got:\n%s", call)
 	}
-	if !strings.Contains(call, "-e RASCAL_AGENT_SESSION_ID=session-123") {
-		t.Fatalf("expected generic session id env, got:\n%s", call)
+	if !strings.Contains(call, "-e RASCAL_TASK_SESSION_ID=session-123") {
+		t.Fatalf("expected task session id env, got:\n%s", call)
 	}
 	if !strings.Contains(call, sessionDir+":/rascal-codex-session") {
 		t.Fatalf("expected task session mount, got:\n%s", call)
@@ -406,15 +406,15 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
-		RunID:      "run_security",
-		TaskID:     "task_security",
-		Repo:       "owner/repo",
-		Instruction:       "security",
-		BaseBranch: "main",
-		HeadBranch: "rascal/task-security",
-		Trigger:    "cli",
-		Debug:      true,
-		RunDir:     runDir,
+		RunID:       "run_security",
+		TaskID:      "task_security",
+		Repo:        "owner/repo",
+		Instruction: "security",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/task-security",
+		Trigger:     "cli",
+		Debug:       true,
+		RunDir:      runDir,
 	})
 	if err != nil {
 		t.Fatalf("unexpected start error: %v", err)

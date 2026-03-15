@@ -450,21 +450,21 @@ func loadConfig() (config, error) {
 		}
 	}
 
-	agentRuntime, err := agent.ParseRuntime(firstSetEnvValue("RASCAL_AGENT_RUNTIME", "RASCAL_AGENT_BACKEND"))
+	agentRuntime, err := agent.ParseRuntime(strings.TrimSpace(os.Getenv("RASCAL_AGENT_RUNTIME")))
 	if err != nil {
 		return config{}, fmt.Errorf("invalid RASCAL_AGENT_RUNTIME: %w", err)
 	}
-	agentSessionModeRaw := firstSetEnvValue("RASCAL_TASK_SESSION_MODE", "RASCAL_GOOSE_SESSION_MODE", "RASCAL_AGENT_SESSION_MODE")
+	agentSessionModeRaw := strings.TrimSpace(os.Getenv("RASCAL_TASK_SESSION_MODE"))
 	agentSessionMode, err := agent.ParseSessionMode(agentSessionModeRaw)
 	if err != nil {
 		return config{}, fmt.Errorf("invalid agent session mode: %w", err)
 	}
-	agentSessionResume := parseBoolEnv(firstSetEnvValue("RASCAL_TASK_SESSION_RESUME", "RASCAL_GOOSE_SESSION_RESUME", "RASCAL_AGENT_SESSION_RESUME"), false)
+	agentSessionResume := parseBoolEnv(strings.TrimSpace(os.Getenv("RASCAL_TASK_SESSION_RESUME")), false)
 	if agentSessionMode == agent.SessionModeOff {
 		agentSessionResume = false
 	}
-	agentSessionKey := firstSetEnvValue("RASCAL_TASK_SESSION_KEY", "RASCAL_GOOSE_SESSION_KEY", "RASCAL_AGENT_SESSION_KEY")
-	backendSessionID := firstSetEnvValue("RASCAL_TASK_SESSION_ID", "RASCAL_GOOSE_SESSION_NAME", "RASCAL_AGENT_SESSION_ID")
+	agentSessionKey := strings.TrimSpace(os.Getenv("RASCAL_TASK_SESSION_KEY"))
+	backendSessionID := strings.TrimSpace(os.Getenv("RASCAL_TASK_SESSION_ID"))
 	if agentSessionResume {
 		if agentSessionKey == "" {
 			agentSessionKey = runner.TaskSessionKey(repo, taskID)
@@ -479,7 +479,7 @@ func loadConfig() (config, error) {
 	return config{
 		RunID:            runID,
 		TaskID:           taskID,
-		Instruction:      firstNonEmptyValue(strings.TrimSpace(os.Getenv("RASCAL_INSTRUCTION")), strings.TrimSpace(os.Getenv("RASCAL_TASK"))),
+		Instruction:      strings.TrimSpace(os.Getenv("RASCAL_INSTRUCTION")),
 		Repo:             repo,
 		BaseBranch:       baseBranch,
 		HeadBranch:       headBranch,
@@ -512,17 +512,6 @@ func firstNonEmptyValue(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
 			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
-func firstSetEnvValue(keys ...string) string {
-	for _, key := range keys {
-		if raw, ok := os.LookupEnv(key); ok {
-			if trimmed := strings.TrimSpace(raw); trimmed != "" {
-				return trimmed
-			}
 		}
 	}
 	return ""

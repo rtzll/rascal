@@ -24,42 +24,22 @@ import (
 
 func mustNewRootCmd(t *testing.T) *cobra.Command {
 	t.Helper()
-
-	cmd, err := newRootCmd()
-	if err != nil {
-		t.Fatalf("newRootCmd: %v", err)
-	}
-	return cmd
+	return newRootCmd()
 }
 
 func mustNewRunCmd(t *testing.T, a *app) *cobra.Command {
 	t.Helper()
-
-	cmd, err := a.newRunCmd()
-	if err != nil {
-		t.Fatalf("newRunCmd: %v", err)
-	}
-	return cmd
+	return a.newRunCmd()
 }
 
 func mustNewInfraUpCmd(t *testing.T, a *app) *cobra.Command {
 	t.Helper()
-
-	cmd, err := a.newInfraUpCmd()
-	if err != nil {
-		t.Fatalf("newInfraUpCmd: %v", err)
-	}
-	return cmd
+	return a.newInfraUpCmd()
 }
 
 func mustNewInfraDeployExistingCmd(t *testing.T, a *app) *cobra.Command {
 	t.Helper()
-
-	cmd, err := a.newInfraDeployExistingCmd()
-	if err != nil {
-		t.Fatalf("newInfraDeployExistingCmd: %v", err)
-	}
-	return cmd
+	return a.newInfraDeployExistingCmd()
 }
 
 func TestMaskSecret(t *testing.T) {
@@ -495,8 +475,8 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := deployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner-goose:latest" {
 		t.Fatalf("deploy default runner-image = %q, want rascal-runner-goose:latest", got)
 	}
-	if got := deployCmd.Flags().Lookup("agent-runtime").DefValue; got != "codex" {
-		t.Fatalf("deploy default agent-runtime = %q, want codex", got)
+	if got := deployCmd.Flags().Lookup("agent-runtime").DefValue; got != "" {
+		t.Fatalf("deploy default agent-runtime = %q, want empty", got)
 	}
 	if got := deployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
 		t.Fatalf("deploy default upload-env = %q, want false", got)
@@ -523,8 +503,8 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := infraDeployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner-goose:latest" {
 		t.Fatalf("infra deploy-existing default runner-image = %q, want rascal-runner-goose:latest", got)
 	}
-	if got := infraDeployCmd.Flags().Lookup("agent-runtime").DefValue; got != "codex" {
-		t.Fatalf("infra deploy-existing default agent-runtime = %q, want codex", got)
+	if got := infraDeployCmd.Flags().Lookup("agent-runtime").DefValue; got != "" {
+		t.Fatalf("infra deploy-existing default agent-runtime = %q, want empty", got)
 	}
 	if got := infraDeployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
 		t.Fatalf("infra deploy-existing default upload-env = %q, want false", got)
@@ -1270,9 +1250,9 @@ func TestRunCreatesTaskPayload(t *testing.T) {
 	cmd := mustNewRunCmd(t, a)
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"--repo", "owner/repo", "--task", "Fix flaky tests"})
+	cmd.SetArgs([]string{"--repo", "owner/repo", "--instruction", "Fix flaky tests"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("run --repo --task: %v", err)
+		t.Fatalf("run --repo --instruction: %v", err)
 	}
 
 	if payload.Repo != "owner/repo" {
@@ -1600,7 +1580,7 @@ func TestRunIssueMutualExclusion(t *testing.T) {
 	cmd := mustNewRunCmd(t, a)
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"--issue", "owner/repo#42", "--task", "Fix it"})
+	cmd.SetArgs([]string{"--issue", "owner/repo#42", "--instruction", "Fix it"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for mutually exclusive flags")
