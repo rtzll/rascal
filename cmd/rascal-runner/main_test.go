@@ -13,6 +13,7 @@ import (
 	"github.com/rtzll/rascal/internal/agent"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtrigger"
+	"github.com/rtzll/rascal/internal/worker"
 )
 
 type fakeExecutor struct {
@@ -55,21 +56,21 @@ func (f fakeExecutor) RunWithInput(dir string, extraEnv []string, stdin io.Reade
 
 func TestTaskSubject(t *testing.T) {
 	t.Run("uses fallback when task is empty", func(t *testing.T) {
-		got := taskSubject("   ", "task_1")
+		got := worker.TaskSubject("   ", "task_1")
 		if got != "task_1" {
 			t.Fatalf("taskSubject fallback = %q, want task_1", got)
 		}
 	})
 
 	t.Run("collapses whitespace", func(t *testing.T) {
-		got := taskSubject("fix\n  spacing\tplease", "task_1")
+		got := worker.TaskSubject("fix\n  spacing\tplease", "task_1")
 		if got != "fix spacing please" {
 			t.Fatalf("taskSubject normalized = %q", got)
 		}
 	})
 
 	t.Run("truncates long subject", func(t *testing.T) {
-		got := taskSubject(strings.Repeat("a", 70), "task_1")
+		got := worker.TaskSubject(strings.Repeat("a", 70), "task_1")
 		if len(got) != 58 {
 			t.Fatalf("expected length 58, got %d", len(got))
 		}
@@ -86,7 +87,7 @@ func TestIsConventionalTitle(t *testing.T) {
 		"chore(ci)!: switch image build",
 	}
 	for _, title := range valid {
-		if !isConventionalTitle(title) {
+		if !worker.IsConventionalTitle(title) {
 			t.Fatalf("expected valid conventional title: %q", title)
 		}
 	}
@@ -97,31 +98,31 @@ func TestIsConventionalTitle(t *testing.T) {
 		"",
 	}
 	for _, title := range invalid {
-		if isConventionalTitle(title) {
+		if worker.IsConventionalTitle(title) {
 			t.Fatalf("expected invalid conventional title: %q", title)
 		}
 	}
 }
 
 func TestBuildInfoSummary(t *testing.T) {
-	origVersion, origCommit, origTime := buildVersion, buildCommit, buildTime
+	origVersion, origCommit, origTime := worker.BuildVersion, worker.BuildCommit, worker.BuildTime
 	t.Cleanup(func() {
-		buildVersion, buildCommit, buildTime = origVersion, origCommit, origTime
+		worker.BuildVersion, worker.BuildCommit, worker.BuildTime = origVersion, origCommit, origTime
 	})
 
-	buildVersion = "v1.2.3"
-	buildCommit = "abcdef0"
-	buildTime = "2026-03-03T12:00:00Z"
-	got := buildInfoSummary()
+	worker.BuildVersion = "v1.2.3"
+	worker.BuildCommit = "abcdef0"
+	worker.BuildTime = "2026-03-03T12:00:00Z"
+	got := worker.BuildInfoSummary()
 	want := "version=v1.2.3 commit=abcdef0 built=2026-03-03T12:00:00Z"
 	if got != want {
-		t.Fatalf("buildInfoSummary() = %q, want %q", got, want)
+		t.Fatalf("worker.BuildInfoSummary() = %q, want %q", got, want)
 	}
 }
 
 func TestLoadAgentCommitMessage(t *testing.T) {
 	t.Run("returns empty when file missing", func(t *testing.T) {
-		title, body, err := loadAgentCommitMessage(filepath.Join(t.TempDir(), "missing.txt"))
+		title, body, err := worker.LoadAgentCommitMessage(filepath.Join(t.TempDir(), "missing.txt"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -136,7 +137,7 @@ func TestLoadAgentCommitMessage(t *testing.T) {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("write file: %v", err)
 		}
-		title, body, err := loadAgentCommitMessage(path)
+		title, body, err := worker.LoadAgentCommitMessage(path)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -166,11 +167,11 @@ func TestNormalizeRepoLocalMetaArtifactsAdoptsCommitMessage(t *testing.T) {
 		t.Fatalf("write repo-local commit message: %v", err)
 	}
 
-	cfg := config{
+	cfg := worker.Config{
 		RepoDir:       repoDir,
 		CommitMsgPath: filepath.Join(metaDir, "commit_message.txt"),
 	}
-	if err := normalizeRepoLocalMetaArtifacts(cfg); err != nil {
+	if err := worker.NormalizeRepoLocalMetaArtifacts(cfg); err != nil {
 		t.Fatalf("normalize repo-local meta artifacts: %v", err)
 	}
 
@@ -204,11 +205,11 @@ func TestNormalizeRepoLocalMetaArtifactsPreservesCanonicalCommitMessage(t *testi
 		t.Fatalf("write repo-local commit message: %v", err)
 	}
 
-	cfg := config{
+	cfg := worker.Config{
 		RepoDir:       repoDir,
 		CommitMsgPath: canonical,
 	}
-	if err := normalizeRepoLocalMetaArtifacts(cfg); err != nil {
+	if err := worker.NormalizeRepoLocalMetaArtifacts(cfg); err != nil {
 		t.Fatalf("normalize repo-local meta artifacts: %v", err)
 	}
 
@@ -239,7 +240,7 @@ func TestLoadConfig(t *testing.T) {
 	t.Setenv("RASCAL_TASK_SESSION_RESUME", "")
 	t.Setenv("RASCAL_TASK_SESSION_KEY", "")
 	t.Setenv("RASCAL_TASK_SESSION_ID", "")
-	cfg, err := loadConfig()
+	cfg, err := worker.LoadConfig()
 	if err != nil {
 		t.Fatalf("loadConfig returned error: %v", err)
 	}
@@ -286,7 +287,7 @@ func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
 	t.Setenv("RASCAL_TASK_SESSION_KEY", "")
 	t.Setenv("RASCAL_TASK_SESSION_ID", "")
 
-	cfg, err := loadConfig()
+	cfg, err := worker.LoadConfig()
 	if err != nil {
 		t.Fatalf("loadConfig returned error: %v", err)
 	}
@@ -319,7 +320,7 @@ func TestLoadConfigRespectsTaskSessionEnv(t *testing.T) {
 	t.Setenv("RASCAL_TASK_SESSION_ID", "rascal-owner-repo-3-abc123")
 	t.Setenv("GOOSE_PATH_ROOT", "/rascal-goose-session")
 
-	cfg, err := loadConfig()
+	cfg, err := worker.LoadConfig()
 	if err != nil {
 		t.Fatalf("loadConfig returned error: %v", err)
 	}
@@ -347,7 +348,7 @@ func TestLoadConfigRejectsInvalidAgentRuntime(t *testing.T) {
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_AGENT_RUNTIME", "claude")
 
-	_, err := loadConfig()
+	_, err := worker.LoadConfig()
 	if err == nil {
 		t.Fatal("loadConfig error = nil, want error")
 	}
@@ -363,7 +364,7 @@ func TestLoadConfigRejectsInvalidAgentSessionMode(t *testing.T) {
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_TASK_SESSION_MODE", "sometimes")
 
-	_, err := loadConfig()
+	_, err := worker.LoadConfig()
 	if err == nil {
 		t.Fatal("loadConfig error = nil, want error")
 	}
@@ -379,7 +380,7 @@ func TestLoadConfigRejectsInvalidTrigger(t *testing.T) {
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_TRIGGER", "issue")
 
-	_, err := loadConfig()
+	_, err := worker.LoadConfig()
 	if err == nil {
 		t.Fatal("loadConfig error = nil, want error")
 	}
@@ -390,7 +391,7 @@ func TestLoadConfigRejectsInvalidTrigger(t *testing.T) {
 
 func TestRunGooseNoSessionByDefault(t *testing.T) {
 	root := t.TempDir()
-	cfg := config{
+	cfg := worker.Config{
 		RepoDir:          root,
 		InstructionsPath: filepath.Join(root, "instructions.md"),
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
@@ -415,7 +416,7 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 		},
 	}
 
-	if _, _, err := runGoose(ex, cfg); err != nil {
+	if _, _, err := worker.RunGoose(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -429,7 +430,7 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 
 func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 	root := t.TempDir()
-	cfg := config{
+	cfg := worker.Config{
 		RepoDir:          root,
 		InstructionsPath: filepath.Join(root, "instructions.md"),
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
@@ -466,7 +467,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 		},
 	}
 
-	if _, _, err := runGoose(ex, cfg); err != nil {
+	if _, _, err := worker.RunGoose(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -482,7 +483,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 
 func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 	root := t.TempDir()
-	cfg := config{
+	cfg := worker.Config{
 		RepoDir:          root,
 		InstructionsPath: filepath.Join(root, "instructions.md"),
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
@@ -519,7 +520,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 		},
 	}
 
-	if _, _, err := runGoose(ex, cfg); err != nil {
+	if _, _, err := worker.RunGoose(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -534,7 +535,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 	root := t.TempDir()
 	sessionRoot := filepath.Join(root, "goose-sessions")
-	cfg := config{
+	cfg := worker.Config{
 		RepoDir:          root,
 		InstructionsPath: filepath.Join(root, "instructions.md"),
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
@@ -590,7 +591,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 		},
 	}
 
-	if _, _, err := runGoose(ex, cfg); err != nil {
+	if _, _, err := worker.RunGoose(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	if len(calls) != 2 {
@@ -621,7 +622,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 
 func TestResetGooseSessionRootCreatesRootWhenMissing(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "missing-goose-root")
-	if err := resetGooseSessionRoot(root); err != nil {
+	if err := worker.ResetGooseSessionRoot(root); err != nil {
 		t.Fatalf("resetGooseSessionRoot returned error: %v", err)
 	}
 	info, err := os.Stat(root)
@@ -642,7 +643,7 @@ func TestResetGooseSessionRootCreatesRootWhenMissing(t *testing.T) {
 
 func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 	root := t.TempDir()
-	cfg := config{
+	cfg := worker.Config{
 		RepoDir:          root,
 		InstructionsPath: filepath.Join(root, "instructions.md"),
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
@@ -673,7 +674,7 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 		},
 	}
 
-	_, _, err := runGoose(ex, cfg)
+	_, _, err := worker.RunGoose(ex, cfg)
 	if err == nil {
 		t.Fatal("expected runGoose to fail")
 	}
@@ -689,14 +690,14 @@ func TestIsSessionResumeFailureDetectsMissingNamedSession(t *testing.T) {
 		t.Fatalf("write goose log: %v", err)
 	}
 
-	if !isSessionResumeFailure(errors.New("exit status 1"), logPath) {
+	if !worker.IsSessionResumeFailure(errors.New("exit status 1"), logPath) {
 		t.Fatal("expected missing named session to trigger resume fallback detection")
 	}
 }
 
 func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 	root := t.TempDir()
-	cfg := config{
+	cfg := worker.Config{
 		RepoDir:          root,
 		InstructionsPath: filepath.Join(root, "instructions.md"),
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
@@ -733,7 +734,7 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 		},
 	}
 
-	if _, _, err := runGoose(ex, cfg); err != nil {
+	if _, _, err := worker.RunGoose(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -746,7 +747,7 @@ func TestRunCodexFreshSession(t *testing.T) {
 	root := t.TempDir()
 	codexHome := filepath.Join(root, "codex-home")
 	sessionPath := filepath.Join(codexHome, "sessions", "2026", "03", "session.jsonl")
-	cfg := config{
+	cfg := worker.Config{
 		RepoDir:          root,
 		MetaDir:          root,
 		InstructionsPath: filepath.Join(root, "instructions.md"),
@@ -794,7 +795,7 @@ func TestRunCodexFreshSession(t *testing.T) {
 		},
 	}
 
-	output, sessionID, err := runCodex(ex, cfg)
+	output, sessionID, err := worker.RunCodex(ex, cfg)
 	if err != nil {
 		t.Fatalf("runCodex returned error: %v", err)
 	}
@@ -825,7 +826,7 @@ func TestRunCodexResumeSession(t *testing.T) {
 	root := t.TempDir()
 	codexHome := filepath.Join(root, "codex-home")
 	sessionPath := filepath.Join(codexHome, "sessions", "2026", "03", "session.jsonl")
-	cfg := config{
+	cfg := worker.Config{
 		RepoDir:          root,
 		MetaDir:          root,
 		InstructionsPath: filepath.Join(root, "instructions.md"),
@@ -872,7 +873,7 @@ func TestRunCodexResumeSession(t *testing.T) {
 		},
 	}
 
-	_, sessionID, err := runCodex(ex, cfg)
+	_, sessionID, err := worker.RunCodex(ex, cfg)
 	if err != nil {
 		t.Fatalf("runCodex returned error: %v", err)
 	}
@@ -1016,7 +1017,7 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
 
-	if err := run(); err != nil {
+	if err := worker.Run(); err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
 
@@ -1134,7 +1135,7 @@ func TestRunWithExecutorUsesCodexBackend(t *testing.T) {
 		},
 	}
 
-	if err := runWithExecutor(ex); err != nil {
+	if err := worker.RunWithExecutor(ex); err != nil {
 		t.Fatalf("runWithExecutor returned error: %v", err)
 	}
 	if !ranCodex {
@@ -1209,7 +1210,7 @@ func TestRunWithExecutorFailsWhenRequiredCommandMissing(t *testing.T) {
 					return nil
 				},
 			}
-			err := runWithExecutor(ex)
+			err := worker.RunWithExecutor(ex)
 			expected := "stage validate_commands: required command missing: " + tc.missingCommand
 			if err == nil || !strings.Contains(err.Error(), expected) {
 				t.Fatalf("expected %q, got: %v", expected, err)
@@ -1283,7 +1284,7 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 		},
 	}
 
-	err := runWithExecutor(ex)
+	err := worker.RunWithExecutor(ex)
 	if err == nil || !strings.Contains(err.Error(), "stage pr_create: gh pr create failed") {
 		t.Fatalf("expected pr create failure, got: %v", err)
 	}
@@ -1308,7 +1309,7 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 }
 
 func TestRunStageWrapsError(t *testing.T) {
-	err := runStage("checkout_repo", func() error {
+	err := worker.RunStage("checkout_repo", func() error {
 		return errors.New("boom")
 	})
 	if err == nil {
@@ -1318,7 +1319,7 @@ func TestRunStageWrapsError(t *testing.T) {
 		t.Fatalf("unexpected wrapped error: %v", err)
 	}
 
-	if err := runStage("ok_stage", func() error { return nil }); err != nil {
+	if err := worker.RunStage("ok_stage", func() error { return nil }); err != nil {
 		t.Fatalf("expected nil error on success stage, got %v", err)
 	}
 }

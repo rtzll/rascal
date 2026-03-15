@@ -201,7 +201,7 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 		t.Fatalf("create credential: %v", err)
 	}
 
-	run, err := s.CreateAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{
 		Repo:            "owner/repo",
 		Instruction:     "do work",
 		CreatedByUserID: "owner",
@@ -276,7 +276,7 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 		t.Fatalf("create credential: %v", err)
 	}
 
-	runA, err := s.CreateAndQueueRun(runRequest{
+	runA, err := s.CreateAndQueueRun(orchestrator.RunRequest{
 		TaskID:          "owner/repo#reuse-a",
 		Repo:            "owner/repo",
 		Instruction:     "reuse shared credential a",
@@ -285,7 +285,7 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run A: %v", err)
 	}
-	runB, err := s.CreateAndQueueRun(runRequest{
+	runB, err := s.CreateAndQueueRun(orchestrator.RunRequest{
 		TaskID:          "owner/repo#reuse-b",
 		Repo:            "owner/repo",
 		Instruction:     "reuse shared credential b",

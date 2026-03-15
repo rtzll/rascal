@@ -44,7 +44,7 @@ func TestInstructionTextPRGitContext(t *testing.T) {
 		Context:     "Please rebase this on main and fix the conflicts.",
 	}
 
-	got := instructionText(run)
+	got := orchestrator.InstructionText(run)
 
 	for _, want := range []string{
 		"## Git Context",
@@ -60,7 +60,7 @@ func TestInstructionTextPRGitContext(t *testing.T) {
 		"Please rebase this on main and fix the conflicts.",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("instructionText() missing %q\nfull text:\n%s", want, got)
+			t.Fatalf("orchestrator.InstructionText() missing %q\nfull text:\n%s", want, got)
 		}
 	}
 }
@@ -76,9 +76,9 @@ func TestInstructionTextNonPRRunOmitsGitContext(t *testing.T) {
 		Trigger:     "issue",
 	}
 
-	got := instructionText(run)
+	got := orchestrator.InstructionText(run)
 	if strings.Contains(got, "## Git Context") {
-		t.Fatalf("instructionText() unexpectedly included Git Context\nfull text:\n%s", got)
+		t.Fatalf("orchestrator.InstructionText() unexpectedly included Git Context\nfull text:\n%s", got)
 	}
 }
 
@@ -107,12 +107,12 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 		t.Fatalf("ReadFile(context.json) error = %v", err)
 	}
 
-	var got RunContextFile
+	var got orchestrator.RunContextFile
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("Unmarshal(context.json) error = %v", err)
 	}
 
-	want := RunContextFile{
+	want := orchestrator.RunContextFile{
 		RunID:       run.ID,
 		TaskID:      run.TaskID,
 		Repo:        run.Repo,
@@ -597,14 +597,14 @@ func (f *fakeLauncher) Calls() int {
 	return f.calls
 }
 
-func newTestServer(t *testing.T, launcher runner.Launcher) *server {
+func newTestServer(t *testing.T, launcher runner.Launcher) *orchestrator.Server {
 	t.Helper()
 
 	dataDir := t.TempDir()
 	return newTestServerWithPaths(t, launcher, dataDir, filepath.Join(dataDir, "state.db"), "test-instance")
 }
 
-func newTestServerWithPaths(t *testing.T, launcher runner.Launcher, dataDir, statePath, instanceID string) *server {
+func newTestServerWithPaths(t *testing.T, launcher runner.Launcher, dataDir, statePath, instanceID string) *orchestrator.Server {
 	t.Helper()
 
 	cfg := config.ServerConfig{
@@ -728,7 +728,7 @@ func copyFileIfExists(src, dst string) (err error) {
 	return nil
 }
 
-func waitForRunExecution(t *testing.T, s *server, runID string) state.RunExecution {
+func waitForRunExecution(t *testing.T, s *orchestrator.Server, runID string) state.RunExecution {
 	t.Helper()
 	var execRec state.RunExecution
 	waitFor(t, 2*time.Second, func() bool {
@@ -879,14 +879,14 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 	t.Fatalf("timeout waiting for condition: %s", msg)
 }
 
-func waitForServerIdle(t *testing.T, s *server) {
+func waitForServerIdle(t *testing.T, s *orchestrator.Server) {
 	t.Helper()
 	waitFor(t, 2*time.Second, func() bool {
 		return s.ActiveRunCount() == 0
 	}, "server idle")
 }
 
-func markRunSucceeded(t *testing.T, s *server, runID string) {
+func markRunSucceeded(t *testing.T, s *orchestrator.Server, runID string) {
 	t.Helper()
 	if _, err := s.Store.SetRunStatus(runID, state.StatusRunning, ""); err != nil {
 		t.Fatalf("set run running before success: %v", err)
@@ -896,7 +896,7 @@ func markRunSucceeded(t *testing.T, s *server, runID string) {
 	}
 }
 
-func markRunReview(t *testing.T, s *server, runID string) {
+func markRunReview(t *testing.T, s *orchestrator.Server, runID string) {
 	t.Helper()
 	if _, err := s.Store.SetRunStatus(runID, state.StatusRunning, ""); err != nil {
 		t.Fatalf("set run running before review: %v", err)
@@ -972,11 +972,11 @@ func TestHandleWebhookIssueClosedCancelsRunsAndCompletesTask(t *testing.T) {
 	defer waitForServerIdle(t, s)
 	taskID := "owner/repo#7"
 
-	runningRun, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "work", IssueNumber: 7})
+	runningRun, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "work", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create running run: %v", err)
 	}
-	queuedRun, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "queued", IssueNumber: 7})
+	queuedRun, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "queued", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create queued run: %v", err)
 	}
@@ -1037,11 +1037,11 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 	defer waitForServerIdle(t, s)
 	taskID := "owner/repo#7"
 
-	runningRun, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "work", IssueNumber: 7})
+	runningRun, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "work", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create running run: %v", err)
 	}
-	queuedRun, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "stale", IssueNumber: 7})
+	queuedRun, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "stale", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create queued run: %v", err)
 	}
@@ -2055,7 +2055,7 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 	if err := os.MkdirAll(threadRun.RunDir, 0o755); err != nil {
 		t.Fatalf("create thread run dir: %v", err)
 	}
-	if err := s.WriteRunResponseTarget(threadRun, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(threadRun, &orchestrator.RunResponseTarget{
 		Repo:           repo,
 		IssueNumber:    prNum,
 		Trigger:        "pr_review_thread",
@@ -2078,7 +2078,7 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 	if err := os.MkdirAll(otherThreadRun.RunDir, 0o755); err != nil {
 		t.Fatalf("create other thread run dir: %v", err)
 	}
-	if err := s.WriteRunResponseTarget(otherThreadRun, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(otherThreadRun, &orchestrator.RunResponseTarget{
 		Repo:           repo,
 		IssueNumber:    prNum,
 		Trigger:        "pr_review_thread",
@@ -2141,13 +2141,13 @@ func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	run, err := s.CreateAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{
 		TaskID:      "owner/repo#99",
 		Repo:        "owner/repo",
 		Instruction: "Address PR #99 feedback",
 		Trigger:     "pr_comment",
 		PRNumber:    99,
-		ResponseTarget: &runResponseTarget{
+		ResponseTarget: &orchestrator.RunResponseTarget{
 			RequestedBy: " alice ",
 		},
 	})
@@ -2155,7 +2155,7 @@ func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	target, ok, err := loadRunResponseTarget(run.RunDir)
+	target, ok, err := orchestrator.LoadRunResponseTarget(run.RunDir)
 	if err != nil {
 		t.Fatalf("load run response target: %v", err)
 	}
@@ -2184,13 +2184,13 @@ func TestCreateAndQueueRunWritesReviewThreadResponseTarget(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	defer waitForServerIdle(t, s)
 
-	run, err := s.CreateAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{
 		TaskID:      "owner/repo#100",
 		Repo:        "owner/repo",
 		Instruction: "Address PR #100 unresolved review thread",
 		Trigger:     "pr_review_thread",
 		PRNumber:    100,
-		ResponseTarget: &runResponseTarget{
+		ResponseTarget: &orchestrator.RunResponseTarget{
 			RequestedBy:    " bob ",
 			ReviewThreadID: 42,
 		},
@@ -2199,7 +2199,7 @@ func TestCreateAndQueueRunWritesReviewThreadResponseTarget(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	target, ok, err := loadRunResponseTarget(run.RunDir)
+	target, ok, err := orchestrator.LoadRunResponseTarget(run.RunDir)
 	if err != nil {
 		t.Fatalf("load run response target: %v", err)
 	}
@@ -2223,7 +2223,7 @@ func TestCreateAndQueueRunDoesNotCreateRunDirWhenEnqueueFails(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	_, err := s.CreateAndQueueRun(runRequest{
+	_, err := s.CreateAndQueueRun(orchestrator.RunRequest{
 		TaskID:      "owner/repo#101",
 		Repo:        "owner/repo",
 		Instruction: "fail before enqueue persists",
@@ -2290,11 +2290,11 @@ func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	_, err := s.CreateAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
+	_, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	second, err := s.CreateAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "second"})
+	second, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "second"})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
@@ -2336,11 +2336,11 @@ func TestCreateAndQueueRunRespectsGlobalConcurrencyLimit(t *testing.T) {
 	s.MaxConcurrent = 1
 	defer waitForServerIdle(t, s)
 
-	_, err := s.CreateAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
+	_, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	second, err := s.CreateAndQueueRun(runRequest{TaskID: "task-2", Repo: "owner/repo", Instruction: "second"})
+	second, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task-2", Repo: "owner/repo", Instruction: "second"})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
@@ -2376,11 +2376,11 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	s.Config.GitHubToken = "token"
 	taskID := "owner/repo#123"
 
-	_, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "first", PRNumber: 55})
+	_, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "first", PRNumber: 55})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	queuedRun, err := s.CreateAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "queued", PRNumber: 55})
+	queuedRun, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "queued", PRNumber: 55})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
@@ -2664,7 +2664,7 @@ func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
 	s.Config.RunnerMaxAttempts = 2
 	defer waitForServerIdle(t, s)
 
-	run, err := s.CreateAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{
 		TaskID:      "owner/repo#retry",
 		Repo:        "owner/repo",
 		Instruction: "retry task",
@@ -2697,7 +2697,7 @@ func TestExecuteRunSetsAgentSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 		TTLDays: 0,
 	}
 
-	run, err := s.CreateAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{
 		TaskID:      "owner/repo#123",
 		Repo:        "owner/repo",
 		Instruction: "Address PR #123 feedback",
@@ -2743,7 +2743,7 @@ func TestExecuteRunDisablesAgentSessionSpecForNonPROnlyTrigger(t *testing.T) {
 		TTLDays: 0,
 	}
 
-	run, err := s.CreateAndQueueRun(runRequest{
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{
 		TaskID:      "owner/repo#124",
 		Repo:        "owner/repo",
 		Instruction: "Initial issue run",
@@ -2789,7 +2789,7 @@ func TestCleanupStaleAgentSessionDirs(t *testing.T) {
 		t.Fatalf("chtimes fresh dir: %v", err)
 	}
 
-	removed, err := cleanupStaleAgentSessionDirs(root, 14, now)
+	removed, err := orchestrator.CleanupStaleAgentSessionDirs(root, 14, now)
 	if err != nil {
 		t.Fatalf("cleanupStaleAgentSessionDirs: %v", err)
 	}
@@ -2835,7 +2835,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &orchestrator.RunResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 77,
 		RequestedBy: "alice",
@@ -2856,7 +2856,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	if len(comments) != 2 {
 		t.Fatalf("expected start and completion comments, got %d", len(comments))
 	}
-	startComment, ok := findPostedComment(comments, runStartCommentBodyMarker)
+	startComment, ok := findPostedComment(comments, orchestrator.RunStartCommentBodyMarker)
 	if !ok {
 		t.Fatalf("expected start comment, got %+v", comments)
 	}
@@ -2869,7 +2869,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	if !strings.Contains(startComment.body, "<details><summary>Run Settings</summary>") {
 		t.Fatalf("expected settings details in start comment, got:\n%s", startComment.body)
 	}
-	completionComment, ok := findPostedComment(comments, runCompletionCommentBodyMarker)
+	completionComment, ok := findPostedComment(comments, orchestrator.RunCompletionCommentBodyMarker)
 	if !ok {
 		t.Fatalf("expected completion comment, got %+v", comments)
 	}
@@ -2988,7 +2988,7 @@ func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *tes
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &orchestrator.RunResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 52,
 		RequestedBy: "alice",
@@ -3006,14 +3006,14 @@ func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *tes
 	if len(comments) != 2 {
 		t.Fatalf("expected start and completion comments, got %d", len(comments))
 	}
-	startComment, ok := findPostedComment(comments, runStartCommentBodyMarker)
+	startComment, ok := findPostedComment(comments, orchestrator.RunStartCommentBodyMarker)
 	if !ok {
 		t.Fatalf("expected start comment, got %+v", comments)
 	}
 	if startComment.issueNumber != 52 {
 		t.Fatalf("start comment target issue number = %d, want 52", startComment.issueNumber)
 	}
-	completionComment, ok := findPostedComment(comments, runCompletionCommentBodyMarker)
+	completionComment, ok := findPostedComment(comments, orchestrator.RunCompletionCommentBodyMarker)
 	if !ok {
 		t.Fatalf("expected completion comment, got %+v", comments)
 	}
@@ -3058,7 +3058,7 @@ func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &orchestrator.RunResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 53,
 		RequestedBy: "alice",
@@ -3090,16 +3090,16 @@ func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 	if len(comments) != 1 {
 		t.Fatalf("expected only the start comment while run is paused for retry, got %d", len(comments))
 	}
-	if _, ok := findPostedComment(comments, runStartCommentBodyMarker); !ok {
+	if _, ok := findPostedComment(comments, orchestrator.RunStartCommentBodyMarker); !ok {
 		t.Fatalf("expected start comment while paused for retry, got %+v", comments)
 	}
 	if calls := launcher.Calls(); calls != 1 {
 		t.Fatalf("expected run not to restart before pause expiry, got launcher calls=%d", calls)
 	}
-	if _, err := os.Stat(RunFailureCommentMarkerPath(run.RunDir)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(orchestrator.RunFailureCommentMarkerPath(run.RunDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected no failure marker, got err=%v", err)
 	}
-	if pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(workerPauseScope, time.Now().UTC()); err != nil {
+	if pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(orchestrator.WorkerPauseScope, time.Now().UTC()); err != nil {
 		t.Fatalf("load scheduler pause: %v", err)
 	} else if !ok {
 		t.Fatal("expected active scheduler pause after usage limit")
@@ -3142,7 +3142,7 @@ func TestExecuteRunRequeuesIssueTriggeredRunForUsageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &orchestrator.RunResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 16,
 		RequestedBy: "alice",
@@ -3168,7 +3168,7 @@ func TestExecuteRunRequeuesIssueTriggeredRunForUsageLimit(t *testing.T) {
 	if len(comments) != 1 {
 		t.Fatalf("expected only the start comment while run is paused for retry, got %d", len(comments))
 	}
-	if _, ok := findPostedComment(comments, runStartCommentBodyMarker); !ok {
+	if _, ok := findPostedComment(comments, orchestrator.RunStartCommentBodyMarker); !ok {
 		t.Fatalf("expected start comment while paused for retry, got %+v", comments)
 	}
 	if calls := launcher.Calls(); calls != 1 {
@@ -3220,7 +3220,7 @@ func TestExecuteRunDoesNotRequeueSuccessfulRunWhenTranscriptMentionsUsageLimit(t
 	if updated.Status != state.StatusReview {
 		t.Fatalf("expected review status after successful run, got %s", updated.Status)
 	}
-	if pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(workerPauseScope, time.Now().UTC()); err != nil {
+	if pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(orchestrator.WorkerPauseScope, time.Now().UTC()); err != nil {
 		t.Fatalf("load scheduler pause: %v", err)
 	} else if ok {
 		t.Fatalf("did not expect scheduler pause, got until=%s reason=%q", pauseUntil, reason)
@@ -3299,11 +3299,11 @@ func TestScheduleRunsResumesAfterPauseDeadline(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	pauseUntil := time.Now().UTC().Add(150 * time.Millisecond)
-	if _, err := s.Store.PauseScheduler(workerPauseScope, "test pause", pauseUntil); err != nil {
+	if _, err := s.Store.PauseScheduler(orchestrator.WorkerPauseScope, "test pause", pauseUntil); err != nil {
 		t.Fatalf("pause scheduler: %v", err)
 	}
 
-	if _, err := s.CreateAndQueueRun(runRequest{
+	if _, err := s.CreateAndQueueRun(orchestrator.RunRequest{
 		TaskID:      "owner/repo#resume",
 		Repo:        "owner/repo",
 		Instruction: "resume after pause",
@@ -3323,7 +3323,7 @@ func TestParseUsageLimitRetryAtSupportsAbsoluteTimestampWithZone(t *testing.T) {
 	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
 	corpus := "Request failed: You've hit your usage limit. Try again at Mar 10th, 2026 6:31 AM UTC."
 
-	retryAt, reason := parseUsageLimitRetryAt(corpus, now)
+	retryAt, reason := orchestrator.ParseUsageLimitRetryAt(corpus, now)
 
 	expected := time.Date(2026, time.March, 10, 6, 31, 0, 0, time.UTC)
 	if !retryAt.Equal(expected) {
@@ -3339,7 +3339,7 @@ func TestParseUsageLimitRetryAtSupportsRFC3339(t *testing.T) {
 	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
 	corpus := "You've hit your usage limit. Try again at 2026-03-10T06:31:00Z."
 
-	retryAt, _ := parseUsageLimitRetryAt(corpus, now)
+	retryAt, _ := orchestrator.ParseUsageLimitRetryAt(corpus, now)
 
 	expected := time.Date(2026, time.March, 10, 6, 31, 0, 0, time.UTC)
 	if !retryAt.Equal(expected) {
@@ -3352,7 +3352,7 @@ func TestParseUsageLimitRetryAtSupportsRelativeDelay(t *testing.T) {
 	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
 	corpus := "You've hit your usage limit. Please try again in 2 hours 15 minutes."
 
-	retryAt, reason := parseUsageLimitRetryAt(corpus, now)
+	retryAt, reason := orchestrator.ParseUsageLimitRetryAt(corpus, now)
 
 	expected := now.Add(2*time.Hour + 15*time.Minute)
 	if !retryAt.Equal(expected) {
@@ -3388,7 +3388,7 @@ func TestPostRunStartCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	run.StartedAt = &now
-	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &orchestrator.RunResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 87,
 		RequestedBy: "alice",
@@ -3407,15 +3407,15 @@ func TestPostRunStartCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	if len(comments) != 1 {
 		t.Fatalf("expected one posted start comment, got %d", len(comments))
 	}
-	if !strings.Contains(comments[0].body, runStartCommentBodyMarker) {
+	if !strings.Contains(comments[0].body, orchestrator.RunStartCommentBodyMarker) {
 		t.Fatalf("expected start marker in comment body, got:\n%s", comments[0].body)
 	}
-	markerPath := RunStartCommentMarkerPath(run.RunDir)
+	markerPath := orchestrator.RunStartCommentMarkerPath(run.RunDir)
 	markerData, err := os.ReadFile(markerPath)
 	if err != nil {
 		t.Fatalf("read start marker: %v", err)
 	}
-	var marker RunCommentMarker
+	var marker orchestrator.RunCommentMarker
 	if err := json.Unmarshal(markerData, &marker); err != nil {
 		t.Fatalf("decode start marker: %v", err)
 	}
@@ -3454,7 +3454,7 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	run.StartedAt = &now
-	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &orchestrator.RunResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 86,
 		RequestedBy: "alice",
@@ -3471,7 +3471,7 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 0 {
 		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
 	}
-	if _, err := os.Stat(RunStartCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
+	if _, err := os.Stat(orchestrator.RunStartCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
 		t.Fatalf("expected start marker to be absent after failed post, stat err=%v", err)
 	}
 
@@ -3483,7 +3483,7 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 1 {
 		t.Fatalf("expected one posted start comment after retry, got %d", len(comments))
 	}
-	if _, err := os.Stat(RunStartCommentMarkerPath(run.RunDir)); err != nil {
+	if _, err := os.Stat(orchestrator.RunStartCommentMarkerPath(run.RunDir)); err != nil {
 		t.Fatalf("expected start marker after successful retry: %v", err)
 	}
 }
@@ -3524,7 +3524,7 @@ func TestPostRunStartCommentIncludesRunnerBuildCommit(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write meta: %v", err)
 	}
-	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &orchestrator.RunResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 85,
 		RequestedBy: "alice",
@@ -3567,7 +3567,7 @@ func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &orchestrator.RunResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 88,
 		RequestedBy: "alice",
@@ -3586,12 +3586,12 @@ func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	if len(comments) != 1 {
 		t.Fatalf("expected one posted comment, got %d", len(comments))
 	}
-	markerPath := RunCompletionCommentMarkerPath(run.RunDir)
+	markerPath := orchestrator.RunCompletionCommentMarkerPath(run.RunDir)
 	markerData, err := os.ReadFile(markerPath)
 	if err != nil {
 		t.Fatalf("read completion marker: %v", err)
 	}
-	var marker RunCommentMarker
+	var marker orchestrator.RunCommentMarker
 	if err := json.Unmarshal(markerData, &marker); err != nil {
 		t.Fatalf("decode completion marker: %v", err)
 	}
@@ -3628,7 +3628,7 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add run: %v", err)
 	}
-	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &orchestrator.RunResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 89,
 		RequestedBy: "alice",
@@ -3645,7 +3645,7 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 0 {
 		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
 	}
-	if _, err := os.Stat(RunCompletionCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
+	if _, err := os.Stat(orchestrator.RunCompletionCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
 		t.Fatalf("expected marker to be absent after failed post, stat err=%v", err)
 	}
 
@@ -3657,7 +3657,7 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 1 {
 		t.Fatalf("expected one posted comment after retry, got %d", len(comments))
 	}
-	if _, err := os.Stat(RunCompletionCommentMarkerPath(run.RunDir)); err != nil {
+	if _, err := os.Stat(orchestrator.RunCompletionCommentMarkerPath(run.RunDir)); err != nil {
 		t.Fatalf("expected marker after successful retry: %v", err)
 	}
 }
@@ -3691,7 +3691,7 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 		t.Fatalf("add run: %v", err)
 	}
 	run.Error = "goose run failed: exit status 1"
-	if err := s.WriteRunResponseTarget(run, &runResponseTarget{
+	if err := s.WriteRunResponseTarget(run, &orchestrator.RunResponseTarget{
 		Repo:        "owner/repo",
 		IssueNumber: 90,
 		RequestedBy: "alice",
@@ -3708,7 +3708,7 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 0 {
 		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
 	}
-	if _, err := os.Stat(RunFailureCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
+	if _, err := os.Stat(orchestrator.RunFailureCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
 		t.Fatalf("expected failure marker to be absent after failed post, stat err=%v", err)
 	}
 
@@ -3724,7 +3724,7 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 	if !strings.Contains(comments[0].body, "Reason: goose run failed: exit status 1") {
 		t.Fatalf("expected generic failure reason in comment, got body:\n%s", comments[0].body)
 	}
-	if _, err := os.Stat(RunFailureCommentMarkerPath(run.RunDir)); err != nil {
+	if _, err := os.Stat(orchestrator.RunFailureCommentMarkerPath(run.RunDir)); err != nil {
 		t.Fatalf("expected failure marker after successful retry: %v", err)
 	}
 }
@@ -3873,11 +3873,11 @@ func TestHandleCancelRunQueued(t *testing.T) {
 		waitForServerIdle(t, s)
 	}()
 
-	first, err := s.CreateAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Instruction: "first"})
+	first, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "t1", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	second, err := s.CreateAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Instruction: "second"})
+	second, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "t1", Repo: "owner/repo", Instruction: "second"})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
@@ -3907,7 +3907,7 @@ func TestHandleCancelRunActiveUsesUserReason(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.CreateAndQueueRun(runRequest{TaskID: "active-cancel", Repo: "owner/repo", Instruction: "cancel me"})
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "active-cancel", Repo: "owner/repo", Instruction: "cancel me"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -3940,7 +3940,7 @@ func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.CreateAndQueueRun(runRequest{TaskID: "cancel-guard", Repo: "owner/repo", Instruction: "guard cancel"})
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "cancel-guard", Repo: "owner/repo", Instruction: "guard cancel"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -3992,7 +3992,7 @@ func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.CreateAndQueueRun(runRequest{TaskID: "drain-reason", Repo: "owner/repo", Instruction: "drain"})
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "drain-reason", Repo: "owner/repo", Instruction: "drain"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4055,7 +4055,7 @@ func TestPersistedRunCancelStopsActiveRun(t *testing.T) {
 		waitForServerIdle(t, s)
 	}()
 
-	run, err := s.CreateAndQueueRun(runRequest{TaskID: "persisted-cancel", Repo: "owner/repo", Instruction: "cancel while running"})
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "persisted-cancel", Repo: "owner/repo", Instruction: "cancel while running"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4205,7 +4205,7 @@ func TestRecoverRunningRunWithoutLeaseOldStartRequeues(t *testing.T) {
 	if _, err := s.Store.SetRunStatus(run.ID, state.StatusRunning, ""); err != nil {
 		t.Fatalf("set running: %v", err)
 	}
-	oldStart := time.Now().UTC().Add(-2 * runLeaseTTL)
+	oldStart := time.Now().UTC().Add(-2 * orchestrator.RunLeaseTTL)
 	if _, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
 		r.StartedAt = &oldStart
 		return nil
@@ -4231,7 +4231,7 @@ func TestExecuteRunPersistsRunExecutionHandle(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.CreateAndQueueRun(runRequest{TaskID: "task_exec_handle", Repo: "owner/repo", Instruction: "persist execution handle"})
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task_exec_handle", Repo: "owner/repo", Instruction: "persist execution handle"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4256,7 +4256,7 @@ func TestRecoverRunningRunAdoptsDetachedExecution(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.CreateAndQueueRun(runRequest{TaskID: "task_adopt", Repo: "owner/repo", Instruction: "adopt detached"})
+	run, err := s1.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task_adopt", Repo: "owner/repo", Instruction: "adopt detached"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4305,7 +4305,7 @@ func TestDrainReleaseDoesNotDeleteAdoptedLease(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.CreateAndQueueRun(runRequest{TaskID: "task_safe_lease_release", Repo: "owner/repo", Instruction: "safe lease release"})
+	run, err := s1.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task_safe_lease_release", Repo: "owner/repo", Instruction: "safe lease release"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4511,7 +4511,7 @@ func TestCancelRunWorksAfterAdoptionByDifferentInstance(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.CreateAndQueueRun(runRequest{TaskID: "task_cancel_adopt", Repo: "owner/repo", Instruction: "cancel after adopt"})
+	run, err := s1.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task_cancel_adopt", Repo: "owner/repo", Instruction: "cancel after adopt"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4558,7 +4558,7 @@ func TestStopRunSupervisorsCatchesInFlightSupervisorRegistration(t *testing.T) {
 		<-releaseBeforeSupervise
 	}
 
-	run, err := s.CreateAndQueueRun(runRequest{TaskID: "task_stop_supervisor_race", Repo: "owner/repo", Instruction: "stop supervisor race"})
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task_stop_supervisor_race", Repo: "owner/repo", Instruction: "stop supervisor race"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4588,7 +4588,7 @@ func TestLateCancelDoesNotOverwriteSuccessfulCompletion(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.CreateAndQueueRun(runRequest{TaskID: "task_late_cancel_success", Repo: "owner/repo", Instruction: "late cancel success"})
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task_late_cancel_success", Repo: "owner/repo", Instruction: "late cancel success"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4616,7 +4616,7 @@ func TestRepeatedHandoffPreservesDetachedExecutionHandle(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.CreateAndQueueRun(runRequest{TaskID: "task_repeated_handoff", Repo: "owner/repo", Instruction: "repeated handoff"})
+	run, err := s1.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task_repeated_handoff", Repo: "owner/repo", Instruction: "repeated handoff"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4676,7 +4676,7 @@ func TestDrainStopsSupervisionWithoutCancelingDetachedRun(t *testing.T) {
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
 
-	run, err := s.CreateAndQueueRun(runRequest{TaskID: "task_drain_detached", Repo: "owner/repo", Instruction: "drain without cancel"})
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "task_drain_detached", Repo: "owner/repo", Instruction: "drain without cancel"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4927,7 +4927,7 @@ func TestHandleRunLogsRejectsInvalidFormat(t *testing.T) {
 
 func TestBuildHeadBranchUsesTaskSummaryForAdHocRunTaskID(t *testing.T) {
 	t.Parallel()
-	got := buildHeadBranch(
+	got := orchestrator.BuildHeadBranch(
 		"run_97073bc1e7787f7c",
 		"When running bootstrap with --skip-deploy, preserve host/domain values.\n\nKeep it small.",
 		"run_97073bc1e7787f7c",
@@ -4942,7 +4942,7 @@ func TestBuildHeadBranchUsesTaskSummaryForAdHocRunTaskID(t *testing.T) {
 
 func TestBuildHeadBranchUsesTaskIDForNamedTasks(t *testing.T) {
 	t.Parallel()
-	got := buildHeadBranch("owner/repo#123", "ignored task text", "run_deadbeefcafefeed")
+	got := orchestrator.BuildHeadBranch("owner/repo#123", "ignored task text", "run_deadbeefcafefeed")
 	if !strings.HasPrefix(got, "rascal/owner/repo-123-") {
 		t.Fatalf("expected task-id-based branch prefix, got %q", got)
 	}
@@ -4979,13 +4979,13 @@ func TestCreateAndQueueRunRejectedWhenDraining(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	s.BeginDrain()
-	_, err := s.CreateAndQueueRun(runRequest{
+	_, err := s.CreateAndQueueRun(orchestrator.RunRequest{
 		TaskID:      "owner/repo#1",
 		Repo:        "owner/repo",
 		Instruction: "should be rejected",
 	})
-	if !errors.Is(err, errServerDraining) {
-		t.Fatalf("expected errServerDraining, got %v", err)
+	if !errors.Is(err, orchestrator.ErrServerDraining) {
+		t.Fatalf("expected orchestrator.ErrServerDraining, got %v", err)
 	}
 }
 
@@ -4999,11 +4999,11 @@ func TestBeginDrainLeavesQueuedRunsForNextSlot(t *testing.T) {
 		waitForServerIdle(t, s)
 	}()
 
-	first, err := s.CreateAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Instruction: "first"})
+	first, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	queued, err := s.CreateAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Instruction: "queued"})
+	queued, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Instruction: "queued"})
 	if err != nil {
 		t.Fatalf("create queued run: %v", err)
 	}

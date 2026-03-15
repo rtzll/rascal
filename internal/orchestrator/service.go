@@ -57,6 +57,11 @@ const workerPauseScope = "workers"
 const defaultUsageLimitPause = 15 * time.Minute
 const minimumUsageLimitPause = 1 * time.Minute
 
+const RunLeaseTTL = runLeaseTTL
+const RunStartCommentBodyMarker = runStartCommentBodyMarker
+const RunCompletionCommentBodyMarker = runCompletionCommentBodyMarker
+const WorkerPauseScope = workerPauseScope
+
 var usageLimitPattern = regexp.MustCompile(`(?i)(?:you['’]?ve hit your usage limit|hit your usage limit|usage limit)`)
 var retryAtPattern = regexp.MustCompile(`(?i)try again at ([^\r\n.]+)`)
 var retryInPattern = regexp.MustCompile(`(?i)try again in ([^\r\n.]+)`)
