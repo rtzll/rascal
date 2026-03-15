@@ -115,7 +115,7 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 		TaskID:      run.TaskID,
 		Repo:        run.Repo,
 		Task:        run.Task,
-		Trigger:     run.Trigger,
+		Trigger:     run.Trigger.String(),
 		IssueNumber: run.IssueNumber,
 		PRNumber:    run.PRNumber,
 		Context:     run.Context,
@@ -1230,7 +1230,7 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 		Task:       "seed",
 		BaseBranch: baseRef,
 		HeadBranch: headRef,
-		Trigger:    "seed",
+		Trigger:    runtrigger.NameCLI,
 		RunDir:     filepath.Join(t.TempDir(), "seed_run"),
 		PRNumber:   prNum,
 	})
@@ -1309,7 +1309,7 @@ func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
 		Task:       "seed",
 		BaseBranch: baseRef,
 		HeadBranch: headRef,
-		Trigger:    "seed",
+		Trigger:    runtrigger.NameCLI,
 		RunDir:     filepath.Join(t.TempDir(), "seed_run_edited"),
 		PRNumber:   prNum,
 	})
@@ -1481,7 +1481,7 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 		Task:       "seed",
 		BaseBranch: baseRef,
 		HeadBranch: headRef,
-		Trigger:    "seed",
+		Trigger:    runtrigger.NameCLI,
 		RunDir:     filepath.Join(t.TempDir(), "seed_review"),
 		PRNumber:   prNum,
 	})
@@ -1622,7 +1622,7 @@ func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.
 		Task:       "seed",
 		BaseBranch: baseRef,
 		HeadBranch: headRef,
-		Trigger:    "seed",
+		Trigger:    runtrigger.NameCLI,
 		RunDir:     filepath.Join(t.TempDir(), "seed_review_comment"),
 		PRNumber:   prNum,
 	})
@@ -1695,7 +1695,7 @@ func TestHandleWebhookPullRequestReviewCommentEditedBodyChangedQueuesRun(t *test
 		Task:       "seed",
 		BaseBranch: baseRef,
 		HeadBranch: headRef,
-		Trigger:    "seed",
+		Trigger:    runtrigger.NameCLI,
 		RunDir:     filepath.Join(t.TempDir(), "seed_review_comment_edited"),
 		PRNumber:   prNum,
 	})
@@ -1801,7 +1801,7 @@ func TestHandleWebhookPullRequestReviewThreadUnresolvedQueuesRun(t *testing.T) {
 		Task:       "seed",
 		BaseBranch: baseRef,
 		HeadBranch: headRef,
-		Trigger:    "seed",
+		Trigger:    runtrigger.NameCLI,
 		RunDir:     filepath.Join(t.TempDir(), "seed_review_thread"),
 		PRNumber:   prNum,
 	})
@@ -4179,7 +4179,7 @@ func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
 		Task:        run.Task,
 		BaseBranch:  run.BaseBranch,
 		HeadBranch:  run.HeadBranch,
-		Trigger:     runtrigger.Normalize(run.Trigger),
+		Trigger:     runtrigger.Normalize(run.Trigger.String()),
 		RunDir:      run.RunDir,
 		IssueNumber: run.IssueNumber,
 		PRNumber:    run.PRNumber,

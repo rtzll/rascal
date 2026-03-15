@@ -17,6 +17,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state/sqlitegen"
 	_ "modernc.org/sqlite"
 )
@@ -304,9 +305,9 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	if baseBranch == "" {
 		baseBranch = "main"
 	}
-	trigger := strings.TrimSpace(in.Trigger)
-	if trigger == "" {
-		trigger = "cli"
+	trigger, err := runtrigger.ParseOrDefault(in.Trigger.String(), runtrigger.NameCLI)
+	if err != nil {
+		return Run{}, fmt.Errorf("invalid trigger: %w", err)
 	}
 	debugEnabled := true
 	if in.Debug != nil {
@@ -357,7 +358,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		AgentBackend: in.AgentBackend.String(),
 		BaseBranch:   baseBranch,
 		HeadBranch:   in.HeadBranch,
-		Trigger:      trigger,
+		Trigger:      trigger.String(),
 		Debug:        debugEnabled,
 		Status:       string(StatusQueued),
 		RunDir:       in.RunDir,
@@ -1108,7 +1109,7 @@ func fromDBRunParts(id, taskID, repo, task, agentBackend, baseBranch, headBranch
 		AgentBackend: agent.NormalizeBackend(agentBackend),
 		BaseBranch:   baseBranch,
 		HeadBranch:   headBranch,
-		Trigger:      trigger,
+		Trigger:      runtrigger.Normalize(trigger),
 		Debug:        debug,
 		Status:       RunStatus(status),
 		RunDir:       runDir,
@@ -1201,7 +1202,7 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 		AgentBackend: agent.NormalizeBackend(string(r.AgentBackend)).String(),
 		BaseBranch:   r.BaseBranch,
 		HeadBranch:   r.HeadBranch,
-		Trigger:      r.Trigger,
+		Trigger:      r.Trigger.String(),
 		Debug:        r.Debug,
 		Status:       string(r.Status),
 		RunDir:       r.RunDir,

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 func TestStoreRunAndTaskLifecycle(t *testing.T) {
@@ -28,7 +29,7 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 		Task:        "Implement feature",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/repo-1/run_1",
-		Trigger:     "issue_label",
+		Trigger:     runtrigger.NameIssueLabel,
 		RunDir:      "/tmp/run_1",
 		IssueNumber: 1,
 	})
@@ -95,6 +96,27 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 	}
 	if store.IsTaskCompleted("repo#1") {
 		t.Fatal("expected task to be reopened")
+	}
+}
+
+func TestStoreAddRunRejectsUnknownTrigger(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	_, err = store.AddRun(CreateRunInput{
+		ID:      "run_invalid_trigger",
+		TaskID:  "repo#1",
+		Repo:    "owner/repo",
+		Task:    "Reject invalid trigger",
+		Trigger: runtrigger.Name("unknown_trigger"),
+		RunDir:  "/tmp/run_invalid_trigger",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid trigger") {
+		t.Fatalf("expected invalid trigger error, got %v", err)
 	}
 }
 

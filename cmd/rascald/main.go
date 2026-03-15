@@ -1541,7 +1541,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		AgentBackend: s.cfg.AgentBackend,
 		BaseBranch:   req.BaseBranch,
 		HeadBranch:   req.HeadBranch,
-		Trigger:      req.Trigger.String(),
+		Trigger:      req.Trigger,
 		RunDir:       runDir,
 		IssueNumber:  req.IssueNumber,
 		PRNumber:     req.PRNumber,
@@ -1578,7 +1578,7 @@ func (s *server) writeRunFiles(run state.Run) (err error) {
 		TaskID:      run.TaskID,
 		Repo:        run.Repo,
 		Task:        run.Task,
-		Trigger:     run.Trigger,
+		Trigger:     run.Trigger.String(),
 		IssueNumber: run.IssueNumber,
 		PRNumber:    run.PRNumber,
 		Context:     run.Context,
@@ -1644,7 +1644,7 @@ func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget
 		out.IssueNumber = run.PRNumber
 	}
 	if out.Trigger == "" {
-		out.Trigger = runtrigger.Normalize(run.Trigger)
+		out.Trigger = runtrigger.Normalize(run.Trigger.String())
 	}
 	if out.Repo == "" || out.IssueNumber <= 0 {
 		return nil
@@ -1795,7 +1795,7 @@ func (s *server) executeRun(runID string) {
 		s.cleanupAgentSessionsBestEffort()
 	}
 
-	sessionResume := agent.SessionEnabled(sessionMode, runtrigger.Normalize(run.Trigger))
+	sessionResume := agent.SessionEnabled(sessionMode, runtrigger.Normalize(run.Trigger.String()))
 	sessionTaskKey := ""
 	sessionTaskDir := ""
 	backendSessionID := ""
@@ -1846,7 +1846,7 @@ func (s *server) executeRun(runID string) {
 		RunnerImage:  s.cfg.RunnerImageForBackend(run.AgentBackend),
 		BaseBranch:   run.BaseBranch,
 		HeadBranch:   run.HeadBranch,
-		Trigger:      runtrigger.Normalize(run.Trigger),
+		Trigger:      runtrigger.Normalize(run.Trigger.String()),
 		RunDir:       run.RunDir,
 		IssueNumber:  run.IssueNumber,
 		PRNumber:     run.PRNumber,
@@ -2811,7 +2811,7 @@ func shouldIncludeGitContext(run state.Run) bool {
 }
 
 func requiresAgentManagedPublish(run state.Run) bool {
-	return runtrigger.Normalize(run.Trigger).IsComment()
+	return runtrigger.Normalize(run.Trigger.String()).IsComment()
 }
 
 func buildHeadBranch(taskID, task, runID string) string {
@@ -3038,8 +3038,8 @@ func (s *server) pendingRunCancelReason(runID string) (string, bool) {
 	return reason, true
 }
 
-func isCommentTriggeredRun(trigger string) bool {
-	return runtrigger.Normalize(trigger).IsComment()
+func isCommentTriggeredRun(trigger runtrigger.Name) bool {
+	return runtrigger.Normalize(trigger.String()).IsComment()
 }
 
 func (s *server) cleanupAgentSessionsBestEffort() {
@@ -3476,7 +3476,7 @@ func buildRunStartComment(run state.Run, target runResponseTarget, requestedBy s
 	body := runsummary.BuildStartComment(runsummary.StartCommentInput{
 		RunID:             run.ID,
 		RequestedBy:       requestedBy,
-		Trigger:           runtrigger.Normalize(firstNonEmpty(target.Trigger.String(), run.Trigger)),
+		Trigger:           runtrigger.Normalize(firstNonEmpty(target.Trigger.String(), run.Trigger.String())),
 		Backend:           run.AgentBackend.String(),
 		RunnerCommit:      loadRunBuildCommit(run.RunDir),
 		BaseBranch:        run.BaseBranch,

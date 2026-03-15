@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 type RunStatus string
@@ -91,17 +92,17 @@ const (
 )
 
 type Run struct {
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentBackend agent.Backend `json:"agent_backend"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       RunStatus     `json:"status"`
-	RunDir       string        `json:"run_dir"`
+	ID           string          `json:"id"`
+	TaskID       string          `json:"task_id"`
+	Repo         string          `json:"repo"`
+	Task         string          `json:"task"`
+	AgentBackend agent.Backend   `json:"agent_backend"`
+	BaseBranch   string          `json:"base_branch"`
+	HeadBranch   string          `json:"head_branch"`
+	Trigger      runtrigger.Name `json:"trigger"`
+	Debug        bool            `json:"debug"`
+	Status       RunStatus       `json:"status"`
+	RunDir       string          `json:"run_dir"`
 
 	IssueNumber int      `json:"issue_number,omitempty"`
 	PRNumber    int      `json:"pr_number,omitempty"`
@@ -182,7 +183,7 @@ type CreateRunInput struct {
 	AgentBackend agent.Backend
 	BaseBranch   string
 	HeadBranch   string
-	Trigger      string
+	Trigger      runtrigger.Name
 	Debug        *bool
 	RunDir       string
 	IssueNumber  int
