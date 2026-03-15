@@ -323,7 +323,7 @@ func envDurationOrDefault(key string, fallback time.Duration) time.Duration {
 func loadAgentRuntime() (agent.Runtime, error) {
 	raw := firstNonEmptyEnv("RASCAL_AGENT_RUNTIME", "RASCAL_AGENT_BACKEND")
 	if raw == "" {
-		raw = "codex"
+		raw = "goose"
 	}
 	runtime, err := agent.ParseRuntime(raw)
 	if err != nil {

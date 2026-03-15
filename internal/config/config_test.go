@@ -142,21 +142,22 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadServerConfigDefaultsAgentBackendToCodex(t *testing.T) {
+func TestLoadServerConfigDefaultsAgentRuntimeToGoose(t *testing.T) {
 	t.Setenv("RASCAL_AGENT_RUNTIME", "")
+	t.Setenv("RASCAL_AGENT_BACKEND", "")
 
 	cfg, err := LoadServerConfig()
 	if err != nil {
 		t.Fatalf("LoadServerConfig returned error: %v", err)
 	}
-	if cfg.AgentRuntime != "codex" {
-		t.Fatalf("AgentRuntime = %q, want codex", cfg.AgentRuntime)
+	if cfg.AgentRuntime != "goose" {
+		t.Fatalf("AgentRuntime = %q, want goose", cfg.AgentRuntime)
 	}
 	if cfg.RunnerMode != runner.ModeNoop {
 		t.Fatalf("RunnerMode = %q, want noop", cfg.RunnerMode)
 	}
-	if cfg.RunnerImage != "rascal-runner-codex:latest" {
-		t.Fatalf("RunnerImage = %q, want rascal-runner-codex:latest", cfg.RunnerImage)
+	if cfg.RunnerImage != "rascal-runner-goose:latest" {
+		t.Fatalf("RunnerImage = %q, want rascal-runner-goose:latest", cfg.RunnerImage)
 	}
 }
 
