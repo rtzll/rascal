@@ -80,6 +80,52 @@ func TestInstructionTextNonPRRunOmitsGitContext(t *testing.T) {
 	}
 }
 
+func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
+	s := newTestServer(t, &fakeLauncher{})
+	runDir := t.TempDir()
+	run := state.Run{
+		ID:          "run_abc123",
+		TaskID:      "task_xyz789",
+		Repo:        "acme/widgets",
+		Task:        "Address PR feedback",
+		Trigger:     "pr_comment",
+		IssueNumber: 42,
+		PRNumber:    137,
+		Context:     "Please handle the review comments.",
+		Debug:       true,
+		RunDir:      runDir,
+	}
+
+	if err := s.writeRunFiles(run); err != nil {
+		t.Fatalf("writeRunFiles() error = %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(runDir, "context.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(context.json) error = %v", err)
+	}
+
+	var got runContextFile
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal(context.json) error = %v", err)
+	}
+
+	want := runContextFile{
+		RunID:       run.ID,
+		TaskID:      run.TaskID,
+		Repo:        run.Repo,
+		Task:        run.Task,
+		Trigger:     run.Trigger,
+		IssueNumber: run.IssueNumber,
+		PRNumber:    run.PRNumber,
+		Context:     run.Context,
+		Debug:       run.Debug,
+	}
+	if got != want {
+		t.Fatalf("context.json mismatch: got %#v want %#v", got, want)
+	}
+}
+
 var (
 	testStateTemplateOnce sync.Once
 	testStateTemplatePath string

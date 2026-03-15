@@ -1573,16 +1573,16 @@ func (s *server) writeRunFiles(run state.Run) (err error) {
 		return fmt.Errorf("create codex run directory: %w", err)
 	}
 
-	ctxPayload := map[string]any{
-		"run_id":       run.ID,
-		"task_id":      run.TaskID,
-		"repo":         run.Repo,
-		"task":         run.Task,
-		"trigger":      run.Trigger,
-		"issue_number": run.IssueNumber,
-		"pr_number":    run.PRNumber,
-		"context":      run.Context,
-		"debug":        run.Debug,
+	ctxPayload := runContextFile{
+		RunID:       run.ID,
+		TaskID:      run.TaskID,
+		Repo:        run.Repo,
+		Task:        run.Task,
+		Trigger:     run.Trigger,
+		IssueNumber: run.IssueNumber,
+		PRNumber:    run.PRNumber,
+		Context:     run.Context,
+		Debug:       run.Debug,
 	}
 	ctxData, err := json.MarshalIndent(ctxPayload, "", "  ")
 	if err != nil {
@@ -1612,6 +1612,18 @@ func (s *server) writeRunFiles(run state.Run) (err error) {
 		return fmt.Errorf("write runner log entry: %w", err)
 	}
 	return nil
+}
+
+type runContextFile struct {
+	RunID       string `json:"run_id"`
+	TaskID      string `json:"task_id"`
+	Repo        string `json:"repo"`
+	Task        string `json:"task"`
+	Trigger     string `json:"trigger"`
+	IssueNumber int    `json:"issue_number"`
+	PRNumber    int    `json:"pr_number"`
+	Context     string `json:"context"`
+	Debug       bool   `json:"debug"`
 }
 
 func (s *server) writeRunResponseTarget(run state.Run, target *runResponseTarget) error {
