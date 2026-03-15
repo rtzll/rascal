@@ -988,15 +988,15 @@ rascal deploy --host "$SERVER_IP" --codex-auth ~/.codex/auth.json
 }
 
 func (a *app) newRunCmd() *cobra.Command {
-	var repo, task, baseBranch, issueRef string
+	var repo, instruction, legacyTask, baseBranch, issueRef string
 	var debug bool
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Start a run",
-		Long:  "Start a run for a repository/task pair, or create a run from an issue reference. The repository must be in OWNER/REPO form.",
+		Long:  "Start a run for a repository/instruction pair, or create a run from an issue reference. The repository must be in OWNER/REPO form.",
 		Example: strings.TrimSpace(`
 rascal run -R OWNER/REPO -t "Fix flaky tests"
-rascal run --repo OWNER/REPO --task "Refactor parser" --output json
+rascal run --repo OWNER/REPO --instruction "Refactor parser" --output json
 rascal run --issue OWNER/REPO#123
 `),
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -1005,8 +1005,8 @@ rascal run --issue OWNER/REPO#123
 			}
 			issueRef = strings.TrimSpace(issueRef)
 			if issueRef != "" {
-				if cmd.Flags().Changed("repo") || cmd.Flags().Changed("task") || cmd.Flags().Changed("base-branch") {
-					return &cliError{Code: exitInput, Message: "--issue cannot be combined with --repo, --task, or --base-branch"}
+				if cmd.Flags().Changed("repo") || cmd.Flags().Changed("instruction") || cmd.Flags().Changed("task") || cmd.Flags().Changed("base-branch") {
+					return &cliError{Code: exitInput, Message: "--issue cannot be combined with --repo, --instruction/--task, or --base-branch"}
 				}
 				repo, issueNumber, err := parseIssueRef(issueRef)
 				if err != nil {
@@ -1037,18 +1037,18 @@ rascal run --issue OWNER/REPO#123
 			}
 			var inferredRepo bool
 			repo, inferredRepo = resolveRepo(strings.TrimSpace(repo), a.cfg.DefaultRepo, inferRepoFromGitRemote)
-			task = strings.TrimSpace(task)
+			instruction = firstNonEmpty(strings.TrimSpace(instruction), strings.TrimSpace(legacyTask))
 			baseBranch = firstNonEmpty(strings.TrimSpace(baseBranch), "main")
-			if repo == "" || task == "" {
-				return &cliError{Code: exitInput, Message: "both --repo/-R and --task/-t are required"}
+			if repo == "" || instruction == "" {
+				return &cliError{Code: exitInput, Message: "both --repo/-R and --instruction/-t are required"}
 			}
 
 			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
 			req := buildCreateTaskPayload(createTaskPayloadInput{
-				Repo:       repo,
-				Task:       task,
-				BaseBranch: baseBranch,
-				Debug:      debugValue,
+				Repo:        repo,
+				Instruction: instruction,
+				BaseBranch:  baseBranch,
+				Debug:       debugValue,
 			})
 			resp, err := req.send(a.client, http.MethodPost)
 			if err != nil {
@@ -1072,7 +1072,9 @@ rascal run --issue OWNER/REPO#123
 		},
 	}
 	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository in OWNER/REPO form")
-	cmd.Flags().StringVarP(&task, "task", "t", "", "task text")
+	cmd.Flags().StringVarP(&instruction, "instruction", "t", "", "instruction text")
+	cmd.Flags().StringVar(&legacyTask, "task", "", "deprecated alias for --instruction")
+	_ = cmd.Flags().MarkHidden("task")
 	cmd.Flags().StringVarP(&baseBranch, "base-branch", "b", "main", "base branch")
 	cmd.Flags().StringVar(&issueRef, "issue", "", "issue reference in OWNER/REPO#NUMBER form")
 	cmd.Flags().BoolVar(&debug, "debug", true, "stream detailed agent execution logs (use --debug=false to reduce verbosity)")
@@ -1826,12 +1828,12 @@ rascal retry run_abc123 --debug=false
 			}
 			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
 			req := buildCreateTaskPayload(createTaskPayloadInput{
-				TaskID:     run.TaskID,
-				Repo:       run.Repo,
-				Task:       run.Task,
-				BaseBranch: run.BaseBranch,
-				Trigger:    runtrigger.NameRetry,
-				Debug:      debugValue,
+				TaskID:      run.TaskID,
+				Repo:        run.Repo,
+				Instruction: run.Instruction,
+				BaseBranch:  run.BaseBranch,
+				Trigger:     runtrigger.NameRetry,
+				Debug:       debugValue,
 			})
 			resp, err := req.send(a.client, http.MethodPost)
 			if err != nil {
@@ -2909,7 +2911,7 @@ func parseIssueRef(input string) (string, int, error) {
 type createTaskPayloadInput struct {
 	TaskID      string
 	Repo        string
-	Task        string
+	Instruction string
 	BaseBranch  string
 	Trigger     runtrigger.Name
 	IssueNumber int
@@ -2957,9 +2959,9 @@ func buildCreateTaskPayload(input createTaskPayloadInput) createTaskRequestPaylo
 	}
 
 	payload := api.CreateTaskRequest{
-		Repo:       input.Repo,
-		Task:       input.Task,
-		BaseBranch: input.BaseBranch,
+		Repo:        input.Repo,
+		Instruction: input.Instruction,
+		BaseBranch:  input.BaseBranch,
 	}
 	if strings.TrimSpace(input.TaskID) != "" {
 		payload.TaskID = input.TaskID

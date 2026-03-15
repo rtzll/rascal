@@ -209,7 +209,7 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 
 	run, err := s.createAndQueueRun(runRequest{
 		Repo:            "owner/repo",
-		Task:            "do work",
+		Instruction:            "do work",
 		CreatedByUserID: "owner",
 	})
 	if err != nil {
@@ -285,7 +285,7 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 	runA, err := s.createAndQueueRun(runRequest{
 		TaskID:          "owner/repo#reuse-a",
 		Repo:            "owner/repo",
-		Task:            "reuse shared credential a",
+		Instruction:            "reuse shared credential a",
 		CreatedByUserID: "owner",
 	})
 	if err != nil {
@@ -294,7 +294,7 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 	runB, err := s.createAndQueueRun(runRequest{
 		TaskID:          "owner/repo#reuse-b",
 		Repo:            "owner/repo",
-		Task:            "reuse shared credential b",
+		Instruction:            "reuse shared credential b",
 		CreatedByUserID: "owner",
 	})
 	if err != nil {

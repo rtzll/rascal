@@ -269,7 +269,7 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 				WebhookSecret:      webhookSecret,
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
-				AgentBackend:       agentBackend,
+				AgentRuntime:       agentBackend,
 				RunnerImage:        runnerImage,
 				RunnerImageGoose:   runnerImageGoose,
 				RunnerImageCodex:   runnerImageCodex,
@@ -312,7 +312,9 @@ rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-toke
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
-	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.BackendCodex), "agent backend to use on the server (goose or codex)")
+	cmd.Flags().StringVar(&agentBackend, "agent-runtime", string(agent.RuntimeCodex), "agent runtime to use on the server (goose or codex)")
+	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.RuntimeCodex), "deprecated alias for --agent-runtime")
+	_ = cmd.Flags().MarkHidden("agent-backend")
 	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
@@ -354,7 +356,7 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 				WebhookSecret:      webhookSecret,
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
-				AgentBackend:       agentBackend,
+				AgentRuntime:       agentBackend,
 				RunnerImage:        runnerImage,
 				RunnerImageGoose:   runnerImageGoose,
 				RunnerImageCodex:   runnerImageCodex,
@@ -389,7 +391,9 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
-	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.BackendCodex), "agent backend to use on the server (goose or codex)")
+	cmd.Flags().StringVar(&agentBackend, "agent-runtime", string(agent.RuntimeCodex), "agent runtime to use on the server (goose or codex)")
+	cmd.Flags().StringVar(&agentBackend, "agent-backend", string(agent.RuntimeCodex), "deprecated alias for --agent-runtime")
+	_ = cmd.Flags().MarkHidden("agent-backend")
 	cmd.Flags().StringVar(&runnerImage, "runner-image", defaults.GooseRunnerImageTag, "legacy shorthand for goose runner image tag")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
@@ -409,7 +413,7 @@ type deployExistingInput struct {
 	WebhookSecret      string
 	CodexAuthPath      string
 	Domain             string
-	AgentBackend       string
+	AgentRuntime       string
 	RunnerImage        string
 	RunnerImageGoose   string
 	RunnerImageCodex   string
@@ -441,7 +445,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	provisionedArch := strings.TrimSpace(input.ProvisionedArch)
 	codexAuthPath := strings.TrimSpace(input.CodexAuthPath)
 	domain := firstNonEmpty(strings.TrimSpace(input.Domain), strings.TrimSpace(a.cfg.Domain))
-	agentBackend := agent.NormalizeBackend(input.AgentBackend)
+	agentBackend := agent.NormalizeBackend(input.AgentRuntime)
 	runnerImage := firstNonEmpty(strings.TrimSpace(input.RunnerImage), defaults.GooseRunnerImageTag)
 	runnerImageGoose := firstNonEmpty(strings.TrimSpace(input.RunnerImageGoose), runnerImage, defaults.GooseRunnerImageTag)
 	runnerImageCodex := firstNonEmpty(strings.TrimSpace(input.RunnerImageCodex), defaults.CodexRunnerImageTag)
@@ -542,7 +546,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		WebhookSecret:      webhookSecret,
 		GitHubRuntimeToken: githubRuntimeToken,
 		RunnerMode:         "docker",
-		AgentBackend:       agentBackend,
+		AgentRuntime:       agentBackend,
 		RunnerImage:        runnerImageGoose,
 		RunnerImageGoose:   runnerImageGoose,
 		RunnerImageCodex:   runnerImageCodex,

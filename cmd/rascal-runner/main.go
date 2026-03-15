@@ -49,7 +49,7 @@ var (
 type config struct {
 	RunID       string
 	TaskID      string
-	Task        string
+	Instruction string
 	Repo        string
 	BaseBranch  string
 	HeadBranch  string
@@ -68,11 +68,11 @@ type config struct {
 	PRBodyPath       string
 
 	GooseDebug   bool
-	AgentBackend agent.Backend
+	AgentRuntime agent.Runtime
 
 	GoosePathRoot string
 	CodexHome     string
-	AgentSession  runner.SessionSpec
+	TaskSession   runner.TaskSessionSpec
 }
 
 type prView struct {
@@ -240,7 +240,7 @@ func runWithExecutor(ex commandExecutor) error {
 		var agentSessionID string
 		agentOutput, agentSessionID, err = runAgent(ex, cfg)
 		if strings.TrimSpace(agentSessionID) != "" {
-			meta.AgentSessionID = strings.TrimSpace(agentSessionID)
+			meta.TaskSessionID = strings.TrimSpace(agentSessionID)
 		}
 		return err
 	}); err != nil {
@@ -259,7 +259,7 @@ func runWithExecutor(ex commandExecutor) error {
 		}
 	}
 
-	commitTitle := fmt.Sprintf("chore(rascal): %s", taskSubject(cfg.Task, cfg.TaskID))
+	commitTitle := fmt.Sprintf("chore(rascal): %s", taskSubject(cfg.Instruction, cfg.TaskID))
 	commitBody := ""
 	if err := runStage("prepare_commit", func() error {
 		if err := normalizeRepoLocalMetaArtifacts(cfg); err != nil {
@@ -450,27 +450,27 @@ func loadConfig() (config, error) {
 		}
 	}
 
-	agentBackend, err := agent.ParseBackend(os.Getenv("RASCAL_AGENT_BACKEND"))
+	agentRuntime, err := agent.ParseRuntime(firstSetEnvValue("RASCAL_AGENT_RUNTIME", "RASCAL_AGENT_BACKEND"))
 	if err != nil {
-		return config{}, fmt.Errorf("invalid RASCAL_AGENT_BACKEND: %w", err)
+		return config{}, fmt.Errorf("invalid RASCAL_AGENT_RUNTIME: %w", err)
 	}
-	agentSessionModeRaw := firstSetEnvValue("RASCAL_GOOSE_SESSION_MODE", "RASCAL_AGENT_SESSION_MODE")
+	agentSessionModeRaw := firstSetEnvValue("RASCAL_TASK_SESSION_MODE", "RASCAL_GOOSE_SESSION_MODE", "RASCAL_AGENT_SESSION_MODE")
 	agentSessionMode, err := agent.ParseSessionMode(agentSessionModeRaw)
 	if err != nil {
 		return config{}, fmt.Errorf("invalid agent session mode: %w", err)
 	}
-	agentSessionResume := parseBoolEnv(firstSetEnvValue("RASCAL_GOOSE_SESSION_RESUME", "RASCAL_AGENT_SESSION_RESUME"), false)
+	agentSessionResume := parseBoolEnv(firstSetEnvValue("RASCAL_TASK_SESSION_RESUME", "RASCAL_GOOSE_SESSION_RESUME", "RASCAL_AGENT_SESSION_RESUME"), false)
 	if agentSessionMode == agent.SessionModeOff {
 		agentSessionResume = false
 	}
-	agentSessionKey := firstSetEnvValue("RASCAL_GOOSE_SESSION_KEY", "RASCAL_AGENT_SESSION_KEY")
-	backendSessionID := firstSetEnvValue("RASCAL_GOOSE_SESSION_NAME", "RASCAL_AGENT_SESSION_ID")
+	agentSessionKey := firstSetEnvValue("RASCAL_TASK_SESSION_KEY", "RASCAL_GOOSE_SESSION_KEY", "RASCAL_AGENT_SESSION_KEY")
+	backendSessionID := firstSetEnvValue("RASCAL_TASK_SESSION_ID", "RASCAL_GOOSE_SESSION_NAME", "RASCAL_AGENT_SESSION_ID")
 	if agentSessionResume {
 		if agentSessionKey == "" {
-			agentSessionKey = runner.SessionTaskKey(repo, taskID)
+			agentSessionKey = runner.TaskSessionKey(repo, taskID)
 		}
-		if backendSessionID == "" && agentBackend == agent.BackendGoose {
-			backendSessionID = runner.SessionName(repo, taskID)
+		if backendSessionID == "" && agentRuntime == agent.RuntimeGoose {
+			backendSessionID = runner.TaskSessionName(repo, taskID)
 		}
 	}
 	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))
@@ -479,7 +479,7 @@ func loadConfig() (config, error) {
 	return config{
 		RunID:            runID,
 		TaskID:           taskID,
-		Task:             strings.TrimSpace(os.Getenv("RASCAL_TASK")),
+		Instruction:      firstNonEmptyValue(strings.TrimSpace(os.Getenv("RASCAL_INSTRUCTION")), strings.TrimSpace(os.Getenv("RASCAL_TASK"))),
 		Repo:             repo,
 		BaseBranch:       baseBranch,
 		HeadBranch:       headBranch,
@@ -496,14 +496,14 @@ func loadConfig() (config, error) {
 		AgentOutputPath:  filepath.Join(metaDir, defaultAgentOutputFile),
 		PRBodyPath:       filepath.Join(metaDir, defaultPRBodyFile),
 		GooseDebug:       debug,
-		AgentBackend:     agentBackend,
+		AgentRuntime:     agentRuntime,
 		GoosePathRoot:    goosePathRoot,
 		CodexHome:        codexHome,
-		AgentSession: runner.SessionSpec{
+		TaskSession: runner.TaskSessionSpec{
 			Mode:             agentSessionMode,
 			Resume:           agentSessionResume,
 			TaskKey:          agentSessionKey,
-			BackendSessionID: backendSessionID,
+			RuntimeSessionID: backendSessionID,
 		},
 	}, nil
 }
@@ -542,24 +542,24 @@ func parseBoolEnv(raw string, fallback bool) bool {
 	}
 }
 
-func configuredAgentBackend(cfg config) agent.Backend {
-	return agent.NormalizeBackend(string(cfg.AgentBackend))
+func configuredAgentRuntime(cfg config) agent.Runtime {
+	return agent.NormalizeRuntime(string(cfg.AgentRuntime))
 }
 
 func configuredSessionMode(cfg config) agent.SessionMode {
-	return agent.NormalizeSessionMode(string(cfg.AgentSession.Mode))
+	return agent.NormalizeSessionMode(string(cfg.TaskSession.Mode))
 }
 
 func configuredSessionResume(cfg config) bool {
-	return cfg.AgentSession.Resume
+	return cfg.TaskSession.Resume
 }
 
 func configuredSessionKey(cfg config) string {
-	return strings.TrimSpace(cfg.AgentSession.TaskKey)
+	return strings.TrimSpace(cfg.TaskSession.TaskKey)
 }
 
-func configuredBackendSessionID(cfg config) string {
-	return strings.TrimSpace(cfg.AgentSession.BackendSessionID)
+func configuredRuntimeSessionID(cfg config) string {
+	return strings.TrimSpace(cfg.TaskSession.RuntimeSessionID)
 }
 
 func ensureInstructions(cfg config) error {
@@ -602,7 +602,7 @@ func requireCommands(ex commandExecutor, names ...string) error {
 
 func validateCommands(ex commandExecutor, cfg config) error {
 	names := []string{"git", "gh"}
-	switch configuredAgentBackend(cfg) {
+	switch configuredAgentRuntime(cfg) {
 	case agent.BackendCodex:
 		names = append(names, "codex")
 	default:
@@ -677,7 +677,7 @@ func checkoutRepo(ex commandExecutor, cfg config) error {
 }
 
 func runAgent(ex commandExecutor, cfg config) (string, string, error) {
-	switch configuredAgentBackend(cfg) {
+	switch configuredAgentRuntime(cfg) {
 	case agent.BackendCodex:
 		return runCodex(ex, cfg)
 	default:
@@ -686,7 +686,7 @@ func runAgent(ex commandExecutor, cfg config) (string, string, error) {
 }
 
 func runGoose(ex commandExecutor, cfg config) (string, string, error) {
-	sessionID := configuredBackendSessionID(cfg)
+	sessionID := configuredRuntimeSessionID(cfg)
 	sessionMode := configuredSessionMode(cfg)
 	sessionKey := configuredSessionKey(cfg)
 	resume := configuredSessionResume(cfg)
@@ -702,7 +702,7 @@ func runGoose(ex commandExecutor, cfg config) (string, string, error) {
 
 	log.Printf("[%s] running goose (backend=%s debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
 		nowUTC(),
-		configuredAgentBackend(cfg),
+		configuredAgentRuntime(cfg),
 		cfg.GooseDebug,
 		sessionMode,
 		sessionKey,
@@ -745,8 +745,8 @@ func runGoose(ex commandExecutor, cfg config) (string, string, error) {
 
 func gooseRunArgs(cfg config, resume bool) []string {
 	args := []string{"run"}
-	if configuredSessionMode(cfg) != agent.SessionModeOff && configuredBackendSessionID(cfg) != "" {
-		args = append(args, "--name", configuredBackendSessionID(cfg))
+	if configuredSessionMode(cfg) != agent.SessionModeOff && configuredRuntimeSessionID(cfg) != "" {
+		args = append(args, "--name", configuredRuntimeSessionID(cfg))
 		if resume {
 			args = append(args, "--resume")
 		}
@@ -794,11 +794,11 @@ func runCodex(ex commandExecutor, cfg config) (output string, sessionID string, 
 	args := codexRunArgs(cfg)
 	log.Printf("[%s] running codex (backend=%s session_mode=%s session_key=%s session_id=%s resume=%t home=%s)",
 		nowUTC(),
-		configuredAgentBackend(cfg),
+		configuredAgentRuntime(cfg),
 		configuredSessionMode(cfg),
 		configuredSessionKey(cfg),
-		configuredBackendSessionID(cfg),
-		configuredSessionResume(cfg) && strings.TrimSpace(configuredBackendSessionID(cfg)) != "",
+		configuredRuntimeSessionID(cfg),
+		configuredSessionResume(cfg) && strings.TrimSpace(configuredRuntimeSessionID(cfg)) != "",
 		cfg.CodexHome,
 	)
 
@@ -834,7 +834,7 @@ func runCodex(ex commandExecutor, cfg config) (output string, sessionID string, 
 
 func codexRunArgs(cfg config) []string {
 	args := []string{"exec"}
-	sessionID := strings.TrimSpace(configuredBackendSessionID(cfg))
+	sessionID := strings.TrimSpace(configuredRuntimeSessionID(cfg))
 	if configuredSessionResume(cfg) && sessionID != "" {
 		args = append(args, "resume")
 	}

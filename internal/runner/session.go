@@ -23,12 +23,20 @@ func SessionEnabled(mode string, trigger runtrigger.Name) bool {
 	return agent.SessionEnabled(agent.NormalizeSessionMode(mode), trigger)
 }
 
+func TaskSessionKey(repo, taskID string) string {
+	return agent.TaskSessionKey(repo, taskID)
+}
+
 func SessionTaskKey(repo, taskID string) string {
-	return agent.SessionTaskKey(repo, taskID)
+	return TaskSessionKey(repo, taskID)
+}
+
+func TaskSessionName(repo, taskID string) string {
+	return "rascal-" + TaskSessionKey(repo, taskID)
 }
 
 func SessionName(repo, taskID string) string {
-	return "rascal-" + SessionTaskKey(repo, taskID)
+	return TaskSessionName(repo, taskID)
 }
 
 func NormalizeGooseSessionMode(mode string) string {
@@ -40,9 +48,9 @@ func GooseSessionEnabled(mode string, trigger runtrigger.Name) bool {
 }
 
 func GooseSessionTaskKey(repo, taskID string) string {
-	return SessionTaskKey(repo, taskID)
+	return TaskSessionKey(repo, taskID)
 }
 
 func GooseSessionName(repo, taskID string) string {
-	return SessionName(repo, taskID)
+	return TaskSessionName(repo, taskID)
 }

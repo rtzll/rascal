@@ -36,7 +36,7 @@ type Config struct {
 	WebhookSecret      string
 	GitHubRuntimeToken string
 	RunnerMode         runner.Mode
-	AgentBackend       agent.Backend
+	AgentRuntime       agent.Backend
 	RunnerImage        string
 	RunnerImageGoose   string
 	RunnerImageCodex   string
@@ -58,7 +58,7 @@ type plan struct {
 	Host             string   `json:"host"`
 	Domain           string   `json:"domain,omitempty"`
 	GOARCH           string   `json:"goarch"`
-	AgentBackend     string   `json:"agent_backend"`
+	AgentRuntime     string   `json:"agent_runtime"`
 	RunnerImage      string   `json:"runner_image"`
 	RunnerImageGoose string   `json:"runner_image_goose"`
 	RunnerImageCodex string   `json:"runner_image_codex"`
@@ -142,7 +142,7 @@ func Execute(cfg Config) error {
 		Host:             cfg.Host,
 		Domain:           strings.TrimSpace(cfg.Domain),
 		GOARCH:           strings.TrimSpace(cfg.GOARCH),
-		AgentBackend:     string(agent.NormalizeBackend(string(cfg.AgentBackend))),
+		AgentRuntime:     string(agent.NormalizeBackend(string(cfg.AgentRuntime))),
 		RunnerImage:      strings.TrimSpace(cfg.RunnerImage),
 		RunnerImageGoose: strings.TrimSpace(cfg.RunnerImageGoose),
 		RunnerImageCodex: strings.TrimSpace(cfg.RunnerImageCodex),
@@ -625,7 +625,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 func serverEnvFile(cfg Config) string {
-	backend := agent.NormalizeBackend(string(cfg.AgentBackend))
+	backend := agent.NormalizeBackend(string(cfg.AgentRuntime))
 	gooseImage := strings.TrimSpace(cfg.RunnerImageGoose)
 	if gooseImage == "" {
 		gooseImage = firstNonEmpty(strings.TrimSpace(cfg.RunnerImage), defaults.GooseRunnerImageTag)
@@ -640,13 +640,13 @@ RASCAL_API_TOKEN=%s
 RASCAL_GITHUB_TOKEN=%s
 RASCAL_GITHUB_WEBHOOK_SECRET=%s
 RASCAL_RUNNER_MODE=%s
-RASCAL_AGENT_BACKEND=%s
+RASCAL_AGENT_RUNTIME=%s
 RASCAL_RUNNER_IMAGE_GOOSE=%s
 RASCAL_RUNNER_IMAGE_CODEX=%s
 RASCAL_RUNNER_MAX_ATTEMPTS=1
-RASCAL_AGENT_SESSION_MODE=all
-RASCAL_AGENT_SESSION_ROOT=%s
-RASCAL_AGENT_SESSION_TTL_DAYS=14
+RASCAL_TASK_SESSION_MODE=all
+RASCAL_TASK_SESSION_ROOT=%s
+RASCAL_TASK_SESSION_TTL_DAYS=14
 	`)+"\n",
 		cfg.ServerListenAddr,
 		cfg.ServerDataDir,

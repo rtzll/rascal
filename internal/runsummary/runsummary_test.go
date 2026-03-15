@@ -278,14 +278,14 @@ func TestBuildStartComment(t *testing.T) {
 			RunID:             "run_abc123",
 			RequestedBy:       "alice",
 			Trigger:           runtrigger.NameIssueLabel,
-			Backend:           agent.BackendCodex,
+			AgentRuntime:      agent.RuntimeCodex,
 			RunnerCommit:      "abc1234",
 			BaseBranch:        "main",
 			HeadBranch:        "rascal/fix-flaky-test-abc123",
 			SessionMode:       "all",
 			SessionResume:     true,
 			Debug:             true,
-			Task:              "Fix flaky scheduler retry path",
+			Instruction:       "Fix flaky scheduler retry path",
 			Context:           "Triggered by label 'rascal' on issue #123",
 			QueueDelaySeconds: &queueDelay,
 		})
@@ -313,19 +313,19 @@ func TestBuildStartComment(t *testing.T) {
 		body := BuildStartComment(StartCommentInput{
 			RunID:         "run_pr_feedback",
 			Trigger:       runtrigger.NamePRReviewComment,
-			Backend:       agent.BackendCodex,
+			AgentRuntime:  agent.RuntimeCodex,
 			BaseBranch:    "main",
 			HeadBranch:    "rascal/pr-77",
 			SessionMode:   "pr-only",
 			SessionResume: false,
 			Debug:         true,
-			Task:          "Address review feedback\n\nwith extra whitespace",
+			Instruction:   "Address review feedback\n\nwith extra whitespace",
 			Context:       strings.Repeat("context ", 80),
 		})
 		if !strings.HasPrefix(body, "Rascal started run `run_pr_feedback` to address new PR feedback.") {
 			t.Fatalf("expected PR feedback headline, got:\n%s", body)
 		}
-		if strings.Contains(body, "\n- Task: Address review feedback\n\nwith extra whitespace") {
+		if strings.Contains(body, "\n- Instruction: Address review feedback\n\nwith extra whitespace") {
 			t.Fatalf("expected task text to be compacted, got:\n%s", body)
 		}
 		if !strings.Contains(body, "- Resume: `false`") {

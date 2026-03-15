@@ -16,8 +16,8 @@ type Spec struct {
 	RunID        string
 	TaskID       string
 	Repo         string
-	Task         string
-	AgentBackend agent.Backend
+	Instruction  string
+	AgentRuntime agent.Runtime
 	RunnerImage  string
 	BaseBranch   string
 	HeadBranch   string
@@ -27,7 +27,7 @@ type Spec struct {
 	IssueNumber  int
 	PRNumber     int
 	Context      string
-	AgentSession SessionSpec
+	TaskSession  TaskSessionSpec
 }
 
 var ErrExecutionNotFound = errors.New("execution handle not found")
@@ -66,13 +66,15 @@ func ExecutionHandleForRun(runID string) ExecutionHandle {
 	}
 }
 
-type SessionSpec struct {
+type TaskSessionSpec struct {
 	Mode             agent.SessionMode
 	Resume           bool
 	TaskDir          string
 	TaskKey          string
-	BackendSessionID string
+	RuntimeSessionID string
 }
+
+type SessionSpec = TaskSessionSpec
 
 func NormalizeMode(raw string) Mode {
 	mode, err := ParseMode(raw)

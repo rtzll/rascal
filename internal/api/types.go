@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/rtzll/rascal/internal/runtrigger"
@@ -14,12 +15,28 @@ type ServiceStatusResponse struct {
 }
 
 type CreateTaskRequest struct {
-	TaskID     string          `json:"task_id,omitempty"`
-	Repo       string          `json:"repo"`
-	Task       string          `json:"task"`
-	BaseBranch string          `json:"base_branch"`
-	Trigger    runtrigger.Name `json:"trigger,omitempty"`
-	Debug      *bool           `json:"debug,omitempty"`
+	TaskID      string          `json:"task_id,omitempty"`
+	Repo        string          `json:"repo"`
+	Instruction string          `json:"instruction"`
+	BaseBranch  string          `json:"base_branch"`
+	Trigger     runtrigger.Name `json:"trigger,omitempty"`
+	Debug       *bool           `json:"debug,omitempty"`
+}
+
+func (r *CreateTaskRequest) UnmarshalJSON(data []byte) error {
+	type createTaskRequest CreateTaskRequest
+	aux := struct {
+		createTaskRequest
+		Task string `json:"task"`
+	}{}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*r = CreateTaskRequest(aux.createTaskRequest)
+	if r.Instruction == "" {
+		r.Instruction = aux.Task
+	}
+	return nil
 }
 
 type CreateIssueTaskRequest struct {

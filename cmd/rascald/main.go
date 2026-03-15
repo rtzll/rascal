@@ -101,7 +101,7 @@ type server struct {
 type runRequest struct {
 	TaskID          string
 	Repo            string
-	Task            string
+	Instruction     string
 	BaseBranch      string
 	HeadBranch      string
 	Trigger         runtrigger.Name
@@ -176,7 +176,7 @@ func main() {
 	s := &server{
 		cfg:           cfg,
 		store:         store,
-		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImageForBackend(cfg.AgentBackend), cfg.GitHubToken),
+		launcher:      runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImageForBackend(cfg.AgentRuntime), cfg.GitHubToken),
 		gh:            ghapi.NewAPIClient(cfg.GitHubToken),
 		broker:        credentials.NewBroker(store, allocStrategy, cipher, cfg.CredentialLeaseTTL),
 		cipher:        cipher,
@@ -209,7 +209,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("rascald listening on %s (runner=%s backend=%s)", cfg.ListenAddr, cfg.RunnerMode, cfg.AgentBackend)
+	log.Printf("rascald listening on %s (runner=%s backend=%s)", cfg.ListenAddr, cfg.RunnerMode, cfg.AgentRuntime)
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- httpServer.ListenAndServe()
@@ -519,9 +519,9 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	req.TaskID = strings.TrimSpace(req.TaskID)
 	req.Repo = strings.TrimSpace(req.Repo)
-	req.Task = strings.TrimSpace(req.Task)
+	req.Instruction = strings.TrimSpace(req.Instruction)
 	req.BaseBranch = strings.TrimSpace(req.BaseBranch)
-	if req.Repo == "" || req.Task == "" {
+	if req.Repo == "" || req.Instruction == "" {
 		http.Error(w, "repo and task are required", http.StatusBadRequest)
 		return
 	}
@@ -534,7 +534,7 @@ func (s *server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	run, err := s.createAndQueueRun(runRequest{
 		TaskID:          req.TaskID,
 		Repo:            req.Repo,
-		Task:            req.Task,
+		Instruction:     req.Instruction,
 		BaseBranch:      req.BaseBranch,
 		Trigger:         trigger,
 		Debug:           req.Debug,
@@ -593,7 +593,7 @@ func (s *server) handleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 	run, err := s.createAndQueueRun(runRequest{
 		TaskID:          taskID,
 		Repo:            req.Repo,
-		Task:            taskText,
+		Instruction:     taskText,
 		Trigger:         runtrigger.NameIssueAPI,
 		IssueNumber:     req.IssueNumber,
 		Context:         ctxText,
@@ -950,7 +950,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			_, err := s.createAndQueueRun(runRequest{
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
-				Task:        ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
 				Trigger:     runtrigger.NameIssueLabel,
 				IssueNumber: ev.Issue.Number,
 				Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number),
@@ -983,7 +983,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			_, err := s.createAndQueueRun(runRequest{
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
-				Task:        ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
 				Trigger:     runtrigger.NameIssueEdited,
 				IssueNumber: ev.Issue.Number,
 				Context:     fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number),
@@ -1037,7 +1037,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 			_, err := s.createAndQueueRun(runRequest{
 				TaskID:      taskID,
 				Repo:        ev.Repository.FullName,
-				Task:        ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
 				Trigger:     runtrigger.NameIssueReopened,
 				IssueNumber: ev.Issue.Number,
 				PRStatus:    state.PRStatusNone,
@@ -1090,7 +1090,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		_, err := s.createAndQueueRun(runRequest{
 			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
-			Task:        fmt.Sprintf("Address PR #%d feedback", ev.Issue.Number),
+			Instruction: fmt.Sprintf("Address PR #%d feedback", ev.Issue.Number),
 			Trigger:     runtrigger.NamePRComment,
 			IssueNumber: task.IssueNumber,
 			PRNumber:    ev.Issue.Number,
@@ -1135,7 +1135,7 @@ func (s *server) processWebhookEvent(ctx context.Context, eventType string, payl
 		_, err := s.createAndQueueRun(runRequest{
 			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
-			Task:        fmt.Sprintf("Address PR #%d review feedback", ev.PullRequest.Number),
+			Instruction: fmt.Sprintf("Address PR #%d review feedback", ev.PullRequest.Number),
 			Trigger:     runtrigger.NamePRReview,
 			IssueNumber: task.IssueNumber,
 			PRNumber:    ev.PullRequest.Number,
@@ -1192,7 +1192,7 @@ Inline comment location: %s`, contextText, location)
 		_, err := s.createAndQueueRun(runRequest{
 			TaskID:      task.ID,
 			Repo:        ev.Repository.FullName,
-			Task:        fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
+			Instruction: fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
 			Trigger:     runtrigger.NamePRReviewComment,
 			IssueNumber: task.IssueNumber,
 			PRNumber:    ev.PullRequest.Number,
@@ -1230,7 +1230,7 @@ Inline comment location: %s`, contextText, location)
 			_, err := s.createAndQueueRun(runRequest{
 				TaskID:      task.ID,
 				Repo:        ev.Repository.FullName,
-				Task:        fmt.Sprintf("Address PR #%d unresolved review thread", ev.PullRequest.Number),
+				Instruction: fmt.Sprintf("Address PR #%d unresolved review thread", ev.PullRequest.Number),
 				Trigger:     runtrigger.NamePRReviewThread,
 				IssueNumber: task.IssueNumber,
 				PRNumber:    ev.PullRequest.Number,
@@ -1453,13 +1453,13 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		return state.Run{}, errServerDraining
 	}
 	req.Repo = state.NormalizeRepo(req.Repo)
-	req.Task = strings.TrimSpace(req.Task)
+	req.Instruction = strings.TrimSpace(req.Instruction)
 	req.TaskID = strings.TrimSpace(req.TaskID)
 	req.BaseBranch = strings.TrimSpace(req.BaseBranch)
 	req.HeadBranch = strings.TrimSpace(req.HeadBranch)
 	req.Context = strings.TrimSpace(req.Context)
 	req.CreatedByUserID = strings.TrimSpace(req.CreatedByUserID)
-	if req.Repo == "" || req.Task == "" {
+	if req.Repo == "" || req.Instruction == "" {
 		return state.Run{}, fmt.Errorf("repo and task are required")
 	}
 	if req.CreatedByUserID == "" {
@@ -1495,7 +1495,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	if s.store.IsTaskCompleted(req.TaskID) {
 		return state.Run{}, errTaskCompleted
 	}
-	if existingTask, ok := s.store.GetTask(req.TaskID); ok && existingTask.AgentBackend != s.cfg.AgentBackend {
+	if existingTask, ok := s.store.GetTask(req.TaskID); ok && existingTask.AgentRuntime != s.cfg.AgentRuntime {
 		if err := s.store.DeleteTaskAgentSession(req.TaskID); err != nil {
 			return state.Run{}, fmt.Errorf("clear stale task session for backend migration: %w", err)
 		}
@@ -1513,7 +1513,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		if hasLastRun && (req.Trigger == runtrigger.NamePRComment || req.Trigger == runtrigger.NamePRReview) && lastRun.HeadBranch != "" {
 			req.HeadBranch = lastRun.HeadBranch
 		} else {
-			req.HeadBranch = buildHeadBranch(req.TaskID, req.Task, runID)
+			req.HeadBranch = buildHeadBranch(req.TaskID, req.Instruction, runID)
 		}
 	}
 
@@ -1522,7 +1522,7 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 	_, err = s.store.UpsertTask(state.UpsertTaskInput{
 		ID:           req.TaskID,
 		Repo:         req.Repo,
-		AgentBackend: s.cfg.AgentBackend,
+		AgentRuntime: s.cfg.AgentRuntime,
 		IssueNumber:  req.IssueNumber,
 		PRNumber:     req.PRNumber,
 	})
@@ -1537,8 +1537,8 @@ func (s *server) createAndQueueRun(req runRequest) (state.Run, error) {
 		ID:           runID,
 		TaskID:       req.TaskID,
 		Repo:         req.Repo,
-		Task:         req.Task,
-		AgentBackend: s.cfg.AgentBackend,
+		Instruction:  req.Instruction,
+		AgentRuntime: s.cfg.AgentRuntime,
 		BaseBranch:   req.BaseBranch,
 		HeadBranch:   req.HeadBranch,
 		Trigger:      req.Trigger,
@@ -1577,7 +1577,7 @@ func (s *server) writeRunFiles(run state.Run) (err error) {
 		RunID:       run.ID,
 		TaskID:      run.TaskID,
 		Repo:        run.Repo,
-		Task:        run.Task,
+		Instruction: run.Instruction,
 		Trigger:     run.Trigger.String(),
 		IssueNumber: run.IssueNumber,
 		PRNumber:    run.PRNumber,
@@ -1618,7 +1618,7 @@ type runContextFile struct {
 	RunID       string `json:"run_id"`
 	TaskID      string `json:"task_id"`
 	Repo        string `json:"repo"`
-	Task        string `json:"task"`
+	Instruction string `json:"instruction"`
 	Trigger     string `json:"trigger"`
 	IssueNumber int    `json:"issue_number"`
 	PRNumber    int    `json:"pr_number"`
@@ -1807,13 +1807,13 @@ func (s *server) executeRun(runID string) {
 		sessionTaskKey = agent.SessionTaskKey(run.Repo, run.TaskID)
 		sessionTaskDir = filepath.Join(sessionRoot, sessionTaskKey)
 		if existing, ok := s.store.GetTaskAgentSession(run.TaskID); ok {
-			if existing.AgentBackend == run.AgentBackend {
-				backendSessionID = strings.TrimSpace(existing.BackendSessionID)
+			if existing.AgentRuntime == run.AgentRuntime {
+				backendSessionID = strings.TrimSpace(existing.RuntimeSessionID)
 			} else if err := s.store.DeleteTaskAgentSession(run.TaskID); err != nil {
-				log.Printf("run %s failed to clear stale %s session for task %s: %v", run.ID, existing.AgentBackend, run.TaskID, err)
+				log.Printf("run %s failed to clear stale %s session for task %s: %v", run.ID, existing.AgentRuntime, run.TaskID, err)
 			}
 		}
-		if backendSessionID == "" && run.AgentBackend == agent.BackendGoose {
+		if backendSessionID == "" && run.AgentRuntime == agent.BackendGoose {
 			backendSessionID = runner.SessionName(run.Repo, run.TaskID)
 		}
 		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {
@@ -1824,8 +1824,8 @@ func (s *server) executeRun(runID string) {
 		}
 		if _, err := s.store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
 			TaskID:           run.TaskID,
-			AgentBackend:     run.AgentBackend,
-			BackendSessionID: backendSessionID,
+			AgentRuntime:     run.AgentRuntime,
+			RuntimeSessionID: backendSessionID,
 			SessionKey:       sessionTaskKey,
 			SessionRoot:      sessionTaskDir,
 			LastRunID:        run.ID,
@@ -1841,9 +1841,9 @@ func (s *server) executeRun(runID string) {
 		RunID:        run.ID,
 		TaskID:       run.TaskID,
 		Repo:         run.Repo,
-		Task:         run.Task,
-		AgentBackend: run.AgentBackend,
-		RunnerImage:  s.cfg.RunnerImageForBackend(run.AgentBackend),
+		Instruction:  run.Instruction,
+		AgentRuntime: run.AgentRuntime,
+		RunnerImage:  s.cfg.RunnerImageForBackend(run.AgentRuntime),
 		BaseBranch:   run.BaseBranch,
 		HeadBranch:   run.HeadBranch,
 		Trigger:      runtrigger.Normalize(run.Trigger.String()),
@@ -1852,15 +1852,15 @@ func (s *server) executeRun(runID string) {
 		PRNumber:     run.PRNumber,
 		Context:      run.Context,
 		Debug:        run.Debug,
-		AgentSession: runner.SessionSpec{
+		TaskSession: runner.SessionSpec{
 			Mode:             sessionMode,
 			Resume:           sessionResume,
 			TaskDir:          sessionTaskDir,
 			TaskKey:          sessionTaskKey,
-			BackendSessionID: backendSessionID,
+			RuntimeSessionID: backendSessionID,
 		},
 	}
-	log.Printf("run %s backend=%s session_mode=%s resume=%t key=%s session_id=%s", run.ID, run.AgentBackend, sessionMode, sessionResume, sessionTaskKey, backendSessionID)
+	log.Printf("run %s backend=%s session_mode=%s resume=%t key=%s session_id=%s", run.ID, run.AgentRuntime, sessionMode, sessionResume, sessionTaskKey, backendSessionID)
 	execRec, hasExec := s.store.GetRunExecution(run.ID)
 	if !hasExec {
 		// Persist a deterministic handle before launch so the next slot can
@@ -2092,23 +2092,23 @@ func (s *server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	if meta.ExitCode == 0 && observedExitCode != 0 {
 		meta.ExitCode = observedExitCode
 	}
-	if strings.TrimSpace(meta.AgentSessionID) != "" {
+	if strings.TrimSpace(meta.TaskSessionID) != "" {
 		existing, _ := s.store.GetTaskAgentSession(run.TaskID)
 		sessionKey := ""
 		sessionRoot := ""
-		if existing.AgentBackend == run.AgentBackend {
+		if existing.AgentRuntime == run.AgentRuntime {
 			sessionKey = existing.SessionKey
 			sessionRoot = existing.SessionRoot
 		}
 		if _, err := s.store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
 			TaskID:           run.TaskID,
-			AgentBackend:     run.AgentBackend,
-			BackendSessionID: strings.TrimSpace(meta.AgentSessionID),
+			AgentRuntime:     run.AgentRuntime,
+			RuntimeSessionID: strings.TrimSpace(meta.TaskSessionID),
 			SessionKey:       sessionKey,
 			SessionRoot:      sessionRoot,
 			LastRunID:        run.ID,
 		}); err != nil {
-			log.Printf("run %s failed to persist resolved agent session id %q: %v", run.ID, meta.AgentSessionID, err)
+			log.Printf("run %s failed to persist resolved task session id %q: %v", run.ID, meta.TaskSessionID, err)
 		}
 	}
 
@@ -2681,7 +2681,7 @@ Repository: %s
 ## Task
 
 `)
-	b.WriteString(run.Task)
+	b.WriteString(run.Instruction)
 	b.WriteString(`
 
 `)
@@ -3397,14 +3397,14 @@ func buildRunStartComment(run state.Run, target runResponseTarget, requestedBy s
 		RunID:             run.ID,
 		RequestedBy:       requestedBy,
 		Trigger:           runtrigger.Normalize(firstNonEmpty(target.Trigger.String(), run.Trigger.String())),
-		Backend:           run.AgentBackend,
+		AgentRuntime:      run.AgentRuntime,
 		RunnerCommit:      loadRunBuildCommit(run.RunDir),
 		BaseBranch:        run.BaseBranch,
 		HeadBranch:        run.HeadBranch,
 		SessionMode:       string(sessionMode),
 		SessionResume:     sessionResume,
 		Debug:             run.Debug,
-		Task:              run.Task,
+		Instruction:       run.Instruction,
 		Context:           run.Context,
 		QueueDelaySeconds: queueDelaySeconds,
 	})
@@ -3492,7 +3492,7 @@ func loadRunTokenUsage(run state.Run) (state.RunTokenUsage, bool, error) {
 
 	return state.RunTokenUsage{
 		RunID:                 run.ID,
-		Backend:               run.AgentBackend,
+		AgentRuntime:          run.AgentRuntime,
 		Provider:              usage.Provider,
 		Model:                 usage.Model,
 		TotalTokens:           usage.TotalTokens,

@@ -9,34 +9,49 @@ import (
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
-type Backend string
+type Runtime string
 
 const (
-	BackendGoose Backend = "goose"
-	BackendCodex Backend = "codex"
+	RuntimeGoose Runtime = "goose"
+	RuntimeCodex Runtime = "codex"
 )
 
-func NormalizeBackend(raw string) Backend {
-	backend, err := ParseBackend(raw)
+type Backend = Runtime
+
+const (
+	BackendGoose = RuntimeGoose
+	BackendCodex = RuntimeCodex
+)
+
+func NormalizeRuntime(raw string) Runtime {
+	runtime, err := ParseRuntime(raw)
 	if err != nil {
-		return BackendCodex
+		return RuntimeCodex
 	}
-	return backend
+	return runtime
 }
 
-func (b Backend) String() string {
-	return string(NormalizeBackend(string(b)))
+func NormalizeBackend(raw string) Backend {
+	return NormalizeRuntime(raw)
+}
+
+func (r Runtime) String() string {
+	return string(NormalizeRuntime(string(r)))
+}
+
+func ParseRuntime(raw string) (Runtime, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(RuntimeCodex):
+		return RuntimeCodex, nil
+	case string(RuntimeGoose):
+		return RuntimeGoose, nil
+	default:
+		return "", fmt.Errorf("unknown agent runtime %q", raw)
+	}
 }
 
 func ParseBackend(raw string) (Backend, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", string(BackendCodex):
-		return BackendCodex, nil
-	case string(BackendGoose):
-		return BackendGoose, nil
-	default:
-		return "", fmt.Errorf("unknown agent backend %q", raw)
-	}
+	return ParseRuntime(raw)
 }
 
 type SessionMode string
@@ -79,7 +94,7 @@ func SessionEnabled(mode SessionMode, trigger runtrigger.Name) bool {
 	}
 }
 
-func SessionTaskKey(repo, taskID string) string {
+func TaskSessionKey(repo, taskID string) string {
 	const maxBaseLen = 45
 	raw := strings.TrimSpace(repo) + "::" + strings.TrimSpace(taskID)
 	sum := sha256.Sum256([]byte(raw))
@@ -96,6 +111,10 @@ func SessionTaskKey(repo, taskID string) string {
 		}
 	}
 	return base + "-" + hash
+}
+
+func SessionTaskKey(repo, taskID string) string {
+	return TaskSessionKey(repo, taskID)
 }
 
 func sanitizeSessionSlug(in string) string {

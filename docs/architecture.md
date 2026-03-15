@@ -100,7 +100,7 @@ These are the main layers in the Go codebase.
 2. Agent abstraction
 
 - `internal/agent` defines `AgentHarness`, `ModelProvider`, and `SessionPolicy`.
-- Compatibility names like `AgentBackend` still exist at some boundaries, but the deeper abstraction is harness-plus-provider.
+- Compatibility names like `AgentRuntime` still exist at some boundaries, but the deeper abstraction is harness-plus-provider.
 
 3. Execution abstraction
 
@@ -201,7 +201,7 @@ Key persisted entities:
 - `run_leases`: supervision ownership and heartbeat expiry.
 - `run_executions`: detached execution handle metadata for adoption and cleanup.
 - `run_cancels`: persisted cancel intent.
-- `task_agent_sessions`: stable harness session identifiers and mounted session roots.
+- `task sessions`: stable harness session identifiers and mounted session roots. In the current SQLite schema this data still lives in the legacy `task_agent_sessions` table.
 - `codex_credentials`: encrypted stored credential payloads and allocation metadata.
 - `credential_leases`: per-run credential assignments and lease expiry state.
 - `deliveries`: webhook dedupe/claim bookkeeping.
@@ -224,7 +224,7 @@ Key persisted entities:
 | Run | `runs` table | User-visible attempt and final outcome |
 | Active supervision owner | `run_leases` table | Coordinates which `rascald` instance supervises |
 | Detached container identity | `run_executions` table | Enables adoption and cleanup across restarts |
-| Session resume state | `task_agent_sessions` plus mounted session directory | Tracks harness session identity and storage root |
+| Session resume state | task session records plus mounted session directory | Tracks harness session identity and storage root |
 | Run artifacts | run directory on disk | Execution outputs consumed during finalization |
 | Live container process | Docker runtime | Actual execution process while the run is active |
 
@@ -297,7 +297,7 @@ Required:
 Common optional:
 
 - `RASCAL_TASK`
-- `RASCAL_AGENT_BACKEND` (`goose` or `codex`; default normalization falls back to `codex`)
+- `RASCAL_AGENT_RUNTIME` (`goose` or `codex`; default normalization falls back to `codex`)
 - `RASCAL_BASE_BRANCH` (default: `main`)
 - `RASCAL_HEAD_BRANCH` (default: `rascal/<run_id>`)
 - `RASCAL_ISSUE_NUMBER` (default: `0`)
@@ -308,10 +308,10 @@ Common optional:
 - `RASCAL_META_DIR` (default: `/rascal-meta`)
 - `RASCAL_WORK_ROOT` (default: `/work`)
 - `RASCAL_REPO_DIR` (default: `${RASCAL_WORK_ROOT}/repo`)
-- `RASCAL_AGENT_SESSION_MODE` (`off`, `pr-only`, `all`; orchestrator default: `all`)
-- `RASCAL_AGENT_SESSION_RESUME` (set by orchestrator per run)
-- `RASCAL_AGENT_SESSION_KEY` (stable task-scoped key when resume is enabled)
-- `RASCAL_AGENT_SESSION_ID` (backend session id when known)
+- `RASCAL_TASK_SESSION_MODE` (`off`, `pr-only`, `all`; orchestrator default: `all`)
+- `RASCAL_TASK_SESSION_RESUME` (set by orchestrator per run)
+- `RASCAL_TASK_SESSION_KEY` (stable task-scoped key when resume is enabled)
+- `RASCAL_TASK_SESSION_ID` (runtime session id when known)
 - `CODEX_HOME` (run-scoped `/rascal-meta/codex` in stateless mode, or task-scoped mount in resume mode for Codex)
 - `GOOSE_PATH_ROOT` (run-scoped `/rascal-meta/goose` in stateless mode, or task-scoped mount in resume mode for Goose)
 

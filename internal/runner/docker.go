@@ -39,7 +39,7 @@ const (
 )
 
 func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
-	backend := agent.NormalizeBackend(string(spec.AgentBackend))
+	backend := agent.NormalizeBackend(string(spec.AgentRuntime))
 	image := strings.TrimSpace(spec.RunnerImage)
 	if image == "" {
 		image = strings.TrimSpace(l.DefaultImage)
@@ -57,11 +57,11 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("create workspace dir: %w", err)
 	}
-	sessionDir := strings.TrimSpace(spec.AgentSession.TaskDir)
-	sessionResume := spec.AgentSession.Resume
-	sessionMode := spec.AgentSession.Mode
-	sessionKey := strings.TrimSpace(spec.AgentSession.TaskKey)
-	backendSessionID := strings.TrimSpace(spec.AgentSession.BackendSessionID)
+	sessionDir := strings.TrimSpace(spec.TaskSession.TaskDir)
+	sessionResume := spec.TaskSession.Resume
+	sessionMode := spec.TaskSession.Mode
+	sessionKey := strings.TrimSpace(spec.TaskSession.TaskKey)
+	backendSessionID := strings.TrimSpace(spec.TaskSession.RuntimeSessionID)
 	if sessionResume && sessionDir != "" {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 			return ExecutionHandle{}, fmt.Errorf("create agent session dir: %w", err)
@@ -82,7 +82,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		}
 	}()
 
-	if _, err := fmt.Fprintf(logFile, "[%s] starting docker runner image=%s backend=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), image, backend, spec.RunID); err != nil {
+	if _, err := fmt.Fprintf(logFile, "[%s] starting docker runner image=%s agent_runtime=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), image, backend, spec.RunID); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("write runner log header: %w", err)
 	}
 
@@ -102,8 +102,10 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 	envPairs := map[string]string{
 		"RASCAL_RUN_ID":               spec.RunID,
 		"RASCAL_TASK_ID":              spec.TaskID,
-		"RASCAL_TASK":                 spec.Task,
+		"RASCAL_INSTRUCTION":          spec.Instruction,
+		"RASCAL_TASK":                 spec.Instruction,
 		"RASCAL_REPO":                 spec.Repo,
+		"RASCAL_AGENT_RUNTIME":        backend.String(),
 		"RASCAL_AGENT_BACKEND":        backend.String(),
 		"RASCAL_BASE_BRANCH":          spec.BaseBranch,
 		"RASCAL_HEAD_BRANCH":          spec.HeadBranch,
@@ -113,6 +115,10 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		"RASCAL_CONTEXT_JSON":         containerContextJSONPath,
 		"RASCAL_ISSUE_NUMBER":         strconv.Itoa(spec.IssueNumber),
 		"RASCAL_PR_NUMBER":            strconv.Itoa(spec.PRNumber),
+		"RASCAL_TASK_SESSION_MODE":    string(sessionMode),
+		"RASCAL_TASK_SESSION_RESUME":  strconv.FormatBool(sessionResume),
+		"RASCAL_TASK_SESSION_KEY":     sessionKey,
+		"RASCAL_TASK_SESSION_ID":      backendSessionID,
 		"RASCAL_AGENT_SESSION_MODE":   string(sessionMode),
 		"RASCAL_AGENT_SESSION_RESUME": strconv.FormatBool(sessionResume),
 		"RASCAL_AGENT_SESSION_KEY":    sessionKey,
@@ -121,7 +127,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		"GH_PROMPT_DISABLED":          "1",
 		"GIT_TERMINAL_PROMPT":         "0",
 	}
-	if backend == agent.BackendGoose {
+	if backend == agent.RuntimeGoose {
 		envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
 		envPairs["GOOSE_PROVIDER"] = "codex"
 		envPairs["GOOSE_MODEL"] = "gpt-5.4"
@@ -164,7 +170,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 	}
 	args = append(args, image)
 
-	if _, err := fmt.Fprintf(logFile, "[%s] agent session backend=%s mode=%s resume=%t key=%s session_id=%s path_root=%s\n",
+	if _, err := fmt.Fprintf(logFile, "[%s] task session agent_runtime=%s mode=%s resume=%t key=%s session_id=%s path_root=%s\n",
 		time.Now().UTC().Format(time.RFC3339),
 		backend,
 		agent.NormalizeSessionMode(string(sessionMode)),

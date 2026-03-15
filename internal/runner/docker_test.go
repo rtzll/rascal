@@ -60,7 +60,7 @@ exit 0
 		RunID:      "run_detached",
 		TaskID:     "task_detached",
 		Repo:       "owner/repo",
-		Task:       "detached",
+		Instruction:       "detached",
 		BaseBranch: "main",
 		HeadBranch: "rascal/task-detached",
 		Trigger:    "cli",
@@ -202,22 +202,22 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
-		AgentBackend: agent.BackendGoose,
+		AgentRuntime: agent.BackendGoose,
 		RunID:        "run_1",
 		TaskID:       "owner/repo#1",
 		Repo:         "owner/repo",
-		Task:         "task",
+		Instruction:         "task",
 		BaseBranch:   "main",
 		HeadBranch:   "rascal/task-1",
 		Trigger:      "pr_comment",
 		Debug:        true,
 		RunDir:       runDir,
-		AgentSession: SessionSpec{
+		TaskSession: SessionSpec{
 			Mode:             agent.SessionModePROnly,
 			Resume:           true,
 			TaskDir:          sessionDir,
 			TaskKey:          "owner-repo-1-abc123",
-			BackendSessionID: "rascal-owner-repo-1-abc123",
+			RuntimeSessionID: "rascal-owner-repo-1-abc123",
 		},
 	})
 	if err != nil {
@@ -283,17 +283,17 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
-		AgentBackend: agent.BackendGoose,
+		AgentRuntime: agent.BackendGoose,
 		RunID:        "run_2",
 		TaskID:       "owner/repo#2",
 		Repo:         "owner/repo",
-		Task:         "task",
+		Instruction:         "task",
 		BaseBranch:   "main",
 		HeadBranch:   "rascal/task-2",
 		Trigger:      "issue_label",
 		Debug:        false,
 		RunDir:       runDir,
-		AgentSession: SessionSpec{
+		TaskSession: SessionSpec{
 			Mode: agent.SessionModePROnly,
 		},
 	})
@@ -342,19 +342,19 @@ exit 0
 		RunID:        "run_codex_1",
 		TaskID:       "owner/repo#1",
 		Repo:         "owner/repo",
-		Task:         "task",
-		AgentBackend: agent.BackendCodex,
+		Instruction:         "task",
+		AgentRuntime: agent.BackendCodex,
 		BaseBranch:   "main",
 		HeadBranch:   "rascal/task-1",
 		Trigger:      "pr_comment",
 		Debug:        true,
 		RunDir:       runDir,
-		AgentSession: SessionSpec{
+		TaskSession: SessionSpec{
 			Mode:             agent.SessionModePROnly,
 			Resume:           true,
 			TaskDir:          sessionDir,
 			TaskKey:          "owner-repo-1-abc123",
-			BackendSessionID: "session-123",
+			RuntimeSessionID: "session-123",
 		},
 	})
 	if err != nil {
@@ -409,7 +409,7 @@ exit 0
 		RunID:      "run_security",
 		TaskID:     "task_security",
 		Repo:       "owner/repo",
-		Task:       "security",
+		Instruction:       "security",
 		BaseBranch: "main",
 		HeadBranch: "rascal/task-security",
 		Trigger:    "cli",

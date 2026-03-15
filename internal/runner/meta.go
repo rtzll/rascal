@@ -8,18 +8,34 @@ import (
 
 // Meta mirrors /rascal-meta/meta.json produced by the container entrypoint.
 type Meta struct {
-	RunID          string `json:"run_id"`
-	TaskID         string `json:"task_id"`
-	Repo           string `json:"repo"`
-	BaseBranch     string `json:"base_branch"`
-	HeadBranch     string `json:"head_branch"`
-	BuildCommit    string `json:"build_commit,omitempty"`
-	PRNumber       int    `json:"pr_number"`
-	PRURL          string `json:"pr_url"`
-	HeadSHA        string `json:"head_sha"`
-	AgentSessionID string `json:"agent_session_id,omitempty"`
-	ExitCode       int    `json:"exit_code"`
-	Error          string `json:"error,omitempty"`
+	RunID         string `json:"run_id"`
+	TaskID        string `json:"task_id"`
+	Repo          string `json:"repo"`
+	BaseBranch    string `json:"base_branch"`
+	HeadBranch    string `json:"head_branch"`
+	BuildCommit   string `json:"build_commit,omitempty"`
+	PRNumber      int    `json:"pr_number"`
+	PRURL         string `json:"pr_url"`
+	HeadSHA       string `json:"head_sha"`
+	TaskSessionID string `json:"task_session_id,omitempty"`
+	ExitCode      int    `json:"exit_code"`
+	Error         string `json:"error,omitempty"`
+}
+
+func (m *Meta) UnmarshalJSON(data []byte) error {
+	type meta Meta
+	aux := struct {
+		meta
+		AgentSessionID string `json:"agent_session_id"`
+	}{}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*m = Meta(aux.meta)
+	if m.TaskSessionID == "" {
+		m.TaskSessionID = aux.AgentSessionID
+	}
+	return nil
 }
 
 func ReadMeta(path string) (Meta, error) {

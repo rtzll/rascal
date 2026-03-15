@@ -260,14 +260,14 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.Trigger != runtrigger.NameCLI {
 		t.Fatalf("expected default trigger cli, got %q", cfg.Trigger)
 	}
-	if cfg.AgentSession.Mode != agent.SessionModeOff {
-		t.Fatalf("expected default agent session mode off, got %q", cfg.AgentSession.Mode)
+	if cfg.TaskSession.Mode != agent.SessionModeOff {
+		t.Fatalf("expected default agent session mode off, got %q", cfg.TaskSession.Mode)
 	}
-	if cfg.AgentSession.Resume {
+	if cfg.TaskSession.Resume {
 		t.Fatal("expected default agent session resume to be false")
 	}
-	if cfg.AgentSession.BackendSessionID != "" {
-		t.Fatalf("expected default agent session name empty, got %q", cfg.AgentSession.BackendSessionID)
+	if cfg.TaskSession.RuntimeSessionID != "" {
+		t.Fatalf("expected default agent session name empty, got %q", cfg.TaskSession.RuntimeSessionID)
 	}
 }
 
@@ -332,35 +332,35 @@ func TestLoadConfigRespectsGooseSessionEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig returned error: %v", err)
 	}
-	if cfg.AgentSession.Mode != agent.SessionModePROnly {
-		t.Fatalf("AgentSession.Mode = %q, want %q", cfg.AgentSession.Mode, agent.SessionModePROnly)
+	if cfg.TaskSession.Mode != agent.SessionModePROnly {
+		t.Fatalf("TaskSession.Mode = %q, want %q", cfg.TaskSession.Mode, agent.SessionModePROnly)
 	}
-	if !cfg.AgentSession.Resume {
-		t.Fatal("AgentSession.Resume should be true")
+	if !cfg.TaskSession.Resume {
+		t.Fatal("TaskSession.Resume should be true")
 	}
-	if cfg.AgentSession.TaskKey != "owner-repo-3-abc123" {
-		t.Fatalf("AgentSession.TaskKey = %q, want owner-repo-3-abc123", cfg.AgentSession.TaskKey)
+	if cfg.TaskSession.TaskKey != "owner-repo-3-abc123" {
+		t.Fatalf("TaskSession.TaskKey = %q, want owner-repo-3-abc123", cfg.TaskSession.TaskKey)
 	}
-	if cfg.AgentSession.BackendSessionID != "rascal-owner-repo-3-abc123" {
-		t.Fatalf("AgentSession.BackendSessionID = %q, want rascal-owner-repo-3-abc123", cfg.AgentSession.BackendSessionID)
+	if cfg.TaskSession.RuntimeSessionID != "rascal-owner-repo-3-abc123" {
+		t.Fatalf("TaskSession.RuntimeSessionID = %q, want rascal-owner-repo-3-abc123", cfg.TaskSession.RuntimeSessionID)
 	}
 	if cfg.GoosePathRoot != "/rascal-goose-session" {
 		t.Fatalf("GoosePathRoot = %q, want /rascal-goose-session", cfg.GoosePathRoot)
 	}
 }
 
-func TestLoadConfigRejectsInvalidAgentBackend(t *testing.T) {
+func TestLoadConfigRejectsInvalidAgentRuntime(t *testing.T) {
 	t.Setenv("RASCAL_RUN_ID", "run_invalid_backend")
 	t.Setenv("RASCAL_TASK_ID", "task_invalid_backend")
 	t.Setenv("RASCAL_REPO", "owner/repo")
 	t.Setenv("GH_TOKEN", "token")
-	t.Setenv("RASCAL_AGENT_BACKEND", "claude")
+	t.Setenv("RASCAL_AGENT_RUNTIME", "claude")
 
 	_, err := loadConfig()
 	if err == nil {
 		t.Fatal("loadConfig error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "invalid RASCAL_AGENT_BACKEND") {
+	if !strings.Contains(err.Error(), "invalid RASCAL_AGENT_RUNTIME") {
 		t.Fatalf("loadConfig error = %q", err.Error())
 	}
 }
@@ -411,7 +411,7 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 		InstructionsPath: filepath.Join(root, "instructions.md"),
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
-		AgentSession:     runner.SessionSpec{Mode: agent.SessionModeOff},
+		TaskSession:      runner.SessionSpec{Mode: agent.SessionModeOff},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
@@ -451,11 +451,11 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
-		AgentSession: runner.SessionSpec{
+		TaskSession: runner.SessionSpec{
 			Mode:             agent.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
-			BackendSessionID: "rascal-owner-repo-task-abc123",
+			RuntimeSessionID: "rascal-owner-repo-task-abc123",
 		},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
@@ -466,7 +466,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 	ex := fakeExecutor{
 		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
 			if name == "goose" && len(args) == 4 && args[0] == "session" && args[1] == "list" && args[2] == "--format" && args[3] == "json" {
-				return fmt.Sprintf(`[{"name":%q}]`, cfg.AgentSession.BackendSessionID), nil
+				return fmt.Sprintf(`[{"name":%q}]`, cfg.TaskSession.RuntimeSessionID), nil
 			}
 			return "", nil
 		},
@@ -486,7 +486,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
-	for _, want := range []string{"--name", cfg.AgentSession.BackendSessionID, "--resume"} {
+	for _, want := range []string{"--name", cfg.TaskSession.RuntimeSessionID, "--resume"} {
 		if !strings.Contains(argsText, want) {
 			t.Fatalf("expected %q in args, got %q", want, argsText)
 		}
@@ -504,11 +504,11 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
-		AgentSession: runner.SessionSpec{
+		TaskSession: runner.SessionSpec{
 			Mode:             agent.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-missing",
-			BackendSessionID: "rascal-owner-repo-task-missing",
+			RuntimeSessionID: "rascal-owner-repo-task-missing",
 		},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
@@ -542,7 +542,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 	if strings.Contains(argsText, "--resume") {
 		t.Fatalf("did not expect --resume args when session is missing, got %q", argsText)
 	}
-	if !strings.Contains(argsText, "--name "+cfg.AgentSession.BackendSessionID) {
+	if !strings.Contains(argsText, "--name "+cfg.TaskSession.RuntimeSessionID) {
 		t.Fatalf("expected named fresh session args, got %q", argsText)
 	}
 }
@@ -556,11 +556,11 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
 		GoosePathRoot:    sessionRoot,
-		AgentSession: runner.SessionSpec{
+		TaskSession: runner.SessionSpec{
 			Mode:             agent.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
-			BackendSessionID: "rascal-owner-repo-task-abc123",
+			RuntimeSessionID: "rascal-owner-repo-task-abc123",
 		},
 	}
 	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
@@ -587,7 +587,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 	ex := fakeExecutor{
 		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
 			if name == "goose" && len(args) == 4 && args[0] == "session" && args[1] == "list" && args[2] == "--format" && args[3] == "json" {
-				return fmt.Sprintf(`[{"name":%q}]`, cfg.AgentSession.BackendSessionID), nil
+				return fmt.Sprintf(`[{"name":%q}]`, cfg.TaskSession.RuntimeSessionID), nil
 			}
 			return "", nil
 		},
@@ -664,11 +664,11 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
-		AgentSession: runner.SessionSpec{
+		TaskSession: runner.SessionSpec{
 			Mode:             agent.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
-			BackendSessionID: "rascal-owner-repo-task-abc123",
+			RuntimeSessionID: "rascal-owner-repo-task-abc123",
 		},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
@@ -679,7 +679,7 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 	ex := fakeExecutor{
 		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
 			if name == "goose" && len(args) == 4 && args[0] == "session" && args[1] == "list" && args[2] == "--format" && args[3] == "json" {
-				return fmt.Sprintf(`[{"name":%q}]`, cfg.AgentSession.BackendSessionID), nil
+				return fmt.Sprintf(`[{"name":%q}]`, cfg.TaskSession.RuntimeSessionID), nil
 			}
 			return "", nil
 		},
@@ -718,11 +718,11 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
-		AgentSession: runner.SessionSpec{
+		TaskSession: runner.SessionSpec{
 			Mode:             agent.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
-			BackendSessionID: "rascal-owner-repo-task-abc123",
+			RuntimeSessionID: "rascal-owner-repo-task-abc123",
 		},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
@@ -769,7 +769,7 @@ func TestRunCodexFreshSession(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		CodexHome:        codexHome,
-		AgentBackend:     agent.BackendCodex,
+		AgentRuntime:     agent.BackendCodex,
 	}
 	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
 		t.Fatalf("mkdir codex sessions: %v", err)
@@ -848,11 +848,11 @@ func TestRunCodexResumeSession(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		CodexHome:        codexHome,
-		AgentBackend:     agent.BackendCodex,
-		AgentSession: runner.SessionSpec{
+		AgentRuntime:     agent.BackendCodex,
+		TaskSession: runner.SessionSpec{
 			Mode:             agent.SessionModeAll,
 			Resume:           true,
-			BackendSessionID: "session-abc",
+			RuntimeSessionID: "session-abc",
 		},
 	}
 	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
@@ -1027,7 +1027,7 @@ printf '{"event":"message","usage":{"total_tokens":321}}'"\n"
 	t.Setenv("RASCAL_REPO", "owner/repo")
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_TASK", "Address feedback")
-	t.Setenv("RASCAL_AGENT_BACKEND", "goose")
+	t.Setenv("RASCAL_AGENT_RUNTIME", "goose")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
@@ -1103,7 +1103,7 @@ func TestRunWithExecutorUsesCodexBackend(t *testing.T) {
 	t.Setenv("RASCAL_REPO", "owner/repo")
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_TASK", "Address Codex feedback")
-	t.Setenv("RASCAL_AGENT_BACKEND", "codex")
+	t.Setenv("RASCAL_AGENT_RUNTIME", "codex")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)
@@ -1162,11 +1162,11 @@ func TestRunWithExecutorUsesCodexBackend(t *testing.T) {
 		t.Fatalf("read meta.json: %v", err)
 	}
 	var meta struct {
-		ExitCode       int    `json:"exit_code"`
-		PRNumber       int    `json:"pr_number"`
-		PRURL          string `json:"pr_url"`
-		HeadSHA        string `json:"head_sha"`
-		AgentSessionID string `json:"agent_session_id"`
+		ExitCode      int    `json:"exit_code"`
+		PRNumber      int    `json:"pr_number"`
+		PRURL         string `json:"pr_url"`
+		HeadSHA       string `json:"head_sha"`
+		TaskSessionID string `json:"task_session_id"`
 	}
 	if err := json.Unmarshal(metaData, &meta); err != nil {
 		t.Fatalf("decode meta.json: %v", err)
@@ -1183,8 +1183,8 @@ func TestRunWithExecutorUsesCodexBackend(t *testing.T) {
 	if meta.HeadSHA != "0123456789abcdef0123456789abcdef01234567" {
 		t.Fatalf("unexpected head_sha: %q", meta.HeadSHA)
 	}
-	if meta.AgentSessionID != "session-codex" {
-		t.Fatalf("unexpected agent session id: %q", meta.AgentSessionID)
+	if meta.TaskSessionID != "session-codex" {
+		t.Fatalf("unexpected task session id: %q", meta.TaskSessionID)
 	}
 }
 
@@ -1213,7 +1213,7 @@ func TestRunWithExecutorFailsWhenRequiredCommandMissing(t *testing.T) {
 			t.Setenv("RASCAL_TASK_ID", "task_missing_cmd_"+tc.name)
 			t.Setenv("RASCAL_REPO", "owner/repo")
 			t.Setenv("GH_TOKEN", "token")
-			t.Setenv("RASCAL_AGENT_BACKEND", tc.backend)
+			t.Setenv("RASCAL_AGENT_RUNTIME", tc.backend)
 			t.Setenv("RASCAL_META_DIR", metaDir)
 			t.Setenv("RASCAL_WORK_ROOT", workRoot)
 
@@ -1268,7 +1268,7 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 	t.Setenv("RASCAL_REPO", "owner/repo")
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("RASCAL_TASK", "Address PR feedback")
-	t.Setenv("RASCAL_AGENT_BACKEND", "goose")
+	t.Setenv("RASCAL_AGENT_RUNTIME", "goose")
 	t.Setenv("RASCAL_META_DIR", metaDir)
 	t.Setenv("RASCAL_WORK_ROOT", workRoot)
 	t.Setenv("RASCAL_REPO_DIR", repoDir)

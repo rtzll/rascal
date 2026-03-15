@@ -15,11 +15,13 @@ import (
 	"github.com/spf13/viper"
 )
 
-type AgentSessionConfig struct {
+type TaskSessionConfig struct {
 	Mode    agent.SessionMode
 	Root    string
 	TTLDays int
 }
+
+type AgentSessionConfig = TaskSessionConfig
 
 // ServerConfig controls rascald runtime behavior.
 type ServerConfig struct {
@@ -33,7 +35,7 @@ type ServerConfig struct {
 	GitHubWebhookSecret     string
 	BotLogin                string
 	RunnerMode              runner.Mode
-	AgentBackend            agent.Backend
+	AgentRuntime            agent.Runtime
 	RunnerImage             string
 	RunnerImageGoose        string
 	RunnerImageCodex        string
@@ -42,7 +44,7 @@ type ServerConfig struct {
 	CredentialLeaseTTL      time.Duration
 	CredentialRenewEvery    time.Duration
 	CredentialEncryptionKey string
-	AgentSession            AgentSessionConfig
+	TaskSession             TaskSessionConfig
 	MaxRuns                 int
 }
 
@@ -67,7 +69,7 @@ func LoadServerConfig() (ServerConfig, error) {
 	if err != nil {
 		return ServerConfig{}, fmt.Errorf("parse RASCAL_RUNNER_MODE: %w", err)
 	}
-	agentBackend, err := loadAgentBackend()
+	agentRuntime, err := loadAgentRuntime()
 	if err != nil {
 		return ServerConfig{}, err
 	}
@@ -75,7 +77,7 @@ func LoadServerConfig() (ServerConfig, error) {
 	if err != nil {
 		return ServerConfig{}, fmt.Errorf("parse RASCAL_CREDENTIAL_STRATEGY: %w", err)
 	}
-	agentSession, err := loadAgentSessionConfig(dataDir)
+	taskSession, err := loadTaskSessionConfig(dataDir)
 	if err != nil {
 		return ServerConfig{}, err
 	}
@@ -91,7 +93,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		GitHubWebhookSecret:     strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
 		BotLogin:                strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
 		RunnerMode:              runnerMode,
-		AgentBackend:            agentBackend,
+		AgentRuntime:            agentRuntime,
 		RunnerImageGoose:        envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", defaults.GooseRunnerImageTag),
 		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
 		RunnerMaxAttempts:       envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
@@ -99,10 +101,10 @@ func LoadServerConfig() (ServerConfig, error) {
 		CredentialLeaseTTL:      envDurationOrDefault("RASCAL_CREDENTIAL_LEASE_TTL", 90*time.Second),
 		CredentialRenewEvery:    envDurationOrDefault("RASCAL_CREDENTIAL_RENEW_INTERVAL", 30*time.Second),
 		CredentialEncryptionKey: firstNonEmptyEnv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "RASCAL_API_TOKEN"),
-		AgentSession:            agentSession,
+		TaskSession:             taskSession,
 		MaxRuns:                 200,
 	}
-	cfg.RunnerImage = cfg.RunnerImageForBackend(cfg.AgentBackend)
+	cfg.RunnerImage = cfg.RunnerImageForRuntime(cfg.AgentRuntime)
 	return cfg, nil
 }
 
@@ -116,8 +118,8 @@ func (c ServerConfig) Ensure() error {
 	if err := os.MkdirAll(filepath.Join(c.DataDir, "runs"), 0o755); err != nil {
 		return fmt.Errorf("create runs directory: %w", err)
 	}
-	if c.EffectiveAgentSessionMode() != agent.SessionModeOff {
-		root := strings.TrimSpace(c.EffectiveAgentSessionRoot())
+	if c.EffectiveTaskSessionMode() != agent.SessionModeOff {
+		root := strings.TrimSpace(c.EffectiveTaskSessionRoot())
 		if root == "" {
 			root = filepath.Join(c.DataDir, defaults.AgentSessionDirName)
 		}
@@ -128,25 +130,41 @@ func (c ServerConfig) Ensure() error {
 	return nil
 }
 
-func (c ServerConfig) RunnerImageForBackend(backend agent.Backend) string {
-	switch agent.NormalizeBackend(string(backend)) {
-	case agent.BackendCodex:
+func (c ServerConfig) RunnerImageForRuntime(runtime agent.Runtime) string {
+	switch agent.NormalizeRuntime(string(runtime)) {
+	case agent.RuntimeCodex:
 		return strings.TrimSpace(c.RunnerImageCodex)
 	default:
 		return strings.TrimSpace(c.RunnerImageGoose)
 	}
 }
 
+func (c ServerConfig) RunnerImageForBackend(backend agent.Backend) string {
+	return c.RunnerImageForRuntime(backend)
+}
+
+func (c ServerConfig) EffectiveTaskSessionMode() agent.SessionMode {
+	return agent.NormalizeSessionMode(string(c.TaskSession.Mode))
+}
+
 func (c ServerConfig) EffectiveAgentSessionMode() agent.SessionMode {
-	return agent.NormalizeSessionMode(string(c.AgentSession.Mode))
+	return c.EffectiveTaskSessionMode()
+}
+
+func (c ServerConfig) EffectiveTaskSessionRoot() string {
+	return strings.TrimSpace(c.TaskSession.Root)
 }
 
 func (c ServerConfig) EffectiveAgentSessionRoot() string {
-	return strings.TrimSpace(c.AgentSession.Root)
+	return c.EffectiveTaskSessionRoot()
+}
+
+func (c ServerConfig) EffectiveTaskSessionTTLDays() int {
+	return c.TaskSession.TTLDays
 }
 
 func (c ServerConfig) EffectiveAgentSessionTTLDays() int {
-	return c.AgentSession.TTLDays
+	return c.EffectiveTaskSessionTTLDays()
 }
 
 func (c ServerConfig) AuthEnabled() bool {
@@ -302,27 +320,48 @@ func envDurationOrDefault(key string, fallback time.Duration) time.Duration {
 	return out
 }
 
-func loadAgentBackend() (agent.Backend, error) {
-	backend, err := agent.ParseBackend(envOrDefault("RASCAL_AGENT_BACKEND", "codex"))
-	if err != nil {
-		return "", fmt.Errorf("parse RASCAL_AGENT_BACKEND: %w", err)
+func loadAgentRuntime() (agent.Runtime, error) {
+	raw := firstNonEmptyEnv("RASCAL_AGENT_RUNTIME", "RASCAL_AGENT_BACKEND")
+	if raw == "" {
+		raw = "codex"
 	}
-	return backend, nil
+	runtime, err := agent.ParseRuntime(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse RASCAL_AGENT_RUNTIME: %w", err)
+	}
+	return runtime, nil
 }
 
-func loadAgentSessionConfig(dataDir string) (AgentSessionConfig, error) {
-	mode, err := loadAgentSessionMode()
+func loadAgentBackend() (agent.Backend, error) {
+	return loadAgentRuntime()
+}
+
+func loadTaskSessionConfig(dataDir string) (TaskSessionConfig, error) {
+	mode, err := loadTaskSessionMode()
 	if err != nil {
-		return AgentSessionConfig{}, err
+		return TaskSessionConfig{}, err
 	}
-	return AgentSessionConfig{
+	return TaskSessionConfig{
 		Mode:    mode,
-		Root:    loadAgentSessionRoot(dataDir),
-		TTLDays: loadAgentSessionTTLDays(),
+		Root:    loadTaskSessionRoot(dataDir),
+		TTLDays: loadTaskSessionTTLDays(),
 	}, nil
 }
 
-func loadAgentSessionMode() (agent.SessionMode, error) {
+func loadAgentSessionConfig(dataDir string) (AgentSessionConfig, error) {
+	return loadTaskSessionConfig(dataDir)
+}
+
+func loadTaskSessionMode() (agent.SessionMode, error) {
+	if raw, ok := os.LookupEnv("RASCAL_TASK_SESSION_MODE"); ok {
+		if strings.TrimSpace(raw) != "" {
+			mode, err := agent.ParseSessionMode(raw)
+			if err != nil {
+				return "", fmt.Errorf("parse RASCAL_TASK_SESSION_MODE: %w", err)
+			}
+			return mode, nil
+		}
+	}
 	if raw, ok := os.LookupEnv("RASCAL_GOOSE_SESSION_MODE"); ok {
 		if strings.TrimSpace(raw) != "" {
 			mode, err := agent.ParseSessionMode(raw)
@@ -344,7 +383,17 @@ func loadAgentSessionMode() (agent.SessionMode, error) {
 	return agent.SessionModeAll, nil
 }
 
-func loadAgentSessionRoot(dataDir string) string {
+func loadAgentSessionMode() (agent.SessionMode, error) {
+	return loadTaskSessionMode()
+}
+
+func loadTaskSessionRoot(dataDir string) string {
+	if raw, ok := os.LookupEnv("RASCAL_TASK_SESSION_ROOT"); ok {
+		if strings.TrimSpace(raw) == "" {
+			return filepath.Join(dataDir, defaults.AgentSessionDirName)
+		}
+		return strings.TrimSpace(raw)
+	}
 	if raw, ok := os.LookupEnv("RASCAL_GOOSE_SESSION_ROOT"); ok {
 		if strings.TrimSpace(raw) == "" {
 			return filepath.Join(dataDir, defaults.AgentSessionDirName)
@@ -360,7 +409,14 @@ func loadAgentSessionRoot(dataDir string) string {
 	return filepath.Join(dataDir, defaults.AgentSessionDirName)
 }
 
-func loadAgentSessionTTLDays() int {
+func loadAgentSessionRoot(dataDir string) string {
+	return loadTaskSessionRoot(dataDir)
+}
+
+func loadTaskSessionTTLDays() int {
+	if _, ok := os.LookupEnv("RASCAL_TASK_SESSION_TTL_DAYS"); ok {
+		return envNonNegativeIntOrDefault("RASCAL_TASK_SESSION_TTL_DAYS", 14)
+	}
 	if _, ok := os.LookupEnv("RASCAL_GOOSE_SESSION_TTL_DAYS"); ok {
 		return envNonNegativeIntOrDefault("RASCAL_GOOSE_SESSION_TTL_DAYS", 14)
 	}
@@ -368,4 +424,8 @@ func loadAgentSessionTTLDays() int {
 		return 14
 	}
 	return envNonNegativeIntOrDefault("RASCAL_AGENT_SESSION_TTL_DAYS", 14)
+}
+
+func loadAgentSessionTTLDays() int {
+	return loadTaskSessionTTLDays()
 }

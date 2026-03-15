@@ -33,7 +33,7 @@ func TestInstructionTextPRGitContext(t *testing.T) {
 		ID:          "run_abc123",
 		TaskID:      "task_xyz789",
 		Repo:        "acme/widgets",
-		Task:        "Address PR #137 feedback",
+		Instruction: "Address PR #137 feedback",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/task-xyz789",
 		Trigger:     "pr_comment",
@@ -65,13 +65,13 @@ func TestInstructionTextPRGitContext(t *testing.T) {
 
 func TestInstructionTextNonPRRunOmitsGitContext(t *testing.T) {
 	run := state.Run{
-		ID:         "run_abc123",
-		TaskID:     "task_xyz789",
-		Repo:       "acme/widgets",
-		Task:       "Fix flaky test",
-		BaseBranch: "main",
-		HeadBranch: "rascal/fix-flaky-test",
-		Trigger:    "issue",
+		ID:          "run_abc123",
+		TaskID:      "task_xyz789",
+		Repo:        "acme/widgets",
+		Instruction: "Fix flaky test",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/fix-flaky-test",
+		Trigger:     "issue",
 	}
 
 	got := instructionText(run)
@@ -87,7 +87,7 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 		ID:          "run_abc123",
 		TaskID:      "task_xyz789",
 		Repo:        "acme/widgets",
-		Task:        "Address PR feedback",
+		Instruction: "Address PR feedback",
 		Trigger:     "pr_comment",
 		IssueNumber: 42,
 		PRNumber:    137,
@@ -114,7 +114,7 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 		RunID:       run.ID,
 		TaskID:      run.TaskID,
 		Repo:        run.Repo,
-		Task:        run.Task,
+		Instruction: run.Instruction,
 		Trigger:     run.Trigger.String(),
 		IssueNumber: run.IssueNumber,
 		PRNumber:    run.PRNumber,
@@ -968,11 +968,11 @@ func TestHandleWebhookIssueClosedCancelsRunsAndCompletesTask(t *testing.T) {
 	defer waitForServerIdle(t, s)
 	taskID := "owner/repo#7"
 
-	runningRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "work", IssueNumber: 7})
+	runningRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "work", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create running run: %v", err)
 	}
-	queuedRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "queued", IssueNumber: 7})
+	queuedRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "queued", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create queued run: %v", err)
 	}
@@ -1033,11 +1033,11 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 	defer waitForServerIdle(t, s)
 	taskID := "owner/repo#7"
 
-	runningRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "work", IssueNumber: 7})
+	runningRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "work", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create running run: %v", err)
 	}
-	queuedRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "stale", IssueNumber: 7})
+	queuedRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "stale", IssueNumber: 7})
 	if err != nil {
 		t.Fatalf("create queued run: %v", err)
 	}
@@ -1068,8 +1068,8 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 		return false
 	}, "issue edited run queued")
 
-	if editedRun.Task != "New Title\n\nNew Body" {
-		t.Fatalf("expected updated task text, got %q", editedRun.Task)
+	if editedRun.Instruction != "New Title\n\nNew Body" {
+		t.Fatalf("expected updated task text, got %q", editedRun.Instruction)
 	}
 	if editedRun.TaskID != taskID {
 		t.Fatalf("expected edited run task id %q, got %q", taskID, editedRun.TaskID)
@@ -1089,22 +1089,22 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
-	s.cfg.AgentSession.Mode = agent.SessionModeAll
+	s.cfg.TaskSession.Mode = agent.SessionModeAll
 	defer waitForServerIdle(t, s)
 
 	const taskID = "owner/repo#7"
 	if _, err := s.store.UpsertTask(state.UpsertTaskInput{
 		ID:           taskID,
 		Repo:         "owner/repo",
-		AgentBackend: agent.BackendGoose,
+		AgentRuntime: agent.BackendGoose,
 		IssueNumber:  7,
 	}); err != nil {
 		t.Fatalf("upsert legacy task: %v", err)
 	}
 	if _, err := s.store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
 		TaskID:           taskID,
-		AgentBackend:     agent.BackendGoose,
-		BackendSessionID: "legacy-goose-session",
+		AgentRuntime:     agent.BackendGoose,
+		RuntimeSessionID: "legacy-goose-session",
 		SessionKey:       "legacy",
 		SessionRoot:      filepath.Join(t.TempDir(), "legacy-session"),
 		LastRunID:        "run_legacy",
@@ -1123,16 +1123,16 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return len(s.store.ListRuns(10)) == 1 }, "run queued")
 
 	run := s.store.ListRuns(10)[0]
-	if run.AgentBackend != agent.BackendCodex {
-		t.Fatalf("run backend = %s, want %s", run.AgentBackend, agent.BackendCodex)
+	if run.AgentRuntime != agent.BackendCodex {
+		t.Fatalf("run backend = %s, want %s", run.AgentRuntime, agent.BackendCodex)
 	}
 
 	task, ok := s.store.GetTask(taskID)
 	if !ok {
 		t.Fatalf("missing task %s", taskID)
 	}
-	if task.AgentBackend != agent.BackendCodex {
-		t.Fatalf("task backend = %s, want %s", task.AgentBackend, agent.BackendCodex)
+	if task.AgentRuntime != agent.BackendCodex {
+		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.BackendCodex)
 	}
 
 	var session state.TaskAgentSession
@@ -1141,11 +1141,11 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 		session, ok = s.store.GetTaskAgentSession(taskID)
 		return ok
 	}, "migrated task session")
-	if session.AgentBackend != agent.BackendCodex {
-		t.Fatalf("task session backend = %s, want %s", session.AgentBackend, agent.BackendCodex)
+	if session.AgentRuntime != agent.BackendCodex {
+		t.Fatalf("task session backend = %s, want %s", session.AgentRuntime, agent.BackendCodex)
 	}
-	if session.BackendSessionID != "" {
-		t.Fatalf("task session id = %q, want empty after backend migration", session.BackendSessionID)
+	if session.RuntimeSessionID != "" {
+		t.Fatalf("task session id = %q, want empty after backend migration", session.RuntimeSessionID)
 	}
 }
 
@@ -1182,10 +1182,10 @@ func TestHandleListRunsSupportsAllQuery(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	for i := 1; i <= 3; i++ {
 		_, err := s.store.AddRun(state.CreateRunInput{
-			ID:     fmt.Sprintf("run_%d", i),
-			TaskID: fmt.Sprintf("task_%d", i),
-			Repo:   "owner/repo",
-			Task:   fmt.Sprintf("Task %d", i),
+			ID:          fmt.Sprintf("run_%d", i),
+			TaskID:      fmt.Sprintf("task_%d", i),
+			Repo:        "owner/repo",
+			Instruction: fmt.Sprintf("Task %d", i),
 		})
 		if err != nil {
 			t.Fatalf("add run %d: %v", i, err)
@@ -1230,10 +1230,10 @@ func TestHandleListRunsAllIgnoresLimitValue(t *testing.T) {
 	s := newTestServer(t, &fakeLauncher{})
 	for i := 1; i <= 2; i++ {
 		_, err := s.store.AddRun(state.CreateRunInput{
-			ID:     fmt.Sprintf("run_all_%d", i),
-			TaskID: fmt.Sprintf("task_all_%d", i),
-			Repo:   "owner/repo",
-			Task:   fmt.Sprintf("Task all %d", i),
+			ID:          fmt.Sprintf("run_all_%d", i),
+			TaskID:      fmt.Sprintf("task_all_%d", i),
+			Repo:        "owner/repo",
+			Instruction: fmt.Sprintf("Task all %d", i),
 		})
 		if err != nil {
 			t.Fatalf("add run %d: %v", i, err)
@@ -1332,15 +1332,15 @@ func TestHandleWebhookIssueCommentUsesExistingPRTaskAndLastBranches(t *testing.T
 		t.Fatalf("upsert task: %v", err)
 	}
 	seedRun, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "seed_run",
-		TaskID:     taskID,
-		Repo:       repo,
-		Task:       "seed",
-		BaseBranch: baseRef,
-		HeadBranch: headRef,
-		Trigger:    runtrigger.NameCLI,
-		RunDir:     filepath.Join(t.TempDir(), "seed_run"),
-		PRNumber:   prNum,
+		ID:          "seed_run",
+		TaskID:      taskID,
+		Repo:        repo,
+		Instruction: "seed",
+		BaseBranch:  baseRef,
+		HeadBranch:  headRef,
+		Trigger:     runtrigger.NameCLI,
+		RunDir:      filepath.Join(t.TempDir(), "seed_run"),
+		PRNumber:    prNum,
 	})
 	if err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1415,15 +1415,15 @@ func TestHandleWebhookIssueCommentEditedUsesUpdatedContext(t *testing.T) {
 		t.Fatalf("upsert task: %v", err)
 	}
 	seedRun, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "seed_run_edited",
-		TaskID:     taskID,
-		Repo:       repo,
-		Task:       "seed",
-		BaseBranch: baseRef,
-		HeadBranch: headRef,
-		Trigger:    runtrigger.NameCLI,
-		RunDir:     filepath.Join(t.TempDir(), "seed_run_edited"),
-		PRNumber:   prNum,
+		ID:          "seed_run_edited",
+		TaskID:      taskID,
+		Repo:        repo,
+		Instruction: "seed",
+		BaseBranch:  baseRef,
+		HeadBranch:  headRef,
+		Trigger:     runtrigger.NameCLI,
+		RunDir:      filepath.Join(t.TempDir(), "seed_run_edited"),
+		PRNumber:    prNum,
 	})
 	if err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1603,15 +1603,15 @@ func TestHandleWebhookPullRequestReviewUsesStateFallbackContext(t *testing.T) {
 		t.Fatalf("upsert task: %v", err)
 	}
 	seedRun, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "seed_review",
-		TaskID:     taskID,
-		Repo:       repo,
-		Task:       "seed",
-		BaseBranch: baseRef,
-		HeadBranch: headRef,
-		Trigger:    runtrigger.NameCLI,
-		RunDir:     filepath.Join(t.TempDir(), "seed_review"),
-		PRNumber:   prNum,
+		ID:          "seed_review",
+		TaskID:      taskID,
+		Repo:        repo,
+		Instruction: "seed",
+		BaseBranch:  baseRef,
+		HeadBranch:  headRef,
+		Trigger:     runtrigger.NameCLI,
+		RunDir:      filepath.Join(t.TempDir(), "seed_review"),
+		PRNumber:    prNum,
 	})
 	if err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1753,15 +1753,15 @@ func TestHandleWebhookPullRequestReviewCommentIncludesInlineLocation(t *testing.
 		t.Fatalf("upsert task: %v", err)
 	}
 	seedRun, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "seed_review_comment",
-		TaskID:     taskID,
-		Repo:       repo,
-		Task:       "seed",
-		BaseBranch: baseRef,
-		HeadBranch: headRef,
-		Trigger:    runtrigger.NameCLI,
-		RunDir:     filepath.Join(t.TempDir(), "seed_review_comment"),
-		PRNumber:   prNum,
+		ID:          "seed_review_comment",
+		TaskID:      taskID,
+		Repo:        repo,
+		Instruction: "seed",
+		BaseBranch:  baseRef,
+		HeadBranch:  headRef,
+		Trigger:     runtrigger.NameCLI,
+		RunDir:      filepath.Join(t.TempDir(), "seed_review_comment"),
+		PRNumber:    prNum,
 	})
 	if err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1832,15 +1832,15 @@ func TestHandleWebhookPullRequestReviewCommentEditedBodyChangedQueuesRun(t *test
 		t.Fatalf("upsert task: %v", err)
 	}
 	seedRun, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "seed_review_comment_edited",
-		TaskID:     taskID,
-		Repo:       repo,
-		Task:       "seed",
-		BaseBranch: baseRef,
-		HeadBranch: headRef,
-		Trigger:    runtrigger.NameCLI,
-		RunDir:     filepath.Join(t.TempDir(), "seed_review_comment_edited"),
-		PRNumber:   prNum,
+		ID:          "seed_review_comment_edited",
+		TaskID:      taskID,
+		Repo:        repo,
+		Instruction: "seed",
+		BaseBranch:  baseRef,
+		HeadBranch:  headRef,
+		Trigger:     runtrigger.NameCLI,
+		RunDir:      filepath.Join(t.TempDir(), "seed_review_comment_edited"),
+		PRNumber:    prNum,
 	})
 	if err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1953,15 +1953,15 @@ func TestHandleWebhookPullRequestReviewThreadUnresolvedQueuesRun(t *testing.T) {
 		t.Fatalf("upsert task: %v", err)
 	}
 	seedRun, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "seed_review_thread",
-		TaskID:     taskID,
-		Repo:       repo,
-		Task:       "seed",
-		BaseBranch: baseRef,
-		HeadBranch: headRef,
-		Trigger:    runtrigger.NameCLI,
-		RunDir:     filepath.Join(t.TempDir(), "seed_review_thread"),
-		PRNumber:   prNum,
+		ID:          "seed_review_thread",
+		TaskID:      taskID,
+		Repo:        repo,
+		Instruction: "seed",
+		BaseBranch:  baseRef,
+		HeadBranch:  headRef,
+		Trigger:     runtrigger.NameCLI,
+		RunDir:      filepath.Join(t.TempDir(), "seed_review_thread"),
+		PRNumber:    prNum,
 	})
 	if err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -2034,13 +2034,13 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 		t.Fatalf("upsert task: %v", err)
 	}
 	threadRun, err := s.store.AddRun(state.CreateRunInput{
-		ID:       "queued_review_thread",
-		TaskID:   taskID,
-		Repo:     repo,
-		Task:     "Address unresolved review thread",
-		Trigger:  "pr_review_thread",
-		RunDir:   filepath.Join(t.TempDir(), "queued_review_thread"),
-		PRNumber: prNum,
+		ID:          "queued_review_thread",
+		TaskID:      taskID,
+		Repo:        repo,
+		Instruction: "Address unresolved review thread",
+		Trigger:     "pr_review_thread",
+		RunDir:      filepath.Join(t.TempDir(), "queued_review_thread"),
+		PRNumber:    prNum,
 	})
 	if err != nil {
 		t.Fatalf("seed thread run: %v", err)
@@ -2057,13 +2057,13 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 		t.Fatalf("write thread run target: %v", err)
 	}
 	otherThreadRun, err := s.store.AddRun(state.CreateRunInput{
-		ID:       "queued_review_thread_other",
-		TaskID:   taskID,
-		Repo:     repo,
-		Task:     "Address another unresolved review thread",
-		Trigger:  "pr_review_thread",
-		RunDir:   filepath.Join(t.TempDir(), "queued_review_thread_other"),
-		PRNumber: prNum,
+		ID:          "queued_review_thread_other",
+		TaskID:      taskID,
+		Repo:        repo,
+		Instruction: "Address another unresolved review thread",
+		Trigger:     "pr_review_thread",
+		RunDir:      filepath.Join(t.TempDir(), "queued_review_thread_other"),
+		PRNumber:    prNum,
 	})
 	if err != nil {
 		t.Fatalf("seed other thread run: %v", err)
@@ -2080,13 +2080,13 @@ func TestHandleWebhookPullRequestReviewThreadResolvedCancelsQueuedThreadRuns(t *
 		t.Fatalf("write other thread run target: %v", err)
 	}
 	otherRun, err := s.store.AddRun(state.CreateRunInput{
-		ID:       "queued_pr_comment",
-		TaskID:   taskID,
-		Repo:     repo,
-		Task:     "Address PR feedback",
-		Trigger:  "pr_comment",
-		RunDir:   filepath.Join(t.TempDir(), "queued_pr_comment"),
-		PRNumber: prNum,
+		ID:          "queued_pr_comment",
+		TaskID:      taskID,
+		Repo:        repo,
+		Instruction: "Address PR feedback",
+		Trigger:     "pr_comment",
+		RunDir:      filepath.Join(t.TempDir(), "queued_pr_comment"),
+		PRNumber:    prNum,
 	})
 	if err != nil {
 		t.Fatalf("seed comment run: %v", err)
@@ -2135,11 +2135,11 @@ func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.createAndQueueRun(runRequest{
-		TaskID:   "owner/repo#99",
-		Repo:     "owner/repo",
-		Task:     "Address PR #99 feedback",
-		Trigger:  "pr_comment",
-		PRNumber: 99,
+		TaskID:      "owner/repo#99",
+		Repo:        "owner/repo",
+		Instruction: "Address PR #99 feedback",
+		Trigger:     "pr_comment",
+		PRNumber:    99,
 		ResponseTarget: &runResponseTarget{
 			RequestedBy: " alice ",
 		},
@@ -2178,11 +2178,11 @@ func TestCreateAndQueueRunWritesReviewThreadResponseTarget(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.createAndQueueRun(runRequest{
-		TaskID:   "owner/repo#100",
-		Repo:     "owner/repo",
-		Task:     "Address PR #100 unresolved review thread",
-		Trigger:  "pr_review_thread",
-		PRNumber: 100,
+		TaskID:      "owner/repo#100",
+		Repo:        "owner/repo",
+		Instruction: "Address PR #100 unresolved review thread",
+		Trigger:     "pr_review_thread",
+		PRNumber:    100,
 		ResponseTarget: &runResponseTarget{
 			RequestedBy:    " bob ",
 			ReviewThreadID: 42,
@@ -2217,9 +2217,9 @@ func TestCreateAndQueueRunDoesNotCreateRunDirWhenEnqueueFails(t *testing.T) {
 	}
 
 	_, err := s.createAndQueueRun(runRequest{
-		TaskID: "owner/repo#101",
-		Repo:   "owner/repo",
-		Task:   "fail before enqueue persists",
+		TaskID:      "owner/repo#101",
+		Repo:        "owner/repo",
+		Instruction: "fail before enqueue persists",
 	})
 	if err == nil {
 		t.Fatal("expected enqueue failure")
@@ -2283,11 +2283,11 @@ func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	_, err := s.createAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Task: "first"})
+	_, err := s.createAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	second, err := s.createAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Task: "second"})
+	second, err := s.createAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "second"})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
@@ -2329,11 +2329,11 @@ func TestCreateAndQueueRunRespectsGlobalConcurrencyLimit(t *testing.T) {
 	s.maxConcurrent = 1
 	defer waitForServerIdle(t, s)
 
-	_, err := s.createAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Task: "first"})
+	_, err := s.createAndQueueRun(runRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	second, err := s.createAndQueueRun(runRequest{TaskID: "task-2", Repo: "owner/repo", Task: "second"})
+	second, err := s.createAndQueueRun(runRequest{TaskID: "task-2", Repo: "owner/repo", Instruction: "second"})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
@@ -2369,11 +2369,11 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	s.cfg.GitHubToken = "token"
 	taskID := "owner/repo#123"
 
-	_, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "first", PRNumber: 55})
+	_, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "first", PRNumber: 55})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	queuedRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Task: "queued", PRNumber: 55})
+	queuedRun, err := s.createAndQueueRun(runRequest{TaskID: taskID, Repo: "owner/repo", Instruction: "queued", PRNumber: 55})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
@@ -2386,7 +2386,7 @@ func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 		ID:          "run_awaiting_merge",
 		TaskID:      taskID,
 		Repo:        "owner/repo",
-		Task:        "await merge",
+		Instruction: "await merge",
 		Trigger:     "pr_comment",
 		RunDir:      t.TempDir(),
 		IssueNumber: 55,
@@ -2441,7 +2441,7 @@ func TestMergedPRMatchesRepositoryCaseInsensitively(t *testing.T) {
 		ID:          "run_case_insensitive_merge",
 		TaskID:      taskID,
 		Repo:        "owner/repo",
-		Task:        "await merge",
+		Instruction: "await merge",
 		Trigger:     "pr_comment",
 		RunDir:      t.TempDir(),
 		IssueNumber: 55,
@@ -2505,7 +2505,7 @@ func TestClosedUnmergedPRCancelsAwaitingFeedbackRuns(t *testing.T) {
 		ID:          "run_unmerged",
 		TaskID:      taskID,
 		Repo:        "owner/repo",
-		Task:        "wait for merge",
+		Instruction: "wait for merge",
 		Trigger:     "pr_comment",
 		RunDir:      t.TempDir(),
 		IssueNumber: 99,
@@ -2558,7 +2558,7 @@ func TestClosedUnmergedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 		ID:          "run_merged_guard",
 		TaskID:      taskID,
 		Repo:        "owner/repo",
-		Task:        "already merged",
+		Instruction: "already merged",
 		Trigger:     "pr_comment",
 		RunDir:      t.TempDir(),
 		IssueNumber: 321,
@@ -2607,7 +2607,7 @@ func TestReopenedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 		ID:          "run_reopened_guard",
 		TaskID:      taskID,
 		Repo:        "owner/repo",
-		Task:        "already merged",
+		Instruction: "already merged",
 		Trigger:     "pr_comment",
 		RunDir:      t.TempDir(),
 		IssueNumber: 654,
@@ -2658,9 +2658,9 @@ func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.createAndQueueRun(runRequest{
-		TaskID: "owner/repo#retry",
-		Repo:   "owner/repo",
-		Task:   "retry task",
+		TaskID:      "owner/repo#retry",
+		Repo:        "owner/repo",
+		Instruction: "retry task",
 	})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -2682,19 +2682,19 @@ func TestExecuteRunSetsAgentSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	s.cfg.AgentBackend = agent.BackendGoose
+	s.cfg.AgentRuntime = agent.BackendGoose
 	sessionRoot := filepath.Join(t.TempDir(), "goose-sessions")
-	s.cfg.AgentSession = config.AgentSessionConfig{
+	s.cfg.TaskSession = config.AgentSessionConfig{
 		Mode:    agent.SessionModePROnly,
 		Root:    sessionRoot,
 		TTLDays: 0,
 	}
 
 	run, err := s.createAndQueueRun(runRequest{
-		TaskID:  "owner/repo#123",
-		Repo:    "owner/repo",
-		Task:    "Address PR #123 feedback",
-		Trigger: "pr_comment",
+		TaskID:      "owner/repo#123",
+		Repo:        "owner/repo",
+		Instruction: "Address PR #123 feedback",
+		Trigger:     "pr_comment",
 	})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -2709,17 +2709,17 @@ func TestExecuteRunSetsAgentSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 		t.Fatalf("expected 1 launcher call, got %d", launcher.Calls())
 	}
 	spec := launcher.specs[0]
-	if !spec.AgentSession.Resume {
-		t.Fatal("expected AgentSession.Resume=true for pr-only comment trigger")
+	if !spec.TaskSession.Resume {
+		t.Fatal("expected TaskSession.Resume=true for pr-only comment trigger")
 	}
-	if spec.AgentSession.TaskKey == "" {
-		t.Fatal("expected AgentSession.TaskKey to be populated")
+	if spec.TaskSession.TaskKey == "" {
+		t.Fatal("expected TaskSession.TaskKey to be populated")
 	}
-	if spec.AgentSession.BackendSessionID == "" {
-		t.Fatal("expected AgentSession.BackendSessionID to be populated")
+	if spec.TaskSession.RuntimeSessionID == "" {
+		t.Fatal("expected TaskSession.RuntimeSessionID to be populated")
 	}
-	if !strings.HasPrefix(spec.AgentSession.TaskDir, sessionRoot+string(os.PathSeparator)) {
-		t.Fatalf("unexpected AgentSession.TaskDir %q (root %q)", spec.AgentSession.TaskDir, sessionRoot)
+	if !strings.HasPrefix(spec.TaskSession.TaskDir, sessionRoot+string(os.PathSeparator)) {
+		t.Fatalf("unexpected TaskSession.TaskDir %q (root %q)", spec.TaskSession.TaskDir, sessionRoot)
 	}
 }
 
@@ -2729,18 +2729,18 @@ func TestExecuteRunDisablesAgentSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	s.cfg.AgentBackend = agent.BackendGoose
-	s.cfg.AgentSession = config.AgentSessionConfig{
+	s.cfg.AgentRuntime = agent.BackendGoose
+	s.cfg.TaskSession = config.AgentSessionConfig{
 		Mode:    agent.SessionModePROnly,
 		Root:    filepath.Join(t.TempDir(), "goose-sessions"),
 		TTLDays: 0,
 	}
 
 	run, err := s.createAndQueueRun(runRequest{
-		TaskID:  "owner/repo#124",
-		Repo:    "owner/repo",
-		Task:    "Initial issue run",
-		Trigger: "issue_label",
+		TaskID:      "owner/repo#124",
+		Repo:        "owner/repo",
+		Instruction: "Initial issue run",
+		Trigger:     "issue_label",
 	})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -2755,11 +2755,11 @@ func TestExecuteRunDisablesAgentSessionSpecForNonPROnlyTrigger(t *testing.T) {
 		t.Fatalf("expected 1 launcher call, got %d", launcher.Calls())
 	}
 	spec := launcher.specs[0]
-	if spec.AgentSession.Resume {
-		t.Fatal("expected AgentSession.Resume=false for non PR-only trigger")
+	if spec.TaskSession.Resume {
+		t.Fatal("expected TaskSession.Resume=false for non PR-only trigger")
 	}
-	if spec.AgentSession.TaskDir != "" || spec.AgentSession.TaskKey != "" || spec.AgentSession.BackendSessionID != "" {
-		t.Fatalf("expected empty agent session fields when resume disabled, got dir=%q key=%q name=%q", spec.AgentSession.TaskDir, spec.AgentSession.TaskKey, spec.AgentSession.BackendSessionID)
+	if spec.TaskSession.TaskDir != "" || spec.TaskSession.TaskKey != "" || spec.TaskSession.RuntimeSessionID != "" {
+		t.Fatalf("expected empty agent session fields when resume disabled, got dir=%q key=%q name=%q", spec.TaskSession.TaskDir, spec.TaskSession.TaskKey, spec.TaskSession.RuntimeSessionID)
 	}
 }
 
@@ -2817,7 +2817,7 @@ func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 		ID:          "run_comment_completion",
 		TaskID:      "owner/repo#77",
 		Repo:        "owner/repo",
-		Task:        "Address PR #77 feedback",
+		Instruction: "Address PR #77 feedback",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/pr-77",
 		Trigger:     "pr_comment",
@@ -2901,14 +2901,14 @@ func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_token_usage",
-		TaskID:     "owner/repo#88",
-		Repo:       "owner/repo",
-		Task:       "Capture token usage",
-		BaseBranch: "main",
-		HeadBranch: "rascal/pr-88",
-		Trigger:    "issue_label",
-		RunDir:     t.TempDir(),
+		ID:          "run_token_usage",
+		TaskID:      "owner/repo#88",
+		Repo:        "owner/repo",
+		Instruction: "Capture token usage",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/pr-88",
+		Trigger:     "issue_label",
+		RunDir:      t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -2924,8 +2924,8 @@ func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected run token usage for %s", run.ID)
 	}
-	if usage.Backend != agent.BackendCodex {
-		t.Fatalf("backend = %q, want codex", usage.Backend)
+	if usage.AgentRuntime != agent.BackendCodex {
+		t.Fatalf("backend = %q, want codex", usage.AgentRuntime)
 	}
 	if usage.Model != "gpt-5-codex" {
 		t.Fatalf("model = %q, want gpt-5-codex", usage.Model)
@@ -2970,7 +2970,7 @@ func TestExecuteRunPostsDetailsWithoutCommitClaimWhenCommitMessageMissing(t *tes
 		ID:          "run_comment_no_commit",
 		TaskID:      "owner/repo#16",
 		Repo:        "owner/repo",
-		Task:        "Address PR #52 feedback",
+		Instruction: "Address PR #52 feedback",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/pr-52",
 		Trigger:     "pr_comment",
@@ -3040,7 +3040,7 @@ func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 		ID:          "run_comment_usage_limit",
 		TaskID:      "owner/repo#53",
 		Repo:        "owner/repo",
-		Task:        "Address PR #53 feedback",
+		Instruction: "Address PR #53 feedback",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/pr-53",
 		Trigger:     "pr_comment",
@@ -3125,7 +3125,7 @@ func TestExecuteRunRequeuesIssueTriggeredRunForUsageLimit(t *testing.T) {
 		ID:          "run_issue_usage_limit",
 		TaskID:      "owner/repo#16",
 		Repo:        "owner/repo",
-		Task:        "Investigate issue #16",
+		Instruction: "Investigate issue #16",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/issue-16",
 		Trigger:     "issue_label",
@@ -3186,7 +3186,7 @@ func TestExecuteRunDoesNotRequeueSuccessfulRunWhenTranscriptMentionsUsageLimit(t
 		ID:          "run_success_usage_limit_false_positive",
 		TaskID:      "owner/repo#54",
 		Repo:        "owner/repo",
-		Task:        "Implement review thread webhook handling",
+		Instruction: "Implement review thread webhook handling",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/pr-54",
 		Trigger:     "issue_label",
@@ -3235,7 +3235,7 @@ func TestExecuteRunPostsTerminalFailureFeedbackForCredentialLeaseFailure(t *test
 		ID:          "run_credential_failure_feedback",
 		TaskID:      "owner/repo#42",
 		Repo:        "owner/repo",
-		Task:        "Investigate issue #42",
+		Instruction: "Investigate issue #42",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/issue-42",
 		Trigger:     "issue_label",
@@ -3297,9 +3297,9 @@ func TestScheduleRunsResumesAfterPauseDeadline(t *testing.T) {
 	}
 
 	if _, err := s.createAndQueueRun(runRequest{
-		TaskID: "owner/repo#resume",
-		Repo:   "owner/repo",
-		Task:   "resume after pause",
+		TaskID:      "owner/repo#resume",
+		Repo:        "owner/repo",
+		Instruction: "resume after pause",
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -3369,7 +3369,7 @@ func TestPostRunStartCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 		ID:          "run_start_comment_dedupe",
 		TaskID:      "owner/repo#87",
 		Repo:        "owner/repo",
-		Task:        "Investigate issue #87",
+		Instruction: "Investigate issue #87",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/issue-87",
 		Trigger:     "issue_label",
@@ -3435,7 +3435,7 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 		ID:          "run_start_comment_retry",
 		TaskID:      "owner/repo#86",
 		Repo:        "owner/repo",
-		Task:        "Investigate issue #86",
+		Instruction: "Investigate issue #86",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/issue-86",
 		Trigger:     "issue_label",
@@ -3494,7 +3494,7 @@ func TestPostRunStartCommentIncludesRunnerBuildCommit(t *testing.T) {
 		ID:          "run_start_comment_commit",
 		TaskID:      "owner/repo#85",
 		Repo:        "owner/repo",
-		Task:        "Investigate issue #85",
+		Instruction: "Investigate issue #85",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/issue-85",
 		Trigger:     "issue_label",
@@ -3547,15 +3547,15 @@ func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	s.cfg.GitHubToken = "token"
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_comment_dedupe",
-		TaskID:     "owner/repo#88",
-		Repo:       "owner/repo",
-		Task:       "Address PR #88 feedback",
-		BaseBranch: "main",
-		HeadBranch: "rascal/pr-88",
-		Trigger:    "pr_comment",
-		RunDir:     t.TempDir(),
-		PRNumber:   88,
+		ID:          "run_comment_dedupe",
+		TaskID:      "owner/repo#88",
+		Repo:        "owner/repo",
+		Instruction: "Address PR #88 feedback",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/pr-88",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		PRNumber:    88,
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -3608,15 +3608,15 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 	s.cfg.GitHubToken = "token"
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_comment_retry",
-		TaskID:     "owner/repo#89",
-		Repo:       "owner/repo",
-		Task:       "Address PR #89 feedback",
-		BaseBranch: "main",
-		HeadBranch: "rascal/pr-89",
-		Trigger:    "pr_comment",
-		RunDir:     t.TempDir(),
-		PRNumber:   89,
+		ID:          "run_comment_retry",
+		TaskID:      "owner/repo#89",
+		Repo:        "owner/repo",
+		Instruction: "Address PR #89 feedback",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/pr-89",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		PRNumber:    89,
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -3670,15 +3670,15 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 	s.cfg.GitHubToken = "token"
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_failure_retry",
-		TaskID:     "owner/repo#90",
-		Repo:       "owner/repo",
-		Task:       "Address PR #90 feedback",
-		BaseBranch: "main",
-		HeadBranch: "rascal/pr-90",
-		Trigger:    "pr_comment",
-		RunDir:     t.TempDir(),
-		PRNumber:   90,
+		ID:          "run_failure_retry",
+		TaskID:      "owner/repo#90",
+		Repo:        "owner/repo",
+		Instruction: "Address PR #90 feedback",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/pr-90",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		PRNumber:    90,
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -3866,11 +3866,11 @@ func TestHandleCancelRunQueued(t *testing.T) {
 		waitForServerIdle(t, s)
 	}()
 
-	first, err := s.createAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Task: "first"})
+	first, err := s.createAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	second, err := s.createAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Task: "second"})
+	second, err := s.createAndQueueRun(runRequest{TaskID: "t1", Repo: "owner/repo", Instruction: "second"})
 	if err != nil {
 		t.Fatalf("create second run: %v", err)
 	}
@@ -3900,7 +3900,7 @@ func TestHandleCancelRunActiveUsesUserReason(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "active-cancel", Repo: "owner/repo", Task: "cancel me"})
+	run, err := s.createAndQueueRun(runRequest{TaskID: "active-cancel", Repo: "owner/repo", Instruction: "cancel me"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -3933,7 +3933,7 @@ func TestCanceledRunDoesNotTransitionToSuccess(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "cancel-guard", Repo: "owner/repo", Task: "guard cancel"})
+	run, err := s.createAndQueueRun(runRequest{TaskID: "cancel-guard", Repo: "owner/repo", Instruction: "guard cancel"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -3985,7 +3985,7 @@ func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "drain-reason", Repo: "owner/repo", Task: "drain"})
+	run, err := s.createAndQueueRun(runRequest{TaskID: "drain-reason", Repo: "owner/repo", Instruction: "drain"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4007,12 +4007,12 @@ func TestExecuteRunHonorsPersistedCancelBeforeStart(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_pre_cancel",
-		TaskID:     "task_pre_cancel",
-		Repo:       "owner/repo",
-		Task:       "should not start",
-		BaseBranch: "main",
-		RunDir:     t.TempDir(),
+		ID:          "run_pre_cancel",
+		TaskID:      "task_pre_cancel",
+		Repo:        "owner/repo",
+		Instruction: "should not start",
+		BaseBranch:  "main",
+		RunDir:      t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4048,7 +4048,7 @@ func TestPersistedRunCancelStopsActiveRun(t *testing.T) {
 		waitForServerIdle(t, s)
 	}()
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "persisted-cancel", Repo: "owner/repo", Task: "cancel while running"})
+	run, err := s.createAndQueueRun(runRequest{TaskID: "persisted-cancel", Repo: "owner/repo", Instruction: "cancel while running"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4077,12 +4077,12 @@ func TestRecoverQueueStateAppliesPersistedCancel(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_recover_cancel",
-		TaskID:     "task_recover_cancel",
-		Repo:       "owner/repo",
-		Task:       "recover queued cancel",
-		BaseBranch: "main",
-		RunDir:     t.TempDir(),
+		ID:          "run_recover_cancel",
+		TaskID:      "task_recover_cancel",
+		Repo:        "owner/repo",
+		Instruction: "recover queued cancel",
+		BaseBranch:  "main",
+		RunDir:      t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4110,12 +4110,12 @@ func TestRecoverRunningRunExpiredLeaseRequeues(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_recover_expired_lease",
-		TaskID:     "task_recover_expired_lease",
-		Repo:       "owner/repo",
-		Task:       "recover running expired lease",
-		BaseBranch: "main",
-		RunDir:     t.TempDir(),
+		ID:          "run_recover_expired_lease",
+		TaskID:      "task_recover_expired_lease",
+		Repo:        "owner/repo",
+		Instruction: "recover running expired lease",
+		BaseBranch:  "main",
+		RunDir:      t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4151,12 +4151,12 @@ func TestRecoverRunningRunValidLeaseKeepsRunning(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_recover_valid_lease",
-		TaskID:     "task_recover_valid_lease",
-		Repo:       "owner/repo",
-		Task:       "recover running valid lease",
-		BaseBranch: "main",
-		RunDir:     t.TempDir(),
+		ID:          "run_recover_valid_lease",
+		TaskID:      "task_recover_valid_lease",
+		Repo:        "owner/repo",
+		Instruction: "recover running valid lease",
+		BaseBranch:  "main",
+		RunDir:      t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4185,12 +4185,12 @@ func TestRecoverRunningRunWithoutLeaseOldStartRequeues(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_recover_no_lease_old",
-		TaskID:     "task_recover_no_lease_old",
-		Repo:       "owner/repo",
-		Task:       "recover running no lease old start",
-		BaseBranch: "main",
-		RunDir:     t.TempDir(),
+		ID:          "run_recover_no_lease_old",
+		TaskID:      "task_recover_no_lease_old",
+		Repo:        "owner/repo",
+		Instruction: "recover running no lease old start",
+		BaseBranch:  "main",
+		RunDir:      t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4224,7 +4224,7 @@ func TestExecuteRunPersistsRunExecutionHandle(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "task_exec_handle", Repo: "owner/repo", Task: "persist execution handle"})
+	run, err := s.createAndQueueRun(runRequest{TaskID: "task_exec_handle", Repo: "owner/repo", Instruction: "persist execution handle"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4249,7 +4249,7 @@ func TestRecoverRunningRunAdoptsDetachedExecution(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_adopt", Repo: "owner/repo", Task: "adopt detached"})
+	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_adopt", Repo: "owner/repo", Instruction: "adopt detached"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4298,7 +4298,7 @@ func TestDrainReleaseDoesNotDeleteAdoptedLease(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_safe_lease_release", Repo: "owner/repo", Task: "safe lease release"})
+	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_safe_lease_release", Repo: "owner/repo", Instruction: "safe lease release"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4338,13 +4338,13 @@ func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_recover_exited_exec",
-		TaskID:     "task_recover_exited_exec",
-		Repo:       "owner/repo",
-		Task:       "recover exited detached run",
-		BaseBranch: "main",
-		HeadBranch: "rascal/recover-exited",
-		RunDir:     t.TempDir(),
+		ID:          "run_recover_exited_exec",
+		TaskID:      "task_recover_exited_exec",
+		Repo:        "owner/repo",
+		Instruction: "recover exited detached run",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/recover-exited",
+		RunDir:      t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4357,7 +4357,7 @@ func TestRecoverRunningRunFinalizesExitedDetachedExecution(t *testing.T) {
 		RunID:       run.ID,
 		TaskID:      run.TaskID,
 		Repo:        run.Repo,
-		Task:        run.Task,
+		Instruction: run.Instruction,
 		BaseBranch:  run.BaseBranch,
 		HeadBranch:  run.HeadBranch,
 		Trigger:     runtrigger.Normalize(run.Trigger.String()),
@@ -4407,12 +4407,12 @@ func TestRecoverRunningRunMissingDetachedExecutionFails(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_recover_missing_exec",
-		TaskID:     "task_recover_missing_exec",
-		Repo:       "owner/repo",
-		Task:       "recover missing detached run",
-		BaseBranch: "main",
-		RunDir:     t.TempDir(),
+		ID:          "run_recover_missing_exec",
+		TaskID:      "task_recover_missing_exec",
+		Repo:        "owner/repo",
+		Instruction: "recover missing detached run",
+		BaseBranch:  "main",
+		RunDir:      t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4448,12 +4448,12 @@ func TestRecoverRunningRunAdoptsByStableContainerName(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_recover_by_name",
-		TaskID:     "task_recover_by_name",
-		Repo:       "owner/repo",
-		Task:       "recover by stable name",
-		BaseBranch: "main",
-		RunDir:     t.TempDir(),
+		ID:          "run_recover_by_name",
+		TaskID:      "task_recover_by_name",
+		Repo:        "owner/repo",
+		Instruction: "recover by stable name",
+		BaseBranch:  "main",
+		RunDir:      t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4463,12 +4463,12 @@ func TestRecoverRunningRunAdoptsByStableContainerName(t *testing.T) {
 	}
 
 	handle, err := launcher.StartDetached(context.Background(), runner.Spec{
-		RunID:      run.ID,
-		TaskID:     run.TaskID,
-		Repo:       run.Repo,
-		Task:       run.Task,
-		BaseBranch: run.BaseBranch,
-		RunDir:     run.RunDir,
+		RunID:       run.ID,
+		TaskID:      run.TaskID,
+		Repo:        run.Repo,
+		Instruction: run.Instruction,
+		BaseBranch:  run.BaseBranch,
+		RunDir:      run.RunDir,
 	})
 	if err != nil {
 		t.Fatalf("start detached fake execution: %v", err)
@@ -4504,7 +4504,7 @@ func TestCancelRunWorksAfterAdoptionByDifferentInstance(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_cancel_adopt", Repo: "owner/repo", Task: "cancel after adopt"})
+	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_cancel_adopt", Repo: "owner/repo", Instruction: "cancel after adopt"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4551,7 +4551,7 @@ func TestStopRunSupervisorsCatchesInFlightSupervisorRegistration(t *testing.T) {
 		<-releaseBeforeSupervise
 	}
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "task_stop_supervisor_race", Repo: "owner/repo", Task: "stop supervisor race"})
+	run, err := s.createAndQueueRun(runRequest{TaskID: "task_stop_supervisor_race", Repo: "owner/repo", Instruction: "stop supervisor race"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4581,7 +4581,7 @@ func TestLateCancelDoesNotOverwriteSuccessfulCompletion(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "task_late_cancel_success", Repo: "owner/repo", Task: "late cancel success"})
+	run, err := s.createAndQueueRun(runRequest{TaskID: "task_late_cancel_success", Repo: "owner/repo", Instruction: "late cancel success"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4609,7 +4609,7 @@ func TestRepeatedHandoffPreservesDetachedExecutionHandle(t *testing.T) {
 	statePath := filepath.Join(dataDir, "state.db")
 
 	s1 := newTestServerWithPaths(t, launcher, dataDir, statePath, "instance-a")
-	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_repeated_handoff", Repo: "owner/repo", Task: "repeated handoff"})
+	run, err := s1.createAndQueueRun(runRequest{TaskID: "task_repeated_handoff", Repo: "owner/repo", Instruction: "repeated handoff"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4669,7 +4669,7 @@ func TestDrainStopsSupervisionWithoutCancelingDetachedRun(t *testing.T) {
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
 
-	run, err := s.createAndQueueRun(runRequest{TaskID: "task_drain_detached", Repo: "owner/repo", Task: "drain without cancel"})
+	run, err := s.createAndQueueRun(runRequest{TaskID: "task_drain_detached", Repo: "owner/repo", Instruction: "drain without cancel"})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4706,12 +4706,12 @@ func TestHandleRunLogsRespectsLines(t *testing.T) {
 
 	runDir := t.TempDir()
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_logs",
-		TaskID:     "task_logs",
-		Repo:       "owner/repo",
-		Task:       "show logs",
-		BaseBranch: "main",
-		RunDir:     runDir,
+		ID:          "run_logs",
+		TaskID:      "task_logs",
+		Repo:        "owner/repo",
+		Instruction: "show logs",
+		BaseBranch:  "main",
+		RunDir:      runDir,
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4751,12 +4751,12 @@ func TestHandleRunLogsJSONIncludesStatusAndDone(t *testing.T) {
 
 	runDir := t.TempDir()
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_logs_json",
-		TaskID:     "task_logs_json",
-		Repo:       "owner/repo",
-		Task:       "show logs as json",
-		BaseBranch: "main",
-		RunDir:     runDir,
+		ID:          "run_logs_json",
+		TaskID:      "task_logs_json",
+		Repo:        "owner/repo",
+		Instruction: "show logs as json",
+		BaseBranch:  "main",
+		RunDir:      runDir,
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4808,12 +4808,12 @@ func TestHandleRunLogsMissingAgentFileStillReturnsRunnerLogs(t *testing.T) {
 
 	runDir := t.TempDir()
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_logs_missing_goose",
-		TaskID:     "task_logs_missing_goose",
-		Repo:       "owner/repo",
-		Task:       "show logs without agent output",
-		BaseBranch: "main",
-		RunDir:     runDir,
+		ID:          "run_logs_missing_goose",
+		TaskID:      "task_logs_missing_goose",
+		Repo:        "owner/repo",
+		Instruction: "show logs without agent output",
+		BaseBranch:  "main",
+		RunDir:      runDir,
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4849,12 +4849,12 @@ func TestHandleRunLogsFallsBackToLegacyGooseLogFile(t *testing.T) {
 
 	runDir := t.TempDir()
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_logs_legacy_goose",
-		TaskID:     "task_logs_legacy_goose",
-		Repo:       "owner/repo",
-		Task:       "show logs from legacy file",
-		BaseBranch: "main",
-		RunDir:     runDir,
+		ID:          "run_logs_legacy_goose",
+		TaskID:      "task_logs_legacy_goose",
+		Repo:        "owner/repo",
+		Instruction: "show logs from legacy file",
+		BaseBranch:  "main",
+		RunDir:      runDir,
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4893,12 +4893,12 @@ func TestHandleRunLogsRejectsInvalidFormat(t *testing.T) {
 
 	runDir := t.TempDir()
 	run, err := s.store.AddRun(state.CreateRunInput{
-		ID:         "run_logs_bad_format",
-		TaskID:     "task_logs_bad_format",
-		Repo:       "owner/repo",
-		Task:       "bad format",
-		BaseBranch: "main",
-		RunDir:     runDir,
+		ID:          "run_logs_bad_format",
+		TaskID:      "task_logs_bad_format",
+		Repo:        "owner/repo",
+		Instruction: "bad format",
+		BaseBranch:  "main",
+		RunDir:      runDir,
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -4973,9 +4973,9 @@ func TestCreateAndQueueRunRejectedWhenDraining(t *testing.T) {
 
 	s.beginDrain()
 	_, err := s.createAndQueueRun(runRequest{
-		TaskID: "owner/repo#1",
-		Repo:   "owner/repo",
-		Task:   "should be rejected",
+		TaskID:      "owner/repo#1",
+		Repo:        "owner/repo",
+		Instruction: "should be rejected",
 	})
 	if !errors.Is(err, errServerDraining) {
 		t.Fatalf("expected errServerDraining, got %v", err)
@@ -4992,11 +4992,11 @@ func TestBeginDrainLeavesQueuedRunsForNextSlot(t *testing.T) {
 		waitForServerIdle(t, s)
 	}()
 
-	first, err := s.createAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Task: "first"})
+	first, err := s.createAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Instruction: "first"})
 	if err != nil {
 		t.Fatalf("create first run: %v", err)
 	}
-	queued, err := s.createAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Task: "queued"})
+	queued, err := s.createAndQueueRun(runRequest{TaskID: "owner/repo#drain", Repo: "owner/repo", Instruction: "queued"})
 	if err != nil {
 		t.Fatalf("create queued run: %v", err)
 	}

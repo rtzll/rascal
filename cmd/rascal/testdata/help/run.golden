@@ -1,20 +1,20 @@
-Start a run for a repository/task pair, or create a run from an issue reference. The repository must be in OWNER/REPO form.
+Start a run for a repository/instruction pair, or create a run from an issue reference. The repository must be in OWNER/REPO form.
 
 Usage:
   rascal run [flags]
 
 Examples:
 rascal run -R OWNER/REPO -t "Fix flaky tests"
-rascal run --repo OWNER/REPO --task "Refactor parser" --output json
+rascal run --repo OWNER/REPO --instruction "Refactor parser" --output json
 rascal run --issue OWNER/REPO#123
 
 Flags:
   -b, --base-branch string   base branch (default "main")
       --debug                stream detailed agent execution logs (use --debug=false to reduce verbosity) (default true)
   -h, --help                 help for run
+  -t, --instruction string   instruction text
       --issue string         issue reference in OWNER/REPO#NUMBER form
   -R, --repo string          repository in OWNER/REPO form
-  -t, --task string          task text
 
 Global Flags:
       --api-token string         orchestrator API token

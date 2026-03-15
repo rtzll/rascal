@@ -31,14 +31,14 @@ type StartCommentInput struct {
 	RunID             string
 	RequestedBy       string
 	Trigger           runtrigger.Name
-	Backend           agent.Backend
+	AgentRuntime      agent.Runtime
 	RunnerCommit      string
 	BaseBranch        string
 	HeadBranch        string
 	SessionMode       string
 	SessionResume     bool
 	Debug             bool
-	Task              string
+	Instruction       string
 	Context           string
 	QueueDelaySeconds *int64
 }
@@ -193,8 +193,8 @@ func BuildStartComment(in StartCommentInput) string {
 	if trigger := strings.TrimSpace(in.Trigger.String()); trigger != "" {
 		details = append(details, fmt.Sprintf("- Trigger: `%s`", trigger))
 	}
-	if backend := strings.TrimSpace(in.Backend.String()); backend != "" {
-		details = append(details, fmt.Sprintf("- Backend: `%s`", backend))
+	if runtime := strings.TrimSpace(in.AgentRuntime.String()); runtime != "" {
+		details = append(details, fmt.Sprintf("- Agent Runtime: `%s`", runtime))
 	}
 	if runnerCommit := strings.TrimSpace(in.RunnerCommit); runnerCommit != "" {
 		details = append(details, fmt.Sprintf("- Runner commit: `%s`", runnerCommit))
@@ -210,8 +210,8 @@ func BuildStartComment(in StartCommentInput) string {
 	if in.QueueDelaySeconds != nil {
 		details = append(details, fmt.Sprintf("- Queue delay: `%s`", FormatDuration(*in.QueueDelaySeconds)))
 	}
-	if task := compactCommentText(in.Task, 280); task != "" {
-		details = append(details, "- Task: "+task)
+	if instruction := compactCommentText(in.Instruction, 280); instruction != "" {
+		details = append(details, "- Instruction: "+instruction)
 	}
 	if contextText := compactCommentText(in.Context, 280); contextText != "" {
 		details = append(details, "- Context: "+contextText)

@@ -298,7 +298,7 @@ func TestSystemdServiceContentUsesMixedKillModeForDrain(t *testing.T) {
 
 func TestServerEnvFileEnablesAgentSessionsByDefault(t *testing.T) {
 	content := serverEnvFile(testDeployConfig())
-	if !strings.Contains(content, "RASCAL_AGENT_SESSION_MODE=all") {
+	if !strings.Contains(content, "RASCAL_TASK_SESSION_MODE=all") {
 		t.Fatalf("expected agent sessions enabled by default, got:\n%s", content)
 	}
 }
@@ -319,7 +319,7 @@ func testDeployConfig() Config {
 		SSHUser:          "root",
 		SSHPort:          22,
 		Domain:           "rascal.example.com",
-		AgentBackend:     agent.BackendCodex,
+		AgentRuntime:     agent.BackendCodex,
 		RunnerImage:      defaults.CodexRunnerImageTag,
 		RunnerImageGoose: defaults.GooseRunnerImageTag,
 		RunnerImageCodex: defaults.CodexRunnerImageTag,

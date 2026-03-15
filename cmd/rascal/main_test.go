@@ -55,9 +55,9 @@ func TestBuildCreateTaskPayloadForRun(t *testing.T) {
 	t.Parallel()
 
 	req := buildCreateTaskPayload(createTaskPayloadInput{
-		Repo:       "owner/repo",
-		Task:       "Fix flaky tests",
-		BaseBranch: "main",
+		Repo:        "owner/repo",
+		Instruction: "Fix flaky tests",
+		BaseBranch:  "main",
 	})
 
 	if req.path != "/v1/tasks" {
@@ -72,8 +72,8 @@ func TestBuildCreateTaskPayloadForRun(t *testing.T) {
 	if req.task.Repo != "owner/repo" {
 		t.Fatalf("repo = %q, want owner/repo", req.task.Repo)
 	}
-	if req.task.Task != "Fix flaky tests" {
-		t.Fatalf("task = %q, want Fix flaky tests", req.task.Task)
+	if req.task.Instruction != "Fix flaky tests" {
+		t.Fatalf("task = %q, want Fix flaky tests", req.task.Instruction)
 	}
 	if req.task.BaseBranch != "main" {
 		t.Fatalf("base_branch = %q, want main", req.task.BaseBranch)
@@ -94,12 +94,12 @@ func TestBuildCreateTaskPayloadForRetry(t *testing.T) {
 
 	debug := false
 	req := buildCreateTaskPayload(createTaskPayloadInput{
-		TaskID:     "task_1",
-		Repo:       "owner/repo",
-		Task:       "Retry task",
-		BaseBranch: "main",
-		Trigger:    runtrigger.NameRetry,
-		Debug:      &debug,
+		TaskID:      "task_1",
+		Repo:        "owner/repo",
+		Instruction: "Retry task",
+		BaseBranch:  "main",
+		Trigger:     runtrigger.NameRetry,
+		Debug:       &debug,
 	})
 
 	if req.path != "/v1/tasks" {
@@ -126,7 +126,7 @@ func TestBuildCreateTaskPayloadForIssue(t *testing.T) {
 	req := buildCreateTaskPayload(createTaskPayloadInput{
 		Repo:        "owner/repo",
 		IssueNumber: 42,
-		Task:        "ignored",
+		Instruction: "ignored",
 		BaseBranch:  "ignored",
 		Trigger:     runtrigger.Name("ignored"),
 		Debug:       &debug,
@@ -454,8 +454,8 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := deployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner-goose:latest" {
 		t.Fatalf("deploy default runner-image = %q, want rascal-runner-goose:latest", got)
 	}
-	if got := deployCmd.Flags().Lookup("agent-backend").DefValue; got != "codex" {
-		t.Fatalf("deploy default agent-backend = %q, want codex", got)
+	if got := deployCmd.Flags().Lookup("agent-runtime").DefValue; got != "codex" {
+		t.Fatalf("deploy default agent-runtime = %q, want codex", got)
 	}
 	if got := deployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
 		t.Fatalf("deploy default upload-env = %q, want false", got)
@@ -482,8 +482,8 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 	if got := infraDeployCmd.Flags().Lookup("runner-image").DefValue; got != "rascal-runner-goose:latest" {
 		t.Fatalf("infra deploy-existing default runner-image = %q, want rascal-runner-goose:latest", got)
 	}
-	if got := infraDeployCmd.Flags().Lookup("agent-backend").DefValue; got != "codex" {
-		t.Fatalf("infra deploy-existing default agent-backend = %q, want codex", got)
+	if got := infraDeployCmd.Flags().Lookup("agent-runtime").DefValue; got != "codex" {
+		t.Fatalf("infra deploy-existing default agent-runtime = %q, want codex", got)
 	}
 	if got := infraDeployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
 		t.Fatalf("infra deploy-existing default upload-env = %q, want false", got)
@@ -1237,8 +1237,8 @@ func TestRunCreatesTaskPayload(t *testing.T) {
 	if payload.Repo != "owner/repo" {
 		t.Fatalf("unexpected repo payload: %v", payload.Repo)
 	}
-	if payload.Task != "Fix flaky tests" {
-		t.Fatalf("unexpected task payload: %v", payload.Task)
+	if payload.Instruction != "Fix flaky tests" {
+		t.Fatalf("unexpected task payload: %v", payload.Instruction)
 	}
 	if payload.BaseBranch != "main" {
 		t.Fatalf("expected default base_branch main, got: %v", payload.BaseBranch)
@@ -1363,7 +1363,7 @@ func TestRetryOmitsDebugByDefault(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
 			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{
-				ID: "run_old", TaskID: "task_1", Repo: "owner/repo", Task: "Fix it", BaseBranch: "main", Status: state.StatusCanceled,
+				ID: "run_old", TaskID: "task_1", Repo: "owner/repo", Instruction: "Fix it", BaseBranch: "main", Status: state.StatusCanceled,
 			}}); err != nil {
 				t.Fatalf("encode response: %v", err)
 			}
@@ -1422,7 +1422,7 @@ func TestRetrySendsExplicitDebugOverride(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
 			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{
-				ID: "run_old", TaskID: "task_1", Repo: "owner/repo", Task: "Fix it", BaseBranch: "main", Status: state.StatusCanceled,
+				ID: "run_old", TaskID: "task_1", Repo: "owner/repo", Instruction: "Fix it", BaseBranch: "main", Status: state.StatusCanceled,
 			}}); err != nil {
 				t.Fatalf("encode response: %v", err)
 			}
@@ -1481,7 +1481,7 @@ func TestRetryCreatesRunWithRetryTrigger(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run_old":
 			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(api.RunResponse{Run: state.Run{
-				ID: "run_old", TaskID: "owner/repo#123", Repo: "owner/repo", Task: "Fix failing tests", BaseBranch: "main", Status: state.StatusFailed,
+				ID: "run_old", TaskID: "owner/repo#123", Repo: "owner/repo", Instruction: "Fix failing tests", BaseBranch: "main", Status: state.StatusFailed,
 			}}); err != nil {
 				t.Fatalf("encode response: %v", err)
 			}

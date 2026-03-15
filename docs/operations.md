@@ -83,9 +83,9 @@ for the same task/PR, without any background process.
 
 Server env controls:
 
-- `RASCAL_AGENT_SESSION_MODE=off|pr-only|all` (default: `all`)
-- `RASCAL_AGENT_SESSION_ROOT` (default: `${RASCAL_DATA_DIR}/agent-sessions`)
-- `RASCAL_AGENT_SESSION_TTL_DAYS` (default: `14`, set `0` to disable cleanup)
+- `RASCAL_TASK_SESSION_MODE=off|pr-only|all` (default: `all`)
+- `RASCAL_TASK_SESSION_ROOT` (default: `${RASCAL_DATA_DIR}/agent-sessions`)
+- `RASCAL_TASK_SESSION_TTL_DAYS` (default: `14`, set `0` to disable cleanup)
 
 Older Goose-specific env names are still accepted as compatibility aliases.
 
@@ -98,17 +98,17 @@ Older Goose-specific env names are still accepted as compatibility aliases.
 - `issue_edited` (same task)
 
 To reset a task session manually, delete its directory under
-`${RASCAL_AGENT_SESSION_ROOT}`.
+`${RASCAL_TASK_SESSION_ROOT}`.
 
 Tradeoff: resume can reduce repeated context rebuilding and token usage, but can
 carry stale context. Reset the task session directory when context drift is
 suspected.
 
-Backend notes:
+Agent runtime notes:
 
 - Goose resumes a named Goose session with a task-scoped mounted session directory.
-- Codex resumes by reusing a task-scoped `CODEX_HOME` and the last discovered backend session id.
-- Switching a task between Goose and Codex is supported; Rascal clears stale task-scoped resume state and starts a fresh session for the new backend.
+- Codex resumes by reusing a task-scoped `CODEX_HOME` and the last discovered runtime session id.
+- Switching a task between Goose and Codex is supported; Rascal clears stale task-scoped resume state and starts a fresh session for the new agent runtime.
 
 ## Credential Leasing
 
@@ -132,8 +132,8 @@ Operational notes:
 - Inspect detached containers with `docker ps` or `docker inspect`.
 - Roll traffic back to a known-good slot by restoring Caddy upstream and `active_slot`.
 - Retry or cancel runs through Rascal commands.
-- Remove stale task session directories when intentionally resetting backend session resume.
-- Change the configured server backend; future runs can migrate existing tasks to the new backend.
+- Remove stale task session directories when intentionally resetting task session resume.
+- Change the configured server agent runtime; future runs can migrate existing tasks to the new runtime.
 
 ## Unsafe Manual Interventions
 

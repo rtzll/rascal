@@ -158,8 +158,8 @@ type Run struct {
 	ID           string          `json:"id"`
 	TaskID       string          `json:"task_id"`
 	Repo         string          `json:"repo"`
-	Task         string          `json:"task"`
-	AgentBackend agent.Backend   `json:"agent_backend"`
+	Instruction  string          `json:"instruction"`
+	AgentRuntime agent.Runtime   `json:"agent_runtime"`
 	BaseBranch   string          `json:"base_branch"`
 	HeadBranch   string          `json:"head_branch"`
 	Trigger      runtrigger.Name `json:"trigger"`
@@ -184,7 +184,7 @@ type Run struct {
 type Task struct {
 	ID           string        `json:"id"`
 	Repo         string        `json:"repo"`
-	AgentBackend agent.Backend `json:"agent_backend"`
+	AgentRuntime agent.Runtime `json:"agent_runtime"`
 	IssueNumber  int           `json:"issue_number,omitempty"`
 	PRNumber     int           `json:"pr_number,omitempty"`
 	Status       TaskStatus    `json:"status"`
@@ -281,7 +281,7 @@ type RunExecution struct {
 
 type RunTokenUsage struct {
 	RunID                 string        `json:"run_id"`
-	Backend               agent.Backend `json:"backend"`
+	AgentRuntime          agent.Runtime `json:"agent_runtime"`
 	Provider              string        `json:"provider,omitempty"`
 	Model                 string        `json:"model,omitempty"`
 	TotalTokens           int64         `json:"total_tokens"`
@@ -333,8 +333,8 @@ type CreateRunInput struct {
 	ID           string
 	TaskID       string
 	Repo         string
-	Task         string
-	AgentBackend agent.Backend
+	Instruction  string
+	AgentRuntime agent.Runtime
 	BaseBranch   string
 	HeadBranch   string
 	Trigger      runtrigger.Name
@@ -349,15 +349,15 @@ type CreateRunInput struct {
 type UpsertTaskInput struct {
 	ID           string
 	Repo         string
-	AgentBackend agent.Backend
+	AgentRuntime agent.Runtime
 	IssueNumber  int
 	PRNumber     int
 }
 
-type TaskAgentSession struct {
+type TaskSession struct {
 	TaskID           string        `json:"task_id"`
-	AgentBackend     agent.Backend `json:"agent_backend"`
-	BackendSessionID string        `json:"backend_session_id,omitempty"`
+	AgentRuntime     agent.Runtime `json:"agent_runtime"`
+	RuntimeSessionID string        `json:"runtime_session_id,omitempty"`
 	SessionKey       string        `json:"session_key,omitempty"`
 	SessionRoot      string        `json:"session_root,omitempty"`
 	LastRunID        string        `json:"last_run_id,omitempty"`
@@ -365,11 +365,15 @@ type TaskAgentSession struct {
 	UpdatedAt        time.Time     `json:"updated_at"`
 }
 
-type UpsertTaskAgentSessionInput struct {
+type TaskAgentSession = TaskSession
+
+type UpsertTaskSessionInput struct {
 	TaskID           string
-	AgentBackend     agent.Backend
-	BackendSessionID string
+	AgentRuntime     agent.Runtime
+	RuntimeSessionID string
 	SessionKey       string
 	SessionRoot      string
 	LastRunID        string
 }
+
+type UpsertTaskAgentSessionInput = UpsertTaskSessionInput

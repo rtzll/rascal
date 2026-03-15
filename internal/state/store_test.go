@@ -26,7 +26,7 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 		ID:          "run_1",
 		TaskID:      "repo#1",
 		Repo:        "owner/repo",
-		Task:        "Implement feature",
+		Instruction: "Implement feature",
 		BaseBranch:  "main",
 		HeadBranch:  "rascal/repo-1/run_1",
 		Trigger:     runtrigger.NameIssueLabel,
@@ -45,14 +45,14 @@ func TestStoreRunAndTaskLifecycle(t *testing.T) {
 
 	debugOff := false
 	run2, err := store.AddRun(CreateRunInput{
-		ID:         "run_2",
-		TaskID:     "repo#1",
-		Repo:       "owner/repo",
-		Task:       "No debug",
-		BaseBranch: "main",
-		HeadBranch: "rascal/repo-1/run_2",
-		RunDir:     "/tmp/run_2",
-		Debug:      &debugOff,
+		ID:          "run_2",
+		TaskID:      "repo#1",
+		Repo:        "owner/repo",
+		Instruction: "No debug",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/repo-1/run_2",
+		RunDir:      "/tmp/run_2",
+		Debug:       &debugOff,
 	})
 	if err != nil {
 		t.Fatalf("add second run: %v", err)
@@ -108,12 +108,12 @@ func TestStoreAddRunRejectsUnknownTrigger(t *testing.T) {
 	}
 
 	_, err = store.AddRun(CreateRunInput{
-		ID:      "run_invalid_trigger",
-		TaskID:  "repo#1",
-		Repo:    "owner/repo",
-		Task:    "Reject invalid trigger",
-		Trigger: runtrigger.Name("unknown_trigger"),
-		RunDir:  "/tmp/run_invalid_trigger",
+		ID:          "run_invalid_trigger",
+		TaskID:      "repo#1",
+		Repo:        "owner/repo",
+		Instruction: "Reject invalid trigger",
+		Trigger:     runtrigger.Name("unknown_trigger"),
+		RunDir:      "/tmp/run_invalid_trigger",
 	})
 	if err == nil || !strings.Contains(err.Error(), "invalid trigger") {
 		t.Fatalf("expected invalid trigger error, got %v", err)
@@ -152,20 +152,20 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	task, err := store.UpsertTask(UpsertTaskInput{
 		ID:           "repo#2",
 		Repo:         "owner/repo",
-		AgentBackend: agent.BackendGoose,
+		AgentRuntime: agent.BackendGoose,
 		IssueNumber:  2,
 	})
 	if err != nil {
 		t.Fatalf("upsert goose task: %v", err)
 	}
-	if task.AgentBackend != agent.BackendGoose {
-		t.Fatalf("task backend = %s, want %s", task.AgentBackend, agent.BackendGoose)
+	if task.AgentRuntime != agent.BackendGoose {
+		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.BackendGoose)
 	}
 
 	session, err := store.UpsertTaskAgentSession(UpsertTaskAgentSessionInput{
 		TaskID:           task.ID,
-		AgentBackend:     agent.BackendGoose,
-		BackendSessionID: "goose-session",
+		AgentRuntime:     agent.BackendGoose,
+		RuntimeSessionID: "goose-session",
 		SessionKey:       "owner-repo-2",
 		SessionRoot:      "/tmp/goose-session",
 		LastRunID:        "run_goose",
@@ -173,27 +173,27 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert goose task session: %v", err)
 	}
-	if session.AgentBackend != agent.BackendGoose {
-		t.Fatalf("session backend = %s, want %s", session.AgentBackend, agent.BackendGoose)
+	if session.AgentRuntime != agent.BackendGoose {
+		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, agent.BackendGoose)
 	}
 
 	task, err = store.UpsertTask(UpsertTaskInput{
 		ID:           task.ID,
 		Repo:         task.Repo,
-		AgentBackend: agent.BackendCodex,
+		AgentRuntime: agent.BackendCodex,
 		IssueNumber:  task.IssueNumber,
 	})
 	if err != nil {
 		t.Fatalf("migrate task backend to codex: %v", err)
 	}
-	if task.AgentBackend != agent.BackendCodex {
-		t.Fatalf("task backend = %s, want %s", task.AgentBackend, agent.BackendCodex)
+	if task.AgentRuntime != agent.BackendCodex {
+		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.BackendCodex)
 	}
 
 	session, err = store.UpsertTaskAgentSession(UpsertTaskAgentSessionInput{
 		TaskID:           task.ID,
-		AgentBackend:     agent.BackendCodex,
-		BackendSessionID: "",
+		AgentRuntime:     agent.BackendCodex,
+		RuntimeSessionID: "",
 		SessionKey:       "owner-repo-2",
 		SessionRoot:      "/tmp/codex-session",
 		LastRunID:        "run_codex",
@@ -201,11 +201,11 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate task session backend to codex: %v", err)
 	}
-	if session.AgentBackend != agent.BackendCodex {
-		t.Fatalf("session backend = %s, want %s", session.AgentBackend, agent.BackendCodex)
+	if session.AgentRuntime != agent.BackendCodex {
+		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, agent.BackendCodex)
 	}
-	if session.BackendSessionID != "" {
-		t.Fatalf("session id = %q, want empty after backend migration", session.BackendSessionID)
+	if session.RuntimeSessionID != "" {
+		t.Fatalf("session id = %q, want empty after backend migration", session.RuntimeSessionID)
 	}
 	if session.SessionRoot != "/tmp/codex-session" {
 		t.Fatalf("session root = %q, want /tmp/codex-session", session.SessionRoot)
@@ -223,12 +223,12 @@ func TestStoreAllowsRecoveryTransitionRunningToQueued(t *testing.T) {
 		t.Fatalf("upsert task: %v", err)
 	}
 	run, err := store.AddRun(CreateRunInput{
-		ID:         "run_recovery",
-		TaskID:     "task-recovery",
-		Repo:       "owner/repo",
-		Task:       "recovery",
-		BaseBranch: "main",
-		RunDir:     "/tmp/run_recovery",
+		ID:          "run_recovery",
+		TaskID:      "task-recovery",
+		Repo:        "owner/repo",
+		Instruction: "recovery",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_recovery",
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -263,12 +263,12 @@ func TestStoreRejectsInvalidRunStatusTransition(t *testing.T) {
 		t.Fatalf("upsert task: %v", err)
 	}
 	run, err := store.AddRun(CreateRunInput{
-		ID:         "run_transition",
-		TaskID:     "task-transition",
-		Repo:       "owner/repo",
-		Task:       "transition",
-		BaseBranch: "main",
-		RunDir:     "/tmp/run_transition",
+		ID:          "run_transition",
+		TaskID:      "task-transition",
+		Repo:        "owner/repo",
+		Instruction: "transition",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_transition",
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -365,12 +365,12 @@ func TestStoreUpsertRunTokenUsage(t *testing.T) {
 		t.Fatalf("upsert task: %v", err)
 	}
 	run, err := store.AddRun(CreateRunInput{
-		ID:         "run_usage",
-		TaskID:     "task-usage",
-		Repo:       "owner/repo",
-		Task:       "usage",
-		BaseBranch: "main",
-		RunDir:     "/tmp/run_usage",
+		ID:          "run_usage",
+		TaskID:      "task-usage",
+		Repo:        "owner/repo",
+		Instruction: "usage",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_usage",
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -382,7 +382,7 @@ func TestStoreUpsertRunTokenUsage(t *testing.T) {
 	reasoningOutputTokens := int64(10)
 	usage, err := store.UpsertRunTokenUsage(RunTokenUsage{
 		RunID:                 run.ID,
-		Backend:               agent.BackendGoose,
+		AgentRuntime:          agent.RuntimeGoose,
 		Provider:              "openai",
 		Model:                 "gpt-5-codex",
 		TotalTokens:           150,
@@ -426,13 +426,13 @@ func TestStoreUpdateRunDoesNotInferPRStatusFromRunStatus(t *testing.T) {
 		t.Fatalf("upsert task: %v", err)
 	}
 	run, err := store.AddRun(CreateRunInput{
-		ID:         "run_pr_status",
-		TaskID:     "task-pr-status",
-		Repo:       "owner/repo",
-		Task:       "pr status behavior",
-		BaseBranch: "main",
-		RunDir:     "/tmp/run_pr_status",
-		PRNumber:   42,
+		ID:          "run_pr_status",
+		TaskID:      "task-pr-status",
+		Repo:        "owner/repo",
+		Instruction: "pr status behavior",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_pr_status",
+		PRNumber:    42,
 	})
 	if err != nil {
 		t.Fatalf("add run: %v", err)
@@ -538,22 +538,22 @@ func TestStoreClaimRunStartAtomic(t *testing.T) {
 		t.Fatalf("upsert task: %v", err)
 	}
 	if _, err := store.AddRun(CreateRunInput{
-		ID:         "run_claim_1",
-		TaskID:     "task-claim",
-		Repo:       "owner/repo",
-		Task:       "first",
-		BaseBranch: "main",
-		RunDir:     "/tmp/run_claim_1",
+		ID:          "run_claim_1",
+		TaskID:      "task-claim",
+		Repo:        "owner/repo",
+		Instruction: "first",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_claim_1",
 	}); err != nil {
 		t.Fatalf("add run 1: %v", err)
 	}
 	if _, err := store.AddRun(CreateRunInput{
-		ID:         "run_claim_2",
-		TaskID:     "task-claim",
-		Repo:       "owner/repo",
-		Task:       "second",
-		BaseBranch: "main",
-		RunDir:     "/tmp/run_claim_2",
+		ID:          "run_claim_2",
+		TaskID:      "task-claim",
+		Repo:        "owner/repo",
+		Instruction: "second",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_claim_2",
 	}); err != nil {
 		t.Fatalf("add run 2: %v", err)
 	}
@@ -585,32 +585,32 @@ func TestStoreClaimNextQueuedRun(t *testing.T) {
 	}
 
 	if _, err := store.AddRun(CreateRunInput{
-		ID:         "run_a_1",
-		TaskID:     "task-a",
-		Repo:       "owner/repo",
-		Task:       "a1",
-		BaseBranch: "main",
-		RunDir:     "/tmp/run_a_1",
+		ID:          "run_a_1",
+		TaskID:      "task-a",
+		Repo:        "owner/repo",
+		Instruction: "a1",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_a_1",
 	}); err != nil {
 		t.Fatalf("add run_a_1: %v", err)
 	}
 	if _, err := store.AddRun(CreateRunInput{
-		ID:         "run_b_1",
-		TaskID:     "task-b",
-		Repo:       "owner/repo",
-		Task:       "b1",
-		BaseBranch: "main",
-		RunDir:     "/tmp/run_b_1",
+		ID:          "run_b_1",
+		TaskID:      "task-b",
+		Repo:        "owner/repo",
+		Instruction: "b1",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_b_1",
 	}); err != nil {
 		t.Fatalf("add run_b_1: %v", err)
 	}
 	if _, err := store.AddRun(CreateRunInput{
-		ID:         "run_a_2",
-		TaskID:     "task-a",
-		Repo:       "owner/repo",
-		Task:       "a2",
-		BaseBranch: "main",
-		RunDir:     "/tmp/run_a_2",
+		ID:          "run_a_2",
+		TaskID:      "task-a",
+		Repo:        "owner/repo",
+		Instruction: "a2",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_a_2",
 	}); err != nil {
 		t.Fatalf("add run_a_2: %v", err)
 	}
@@ -773,22 +773,22 @@ func TestStoreListRunningRuns(t *testing.T) {
 		t.Fatalf("upsert task: %v", err)
 	}
 	if _, err := store.AddRun(CreateRunInput{
-		ID:         "run_running",
-		TaskID:     "task-running",
-		Repo:       "owner/repo",
-		Task:       "running",
-		BaseBranch: "main",
-		RunDir:     "/tmp/run_running",
+		ID:          "run_running",
+		TaskID:      "task-running",
+		Repo:        "owner/repo",
+		Instruction: "running",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_running",
 	}); err != nil {
 		t.Fatalf("add run_running: %v", err)
 	}
 	if _, err := store.AddRun(CreateRunInput{
-		ID:         "run_queued",
-		TaskID:     "task-running",
-		Repo:       "owner/repo",
-		Task:       "queued",
-		BaseBranch: "main",
-		RunDir:     "/tmp/run_queued",
+		ID:          "run_queued",
+		TaskID:      "task-running",
+		Repo:        "owner/repo",
+		Instruction: "queued",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_queued",
 	}); err != nil {
 		t.Fatalf("add run_queued: %v", err)
 	}

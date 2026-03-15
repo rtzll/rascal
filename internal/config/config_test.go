@@ -130,27 +130,27 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadServerConfig returned error: %v", err)
 	}
-	if cfg.AgentSession.Mode != agent.SessionModeAll {
-		t.Fatalf("AgentSession.Mode = %q, want all", cfg.AgentSession.Mode)
+	if cfg.TaskSession.Mode != agent.SessionModeAll {
+		t.Fatalf("TaskSession.Mode = %q, want all", cfg.TaskSession.Mode)
 	}
 	wantRoot := filepath.Join(dataDir, "agent-sessions")
-	if cfg.AgentSession.Root != wantRoot {
-		t.Fatalf("AgentSession.Root = %q, want %q", cfg.AgentSession.Root, wantRoot)
+	if cfg.TaskSession.Root != wantRoot {
+		t.Fatalf("TaskSession.Root = %q, want %q", cfg.TaskSession.Root, wantRoot)
 	}
-	if cfg.AgentSession.TTLDays != 14 {
-		t.Fatalf("AgentSession.TTLDays = %d, want 14", cfg.AgentSession.TTLDays)
+	if cfg.TaskSession.TTLDays != 14 {
+		t.Fatalf("TaskSession.TTLDays = %d, want 14", cfg.TaskSession.TTLDays)
 	}
 }
 
 func TestLoadServerConfigDefaultsAgentBackendToCodex(t *testing.T) {
-	t.Setenv("RASCAL_AGENT_BACKEND", "")
+	t.Setenv("RASCAL_AGENT_RUNTIME", "")
 
 	cfg, err := LoadServerConfig()
 	if err != nil {
 		t.Fatalf("LoadServerConfig returned error: %v", err)
 	}
-	if cfg.AgentBackend != "codex" {
-		t.Fatalf("AgentBackend = %q, want codex", cfg.AgentBackend)
+	if cfg.AgentRuntime != "codex" {
+		t.Fatalf("AgentRuntime = %q, want codex", cfg.AgentRuntime)
 	}
 	if cfg.RunnerMode != runner.ModeNoop {
 		t.Fatalf("RunnerMode = %q, want noop", cfg.RunnerMode)
@@ -170,14 +170,14 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadServerConfig returned error: %v", err)
 	}
-	if cfg.AgentSession.Mode != agent.SessionModePROnly {
-		t.Fatalf("AgentSession.Mode = %q, want pr-only", cfg.AgentSession.Mode)
+	if cfg.TaskSession.Mode != agent.SessionModePROnly {
+		t.Fatalf("TaskSession.Mode = %q, want pr-only", cfg.TaskSession.Mode)
 	}
-	if cfg.AgentSession.Root != root {
-		t.Fatalf("AgentSession.Root = %q, want %q", cfg.AgentSession.Root, root)
+	if cfg.TaskSession.Root != root {
+		t.Fatalf("TaskSession.Root = %q, want %q", cfg.TaskSession.Root, root)
 	}
-	if cfg.AgentSession.TTLDays != 0 {
-		t.Fatalf("AgentSession.TTLDays = %d, want 0", cfg.AgentSession.TTLDays)
+	if cfg.TaskSession.TTLDays != 0 {
+		t.Fatalf("TaskSession.TTLDays = %d, want 0", cfg.TaskSession.TTLDays)
 	}
 }
 
@@ -223,7 +223,7 @@ func TestLoadServerConfigRejectsInvalidEnumEnv(t *testing.T) {
 		needle string
 	}{
 		{name: "runner mode", key: "RASCAL_RUNNER_MODE", value: "podman", needle: "unknown runner mode"},
-		{name: "agent backend", key: "RASCAL_AGENT_BACKEND", value: "claude", needle: "unknown agent backend"},
+		{name: "agent runtime", key: "RASCAL_AGENT_RUNTIME", value: "claude", needle: "unknown agent runtime"},
 		{name: "credential strategy", key: "RASCAL_CREDENTIAL_STRATEGY", value: "weighted", needle: "unknown credential strategy"},
 		{name: "agent session mode", key: "RASCAL_AGENT_SESSION_MODE", value: "sometimes", needle: "unknown agent session mode"},
 		{name: "legacy goose session mode", key: "RASCAL_GOOSE_SESSION_MODE", value: "sometimes", needle: "unknown agent session mode"},

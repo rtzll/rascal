@@ -121,7 +121,7 @@ func NewRunID() (string, error) {
 func (s *Store) UpsertTask(in UpsertTaskInput) (Task, error) {
 	in.ID = strings.TrimSpace(in.ID)
 	in.Repo = NormalizeRepo(in.Repo)
-	in.AgentBackend = agent.NormalizeBackend(string(in.AgentBackend))
+	in.AgentRuntime = agent.NormalizeRuntime(string(in.AgentRuntime))
 	if in.ID == "" || in.Repo == "" {
 		return Task{}, fmt.Errorf("task id and repo are required")
 	}
@@ -129,7 +129,7 @@ func (s *Store) UpsertTask(in UpsertTaskInput) (Task, error) {
 	if err := s.q.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
 		ID:           in.ID,
 		Repo:         in.Repo,
-		AgentBackend: in.AgentBackend.String(),
+		AgentBackend: in.AgentRuntime.String(),
 		IssueNumber:  int64(in.IssueNumber),
 		PrNumber:     int64(in.PRNumber),
 		Status:       string(TaskOpen),
@@ -231,8 +231,8 @@ func (s *Store) MarkTaskOpen(taskID string) error {
 
 func (s *Store) UpsertTaskAgentSession(in UpsertTaskAgentSessionInput) (TaskAgentSession, error) {
 	in.TaskID = strings.TrimSpace(in.TaskID)
-	in.AgentBackend = agent.NormalizeBackend(string(in.AgentBackend))
-	in.BackendSessionID = strings.TrimSpace(in.BackendSessionID)
+	in.AgentRuntime = agent.NormalizeRuntime(string(in.AgentRuntime))
+	in.RuntimeSessionID = strings.TrimSpace(in.RuntimeSessionID)
 	in.SessionKey = strings.TrimSpace(in.SessionKey)
 	in.SessionRoot = strings.TrimSpace(in.SessionRoot)
 	in.LastRunID = strings.TrimSpace(in.LastRunID)
@@ -243,8 +243,8 @@ func (s *Store) UpsertTaskAgentSession(in UpsertTaskAgentSessionInput) (TaskAgen
 	now := time.Now().UTC().UnixNano()
 	if err := s.q.UpsertTaskAgentSession(context.Background(), sqlitegen.UpsertTaskAgentSessionParams{
 		TaskID:           in.TaskID,
-		AgentBackend:     in.AgentBackend.String(),
-		BackendSessionID: in.BackendSessionID,
+		AgentBackend:     in.AgentRuntime.String(),
+		BackendSessionID: in.RuntimeSessionID,
 		SessionKey:       in.SessionKey,
 		SessionRoot:      in.SessionRoot,
 		LastRunID:        in.LastRunID,
@@ -295,7 +295,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	in.ID = strings.TrimSpace(in.ID)
 	in.TaskID = strings.TrimSpace(in.TaskID)
 	in.Repo = NormalizeRepo(in.Repo)
-	in.AgentBackend = agent.NormalizeBackend(string(in.AgentBackend))
+	in.AgentRuntime = agent.NormalizeRuntime(string(in.AgentRuntime))
 	if in.ID == "" || in.TaskID == "" || in.Repo == "" {
 		return Run{}, fmt.Errorf("id, task_id and repo are required")
 	}
@@ -339,7 +339,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	if err := qtx.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
 		ID:           in.TaskID,
 		Repo:         in.Repo,
-		AgentBackend: in.AgentBackend.String(),
+		AgentBackend: in.AgentRuntime.String(),
 		IssueNumber:  int64(in.IssueNumber),
 		PrNumber:     int64(in.PRNumber),
 		Status:       string(TaskOpen),
@@ -354,8 +354,8 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		ID:           in.ID,
 		TaskID:       in.TaskID,
 		Repo:         in.Repo,
-		Task:         in.Task,
-		AgentBackend: in.AgentBackend.String(),
+		Task:         in.Instruction,
+		AgentBackend: in.AgentRuntime.String(),
 		BaseBranch:   baseBranch,
 		HeadBranch:   in.HeadBranch,
 		Trigger:      trigger.String(),
@@ -780,7 +780,7 @@ func (s *Store) DeleteRunExecution(runID string) error {
 
 func (s *Store) UpsertRunTokenUsage(usage RunTokenUsage) (RunTokenUsage, error) {
 	usage.RunID = strings.TrimSpace(usage.RunID)
-	usage.Backend = agent.NormalizeBackend(string(usage.Backend))
+	usage.AgentRuntime = agent.NormalizeRuntime(string(usage.AgentRuntime))
 	usage.Provider = strings.TrimSpace(usage.Provider)
 	usage.Model = strings.TrimSpace(usage.Model)
 	usage.RawUsageJSON = strings.TrimSpace(usage.RawUsageJSON)
@@ -793,7 +793,7 @@ func (s *Store) UpsertRunTokenUsage(usage RunTokenUsage) (RunTokenUsage, error) 
 	}
 	row, err := s.q.UpsertRunTokenUsage(context.Background(), sqlitegen.UpsertRunTokenUsageParams{
 		RunID:                 usage.RunID,
-		Backend:               usage.Backend.String(),
+		Backend:               usage.AgentRuntime.String(),
 		Provider:              usage.Provider,
 		Model:                 usage.Model,
 		TotalTokens:           usage.TotalTokens,
@@ -1085,7 +1085,7 @@ func fromDBTaskParts(id, repo, agentBackend string, issueNumber, prNumber int64,
 	return Task{
 		ID:           id,
 		Repo:         repo,
-		AgentBackend: agent.NormalizeBackend(agentBackend),
+		AgentRuntime: agent.NormalizeRuntime(agentBackend),
 		IssueNumber:  int(issueNumber),
 		PRNumber:     int(prNumber),
 		Status:       NormalizeTaskStatus(TaskStatus(status)),
@@ -1109,8 +1109,8 @@ func fromDBRunParts(id, taskID, repo, task, agentBackend, baseBranch, headBranch
 		ID:           id,
 		TaskID:       taskID,
 		Repo:         repo,
-		Task:         task,
-		AgentBackend: agent.NormalizeBackend(agentBackend),
+		Instruction:  task,
+		AgentRuntime: agent.NormalizeRuntime(agentBackend),
 		BaseBranch:   baseBranch,
 		HeadBranch:   headBranch,
 		Trigger:      runtrigger.Normalize(trigger),
@@ -1184,11 +1184,11 @@ func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {
 	}
 }
 
-func fromDBTaskAgentSession(s sqlitegen.TaskAgentSession) TaskAgentSession {
-	return TaskAgentSession{
+func fromDBTaskAgentSession(s sqlitegen.TaskAgentSession) TaskSession {
+	return TaskSession{
 		TaskID:           s.TaskID,
-		AgentBackend:     agent.NormalizeBackend(s.AgentBackend),
-		BackendSessionID: s.BackendSessionID,
+		AgentRuntime:     agent.NormalizeRuntime(s.AgentBackend),
+		RuntimeSessionID: s.BackendSessionID,
 		SessionKey:       s.SessionKey,
 		SessionRoot:      s.SessionRoot,
 		LastRunID:        s.LastRunID,
@@ -1202,8 +1202,8 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 	return sqlitegen.UpdateRunParams{
 		TaskID:       r.TaskID,
 		Repo:         r.Repo,
-		Task:         r.Task,
-		AgentBackend: agent.NormalizeBackend(string(r.AgentBackend)).String(),
+		Task:         r.Instruction,
+		AgentBackend: agent.NormalizeRuntime(string(r.AgentRuntime)).String(),
 		BaseBranch:   r.BaseBranch,
 		HeadBranch:   r.HeadBranch,
 		Trigger:      r.Trigger.String(),
@@ -1235,7 +1235,7 @@ func optionalPositiveInt64(v int) sql.NullInt64 {
 func fromDBRunTokenUsage(row sqlitegen.RunTokenUsage) RunTokenUsage {
 	return RunTokenUsage{
 		RunID:                 row.RunID,
-		Backend:               agent.NormalizeBackend(row.Backend),
+		AgentRuntime:          agent.NormalizeRuntime(row.Backend),
 		Provider:              row.Provider,
 		Model:                 row.Model,
 		TotalTokens:           row.TotalTokens,

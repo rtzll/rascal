@@ -1,11 +1,17 @@
 package agent
 
 // AgentHarness is the tool wrapper the worker invokes for a run.
-type AgentHarness = Backend
+type AgentHarness = Runtime
+
+// AgentRuntime is the selected agent runtime for a run.
+type AgentRuntime = Runtime
 
 const (
-	AgentHarnessGoose = BackendGoose
-	AgentHarnessCodex = BackendCodex
+	AgentHarnessGoose = RuntimeGoose
+	AgentHarnessCodex = RuntimeCodex
+
+	AgentRuntimeGoose = RuntimeGoose
+	AgentRuntimeCodex = RuntimeCodex
 )
 
 type ModelProvider string
@@ -16,9 +22,9 @@ const (
 )
 
 func ParseAgentHarness(raw string) (AgentHarness, error) {
-	return ParseBackend(raw)
+	return ParseRuntime(raw)
 }
 
 func NormalizeAgentHarness(raw string) AgentHarness {
-	return NormalizeBackend(raw)
+	return NormalizeRuntime(raw)
 }
