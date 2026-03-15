@@ -32,14 +32,9 @@ func mustNewRunCmd(t *testing.T, a *app) *cobra.Command {
 	return a.newRunCmd()
 }
 
-func mustNewInfraUpCmd(t *testing.T, a *app) *cobra.Command {
+func mustNewDeployCmd(t *testing.T, a *app) *cobra.Command {
 	t.Helper()
-	return a.newInfraUpCmd()
-}
-
-func mustNewInfraDeployExistingCmd(t *testing.T, a *app) *cobra.Command {
-	t.Helper()
-	return a.newInfraDeployExistingCmd()
+	return a.newDeployCmd()
 }
 
 func TestMaskSecret(t *testing.T) {
@@ -388,10 +383,16 @@ func TestRootFlagsDoNotExposeDeadFlags(t *testing.T) {
 	}
 }
 
-func TestRootHasGitHubAndInfraCommands(t *testing.T) {
+func TestRootHasGitHubAndSetupCommands(t *testing.T) {
 	root := mustNewRootCmd(t)
+	if _, _, err := root.Find([]string{"init"}); err != nil {
+		t.Fatalf("init command missing: %v", err)
+	}
 	if _, _, err := root.Find([]string{"deploy"}); err != nil {
 		t.Fatalf("deploy command missing: %v", err)
+	}
+	if _, _, err := root.Find([]string{"provision"}); err != nil {
+		t.Fatalf("provision command missing: %v", err)
 	}
 	if _, _, err := root.Find([]string{"github"}); err != nil {
 		t.Fatalf("github command missing: %v", err)
@@ -402,8 +403,8 @@ func TestRootHasGitHubAndInfraCommands(t *testing.T) {
 	if _, _, err := root.Find([]string{"github", "webhook", "test"}); err != nil {
 		t.Fatalf("github webhook test command missing: %v", err)
 	}
-	if _, _, err := root.Find([]string{"infra"}); err != nil {
-		t.Fatalf("infra command missing: %v", err)
+	if cmd, _, err := root.Find([]string{"infra"}); err == nil && cmd != nil && cmd.Name() == "infra" {
+		t.Fatal("infra command should be removed")
 	}
 	if _, _, err := root.Find([]string{"logs", "run"}); err != nil {
 		t.Fatalf("logs run command missing: %v", err)
@@ -448,21 +449,33 @@ func TestLogsFollowIntervalDefaults(t *testing.T) {
 	}
 }
 
-func TestBootstrapAndInfraDefaults(t *testing.T) {
+func TestInitDeployAndProvisionDefaults(t *testing.T) {
 	root := mustNewRootCmd(t)
 
-	bootstrapCmd, _, err := root.Find([]string{"bootstrap"})
+	initCmd, _, err := root.Find([]string{"init"})
 	if err != nil {
-		t.Fatalf("bootstrap command missing: %v", err)
+		t.Fatalf("init command missing: %v", err)
 	}
-	if got := bootstrapCmd.Flags().Lookup("goarch"); got != nil {
-		t.Fatalf("bootstrap should not expose goarch flag, got %q", got.Name)
+	if got := initCmd.Flags().Lookup("goarch"); got != nil {
+		t.Fatalf("init should not expose goarch flag, got %q", got.Name)
 	}
-	if got := bootstrapCmd.Flags().Lookup("hcloud-server-type"); got != nil {
-		t.Fatalf("bootstrap should not expose hcloud-server-type flag, got %q", got.Name)
+	if got := initCmd.Flags().Lookup("hcloud-server-type"); got != nil {
+		t.Fatalf("init should not expose hcloud-server-type flag, got %q", got.Name)
 	}
-	if got := bootstrapCmd.Flags().Lookup("print-plan"); got == nil {
-		t.Fatal("bootstrap should expose print-plan flag")
+	if got := initCmd.Flags().Lookup("print-plan"); got == nil {
+		t.Fatal("init should expose print-plan flag")
+	}
+	if got := initCmd.Flags().Lookup("provision"); got == nil {
+		t.Fatal("init should expose provision flag")
+	}
+	if got := initCmd.Flags().Lookup("skip-github"); got == nil {
+		t.Fatal("init should expose skip-github flag")
+	}
+	if got := initCmd.Flags().Lookup("skip-webhook"); got != nil {
+		t.Fatalf("init should not expose legacy --skip-webhook flag, got %q", got.Name)
+	}
+	if got := initCmd.Flags().Lookup("provision-new"); got != nil {
+		t.Fatalf("init should not expose legacy --provision-new flag, got %q", got.Name)
 	}
 
 	deployCmd, _, err := root.Find([]string{"deploy"})
@@ -485,44 +498,22 @@ func TestBootstrapAndInfraDefaults(t *testing.T) {
 		t.Fatalf("deploy default codex-auth = %q, want empty", got)
 	}
 
-	provisionCmd, _, err := root.Find([]string{"infra", "provision-hetzner"})
+	provisionCmd, _, err := root.Find([]string{"provision"})
 	if err != nil {
-		t.Fatalf("infra provision-hetzner command missing: %v", err)
+		t.Fatalf("provision command missing: %v", err)
 	}
 	if got := provisionCmd.Flags().Lookup("server-type").DefValue; got != "cx23" {
-		t.Fatalf("infra provision default server type = %q, want cx23", got)
+		t.Fatalf("provision default server type = %q, want cx23", got)
 	}
-
-	infraDeployCmd, _, err := root.Find([]string{"infra", "deploy-existing"})
-	if err != nil {
-		t.Fatalf("infra deploy-existing command missing: %v", err)
+	if cmd, _, err := root.Find([]string{"bootstrap"}); err == nil && cmd != nil && cmd.Name() == "bootstrap" {
+		t.Fatal("bootstrap command should be removed")
 	}
-	if got := infraDeployCmd.Flags().Lookup("goarch").DefValue; got != "" {
-		t.Fatalf("infra deploy-existing default goarch = %q, want empty for auto-detect", got)
-	}
-	if got := infraDeployCmd.Flags().Lookup("runner-image"); got != nil {
-		t.Fatalf("infra deploy-existing should not expose legacy --runner-image flag")
-	}
-	if got := infraDeployCmd.Flags().Lookup("agent-runtime").DefValue; got != "" {
-		t.Fatalf("infra deploy-existing default agent-runtime = %q, want empty", got)
-	}
-	if got := infraDeployCmd.Flags().Lookup("upload-env").DefValue; got != "false" {
-		t.Fatalf("infra deploy-existing default upload-env = %q, want false", got)
-	}
-	if got := infraDeployCmd.Flags().Lookup("codex-auth").DefValue; got != "" {
-		t.Fatalf("infra deploy-existing default codex-auth = %q, want empty", got)
-	}
-
-	infraUpCmd, _, err := root.Find([]string{"infra", "up"})
-	if err != nil {
-		t.Fatalf("infra up command missing: %v", err)
-	}
-	if got := infraUpCmd.Flags().Lookup("provision").DefValue; got != "false" {
-		t.Fatalf("infra up default provision = %q, want false", got)
+	if cmd, _, err := root.Find([]string{"infra"}); err == nil && cmd != nil && cmd.Name() == "infra" {
+		t.Fatal("infra command should be removed")
 	}
 }
 
-func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
+func TestInitPrintPlanShowsMissingPrerequisites(t *testing.T) {
 	tmp := t.TempDir()
 	a := &app{
 		cfg: config.ClientConfig{
@@ -542,7 +533,7 @@ func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
 	}
 
 	missingAuthPath := filepath.Join(tmp, "missing-auth.json")
-	cmd := a.newBootstrapCmd()
+	cmd := a.newInitCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{
@@ -553,14 +544,14 @@ func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
 	})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
-		t.Fatalf("bootstrap --print-plan failed: %v", err)
+		t.Fatalf("init --print-plan failed: %v", err)
 	}
 
-	var out bootstrapPlanOutput
+	var out initPlanOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
 	}
-	if out.Status != "bootstrap_plan" {
+	if out.Status != "init_plan" {
 		t.Fatalf("unexpected status: %v", out.Status)
 	}
 	if out.Ready {
@@ -584,7 +575,7 @@ func TestBootstrapPrintPlanShowsMissingPrerequisites(t *testing.T) {
 	}
 }
 
-func TestBootstrapPrintPlanReadyForProvisionFlow(t *testing.T) {
+func TestInitPrintPlanReadyForProvisionFlow(t *testing.T) {
 	tmp := t.TempDir()
 	authPath := filepath.Join(tmp, "auth.json")
 	if err := os.WriteFile(authPath, []byte(`{"ok":true}`), 0o600); err != nil {
@@ -597,13 +588,13 @@ func TestBootstrapPrintPlanReadyForProvisionFlow(t *testing.T) {
 		output:     "json",
 		configPath: filepath.Join(tmp, "config.toml"),
 	}
-	cmd := a.newBootstrapCmd()
+	cmd := a.newInitCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{
 		"--print-plan",
 		"--repo", "owner/repo",
-		"--provision-new",
+		"--provision",
 		"--hcloud-token", "hcloud-token",
 		"--github-admin-token", "admin-token",
 		"--github-runtime-token", "runtime-token",
@@ -611,10 +602,10 @@ func TestBootstrapPrintPlanReadyForProvisionFlow(t *testing.T) {
 	})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
-		t.Fatalf("bootstrap --print-plan failed: %v", err)
+		t.Fatalf("init --print-plan failed: %v", err)
 	}
 
-	var out bootstrapPlanOutput
+	var out initPlanOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
 	}
@@ -632,7 +623,7 @@ func TestBootstrapPrintPlanReadyForProvisionFlow(t *testing.T) {
 	}
 }
 
-func TestBootstrapPrintPlanUsesCanonicalRuntimeTokenEnv(t *testing.T) {
+func TestInitPrintPlanUsesCanonicalRuntimeTokenEnv(t *testing.T) {
 	tmp := t.TempDir()
 	authPath := filepath.Join(tmp, "auth.json")
 	if err := os.WriteFile(authPath, []byte(`{"ok":true}`), 0o600); err != nil {
@@ -648,7 +639,7 @@ func TestBootstrapPrintPlanUsesCanonicalRuntimeTokenEnv(t *testing.T) {
 	t.Setenv("GITHUB_ADMIN_TOKEN", "admin-token")
 	t.Setenv("RASCAL_GITHUB_TOKEN", "runtime-token")
 
-	cmd := a.newBootstrapCmd()
+	cmd := a.newInitCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{
@@ -659,10 +650,10 @@ func TestBootstrapPrintPlanUsesCanonicalRuntimeTokenEnv(t *testing.T) {
 	})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
-		t.Fatalf("bootstrap --print-plan failed: %v", err)
+		t.Fatalf("init --print-plan failed: %v", err)
 	}
 
-	var out bootstrapPlanOutput
+	var out initPlanOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
 	}
@@ -674,7 +665,7 @@ func TestBootstrapPrintPlanUsesCanonicalRuntimeTokenEnv(t *testing.T) {
 	}
 }
 
-func TestBootstrapPrintPlanIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
+func TestInitPrintPlanIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
 	tmp := t.TempDir()
 	authPath := filepath.Join(tmp, "auth.json")
 	if err := os.WriteFile(authPath, []byte(`{"ok":true}`), 0o600); err != nil {
@@ -690,7 +681,7 @@ func TestBootstrapPrintPlanIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
 	t.Setenv("GITHUB_ADMIN_TOKEN", "admin-token")
 	t.Setenv("RASCAL_GITHUB_TOKEN", "")
 
-	cmd := a.newBootstrapCmd()
+	cmd := a.newInitCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{
@@ -701,10 +692,10 @@ func TestBootstrapPrintPlanIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
 	})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
-		t.Fatalf("bootstrap --print-plan failed: %v", err)
+		t.Fatalf("init --print-plan failed: %v", err)
 	}
 
-	var out bootstrapPlanOutput
+	var out initPlanOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
 	}
@@ -716,7 +707,7 @@ func TestBootstrapPrintPlanIgnoresLegacyRuntimeTokenEnv(t *testing.T) {
 	}
 }
 
-func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
+func TestInitStillValidatesWithoutPrintPlan(t *testing.T) {
 	a := &app{
 		cfg: config.ClientConfig{
 			ServerURL: "http://127.0.0.1:8080",
@@ -730,7 +721,7 @@ func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
 		t.Setenv(k, "")
 	}
 
-	cmd := a.newBootstrapCmd()
+	cmd := a.newInitCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{
@@ -740,14 +731,14 @@ func TestBootstrapStillValidatesWithoutPrintPlan(t *testing.T) {
 	})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected bootstrap to fail when webhook admin token is missing")
+		t.Fatal("expected init to fail when GitHub admin token is missing")
 	}
 	if !strings.Contains(err.Error(), "--github-admin-token is required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestBootstrapCompletionJSONOutput(t *testing.T) {
+func TestInitCompletionJSONOutput(t *testing.T) {
 	a := &app{
 		cfg: config.ClientConfig{
 			ServerURL: "http://127.0.0.1:8080",
@@ -756,25 +747,25 @@ func TestBootstrapCompletionJSONOutput(t *testing.T) {
 		configPath: filepath.Join(t.TempDir(), "config.toml"),
 	}
 
-	cmd := a.newBootstrapCmd()
+	cmd := a.newInitCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetArgs([]string{
 		"--skip-deploy",
-		"--skip-webhook",
+		"--skip-github",
 		"--server-url", "https://rascal.example.com",
 	})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
-		t.Fatalf("bootstrap: %v", err)
+		t.Fatalf("init: %v", err)
 	}
 
-	var out bootstrapCompleteOutput
+	var out initCompleteOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode json output: %v\noutput:\n%s", err, stdout)
 	}
-	if out.Status != "bootstrap_complete" {
-		t.Fatalf("status = %q, want bootstrap_complete", out.Status)
+	if out.Status != "init_complete" {
+		t.Fatalf("status = %q, want init_complete", out.Status)
 	}
 	if out.ServerURL != "https://rascal.example.com" {
 		t.Fatalf("server_url = %q, want https://rascal.example.com", out.ServerURL)
@@ -782,55 +773,56 @@ func TestBootstrapCompletionJSONOutput(t *testing.T) {
 	if out.Host != "" {
 		t.Fatalf("host = %q, want empty", out.Host)
 	}
-	if out.APIToken == "" || !strings.Contains(out.APIToken, "*") {
-		t.Fatalf("expected masked api token, got %q", out.APIToken)
+	if out.APIToken != "" {
+		t.Fatalf("expected empty api token when not deploying, got %q", out.APIToken)
 	}
-	if out.WebhookSecret == "" || !strings.Contains(out.WebhookSecret, "*") {
-		t.Fatalf("expected masked webhook secret, got %q", out.WebhookSecret)
+	if out.WebhookSecret != "" {
+		t.Fatalf("expected empty webhook secret when GitHub setup is skipped, got %q", out.WebhookSecret)
 	}
 }
 
-func TestInfraUpValidatesRequiredInputs(t *testing.T) {
+func TestInitValidatesProvisionAndGitHubInputs(t *testing.T) {
 	a := &app{
 		cfg: config.ClientConfig{
 			ServerURL: "http://127.0.0.1:8080",
 		},
 	}
-	cmd := mustNewInfraUpCmd(t, a)
+	cmd := a.newInitCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 
-	cmd.SetArgs([]string{})
+	cmd.SetArgs([]string{"--host", "203.0.113.10", "--provision"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected infra up to fail without host/provision")
-	}
-	if !strings.Contains(err.Error(), "--host is required unless --provision is set") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	cmd = mustNewInfraUpCmd(t, a)
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"--host", "203.0.113.10", "--provision"})
-	err = cmd.Execute()
-	if err == nil {
-		t.Fatal("expected infra up to fail when host and provision are combined")
+		t.Fatal("expected init to fail when host and provision are combined")
 	}
 	if !strings.Contains(err.Error(), "--host cannot be combined with --provision") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	cmd = mustNewInfraUpCmd(t, a)
+	cmd = a.newInitCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	t.Setenv("HCLOUD_TOKEN", "")
 	cmd.SetArgs([]string{"--provision"})
 	err = cmd.Execute()
 	if err == nil {
-		t.Fatal("expected infra up to fail without hcloud token in provision mode")
+		t.Fatal("expected init to fail without hcloud token in provision mode")
 	}
-	if !strings.Contains(err.Error(), "missing Hetzner token") {
+	if !strings.Contains(err.Error(), "required when --provision is set") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cmd = a.newInitCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	t.Setenv("GITHUB_ADMIN_TOKEN", "")
+	cmd.SetArgs([]string{"--repo", "owner/repo", "--server-url", "https://rascal.example.com"})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("expected init to fail when GitHub setup is enabled without admin token")
+	}
+	if !strings.Contains(err.Error(), "--github-admin-token is required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -1749,12 +1741,12 @@ func TestHelpGoldenSnapshots(t *testing.T) {
 		{name: "root", args: nil},
 		{name: "run", args: []string{"run"}},
 		{name: "logs", args: []string{"logs"}},
-		{name: "bootstrap", args: []string{"bootstrap"}},
+		{name: "init", args: []string{"init"}},
 		{name: "deploy", args: []string{"deploy"}},
+		{name: "provision", args: []string{"provision"}},
 		{name: "auth", args: []string{"auth"}},
 		{name: "auth_credentials", args: []string{"auth", "credentials"}},
 		{name: "github", args: []string{"github"}},
-		{name: "infra", args: []string{"infra"}},
 	}
 	for _, tc := range cases {
 		tc := tc

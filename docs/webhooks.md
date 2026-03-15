@@ -8,14 +8,14 @@ Rascal expects GitHub webhooks at:
 
 ## Setup
 
-The bootstrap flow configures webhook + `rascal` label when admin token is
+The `init` flow configures webhook + `rascal` label when admin token is
 available.
 
 ```bash
-./bin/rascal bootstrap --repo OWNER/REPO --domain rascal.example.com
+./bin/rascal init --provision --repo OWNER/REPO --domain rascal.example.com
 ```
 
-If needed, you can re-run bootstrap with `--skip-deploy` to resync webhook
+If needed, you can re-run `init` with `--skip-deploy` to resync webhook
 configuration.
 
 ## Validation

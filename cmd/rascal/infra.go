@@ -102,27 +102,7 @@ func runHetznerProvision(cfg hcloudProvisionConfig, timeout time.Duration) (hclo
 
 var runHetznerProvisionFn = runHetznerProvision
 
-func (a *app) newInfraCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "infra",
-		Short: "Infrastructure operations (provisioning/deploy)",
-		Long:  "Provision and deploy Rascal infrastructure resources.",
-		Example: strings.TrimSpace(`
-rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$RASCAL_GITHUB_TOKEN"
-rascal infra provision-hetzner --token "$HCLOUD_TOKEN"
-rascal infra deploy-existing --host "$SERVER_IP" --ssh-key ~/.ssh/id_ed25519
-`),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
-		},
-	}
-	cmd.AddCommand(a.newInfraUpCmd())
-	cmd.AddCommand(a.newInfraProvisionHetznerCmd())
-	cmd.AddCommand(a.newInfraDeployExistingCmd())
-	return cmd
-}
-
-func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
+func (a *app) newProvisionCmd() *cobra.Command {
 	var (
 		token         string
 		name          string
@@ -136,8 +116,13 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 		timeout       time.Duration
 	)
 	cmd := &cobra.Command{
-		Use:   "provision-hetzner",
-		Short: "Provision a Hetzner Cloud server",
+		Use:   "provision",
+		Short: "Provision a Rascal host",
+		Long:  "Provision a new Rascal host using the default infrastructure provider (currently Hetzner Cloud).",
+		Example: strings.TrimSpace(`
+rascal provision --token "$HCLOUD_TOKEN"
+rascal provision --name rascal-prod --server-type cax21
+`),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			token = firstNonEmpty(strings.TrimSpace(token), strings.TrimSpace(os.Getenv("HCLOUD_TOKEN")))
 			if token == "" {
@@ -189,131 +174,6 @@ func (a *app) newInfraProvisionHetznerCmd() *cobra.Command {
 	cmd.Flags().StringVar(&firewallName, "firewall-name", "rascal-fw", "Hetzner firewall resource name")
 	cmd.Flags().BoolVar(&applyFirewall, "apply-firewall", true, "create/update and attach a basic firewall (22,80,443)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 8*time.Minute, "provision timeout")
-	return cmd
-}
-
-func (a *app) newInfraDeployExistingCmd() *cobra.Command {
-	return a.newDeployExistingCmd("deploy-existing", "Deploy rascald to an existing Linux host over SSH")
-}
-
-func (a *app) newInfraUpCmd() *cobra.Command {
-	var (
-		host               string
-		provision          bool
-		hcloudToken        string
-		name               string
-		sshUser            string
-		sshKey             string
-		sshPort            int
-		goarch             string
-		apiToken           string
-		githubRuntimeToken string
-		webhookSecret      string
-		codexAuthPath      string
-		domain             string
-		agentRuntime       string
-		runnerImageGoose   string
-		runnerImageCodex   string
-		skipEnvUpload      bool
-	)
-	cmd := &cobra.Command{
-		Use:   "up",
-		Short: "Provision (optional) and deploy rascald",
-		Long:  "One-shot infrastructure flow: optionally provision a Hetzner host, then deploy rascald over SSH.",
-		Example: strings.TrimSpace(`
-rascal infra up --host "$SERVER_IP" --github-runtime-token "$RASCAL_GITHUB_TOKEN"
-rascal infra up --provision --hcloud-token "$HCLOUD_TOKEN" --github-runtime-token "$RASCAL_GITHUB_TOKEN" --codex-auth ~/.codex/auth.json
-`),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			host = strings.TrimSpace(host)
-			hcloudToken = firstNonEmpty(strings.TrimSpace(hcloudToken), strings.TrimSpace(os.Getenv("HCLOUD_TOKEN")))
-			if provision && host != "" {
-				return &cliError{Code: exitInput, Message: "--host cannot be combined with --provision"}
-			}
-			if !provision && host == "" {
-				return &cliError{Code: exitInput, Message: "--host is required unless --provision is set"}
-			}
-
-			var provisionOut *hcloudProvisionResult
-			if provision {
-				if hcloudToken == "" {
-					return &cliError{Code: exitInput, Message: "missing Hetzner token", Hint: "set --hcloud-token or HCLOUD_TOKEN"}
-				}
-				cfg, timeout, err := resolveHetznerProvisionConfig(hetznerProvisionInput{
-					Token:         hcloudToken,
-					Name:          name,
-					ApplyFirewall: true,
-				})
-				if err != nil {
-					return &cliError{Code: exitInput, Message: "invalid default ssh public key path", Cause: err}
-				}
-				out, err := runHetznerProvisionFn(cfg, timeout)
-				if err != nil {
-					return &cliError{Code: exitRuntime, Message: "hetzner provisioning failed", Cause: err}
-				}
-				host = strings.TrimSpace(out.Host)
-				provisionOut = &out
-				a.println("provisioned %s (%d)", out.ServerName, out.ServerID)
-				a.println("host: %s", out.Host)
-			}
-
-			result, err := a.runDeployExisting(deployExistingInput{
-				Host:               host,
-				SSHUser:            sshUser,
-				SSHKey:             sshKey,
-				SSHPort:            sshPort,
-				GOARCH:             goarch,
-				APIToken:           apiToken,
-				GitHubRuntimeToken: githubRuntimeToken,
-				WebhookSecret:      webhookSecret,
-				CodexAuthPath:      codexAuthPath,
-				Domain:             domain,
-				AgentRuntime:       agentRuntime,
-				RunnerImageGoose:   runnerImageGoose,
-				RunnerImageCodex:   runnerImageCodex,
-				SkipEnvUpload:      skipEnvUpload,
-			})
-			if err != nil {
-				return err
-			}
-
-			out := deployCommandOutput{
-				Host:      result.Host,
-				ServerURL: result.ServerURL,
-				APIToken:  maskSecret(result.APIToken),
-			}
-			if provisionOut != nil {
-				out.ProvisionedServer = provisionOut
-			}
-			return emit(a, out, func() error {
-				a.println("deployed rascald to %s", result.Host)
-				a.println("server_url: %s", result.ServerURL)
-				if strings.TrimSpace(result.APIToken) != "" {
-					a.println("api_token: %s", maskSecret(result.APIToken))
-				} else {
-					a.println("api_token: unchanged on remote")
-				}
-				return nil
-			})
-		},
-	}
-	cmd.Flags().StringVar(&host, "host", "", "existing server host")
-	cmd.Flags().BoolVar(&provision, "provision", false, "provision a new Hetzner host before deploy")
-	cmd.Flags().StringVar(&hcloudToken, "hcloud-token", "", "Hetzner Cloud token (or HCLOUD_TOKEN) used with --provision")
-	cmd.Flags().StringVar(&name, "name", "", "provisioned server name (default: rascal-<timestamp>)")
-	cmd.Flags().StringVar(&sshUser, "ssh-user", "root", "SSH target user")
-	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key path")
-	cmd.Flags().IntVar(&sshPort, "ssh-port", 22, "SSH target port")
-	cmd.Flags().StringVar(&goarch, "goarch", "", "GOARCH for rascald binary (auto-detected when empty)")
-	cmd.Flags().StringVar(&apiToken, "api-token", "", "orchestrator API token")
-	cmd.Flags().StringVar(&githubRuntimeToken, "github-runtime-token", "", "GitHub runtime token")
-	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
-	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
-	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
-	cmd.Flags().StringVar(&agentRuntime, "agent-runtime", "", "agent runtime to use on the server (goose or codex)")
-	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
-	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
-	cmd.Flags().BoolVar(&skipEnvUpload, "skip-env-upload", false, "keep existing /etc/rascal/rascal.env on server")
 	return cmd
 }
 

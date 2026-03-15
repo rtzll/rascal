@@ -121,7 +121,7 @@ Operational notes:
 - Stored credential payloads are encrypted at rest in SQLite using
   `RASCAL_CREDENTIAL_ENCRYPTION_KEY`.
 - Manage credentials with `rascal auth credentials ...`.
-- `rascal bootstrap --codex-auth ...` and `rascal deploy --codex-auth ...`
+- `rascal init --codex-auth ...` and `rascal deploy --codex-auth ...`
   seed or update a shared stored credential for the server.
 
 ## Safe Manual Interventions

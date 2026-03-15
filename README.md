@@ -38,10 +38,10 @@ GITHUB_ADMIN_TOKEN=...
 RASCAL_GITHUB_TOKEN=...
 ```
 
-3. Bootstrap:
+3. Initialize Rascal:
 
 ```bash
-./bin/rascal bootstrap \
+./bin/rascal init --provision \
   --repo OWNER/REPO \
   --domain rascal.example.com
 ```

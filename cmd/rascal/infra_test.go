@@ -313,11 +313,11 @@ func TestInfraProvisionHetznerJSONOutput(t *testing.T) {
 	}
 
 	a := &app{output: "json", quiet: true}
-	cmd := a.newInfraProvisionHetznerCmd()
+	cmd := a.newProvisionCmd()
 	cmd.SetArgs([]string{"--token", "hcloud-token"})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
-		t.Fatalf("provision-hetzner: %v", err)
+		t.Fatalf("provision: %v", err)
 	}
 
 	var out hcloudProvisionOutput
@@ -329,7 +329,7 @@ func TestInfraProvisionHetznerJSONOutput(t *testing.T) {
 	}
 }
 
-func TestInfraDeployExistingJSONOutput(t *testing.T) {
+func TestDeployJSONOutput(t *testing.T) {
 	origDeploy := deployToExistingHostFn
 	origHealth := waitForServerHealthSSHFn
 	origSeed := seedBootstrapSharedCredentialFn
@@ -346,11 +346,11 @@ func TestInfraDeployExistingJSONOutput(t *testing.T) {
 	}
 
 	a := &app{output: "json", quiet: true}
-	cmd := mustNewInfraDeployExistingCmd(t, a)
+	cmd := mustNewDeployCmd(t, a)
 	cmd.SetArgs([]string{"--host", "203.0.113.10", "--goarch", "amd64"})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
-		t.Fatalf("deploy-existing: %v", err)
+		t.Fatalf("deploy: %v", err)
 	}
 
 	var out deployCommandOutput
@@ -365,14 +365,16 @@ func TestInfraDeployExistingJSONOutput(t *testing.T) {
 	}
 }
 
-func TestInfraUpJSONOutputIncludesProvisionedServer(t *testing.T) {
+func TestInitJSONOutputIncludesProvisionedServer(t *testing.T) {
 	origRunHetznerProvision := runHetznerProvisionFn
 	origDeploy := deployToExistingHostFn
+	origRemoteDoctor := runRemoteDoctorFn
 	origHealth := waitForServerHealthSSHFn
 	origSeed := seedBootstrapSharedCredentialFn
 	t.Cleanup(func() {
 		runHetznerProvisionFn = origRunHetznerProvision
 		deployToExistingHostFn = origDeploy
+		runRemoteDoctorFn = origRemoteDoctor
 		waitForServerHealthSSHFn = origHealth
 		seedBootstrapSharedCredentialFn = origSeed
 	})
@@ -388,20 +390,36 @@ func TestInfraUpJSONOutputIncludesProvisionedServer(t *testing.T) {
 		}, nil
 	}
 	deployToExistingHostFn = func(cfg deployConfig) error { return nil }
+	runRemoteDoctorFn = func(cfg deployConfig) (remoteDoctorStatus, error) { return remoteDoctorStatus{}, os.ErrNotExist }
 	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error { return nil }
 	seedBootstrapSharedCredentialFn = func(client apiClient, authFilePath string) (credentialRecord, error) {
 		return credentialRecord{}, nil
 	}
 
-	a := &app{output: "json", quiet: true}
-	cmd := mustNewInfraUpCmd(t, a)
-	cmd.SetArgs([]string{"--provision", "--hcloud-token", "hcloud-token", "--goarch", "amd64", "--skip-env-upload"})
+	tmp := t.TempDir()
+	a := &app{
+		output:     "json",
+		quiet:      true,
+		configPath: filepath.Join(tmp, "config.toml"),
+	}
+	authPath := filepath.Join(tmp, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	cmd := a.newInitCmd()
+	cmd.SetArgs([]string{
+		"--provision",
+		"--hcloud-token", "hcloud-token",
+		"--github-runtime-token", "runtime-token",
+		"--codex-auth", authPath,
+		"--skip-github",
+	})
 	stdout, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
-		t.Fatalf("infra up: %v", err)
+		t.Fatalf("init: %v", err)
 	}
 
-	var out deployCommandOutput
+	var out initCompleteOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode output: %v", err)
 	}

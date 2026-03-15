@@ -37,7 +37,7 @@ Resync webhook/label (no deploy):
 
 ```bash
 set -a; source ./.rascal.env; set +a
-./bin/rascal bootstrap \
+./bin/rascal init \
   --repo "$REPO" \
   --server-url "https://${DOMAIN}" \
   --skip-deploy \

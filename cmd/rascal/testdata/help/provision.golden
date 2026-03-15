@@ -1,0 +1,36 @@
+Provision a new Rascal host using the default infrastructure provider (currently Hetzner Cloud).
+
+Usage:
+  rascal provision [flags]
+
+Examples:
+rascal provision --token "$HCLOUD_TOKEN"
+rascal provision --name rascal-prod --server-type cax21
+
+Flags:
+      --apply-firewall          create/update and attach a basic firewall (22,80,443) (default true)
+      --firewall-name string    Hetzner firewall resource name (default "rascal-fw")
+  -h, --help                    help for provision
+      --image string            Hetzner image (default "ubuntu-24.04")
+      --location string         Hetzner location (default "fsn1")
+      --name string             server name
+      --server-type string      Hetzner server type (default "cx23")
+      --ssh-key-name string     Hetzner SSH key resource name (default "rascal")
+      --ssh-public-key string   local SSH public key path (default "~/.ssh/id_ed25519.pub")
+      --timeout duration        provision timeout (default 8m0s)
+      --token string            Hetzner Cloud token (or HCLOUD_TOKEN)
+
+Global Flags:
+      --api-token string         orchestrator API token
+      --client-ssh-host string   SSH target host for API transport=ssh/auto
+      --client-ssh-key string    SSH private key path for API transport=ssh/auto
+      --client-ssh-port int      SSH target port for API transport=ssh/auto
+      --client-ssh-user string   SSH target user for API transport=ssh/auto
+      --config string            config file path (default "$HOME/.rascal/config.toml")
+      --default-repo string      default repository in OWNER/REPO form
+      --env-file string          env file path (fallback: ./.rascal.env if present)
+      --no-color                 disable ANSI color/style output (also set by NO_COLOR)
+      --output string            output format: table|json|toml (default "table")
+  -q, --quiet                    reduce non-essential output
+      --server-url string        orchestrator URL
+      --transport string         API transport: auto|http|ssh

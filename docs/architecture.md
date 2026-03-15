@@ -66,7 +66,7 @@ rascal (CLI) or GitHub webhook
 1. `rascal` (CLI)
 
 - Local operator interface.
-- Handles bootstrap, deploy, config, run creation, logs, and control commands.
+- Handles init, deploy, config, run creation, logs, and control commands.
 - Lives in `cmd/rascal`.
 
 2. `rascald` (orchestrator server)

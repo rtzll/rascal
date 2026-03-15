@@ -1,28 +1,30 @@
-Configure client, provision (optional), and deploy orchestrator
+Resolve local config, optionally provision a host, deploy rascald, configure GitHub integration, and write local client settings.
 
 Usage:
-  rascal bootstrap [flags]
+  rascal init [flags]
 
 Flags:
-      --api-token string              API token for orchestrator (auto-generated if empty)
+      --api-token string              API token for orchestrator
       --codex-auth string             local Codex auth.json path used to seed the initial stored shared credential (default "~/.codex/auth.json")
       --domain string                 orchestrator domain (e.g. rascal.example.com)
       --github-admin-token string     GitHub token with repo Webhooks (rw) and Issues (rw) for label/webhook setup
       --github-runtime-token string   GitHub token for remote runner operations (push/PR)
       --hcloud-token string           Hetzner Cloud token (or HCLOUD_TOKEN) for provisioning
-  -h, --help                          help for bootstrap
-      --host host                     existing server host (defaults to config host if set)
-      --print-plan                    print resolved bootstrap actions and prerequisites without executing
-      --provision-new                 force provisioning a new host when --hcloud-token is set
+  -h, --help                          help for init
+      --host string                   existing server host for deploy and saved config
+      --print-plan                    print resolved init actions and prerequisites without executing
+      --provision                     provision a new Hetzner host before deploy
       --repo string                   default repository in OWNER/REPO form
       --server-url string             orchestrator URL (overrides --domain)
       --skip-deploy                   skip remote deployment
-      --skip-webhook                  skip GitHub webhook setup
-      --ssh-key string                SSH private key path for existing host deployment
-      --ssh-port int                  SSH target port for existing host deployment (default 22)
-      --ssh-user string               SSH target user for existing host deployment (default "root")
-      --webhook-secret string         GitHub webhook secret (auto-generated if empty)
-      --write-config                  write config file (default true)
+      --skip-github                   skip GitHub webhook and label setup
+      --ssh-host string               default SSH target host for transport=ssh/auto
+      --ssh-key string                SSH private key path for existing host deployment and saved config
+      --ssh-port int                  SSH target port for existing host deployment and saved config (default 22)
+      --ssh-user string               SSH target user for existing host deployment and saved config (default "root")
+      --transport string              default transport to save: auto|http|ssh
+      --webhook-secret string         GitHub webhook secret (auto-generated if needed)
+      --write-config                  write local config file (default true)
 
 Global Flags:
       --client-ssh-host string   SSH target host for API transport=ssh/auto
@@ -35,4 +37,3 @@ Global Flags:
       --no-color                 disable ANSI color/style output (also set by NO_COLOR)
       --output string            output format: table|json|toml (default "table")
   -q, --quiet                    reduce non-essential output
-      --transport string         API transport: auto|http|ssh
