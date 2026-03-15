@@ -160,6 +160,45 @@ func TestRunDeployExistingUsesConfiguredHost(t *testing.T) {
 	if result.Host != "203.0.113.10" {
 		t.Fatalf("result host = %q, want config host", result.Host)
 	}
+	if result.ServerURL != "http://203.0.113.10:8080" {
+		t.Fatalf("result server_url = %q, want host-derived url", result.ServerURL)
+	}
+}
+
+func TestRunDeployExistingDoesNotReuseStaleConfiguredServerURL(t *testing.T) {
+	origDeploy := deployToExistingHostFn
+	origHealth := waitForServerHealthSSHFn
+	origSeed := seedBootstrapSharedCredentialFn
+	t.Cleanup(func() {
+		deployToExistingHostFn = origDeploy
+		waitForServerHealthSSHFn = origHealth
+		seedBootstrapSharedCredentialFn = origSeed
+	})
+
+	deployToExistingHostFn = func(cfg deployConfig) error { return nil }
+	waitForServerHealthSSHFn = func(cfg deployConfig, timeout time.Duration) error { return nil }
+	seedBootstrapSharedCredentialFn = func(client apiClient, authFilePath string) (credentialRecord, error) {
+		return credentialRecord{}, nil
+	}
+
+	a := &app{
+		cfg: config.ClientConfig{
+			ServerURL: "http://<provisioned-host>:8080",
+		},
+	}
+	result, err := a.runDeployExisting(deployExistingInput{
+		Host:          "203.0.113.10",
+		SSHPort:       22,
+		GOARCH:        "amd64",
+		SkipEnvUpload: true,
+		RawErrors:     true,
+	})
+	if err != nil {
+		t.Fatalf("runDeployExisting failed: %v", err)
+	}
+	if result.ServerURL != "http://203.0.113.10:8080" {
+		t.Fatalf("result server_url = %q, want host-derived url", result.ServerURL)
+	}
 }
 
 func TestRunDeployExistingUsesCanonicalRuntimeTokenEnv(t *testing.T) {
@@ -428,5 +467,19 @@ func TestInitJSONOutputIncludesProvisionedServer(t *testing.T) {
 	}
 	if out.ProvisionedServer == nil || out.ProvisionedServer.ServerID != 456 {
 		t.Fatalf("unexpected provisioned server: %+v", out.ProvisionedServer)
+	}
+
+	cfg, err := config.LoadClientConfigAtPath(a.configPath)
+	if err != nil {
+		t.Fatalf("load saved config: %v", err)
+	}
+	if cfg.ServerURL != "http://203.0.113.30:8080" {
+		t.Fatalf("saved server_url = %q, want provisioned host url", cfg.ServerURL)
+	}
+	if cfg.Host != "203.0.113.30" {
+		t.Fatalf("saved host = %q, want provisioned host", cfg.Host)
+	}
+	if cfg.SSHHost != "203.0.113.30" {
+		t.Fatalf("saved ssh_host = %q, want provisioned host", cfg.SSHHost)
 	}
 }

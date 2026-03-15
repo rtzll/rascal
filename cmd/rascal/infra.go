@@ -473,7 +473,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		a.println("seeded stored shared credential: %s", bootstrapSharedCredentialID)
 	}
 
-	serverURL := firstNonEmpty(strings.TrimSpace(a.cfg.ServerURL), "http://"+host+":8080")
+	serverURL := "http://" + host + ":8080"
 	if domain != "" {
 		serverURL = "https://" + domain
 	}

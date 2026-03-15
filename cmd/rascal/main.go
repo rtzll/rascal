@@ -531,6 +531,7 @@ func (a *app) newInitCmd() *cobra.Command {
 			repo = firstNonEmpty(strings.TrimSpace(repo), a.cfg.DefaultRepo)
 			domain = firstNonEmpty(strings.TrimSpace(domain), strings.TrimSpace(a.cfg.Domain))
 			serverURL = strings.TrimSpace(serverURL)
+			explicitSSHHost := strings.TrimSpace(sshHost)
 			apiToken = firstNonEmpty(strings.TrimSpace(apiToken), strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")), strings.TrimSpace(a.cfg.APIToken))
 			githubAdminToken = firstNonEmpty(strings.TrimSpace(githubAdminToken), strings.TrimSpace(os.Getenv("GITHUB_ADMIN_TOKEN")))
 			githubRuntimeToken = firstNonEmpty(strings.TrimSpace(githubRuntimeToken), strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")))
@@ -699,6 +700,9 @@ func (a *app) newInitCmd() *cobra.Command {
 					return fmt.Errorf("hcloud provision: %w", err)
 				}
 				host = strings.TrimSpace(out.Host)
+				if explicitSSHHost == "" {
+					sshHost = host
+				}
 				provisionOut = &out
 			}
 
@@ -741,6 +745,10 @@ func (a *app) newInitCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				host = strings.TrimSpace(result.Host)
+				if serverURL == "" {
+					serverURL = strings.TrimRight(strings.TrimSpace(result.ServerURL), "/")
+				}
 				deployPerformed = result.DeployPerformed
 				if deployPerformed {
 					a.println("deployed rascald to %s", host)
@@ -748,14 +756,16 @@ func (a *app) newInitCmd() *cobra.Command {
 			}
 
 			if writeConfig {
-				if resolvedServerURL == "" {
+				finalServerURL, _ := resolveInitServerURL(serverURL, domain, host, a.cfg.ServerURL, false)
+				if finalServerURL == "" {
 					return fmt.Errorf("either --server-url, --domain, --host, or existing config server_url is required when writing config")
 				}
-				serverURL = strings.TrimRight(resolvedServerURL, "/")
+				serverURL = strings.TrimRight(finalServerURL, "/")
 			}
 			if shouldConfigureGitHub {
 				if strings.TrimSpace(serverURL) == "" {
-					serverURL = strings.TrimRight(resolvedServerURL, "/")
+					finalServerURL, _ := resolveInitServerURL(serverURL, domain, host, a.cfg.ServerURL, false)
+					serverURL = strings.TrimRight(finalServerURL, "/")
 				}
 				if serverURL == "" {
 					return fmt.Errorf("GitHub setup requires a resolved server URL; set --server-url, --domain, or --host")
@@ -794,7 +804,7 @@ func (a *app) newInitCmd() *cobra.Command {
 					save.Domain = domain
 				}
 				save.Transport = transport
-				save.SSHHost = firstNonEmpty(strings.TrimSpace(sshHost), save.SSHHost, host)
+				save.SSHHost = firstNonEmpty(strings.TrimSpace(sshHost), host, save.SSHHost)
 				save.SSHUser = firstNonEmpty(strings.TrimSpace(sshUser), save.SSHUser, "root")
 				save.SSHKey = strings.TrimSpace(sshKey)
 				save.SSHPort = sshPort
