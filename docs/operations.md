@@ -27,8 +27,10 @@ runtime prerequisites.
 Log output includes:
 
 - `runner.log`: orchestration, git, push, PR operations
-- `agent.ndjson`: canonical agent-side stream log path for both Goose and Codex runs
-- `agent_output.txt`: structured/fallback agent output when the backend writes it
+- `agent.ndjson`: canonical agent-side stream log path for both Goose and Codex
+  runs
+- `agent_output.txt`: structured/fallback agent output when the backend writes
+  it
 
 ## Recovery Patterns
 
@@ -51,21 +53,23 @@ detached into Docker containers.
 
 Operationally this means:
 
-- Blue/green still provides readiness-checked cutover, rollback safety, and API/webhook continuity.
+- Blue/green still provides readiness-checked cutover, rollback safety, and
+  API/webhook continuity.
 - Blue/green is no longer required to keep active runs alive during deploy.
-- After deploy, restart, or slot rotation, the active slot should recover and adopt detached run supervision.
+- After deploy, restart, or slot rotation, the active slot should recover and
+  adopt detached run supervision.
 
 ## Troubleshooting by Layer
 
-| Symptom | Likely layer | First checks |
-| --- | --- | --- |
-| `rascal` command cannot reach server | Control plane / transport | `./bin/rascal config view`, `./bin/rascal doctor --host YOUR_SERVER_IP` |
-| Webhook arrives but no run is created | Control plane / webhook path | `curl -fsS https://YOUR_DOMAIN/healthz`, `./bin/rascal logs caddy-access --host YOUR_SERVER_IP --follow`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
-| Run is stuck in `queued` | Control plane / scheduler | `./bin/rascal ps`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
-| Run is `running` but appears idle | Execution plane / backend | `./bin/rascal logs <run_id> --follow`, inspect detached containers on host |
-| Cancel does not take effect | Execution plane / supervision adoption | `./bin/rascal cancel <run_id>`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
-| Auth failures in Codex runs | Credential layer | inspect run logs, verify stored credential status and lease availability |
-| Deploy succeeds locally but service is unhealthy | Deployment / blue-green cutover | check active slot, slot readiness, Caddy logs, and rollback readiness |
+| Symptom                                          | Likely layer                           | First checks                                                                                                                                                         |
+| ------------------------------------------------ | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rascal` command cannot reach server             | Control plane / transport              | `./bin/rascal config view`, `./bin/rascal doctor --host YOUR_SERVER_IP`                                                                                              |
+| Webhook arrives but no run is created            | Control plane / webhook path           | `curl -fsS https://YOUR_DOMAIN/healthz`, `./bin/rascal logs caddy-access --host YOUR_SERVER_IP --follow`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow` |
+| Run is stuck in `queued`                         | Control plane / scheduler              | `./bin/rascal ps`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                                        |
+| Run is `running` but appears idle                | Execution plane / backend              | `./bin/rascal logs <run_id> --follow`, inspect detached containers on host                                                                                           |
+| Cancel does not take effect                      | Execution plane / supervision adoption | `./bin/rascal cancel <run_id>`, `./bin/rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                           |
+| Auth failures in Codex runs                      | Credential layer                       | inspect run logs, verify stored credential status and lease availability                                                                                             |
+| Deploy succeeds locally but service is unhealthy | Deployment / blue-green cutover        | check active slot, slot readiness, Caddy logs, and rollback readiness                                                                                                |
 
 ## First-Response Commands
 
@@ -105,9 +109,12 @@ suspected.
 
 Agent runtime notes:
 
-- Goose resumes a named Goose session with a task-scoped mounted session directory.
-- Codex resumes by reusing a task-scoped `CODEX_HOME` and the last discovered runtime session id.
-- Switching a task between Goose and Codex is supported; Rascal clears stale task-scoped resume state and starts a fresh session for the new agent runtime.
+- Goose resumes a named Goose session with a task-scoped mounted session
+  directory.
+- Codex resumes by reusing a task-scoped `CODEX_HOME` and the last discovered
+  runtime session id.
+- Switching a task between Goose and Codex is supported; Rascal clears stale
+  task-scoped resume state and starts a fresh session for the new agent runtime.
 
 ## Credential Leasing
 
@@ -122,17 +129,20 @@ Operational notes:
 - Stored credential payloads are encrypted at rest in SQLite using
   `RASCAL_CREDENTIAL_ENCRYPTION_KEY`.
 - Manage credentials with `rascal auth credentials ...`.
-- `rascal init --codex-auth ...` and `rascal deploy --codex-auth ...`
-  seed or update a shared stored credential for the server.
+- `rascal init --codex-auth ...` and `rascal deploy --codex-auth ...` seed or
+  update a shared stored credential for the server.
 
 ## Safe Manual Interventions
 
 - Restart or inspect the inactive slot during blue/green troubleshooting.
 - Inspect detached containers with `docker ps` or `docker inspect`.
-- Roll traffic back to a known-good slot by restoring Caddy upstream and `active_slot`.
+- Roll traffic back to a known-good slot by restoring Caddy upstream and
+  `active_slot`.
 - Retry or cancel runs through Rascal commands.
-- Remove stale task session directories when intentionally resetting task session resume.
-- Change the configured server agent runtime; future runs can migrate existing tasks to the new runtime.
+- Remove stale task session directories when intentionally resetting task
+  session resume.
+- Change the configured server agent runtime; future runs can migrate existing
+  tasks to the new runtime.
 
 ## Unsafe Manual Interventions
 
@@ -147,5 +157,6 @@ Operational notes:
 2. Confirm server URL and API token in `config view`.
 3. Follow logs for run-level errors.
 4. Verify webhook health/signature if GitHub triggers fail.
-5. Identify the failing layer: control plane, execution plane, backend, credentials, or deployment.
+5. Identify the failing layer: control plane, execution plane, backend,
+   credentials, or deployment.
 6. Prefer reversible interventions before deleting containers or artifacts.

@@ -22,6 +22,7 @@ REPO=OWNER/REPO
 ## 1) Webhook Not Triggering Runs
 
 Symptoms:
+
 - Label/comment in GitHub does nothing.
 - No new run appears in `rascal ps`.
 
@@ -47,6 +48,7 @@ set -a; source ./.rascal.env; set +a
 ```
 
 If behind Cloudflare, use:
+
 - SSL/TLS mode: `Full (strict)`
 - Proxy mode: `DNS only` while validating webhook behavior
 
@@ -69,8 +71,8 @@ set -a; source ./.rascal.env; set +a
   --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 ```
 
-That `--codex-auth` value seeds or updates the shared stored credential used
-for Codex runs; it is not copied to a static server-side fallback file.
+That `--codex-auth` value seeds or updates the shared stored credential used for
+Codex runs; it is not copied to a static server-side fallback file.
 
 Inspect remote services:
 
@@ -191,5 +193,6 @@ curl -fsS "https://${DOMAIN}/readyz"
 ```
 
 Then:
+
 - Open an issue with failing run IDs and timestamps.
 - Include snippets from `rascald`, `caddy`, and run logs.

@@ -11,7 +11,8 @@ from execution-plane responsibilities.
 - Control plane: `rascal` and `rascald`
 - Execution plane: detached runner containers launched via the Docker launcher
 - Agent harnesses: `goose` and `codex`
-- Model providers: currently `codex`, with room for future provider-specific harnesses
+- Model providers: currently `codex`, with room for future provider-specific
+  harnesses
 - Packaging: separate runner images for Goose and Codex
 
 In simple terms:
@@ -20,7 +21,8 @@ In simple terms:
 - A Run is one attempt to advance that task.
 - A Task tracks the harness selected for its latest run.
 - A Task may have one current task-scoped session record.
-- A Run uses the harness recorded on that run and may resume the task's session when the harness still matches.
+- A Run uses the harness recorded on that run and may resume the task's session
+  when the harness still matches.
 - A detached container is `RunExecution` state for a run, not the run itself.
 
 This split is important during deploys and restarts:
@@ -74,8 +76,10 @@ rascal (CLI) or GitHub webhook
 - Receives API requests and GitHub webhooks.
 - Persists task, run, lease, cancellation, and detached execution state.
 - Schedules runs serially per task and concurrently across different tasks.
-- Starts detached runner containers and supervises them via persisted execution handles.
-- Supports blue/green slot handoff by letting a new slot adopt detached execution supervision.
+- Starts detached runner containers and supervises them via persisted execution
+  handles.
+- Supports blue/green slot handoff by letting a new slot adopt detached
+  execution supervision.
 - Lives in `cmd/rascald`.
 
 3. Runner container (`rascal-runner`)
@@ -85,7 +89,8 @@ rascal (CLI) or GitHub webhook
 - Commits changes, pushes the head branch, and creates or reuses a PR.
 - Writes canonical artifacts into mounted `/rascal-meta`.
 - Runtime logic lives in Go in `cmd/rascal-runner`.
-- `runner/entrypoint.sh` is a thin shim that only executes `/usr/local/bin/rascal-runner`.
+- `runner/entrypoint.sh` is a thin shim that only executes
+  `/usr/local/bin/rascal-runner`.
 
 ## Code-Level Abstractions
 
@@ -100,26 +105,37 @@ These are the main layers in the Go codebase.
 2. Agent abstraction
 
 - `internal/agent` defines `AgentHarness`, `ModelProvider`, and `SessionPolicy`.
-- Compatibility names like `AgentRuntime` still exist at some boundaries, but the deeper abstraction is harness-plus-provider.
+- Compatibility names like `AgentRuntime` still exist at some boundaries, but
+  the deeper abstraction is harness-plus-provider.
 
 3. Execution abstraction
 
-- `internal/runner` defines the `Runner` launcher interface and `Spec`/`ExecutionHandle` contract.
-- Current production implementation is Docker; `noop` exists for non-runtime/test scenarios.
-- Session mounting is backend-aware: Goose uses `GOOSE_PATH_ROOT`, Codex uses `CODEX_HOME`.
+- `internal/runner` defines the `Runner` launcher interface and
+  `Spec`/`ExecutionHandle` contract.
+- Current production implementation is Docker; `noop` exists for
+  non-runtime/test scenarios.
+- Session mounting is backend-aware: Goose uses `GOOSE_PATH_ROOT`, Codex uses
+  `CODEX_HOME`.
 
 4. Control-plane and client boundaries
 
-- `internal/github` is the single deep GitHub boundary for API calls, webhook payload interpretation helpers, and comment rendering helpers.
-- `internal/apiclient` owns the CLI transport layer for HTTP and SSH-backed requests to `rascald`.
-- `internal/clientconfig` owns client config load/save/effective-resolution behavior.
-- `internal/remote` owns shared SSH/SCP/shell-quoting primitives reused by CLI and deploy flows.
+- `internal/github` is the single deep GitHub boundary for API calls, webhook
+  payload interpretation helpers, and comment rendering helpers.
+- `internal/apiclient` owns the CLI transport layer for HTTP and SSH-backed
+  requests to `rascald`.
+- `internal/clientconfig` owns client config load/save/effective-resolution
+  behavior.
+- `internal/remote` owns shared SSH/SCP/shell-quoting primitives reused by CLI
+  and deploy flows.
 
 5. Persistence abstraction
 
 - `internal/state` owns SQLite-backed persistence and state transitions.
-- It stores runs, tasks, run leases, detached run executions, cancel requests, webhook deliveries, task agent session records, and encrypted stored credentials plus credential leases.
-- SQL schema lives in embedded migrations and typed queries are generated under `internal/state/sqlitegen`.
+- It stores runs, tasks, run leases, detached run executions, cancel requests,
+  webhook deliveries, task agent session records, and encrypted stored
+  credentials plus credential leases.
+- SQL schema lives in embedded migrations and typed queries are generated under
+  `internal/state/sqlitegen`.
 
 6. Supporting integrations
 
@@ -130,20 +146,28 @@ These are the main layers in the Go codebase.
 
 - Rascal builds and deploys one orchestrator binary: `rascald`.
 - Rascal also builds one runner binary: `rascal-runner`.
-- That runner binary is packaged into separate Docker images for Goose and Codex.
+- That runner binary is packaged into separate Docker images for Goose and
+  Codex.
 - `rascald` selects the runner image based on the task/run harness.
-- Blue/green deploy replaces the control plane, while runner containers remain detached in the execution plane.
+- Blue/green deploy replaces the control plane, while runner containers remain
+  detached in the execution plane.
 
 ## Execution Flow
 
 1. User triggers a run from the CLI or via GitHub webhook.
-2. `rascald` creates or updates task context, writes run artifacts, and queues the run.
-3. Scheduler claims a queued run, enforces per-task serialization, and records a run lease.
-4. `rascald` resolves backend/session settings and persists a deterministic detached execution handle.
+2. `rascald` creates or updates task context, writes run artifacts, and queues
+   the run.
+3. Scheduler claims a queued run, enforces per-task serialization, and records a
+   run lease.
+4. `rascald` resolves backend/session settings and persists a deterministic
+   detached execution handle.
 5. `internal/runner` starts a detached Docker container for `rascal-runner`.
-6. Active slot supervises the detached execution by inspect/stop/remove operations and lease heartbeats.
-7. On slot rotation or process restart, a new slot can recover the persisted handle and adopt supervision.
-8. `rascal-runner` finalizes `meta.json`; `rascald` reads that artifact, updates run/task state, posts GitHub reactions/comments, and removes the container.
+6. Active slot supervises the detached execution by inspect/stop/remove
+   operations and lease heartbeats.
+7. On slot rotation or process restart, a new slot can recover the persisted
+   handle and adopt supervision.
+8. `rascal-runner` finalizes `meta.json`; `rascald` reads that artifact, updates
+   run/task state, posts GitHub reactions/comments, and removes the container.
 9. User monitors via `ps`, `logs`, and `open`.
 
 ## Lifecycle Summary
@@ -175,9 +199,11 @@ active slot A running
 - A run belongs to exactly one task.
 - A run uses the harness recorded on that run.
 - A task may have at most one current task-scoped session record.
-- Changing a task harness must discard incompatible task-scoped session resume state before the next run starts.
+- Changing a task harness must discard incompatible task-scoped session resume
+  state before the next run starts.
 - At most one orchestrator instance should own a run lease at a time.
-- `run_executions` store detached execution metadata, not user-visible business progress.
+- `run_executions` store detached execution metadata, not user-visible business
+  progress.
 - Only the active slot should process webhook traffic during blue/green overlap.
 
 ## Persistence Model
@@ -195,36 +221,41 @@ background worker.
 Key persisted entities:
 
 - `runs`: user-visible execution records and final outcome.
-- `tasks`: long-lived task identity across retries and follow-up feedback; API responses include a derived `pending_input` flag (computed from queued runs, not stored as a task column).
+- `tasks`: long-lived task identity across retries and follow-up feedback; API
+  responses include a derived `pending_input` flag (computed from queued runs,
+  not stored as a task column).
 - `run_leases`: supervision ownership and heartbeat expiry.
 - `run_executions`: detached execution handle metadata for adoption and cleanup.
 - `run_cancels`: persisted cancel intent.
-- `task sessions`: stable harness session identifiers and mounted session roots. In the current SQLite schema this data still lives in the legacy `task_agent_sessions` table.
-- `codex_credentials`: encrypted stored credential payloads and allocation metadata.
+- `task sessions`: stable harness session identifiers and mounted session roots.
+  In the current SQLite schema this data still lives in the legacy
+  `task_agent_sessions` table.
+- `codex_credentials`: encrypted stored credential payloads and allocation
+  metadata.
 - `credential_leases`: per-run credential assignments and lease expiry state.
 - `deliveries`: webhook dedupe/claim bookkeeping.
 
 ## Where State Lives
 
-| Location | What lives there | Notes |
-| --- | --- | --- |
-| SQLite state DB | tasks, runs, leases, execution handles, sessions, credentials | Primary control-plane source of truth |
-| Run directory | per-run artifacts, logs, `meta.json`, transient auth material | Short-lived execution artifacts |
-| Task session directory | resumable harness session state | Optional and task-scoped |
-| Docker runtime | detached runner container process state | Execution-plane state, not the system of record |
-| Caddy and systemd config on host | active slot routing and service activation | Deployment/control-plane topology |
+| Location                         | What lives there                                              | Notes                                           |
+| -------------------------------- | ------------------------------------------------------------- | ----------------------------------------------- |
+| SQLite state DB                  | tasks, runs, leases, execution handles, sessions, credentials | Primary control-plane source of truth           |
+| Run directory                    | per-run artifacts, logs, `meta.json`, transient auth material | Short-lived execution artifacts                 |
+| Task session directory           | resumable harness session state                               | Optional and task-scoped                        |
+| Docker runtime                   | detached runner container process state                       | Execution-plane state, not the system of record |
+| Caddy and systemd config on host | active slot routing and service activation                    | Deployment/control-plane topology               |
 
 ## Source of Truth by Object
 
-| Object | Source of truth | Why |
-| --- | --- | --- |
-| Task | `tasks` table | Durable unit of work across iterations |
-| Run | `runs` table | User-visible attempt and final outcome |
-| Active supervision owner | `run_leases` table | Coordinates which `rascald` instance supervises |
-| Detached container identity | `run_executions` table | Enables adoption and cleanup across restarts |
-| Session resume state | task session records plus mounted session directory | Tracks harness session identity and storage root |
-| Run artifacts | run directory on disk | Execution outputs consumed during finalization |
-| Live container process | Docker runtime | Actual execution process while the run is active |
+| Object                      | Source of truth                                     | Why                                              |
+| --------------------------- | --------------------------------------------------- | ------------------------------------------------ |
+| Task                        | `tasks` table                                       | Durable unit of work across iterations           |
+| Run                         | `runs` table                                        | User-visible attempt and final outcome           |
+| Active supervision owner    | `run_leases` table                                  | Coordinates which `rascald` instance supervises  |
+| Detached container identity | `run_executions` table                              | Enables adoption and cleanup across restarts     |
+| Session resume state        | task session records plus mounted session directory | Tracks harness session identity and storage root |
+| Run artifacts               | run directory on disk                               | Execution outputs consumed during finalization   |
+| Live container process      | Docker runtime                                      | Actual execution process while the run is active |
 
 ## Run Artifacts
 
@@ -238,33 +269,39 @@ Each run directory stores metadata and artifacts such as:
 - `commit_message.txt`
 - `pr_body.md`
 - `meta.json`
-- `response_target.json` and completion-comment markers when comment-triggered flows are used
+- `response_target.json` and completion-comment markers when comment-triggered
+  flows are used
 
 ## Session Behavior
 
-- Session policy is configured at the orchestrator via `off`, `pr-only`, or `all`.
-- `pr-only` currently resumes for `pr_comment`, `pr_review`, `pr_review_comment`, `pr_review_thread`, `retry`, and `issue_edited`.
+- Session policy is configured at the orchestrator via `off`, `pr-only`, or
+  `all`.
+- `pr-only` currently resumes for `pr_comment`, `pr_review`,
+  `pr_review_comment`, `pr_review_thread`, `retry`, and `issue_edited`.
 - Goose resumes by named Goose session plus mounted session storage.
-- Codex resumes by reusing a task-scoped `CODEX_HOME` and the discovered harness session id.
-- If a task switches harness between runs, Rascal starts a fresh session for the new harness and replaces the stored task session record.
-- If a Goose resume attempt fails because the stored session is missing or invalid, the runner falls back to a fresh session.
+- Codex resumes by reusing a task-scoped `CODEX_HOME` and the discovered harness
+  session id.
+- If a task switches harness between runs, Rascal starts a fresh session for the
+  new harness and replaces the stored task session record.
+- If a Goose resume attempt fails because the stored session is missing or
+  invalid, the runner falls back to a fresh session.
 
 ## Failure and Recovery
 
 Common failure and recovery cases:
 
-- `rascald` restart:
-  persisted run execution handles let the restarted process recover and re-adopt detached runs.
-- Blue/green deploy during active work:
-  detached containers keep running while the new active slot adopts supervision.
-- Missing detached container during adoption:
-  Rascal marks the run failed because execution disappeared before finalization.
-- Lease ownership loss:
-  the local instance stops supervision so another instance can take over safely.
-- Credential lease renewal failure:
-  Rascal requests cancellation and attempts to stop the detached run.
-- Cancel during slot rotation:
-  cancel intent is persisted, and the active slot after cutover should still stop/finalize the run.
+- `rascald` restart: persisted run execution handles let the restarted process
+  recover and re-adopt detached runs.
+- Blue/green deploy during active work: detached containers keep running while
+  the new active slot adopts supervision.
+- Missing detached container during adoption: Rascal marks the run failed
+  because execution disappeared before finalization.
+- Lease ownership loss: the local instance stops supervision so another instance
+  can take over safely.
+- Credential lease renewal failure: Rascal requests cancellation and attempts to
+  stop the detached run.
+- Cancel during slot rotation: cancel intent is persisted, and the active slot
+  after cutover should still stop/finalize the run.
 
 ## Credential Handling
 
@@ -276,12 +313,12 @@ Rascal uses stored Codex credentials managed by `rascald`.
   for that run and records the selected credential id in state.
 - The broker chooses from eligible credentials using the configured allocation
   strategy and tracks lease assignment per run.
-- The leased auth blob is written into the run-scoped `codex/auth.json` file
-  and removed during run cleanup.
+- The leased auth blob is written into the run-scoped `codex/auth.json` file and
+  removed during run cleanup.
 - While a run is active, `rascald` renews the credential lease. If renewal is
   lost, the run is canceled.
-- Bootstrap and deploy can seed an initial shared stored credential from a
-  local Codex auth file.
+- Bootstrap and deploy can seed an initial shared stored credential from a local
+  Codex auth file.
 
 ## Runner Environment Contract
 
@@ -297,7 +334,9 @@ Common optional:
 - `RASCAL_INSTRUCTION`
 - `RASCAL_AGENT_RUNTIME` (`goose` or `codex`; defaults to `goose` when unset)
 - `RASCAL_BASE_BRANCH` (default: `main`)
-- `RASCAL_HEAD_BRANCH` (runner fallback default: `rascal/<run_id>` when unset; `rascald` normally sets a task-derived branch and may reuse the previous head branch for PR comment/review follow-ups)
+- `RASCAL_HEAD_BRANCH` (runner fallback default: `rascal/<run_id>` when unset;
+  `rascald` normally sets a task-derived branch and may reuse the previous head
+  branch for PR comment/review follow-ups)
 - `RASCAL_ISSUE_NUMBER` (default: `0`)
 - `RASCAL_PR_NUMBER` (default: `0`)
 - `RASCAL_TRIGGER` (default: `cli`)
@@ -306,12 +345,15 @@ Common optional:
 - `RASCAL_META_DIR` (default: `/rascal-meta`)
 - `RASCAL_WORK_ROOT` (default: `/work`)
 - `RASCAL_REPO_DIR` (default: `${RASCAL_WORK_ROOT}/repo`)
-- `RASCAL_TASK_SESSION_MODE` (`off`, `pr-only`, `all`; orchestrator default: `all`)
+- `RASCAL_TASK_SESSION_MODE` (`off`, `pr-only`, `all`; orchestrator default:
+  `all`)
 - `RASCAL_TASK_SESSION_RESUME` (set by orchestrator per run)
 - `RASCAL_TASK_SESSION_KEY` (stable task-scoped key when resume is enabled)
 - `RASCAL_TASK_SESSION_ID` (runtime session id when known)
-- `CODEX_HOME` (run-scoped `/rascal-meta/codex` in stateless mode, or task-scoped mount in resume mode for Codex)
-- `GOOSE_PATH_ROOT` (run-scoped `/rascal-meta/goose` in stateless mode, or task-scoped mount in resume mode for Goose)
+- `CODEX_HOME` (run-scoped `/rascal-meta/codex` in stateless mode, or
+  task-scoped mount in resume mode for Codex)
+- `GOOSE_PATH_ROOT` (run-scoped `/rascal-meta/goose` in stateless mode, or
+  task-scoped mount in resume mode for Goose)
 
 ## Further Reading
 

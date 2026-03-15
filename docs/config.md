@@ -71,21 +71,17 @@ Tip: use `doctor` to confirm both local and remote resolution.
 
 Rascal uses encrypted stored credentials for Codex runs.
 
-- `RASCAL_CREDENTIAL_STRATEGY`
-  Allocation strategy for choosing among eligible credentials.
-  Default: `requester_own_then_shared`
+- `RASCAL_CREDENTIAL_STRATEGY` Allocation strategy for choosing among eligible
+  credentials. Default: `requester_own_then_shared`
 
-- `RASCAL_CREDENTIAL_LEASE_TTL`
-  How long a credential lease stays valid before it must be renewed.
-  Default: `90s`
+- `RASCAL_CREDENTIAL_LEASE_TTL` How long a credential lease stays valid before
+  it must be renewed. Default: `90s`
 
-- `RASCAL_CREDENTIAL_RENEW_INTERVAL`
-  How often the orchestrator renews an active credential lease.
-  Default: `30s`
+- `RASCAL_CREDENTIAL_RENEW_INTERVAL` How often the orchestrator renews an active
+  credential lease. Default: `30s`
 
-- `RASCAL_CREDENTIAL_ENCRYPTION_KEY`
-  Key used to encrypt stored credential auth blobs in SQLite.
-  If unset, Rascal falls back to `RASCAL_API_TOKEN`.
+- `RASCAL_CREDENTIAL_ENCRYPTION_KEY` Key used to encrypt stored credential auth
+  blobs in SQLite. If unset, Rascal falls back to `RASCAL_API_TOKEN`.
   Recommended: set a dedicated encryption key instead of reusing the API token.
 
 Operators can manage stored credentials with `rascal auth credentials ...`.

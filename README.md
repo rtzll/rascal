@@ -82,6 +82,7 @@ RASCAL_GITHUB_TOKEN=...
 - Glossary of core terms: [docs/glossary.md](docs/glossary.md)
 - Webhooks and Cloudflare notes: [docs/webhooks.md](docs/webhooks.md)
 - Operations and troubleshooting: [docs/operations.md](docs/operations.md)
-- Operator runbook (failure modes + exact commands): [docs/runbook.md](docs/runbook.md)
+- Operator runbook (failure modes + exact commands):
+  [docs/runbook.md](docs/runbook.md)
 - Architecture overview: [docs/architecture.md](docs/architecture.md)
 - Deployment flow (blue/green + drain): [docs/deployment.md](docs/deployment.md)
