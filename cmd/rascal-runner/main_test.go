@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rtzll/rascal/internal/runner"
+	"github.com/rtzll/rascal/internal/runsummary"
 	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/worker"
@@ -785,7 +786,11 @@ func TestRunCodexFreshSession(t *testing.T) {
 			if err := os.WriteFile(cfg.AgentOutputPath, []byte("final codex response"), 0o644); err != nil {
 				t.Fatalf("write agent output: %v", err)
 			}
-			if err := os.WriteFile(sessionPath, []byte(`{"type":"session_meta","payload":{"id":"session-123"}}`+"\n"), 0o644); err != nil {
+			sessionData := strings.Join([]string{
+				`{"type":"session_meta","payload":{"id":"session-123"}}`,
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":120,"cached_input_tokens":40,"output_tokens":30,"reasoning_output_tokens":10,"total_tokens":150},"total_token_usage":{"input_tokens":120,"cached_input_tokens":40,"output_tokens":30,"reasoning_output_tokens":10,"total_tokens":150}}}}`,
+			}, "\n") + "\n"
+			if err := os.WriteFile(sessionPath, []byte(sessionData), 0o644); err != nil {
 				t.Fatalf("write codex session: %v", err)
 			}
 			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
@@ -823,6 +828,19 @@ func TestRunCodexFreshSession(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err != nil {
 		t.Fatalf("expected codex auth copied into home: %v", err)
 	}
+	usage, ok, err := runsummary.ReadRecordedTokenUsage(filepath.Join(root, runsummary.RecordedTokenUsageFile))
+	if err != nil {
+		t.Fatalf("read recorded token usage: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected recorded token usage")
+	}
+	if usage.TotalTokens != 150 {
+		t.Fatalf("total_tokens = %d, want 150", usage.TotalTokens)
+	}
+	if usage.CachedInputTokens == nil || *usage.CachedInputTokens != 40 {
+		t.Fatalf("cached_input_tokens = %v, want 40", usage.CachedInputTokens)
+	}
 }
 
 func TestRunCodexResumeSession(t *testing.T) {
@@ -855,6 +873,13 @@ func TestRunCodexResumeSession(t *testing.T) {
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("continue"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
 	}
+	initialSessionData := strings.Join([]string{
+		`{"type":"session_meta","payload":{"id":"session-abc"}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":80,"cached_input_tokens":20,"output_tokens":20,"reasoning_output_tokens":5,"total_tokens":100}}}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(sessionPath, []byte(initialSessionData), 0o644); err != nil {
+		t.Fatalf("write initial codex session: %v", err)
+	}
 
 	var gotArgs []string
 	ex := fakeExecutor{
@@ -866,8 +891,17 @@ func TestRunCodexResumeSession(t *testing.T) {
 			if err := os.WriteFile(cfg.AgentOutputPath, []byte("continued"), 0o644); err != nil {
 				t.Fatalf("write agent output: %v", err)
 			}
-			if err := os.WriteFile(sessionPath, []byte(`{"type":"session_meta","payload":{"id":"session-abc"}}`+"\n"), 0o644); err != nil {
-				t.Fatalf("write codex session: %v", err)
+			sessionFile, err := os.OpenFile(sessionPath, os.O_APPEND|os.O_WRONLY, 0o644)
+			if err != nil {
+				t.Fatalf("open codex session: %v", err)
+			}
+			defer func() {
+				if closeErr := sessionFile.Close(); closeErr != nil {
+					t.Fatalf("close codex session: %v", closeErr)
+				}
+			}()
+			if _, err := io.WriteString(sessionFile, `{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":35,"cached_input_tokens":10,"output_tokens":15,"reasoning_output_tokens":3,"total_tokens":50},"total_token_usage":{"input_tokens":115,"cached_input_tokens":30,"output_tokens":35,"reasoning_output_tokens":8,"total_tokens":150}}}}`+"\n"); err != nil {
+				t.Fatalf("append codex session: %v", err)
 			}
 			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
 				return fmt.Errorf("write fake codex output: %w", err)
@@ -891,6 +925,74 @@ func TestRunCodexResumeSession(t *testing.T) {
 	}
 	if strings.Contains(argsText, "workspace-write") {
 		t.Fatalf("did not expect explicit sandbox arg on resume, got %q", argsText)
+	}
+	usage, ok, err := runsummary.ReadRecordedTokenUsage(filepath.Join(root, runsummary.RecordedTokenUsageFile))
+	if err != nil {
+		t.Fatalf("read recorded token usage: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected recorded token usage")
+	}
+	if usage.TotalTokens != 50 {
+		t.Fatalf("total_tokens = %d, want 50", usage.TotalTokens)
+	}
+	if usage.InputTokens == nil || *usage.InputTokens != 35 {
+		t.Fatalf("input_tokens = %v, want 35", usage.InputTokens)
+	}
+}
+
+func TestRunCodexSkipsRecordedUsageWhenSessionUsageInvalid(t *testing.T) {
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex-home")
+	sessionPath := filepath.Join(codexHome, "sessions", "2026", "03", "session.jsonl")
+	cfg := worker.Config{
+		RepoDir:          root,
+		MetaDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
+		CodexHome:        codexHome,
+		AgentRuntime:     runtime.RuntimeCodex,
+	}
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatalf("mkdir codex sessions: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "codex"), 0o755); err != nil {
+		t.Fatalf("mkdir codex auth dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "codex", "auth.json"), []byte(`{"token":"test"}`), 0o600); err != nil {
+		t.Fatalf("write codex auth: %v", err)
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	ex := fakeExecutor{
+		runWithInputFn: func(_ string, _ []string, _ io.Reader, stdout, _ io.Writer, name string, args ...string) error {
+			if err := os.WriteFile(cfg.AgentOutputPath, []byte("final codex response"), 0o644); err != nil {
+				t.Fatalf("write agent output: %v", err)
+			}
+			sessionData := strings.Join([]string{
+				`{"type":"session_meta","payload":{"id":"session-123"}}`,
+				`{"type":"event_msg","payload":{"type":"token_count","info":`,
+			}, "\n")
+			if err := os.WriteFile(sessionPath, []byte(sessionData), 0o644); err != nil {
+				t.Fatalf("write codex session: %v", err)
+			}
+			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
+				return fmt.Errorf("write fake codex output: %w", err)
+			}
+			return nil
+		},
+	}
+
+	if _, _, err := worker.RunCodex(ex, cfg); err != nil {
+		t.Fatalf("runCodex returned error: %v", err)
+	}
+	if _, ok, err := runsummary.ReadRecordedTokenUsage(filepath.Join(root, runsummary.RecordedTokenUsageFile)); err != nil {
+		t.Fatalf("read recorded token usage: %v", err)
+	} else if ok {
+		t.Fatal("did not expect recorded token usage")
 	}
 }
 
