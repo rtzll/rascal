@@ -2601,7 +2601,10 @@ func TestClosedUnmergedPRCancelsRunningRuns(t *testing.T) {
 	waitCh := make(chan struct{})
 	launcher := &fakeLauncher{waitCh: waitCh}
 	s := newTestServer(t, launcher)
-	defer waitForServerIdle(t, s)
+	defer func() {
+		close(waitCh)
+		waitForServerIdle(t, s)
+	}()
 
 	taskID := "owner/repo#1001"
 	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 1001}); err != nil {
@@ -2618,10 +2621,7 @@ func TestClosedUnmergedPRCancelsRunningRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	waitFor(t, time.Second, func() bool {
-		current, ok := s.Store.GetRun(run.ID)
-		return ok && current.Status == state.StatusRunning
-	}, "running PR run")
+	_ = waitForRunExecution(t, s, run.ID)
 
 	payload := pullRequestEventPayload(t, "closed", "owner/repo", "dev", testPullRequest(1001, false, "", ""))
 	req := webhookRequest(t, payload, "pull_request", "delivery-closed-running-pr", "")
@@ -2645,8 +2645,6 @@ func TestClosedUnmergedPRCancelsRunningRuns(t *testing.T) {
 	if !strings.Contains(updated.Error, "pull request closed") {
 		t.Fatalf("expected closed pr cancel reason, got %q", updated.Error)
 	}
-
-	close(waitCh)
 }
 
 func TestClosedUnmergedEventDoesNotDowngradeMergedRunState(t *testing.T) {
