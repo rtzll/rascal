@@ -24,15 +24,16 @@ type Config struct {
 	Trigger     runtrigger.Name
 	GitHubToken string
 
-	MetaDir          string
-	WorkRoot         string
-	RepoDir          string
-	GooseLogPath     string
-	MetaPath         string
-	InstructionsPath string
-	CommitMsgPath    string
-	AgentOutputPath  string
-	PRBodyPath       string
+	MetaDir                    string
+	WorkRoot                   string
+	RepoDir                    string
+	GooseLogPath               string
+	MetaPath                   string
+	InstructionsPath           string
+	PersistentInstructionsPath string
+	CommitMsgPath              string
+	AgentOutputPath            string
+	PRBodyPath                 string
 
 	GooseDebug   bool
 	AgentRuntime runtime.Runtime
@@ -126,31 +127,33 @@ func LoadConfig() (Config, error) {
 	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))
 	codexHome := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CODEX_HOME")), filepath.Join(metaDir, "codex"))
 	claudeConfigDir := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")), filepath.Join(metaDir, "claude"))
+	persistentInstructionsPath := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_MOIM_MESSAGE_FILE")), filepath.Join(metaDir, defaultPersistentInstructionsFile))
 
 	return Config{
-		RunID:            runID,
-		TaskID:           taskID,
-		Instruction:      strings.TrimSpace(os.Getenv("RASCAL_INSTRUCTION")),
-		Repo:             repo,
-		BaseBranch:       baseBranch,
-		HeadBranch:       headBranch,
-		IssueNumber:      issueNumber,
-		Trigger:          trigger,
-		GitHubToken:      ghToken,
-		MetaDir:          metaDir,
-		WorkRoot:         workRoot,
-		RepoDir:          repoDir,
-		GooseLogPath:     filepath.Join(metaDir, defaultAgentLogFile),
-		MetaPath:         filepath.Join(metaDir, defaultMetaFile),
-		InstructionsPath: filepath.Join(metaDir, defaultInstructionsFile),
-		CommitMsgPath:    filepath.Join(metaDir, defaultCommitMsgFile),
-		AgentOutputPath:  filepath.Join(metaDir, defaultAgentOutputFile),
-		PRBodyPath:       filepath.Join(metaDir, defaultPRBodyFile),
-		GooseDebug:       debug,
-		AgentRuntime:     agentRuntime,
-		GoosePathRoot:    goosePathRoot,
-		CodexHome:        codexHome,
-		ClaudeConfigDir:  claudeConfigDir,
+		RunID:                      runID,
+		TaskID:                     taskID,
+		Instruction:                strings.TrimSpace(os.Getenv("RASCAL_INSTRUCTION")),
+		Repo:                       repo,
+		BaseBranch:                 baseBranch,
+		HeadBranch:                 headBranch,
+		IssueNumber:                issueNumber,
+		Trigger:                    trigger,
+		GitHubToken:                ghToken,
+		MetaDir:                    metaDir,
+		WorkRoot:                   workRoot,
+		RepoDir:                    repoDir,
+		GooseLogPath:               filepath.Join(metaDir, defaultAgentLogFile),
+		MetaPath:                   filepath.Join(metaDir, defaultMetaFile),
+		InstructionsPath:           filepath.Join(metaDir, defaultInstructionsFile),
+		PersistentInstructionsPath: persistentInstructionsPath,
+		CommitMsgPath:              filepath.Join(metaDir, defaultCommitMsgFile),
+		AgentOutputPath:            filepath.Join(metaDir, defaultAgentOutputFile),
+		PRBodyPath:                 filepath.Join(metaDir, defaultPRBodyFile),
+		GooseDebug:                 debug,
+		AgentRuntime:               agentRuntime,
+		GoosePathRoot:              goosePathRoot,
+		CodexHome:                  codexHome,
+		ClaudeConfigDir:            claudeConfigDir,
 		TaskSession: runner.TaskSessionSpec{
 			Mode:             agentSessionMode,
 			Resume:           agentSessionResume,
@@ -211,15 +214,45 @@ func ensureInstructions(cfg Config) error {
 	}
 	body := fmt.Sprintf(`# Rascal Instructions
 
+Repository: %s
 Task ID: %s
 Trigger: %s
 
-Follow the repository instructions and implement the requested task.
-Keep changes minimal, run `+"`make lint`"+` and `+"`make test`"+` before finishing if those targets exist, and summarize what changed.
-If one of those commands does not exist or cannot run, explain exactly why and run the closest equivalent checks instead.
-`, cfg.TaskID, cfg.Trigger)
+## Task
+
+%s
+`, cfg.Repo, cfg.TaskID, cfg.Trigger, firstNonEmptyValue(cfg.Instruction, "Follow the repository instructions and implement the requested task."))
 	if err := os.WriteFile(cfg.InstructionsPath, []byte(body), 0o644); err != nil {
 		return fmt.Errorf("write default instructions: %w", err)
+	}
+	return nil
+}
+
+func ensurePersistentInstructions(cfg Config) error {
+	if _, err := os.Stat(cfg.PersistentInstructionsPath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat persistent instructions: %w", err)
+	}
+	body := `# Rascal Persistent Instructions
+
+- Do not ask for interactive input.
+- Do not require MCP tools.
+- Keep changes minimal and scoped to the requested task.
+- Do not overwrite, revert, or discard user changes you did not make unless the task explicitly requires it.
+- Use the repository's existing patterns and conventions.
+- Prefer the repository's documented workflow over inventing a new one.
+- If the repository provides verification commands, run the relevant ones before finishing.
+- Run ` + "`make lint`" + ` and ` + "`make test`" + ` before finishing if those targets exist.
+- If one of those commands does not exist or cannot run, explain exactly why and run the closest equivalent checks instead.
+- If you make changes, write /rascal-meta/commit_message.txt using a conventional commit title on the first line.
+- Optionally add a commit body after a blank line in /rascal-meta/commit_message.txt.
+- If working with GitHub branches or pull requests, only push to the designated Rascal branch for this run.
+- If you must rewrite published history, prefer ` + "`git push --force-with-lease`" + ` over ` + "`git push --force`" + `.
+- Before finishing, ensure the working tree is clean unless the task explicitly requires uncommitted output.
+`
+	if err := os.WriteFile(cfg.PersistentInstructionsPath, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write default persistent instructions: %w", err)
 	}
 	return nil
 }

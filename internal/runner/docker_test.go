@@ -232,6 +232,9 @@ exit 0
 	if !strings.Contains(call, "-e GOOSE_PATH_ROOT=/rascal-goose-session") {
 		t.Fatalf("expected persistent goose path root env, got:\n%s", call)
 	}
+	if !strings.Contains(call, "-e GOOSE_MOIM_MESSAGE_FILE=/rascal-meta/persistent_instructions.md") {
+		t.Fatalf("expected goose persistent instructions env, got:\n%s", call)
+	}
 	if !strings.Contains(call, "-e RASCAL_TASK_SESSION_MODE=pr-only") {
 		t.Fatalf("expected session mode env, got:\n%s", call)
 	}
@@ -309,6 +312,9 @@ exit 0
 	if !strings.Contains(call, "-e GOOSE_PATH_ROOT=/rascal-meta/goose") {
 		t.Fatalf("expected run-scoped goose path root env, got:\n%s", call)
 	}
+	if !strings.Contains(call, "-e GOOSE_MOIM_MESSAGE_FILE=/rascal-meta/persistent_instructions.md") {
+		t.Fatalf("expected goose persistent instructions env, got:\n%s", call)
+	}
 	if strings.Contains(call, ":/rascal-goose-session") {
 		t.Fatalf("did not expect persistent session mount when resume disabled, got:\n%s", call)
 	}
@@ -374,6 +380,9 @@ exit 0
 	}
 	if !strings.Contains(call, sessionDir+":/rascal-codex-session") {
 		t.Fatalf("expected task session mount, got:\n%s", call)
+	}
+	if strings.Contains(call, "-e GOOSE_MOIM_MESSAGE_FILE=") {
+		t.Fatalf("did not expect goose persistent instructions env for codex backend, got:\n%s", call)
 	}
 	if strings.Contains(call, "-e GOOSE_PROVIDER=") {
 		t.Fatalf("did not expect goose env for codex backend, got:\n%s", call)

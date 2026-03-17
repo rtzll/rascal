@@ -17,19 +17,20 @@ import (
 )
 
 const (
-	defaultMetaDir          = "/rascal-meta"
-	defaultWorkRoot         = "/work"
-	defaultRepoDirName      = "repo"
-	defaultAgentLogFile     = "agent.ndjson"
-	defaultMetaFile         = "meta.json"
-	defaultInstructionsFile = "instructions.md"
-	defaultCommitMsgFile    = "commit_message.txt"
-	defaultAgentOutputFile  = "agent_output.txt"
-	defaultPRBodyFile       = "pr_body.md"
-	defaultPRLabel          = "rascal"
-	defaultCodexAuthFile    = "auth.json"
-	defaultCodexSessionDir  = "sessions"
-	defaultClaudeOAuthFile  = "oauth_token"
+	defaultMetaDir                    = "/rascal-meta"
+	defaultWorkRoot                   = "/work"
+	defaultRepoDirName                = "repo"
+	defaultAgentLogFile               = "agent.ndjson"
+	defaultMetaFile                   = "meta.json"
+	defaultInstructionsFile           = "instructions.md"
+	defaultPersistentInstructionsFile = "persistent_instructions.md"
+	defaultCommitMsgFile              = "commit_message.txt"
+	defaultAgentOutputFile            = "agent_output.txt"
+	defaultPRBodyFile                 = "pr_body.md"
+	defaultPRLabel                    = "rascal"
+	defaultCodexAuthFile              = "auth.json"
+	defaultCodexSessionDir            = "sessions"
+	defaultClaudeOAuthFile            = "oauth_token"
 )
 
 var (
@@ -155,7 +156,10 @@ func RunWithExecutor(ex CommandExecutor) error {
 	}
 
 	if err := RunStage("prepare_instructions", func() error {
-		return ensureInstructions(cfg)
+		if err := ensureInstructions(cfg); err != nil {
+			return err
+		}
+		return ensurePersistentInstructions(cfg)
 	}); err != nil {
 		return fail(err)
 	}
