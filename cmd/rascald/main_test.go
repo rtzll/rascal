@@ -82,6 +82,22 @@ func TestInstructionTextNonPRRunOmitsGitContext(t *testing.T) {
 	}
 }
 
+func TestPersistentInstructionTextContainsDurableGuardrails(t *testing.T) {
+	got := orchestrator.PersistentInstructionText(state.Run{})
+
+	for _, want := range []string{
+		"# Rascal Persistent Instructions",
+		"Do not ask for interactive input.",
+		"Do not overwrite, revert, or discard user changes you did not make unless the task explicitly requires it.",
+		"Run `make lint` and `make test` before finishing if those targets exist.",
+		"/rascal-meta/commit_message.txt",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("orchestrator.PersistentInstructionText() missing %q\nfull text:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 	s := newTestServer(t, &fakeRunner{})
 	runDir := t.TempDir()
@@ -125,6 +141,21 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("context.json mismatch: got %#v want %#v", got, want)
+	}
+
+	persistentData, err := os.ReadFile(filepath.Join(runDir, "persistent_instructions.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(persistent_instructions.md) error = %v", err)
+	}
+	persistentText := string(persistentData)
+	for _, want := range []string{
+		"# Rascal Persistent Instructions",
+		"Do not ask for interactive input.",
+		"/rascal-meta/commit_message.txt",
+	} {
+		if !strings.Contains(persistentText, want) {
+			t.Fatalf("persistent instructions missing %q\nfull text:\n%s", want, persistentText)
+		}
 	}
 }
 

@@ -265,6 +265,9 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.TaskSession.RuntimeSessionID != "" {
 		t.Fatalf("expected default agent session name empty, got %q", cfg.TaskSession.RuntimeSessionID)
 	}
+	if cfg.PersistentInstructionsPath != filepath.Join("/rascal-meta", "persistent_instructions.md") {
+		t.Fatalf("expected default persistent instructions path, got %q", cfg.PersistentInstructionsPath)
+	}
 }
 
 func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
@@ -303,6 +306,9 @@ func TestLoadConfigRespectsDirectoryOverrides(t *testing.T) {
 	if cfg.GoosePathRoot != filepath.Join(metaDir, "goose") {
 		t.Fatalf("goose path root = %q, want %q", cfg.GoosePathRoot, filepath.Join(metaDir, "goose"))
 	}
+	if cfg.PersistentInstructionsPath != filepath.Join(metaDir, "persistent_instructions.md") {
+		t.Fatalf("persistent instructions path = %q, want %q", cfg.PersistentInstructionsPath, filepath.Join(metaDir, "persistent_instructions.md"))
+	}
 }
 
 func TestLoadConfigRespectsTaskSessionEnv(t *testing.T) {
@@ -338,6 +344,23 @@ func TestLoadConfigRespectsTaskSessionEnv(t *testing.T) {
 	}
 	if cfg.GoosePathRoot != "/rascal-goose-session" {
 		t.Fatalf("GoosePathRoot = %q, want /rascal-goose-session", cfg.GoosePathRoot)
+	}
+}
+
+func TestLoadConfigRespectsPersistentInstructionsOverride(t *testing.T) {
+	overridePath := filepath.Join(t.TempDir(), "custom-persistent.md")
+	t.Setenv("RASCAL_RUN_ID", "run_persistent_override")
+	t.Setenv("RASCAL_TASK_ID", "task_persistent_override")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("GOOSE_MOIM_MESSAGE_FILE", overridePath)
+
+	cfg, err := worker.LoadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if cfg.PersistentInstructionsPath != overridePath {
+		t.Fatalf("PersistentInstructionsPath = %q, want %q", cfg.PersistentInstructionsPath, overridePath)
 	}
 }
 

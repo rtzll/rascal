@@ -171,6 +171,10 @@ func (s *Server) WriteRunFiles(run state.Run) (err error) {
 	if err := os.WriteFile(filepath.Join(run.RunDir, "instructions.md"), []byte(instructions), 0o644); err != nil {
 		return fmt.Errorf("write run instructions: %w", err)
 	}
+	persistentInstructions := PersistentInstructionText(run)
+	if err := os.WriteFile(filepath.Join(run.RunDir, "persistent_instructions.md"), []byte(persistentInstructions), 0o644); err != nil {
+		return fmt.Errorf("write persistent run instructions: %w", err)
+	}
 
 	logLine := fmt.Sprintf("[%s] queued run=%s task=%s trigger=%s\n", time.Now().UTC().Format(time.RFC3339), run.ID, run.TaskID, run.Trigger)
 	f, err := os.OpenFile(filepath.Join(run.RunDir, "runner.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -270,7 +274,6 @@ Repository: %s
 - If you rewrite history, you must run ` + "`git push --force-with-lease origin HEAD:" + strings.TrimSpace(run.HeadBranch) + "`" + `.
 - Otherwise run ` + "`git push origin HEAD:" + strings.TrimSpace(run.HeadBranch) + "`" + `.
 - Do not push to any other branch.
-- Before finishing, ensure the remote branch is updated and the working tree is clean.
 `)
 		if requiresAgentManagedPublish(run) {
 			b.WriteString(`
@@ -280,17 +283,6 @@ Repository: %s
 		b.WriteString(`
 `)
 	}
-	b.WriteString(`
-## Constraints
-
-- Do not ask for interactive input.
-- Do not require MCP tools.
-- Keep changes minimal and scoped to the requested task.
-- Run ` + "`make lint`" + ` and ` + "`make test`" + ` before finishing if those targets exist.
-- If one of those commands does not exist or cannot run, explain exactly why and run the closest equivalent checks instead.
-- If you make changes, write /rascal-meta/commit_message.txt using a conventional commit title on the first line.
-- Optionally add a commit body after a blank line in /rascal-meta/commit_message.txt.
-`)
 	if strings.TrimSpace(run.Context) != "" {
 		b.WriteString(`
 ## Additional Context
@@ -301,6 +293,28 @@ Repository: %s
 `)
 	}
 	return b.String()
+}
+
+func PersistentInstructionText(run state.Run) string {
+	_ = run
+
+	return `# Rascal Persistent Instructions
+
+- Do not ask for interactive input.
+- Do not require MCP tools.
+- Keep changes minimal and scoped to the requested task.
+- Do not overwrite, revert, or discard user changes you did not make unless the task explicitly requires it.
+- Use the repository's existing patterns and conventions.
+- Prefer the repository's documented workflow over inventing a new one.
+- If the repository provides verification commands, run the relevant ones before finishing.
+- Run ` + "`make lint`" + ` and ` + "`make test`" + ` before finishing if those targets exist.
+- If one of those commands does not exist or cannot run, explain exactly why and run the closest equivalent checks instead.
+- If you make changes, write /rascal-meta/commit_message.txt using a conventional commit title on the first line.
+- Optionally add a commit body after a blank line in /rascal-meta/commit_message.txt.
+- If working with GitHub branches or pull requests, only push to the designated Rascal branch for this run.
+- If you must rewrite published history, prefer ` + "`git push --force-with-lease`" + ` over ` + "`git push --force`" + `.
+- Before finishing, ensure the working tree is clean unless the task explicitly requires uncommitted output.
+`
 }
 
 func shouldIncludeGitContext(run state.Run) bool {

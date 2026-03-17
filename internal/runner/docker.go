@@ -38,6 +38,7 @@ const (
 	containerClaudeStateDir   = "/rascal-meta/claude"
 	containerClaudeSessionDir = "/rascal-claude-session"
 	containerContextJSONPath  = "/rascal-meta/context.json"
+	containerGooseMOIMPath    = "/rascal-meta/persistent_instructions.md"
 )
 
 func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
@@ -129,6 +130,7 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 	}
 	if agentRuntime.Harness() == runtime.HarnessGoose {
 		envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
+		envPairs["GOOSE_MOIM_MESSAGE_FILE"] = containerGooseMOIMPath
 		envPairs["GOOSE_MODE"] = "auto"
 		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
 		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
