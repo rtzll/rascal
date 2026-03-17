@@ -1,7 +1,17 @@
 ARG GO_VERSION=1.26.1
 ARG GOOSE_VERSION=1.27.2
+ARG GOLANGCI_LINT_VERSION=v2.11.2
+ARG SQLC_VERSION=v1.30.0
 
 FROM golang:${GO_VERSION}-bookworm AS go-runtime
+
+FROM go-runtime AS repo-tools
+ARG GOLANGCI_LINT_VERSION
+ARG SQLC_VERSION
+RUN curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b /usr/local/bin "${GOLANGCI_LINT_VERSION}" \
+    && /usr/local/bin/golangci-lint version \
+    && GOBIN=/usr/local/bin CGO_ENABLED=0 go install github.com/sqlc-dev/sqlc/cmd/sqlc@"${SQLC_VERSION}" \
+    && /usr/local/bin/sqlc version
 
 FROM node:24-bookworm-slim AS codex-runtime
 RUN npm install -g --silent --no-progress --no-fund --no-audit @openai/codex \
@@ -34,17 +44,22 @@ ARG RUNTIME_GID=10001
 RUN apt-get -qq update && apt-get -y -qq install --no-install-recommends \
     ca-certificates curl gnupg bzip2 xz-utils zip unzip \
     git gh \
-    bash jq ripgrep make patch diffutils file less \
+    bash jq ripgrep make patch diffutils file less sqlite3 \
     python3 libxcb1 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=codex-runtime /usr/local/ /usr/local/
 COPY --from=go-runtime /usr/local/go/ /usr/local/go/
+COPY --from=repo-tools /usr/local/bin/golangci-lint /usr/local/bin/golangci-lint
+COPY --from=repo-tools /usr/local/bin/sqlc /usr/local/bin/sqlc
 
 RUN node --version \
     && npm --version \
     && codex --version \
-    && /usr/local/go/bin/go version
+    && /usr/local/go/bin/go version \
+    && golangci-lint version \
+    && sqlc version \
+    && sqlite3 --version
 
 ENV PATH=/usr/local/go/bin:$PATH \
     GH_PROMPT_DISABLED=1 \
