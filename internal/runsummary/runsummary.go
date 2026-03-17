@@ -111,9 +111,16 @@ func renderAgentDetailsSection(gooseOutput string) string {
 	)
 }
 
-func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection string) string {
+func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection string, totalTokens *int64) string {
 	gooseSection := renderAgentDetailsSection(gooseOutput)
-	if usage, ok := ExtractTokenUsage(gooseOutput); ok {
+	if (totalTokens != nil && *totalTokens > 0) || totalTokens == nil {
+		if totalTokens == nil {
+			if usage, ok := ExtractTokenUsage(gooseOutput); ok {
+				totalTokens = &usage.TotalTokens
+			}
+		}
+	}
+	if totalTokens != nil && *totalTokens > 0 {
 		body := ""
 		if strings.TrimSpace(commitBody) != "" {
 			body = commitBody + "\n\n"
@@ -122,7 +129,7 @@ func BuildPRBody(runID, commitBody, gooseOutput, runDuration, closesSection stri
 			"Rascal run `%s` completed in %s · %s tokens",
 			runID,
 			runDuration,
-			formatTokenCount(usage.TotalTokens),
+			formatTokenCount(*totalTokens),
 		)
 		return body
 	}
@@ -145,20 +152,7 @@ func BuildCompletionComment(in CompletionCommentInput) (string, error) {
 		closesSection = fmt.Sprintf("\n\nCloses #%d", in.IssueNumber)
 	}
 	runDuration := FormatDuration(in.DurationSeconds)
-	commentBody := BuildPRBody(in.RunID, commitBody, in.GooseOutput, runDuration, closesSection)
-	if in.TotalTokens != nil && *in.TotalTokens > 0 {
-		body := ""
-		if strings.TrimSpace(commitBody) != "" {
-			body = commitBody + "\n\n"
-		}
-		body += renderAgentDetailsSection(in.GooseOutput) + closesSection + "\n\n---\n\n" + fmt.Sprintf(
-			"Rascal run `%s` completed in %s · %s tokens",
-			in.RunID,
-			runDuration,
-			formatTokenCount(*in.TotalTokens),
-		)
-		commentBody = body
-	}
+	commentBody := BuildPRBody(in.RunID, commitBody, in.GooseOutput, runDuration, closesSection, in.TotalTokens)
 
 	requestedBy := strings.TrimSpace(in.RequestedBy)
 	if requestedBy == "" {

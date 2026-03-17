@@ -101,6 +101,100 @@ func TestExtractTokenUsage(t *testing.T) {
 	})
 }
 
+func TestExtractCodexSessionUsage(t *testing.T) {
+	session := strings.Join([]string{
+		`{"type":"session_meta","payload":{"id":"session-123"}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"cached_input_tokens":40,"output_tokens":30,"reasoning_output_tokens":10,"total_tokens":150}}}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":180,"cached_input_tokens":55,"output_tokens":45,"reasoning_output_tokens":12,"total_tokens":225}}}}`,
+	}, "\n")
+
+	usage, ok, err := ExtractCodexSessionUsage(session)
+	if err != nil {
+		t.Fatalf("ExtractCodexSessionUsage returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected codex session usage")
+	}
+	if usage.TotalTokens != 225 {
+		t.Fatalf("total_tokens = %d, want 225", usage.TotalTokens)
+	}
+	if usage.InputTokens == nil || *usage.InputTokens != 180 {
+		t.Fatalf("input_tokens = %v, want 180", usage.InputTokens)
+	}
+	if usage.CachedInputTokens == nil || *usage.CachedInputTokens != 55 {
+		t.Fatalf("cached_input_tokens = %v, want 55", usage.CachedInputTokens)
+	}
+}
+
+func TestExtractCodexSessionUsageDelta(t *testing.T) {
+	session := strings.Join([]string{
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20,"cached_input_tokens":5,"output_tokens":4,"reasoning_output_tokens":1,"total_tokens":24}}}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":30,"cached_input_tokens":6,"output_tokens":5,"reasoning_output_tokens":2,"total_tokens":35}}}}`,
+	}, "\n")
+
+	usage, ok, err := ExtractCodexSessionUsageDelta(session)
+	if err != nil {
+		t.Fatalf("ExtractCodexSessionUsageDelta returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected codex session delta")
+	}
+	if usage.TotalTokens != 59 {
+		t.Fatalf("total_tokens = %d, want 59", usage.TotalTokens)
+	}
+	if usage.InputTokens == nil || *usage.InputTokens != 50 {
+		t.Fatalf("input_tokens = %v, want 50", usage.InputTokens)
+	}
+	if usage.CachedInputTokens == nil || *usage.CachedInputTokens != 11 {
+		t.Fatalf("cached_input_tokens = %v, want 11", usage.CachedInputTokens)
+	}
+	if usage.ReasoningOutputTokens == nil || *usage.ReasoningOutputTokens != 3 {
+		t.Fatalf("reasoning_output_tokens = %v, want 3", usage.ReasoningOutputTokens)
+	}
+}
+
+func TestSubtractTokenUsage(t *testing.T) {
+	inputTotal := int64(180)
+	outputTotal := int64(45)
+	cachedTotal := int64(55)
+	reasoningTotal := int64(12)
+	inputBase := int64(120)
+	outputBase := int64(30)
+	cachedBase := int64(40)
+	reasoningBase := int64(10)
+
+	usage, ok := SubtractTokenUsage(TokenUsage{
+		Provider:              "openai",
+		Model:                 "gpt-5-codex",
+		TotalTokens:           225,
+		InputTokens:           &inputTotal,
+		OutputTokens:          &outputTotal,
+		CachedInputTokens:     &cachedTotal,
+		ReasoningOutputTokens: &reasoningTotal,
+	}, TokenUsage{
+		TotalTokens:           150,
+		InputTokens:           &inputBase,
+		OutputTokens:          &outputBase,
+		CachedInputTokens:     &cachedBase,
+		ReasoningOutputTokens: &reasoningBase,
+	})
+	if !ok {
+		t.Fatal("expected usage subtraction")
+	}
+	if usage.TotalTokens != 75 {
+		t.Fatalf("total_tokens = %d, want 75", usage.TotalTokens)
+	}
+	if usage.InputTokens == nil || *usage.InputTokens != 60 {
+		t.Fatalf("input_tokens = %v, want 60", usage.InputTokens)
+	}
+	if usage.OutputTokens == nil || *usage.OutputTokens != 15 {
+		t.Fatalf("output_tokens = %v, want 15", usage.OutputTokens)
+	}
+	if usage.Provider != "openai" || usage.Model != "gpt-5-codex" {
+		t.Fatalf("unexpected provider/model: %+v", usage)
+	}
+}
+
 func TestFormatDuration(t *testing.T) {
 	cases := []struct {
 		seconds int64
@@ -149,6 +243,7 @@ func TestBuildPRBody(t *testing.T) {
 			`{"usage":{"total_tokens":123000}}`,
 			"1m 2s",
 			"",
+			nil,
 		)
 		if !strings.Contains(body, "<details><summary>Agent Details</summary>") {
 			t.Fatalf("missing agent details section:\n%s", body)
@@ -168,6 +263,7 @@ func TestBuildPRBody(t *testing.T) {
 			`{"event":"x"}`,
 			"8s",
 			"\n\nCloses #12",
+			nil,
 		)
 		if !strings.Contains(body, "<details><summary>Agent Details</summary>") {
 			t.Fatalf("missing agent details section:\n%s", body)
@@ -190,6 +286,7 @@ func TestBuildPRBody(t *testing.T) {
 			"issue body\n```go\nfmt.Println(\"hi\")\n```\n<details>raw</details>\n{\"usage\":{\"total_tokens\":321}}",
 			"9s",
 			"",
+			nil,
 		)
 		if !strings.Contains(body, "<details><summary>Agent Details</summary>") {
 			t.Fatalf("missing agent details section:\n%s", body)
@@ -207,6 +304,21 @@ func TestBuildPRBody(t *testing.T) {
 			t.Fatalf("expected a single outer details close tag:\n%s", body)
 		}
 	})
+}
+
+func TestBuildPRBodyPrefersExplicitTokenTotal(t *testing.T) {
+	total := int64(75)
+	body := BuildPRBody(
+		"run_explicit",
+		"",
+		`{"event":"x"}`,
+		"4s",
+		"",
+		&total,
+	)
+	if !strings.Contains(body, "Rascal run `run_explicit` completed in 4s · 75 tokens") {
+		t.Fatalf("missing explicit token summary:\n%s", body)
+	}
 }
 
 func TestBuildCompletionComment(t *testing.T) {

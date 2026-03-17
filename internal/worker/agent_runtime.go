@@ -134,6 +134,11 @@ func RunCodex(ex CommandExecutor, cfg Config) (output string, sessionID string, 
 		return "", "", fmt.Errorf("ensure codex home: %w", err)
 	}
 
+	baseline, baselineErr := captureCodexUsageBaseline(cfg)
+	if baselineErr != nil {
+		log.Printf("[%s] codex token baseline warning: %v", nowUTC(), baselineErr)
+	}
+
 	instructions, err := os.ReadFile(cfg.InstructionsPath)
 	if err != nil {
 		return "", "", fmt.Errorf("read instructions: %w", err)
@@ -165,6 +170,7 @@ func RunCodex(ex CommandExecutor, cfg Config) (output string, sessionID string, 
 		if discoverErr != nil {
 			log.Printf("[%s] codex session discovery warning: %v", nowUTC(), discoverErr)
 		}
+		recordCodexRunTokenUsage(cfg, baseline, sessionID)
 		return "", sessionID, fmt.Errorf("codex run failed: %w", err)
 	}
 
@@ -172,6 +178,7 @@ func RunCodex(ex CommandExecutor, cfg Config) (output string, sessionID string, 
 	if err != nil {
 		return "", "", fmt.Errorf("discover codex session: %w", err)
 	}
+	recordCodexRunTokenUsage(cfg, baseline, sessionID)
 
 	output, err = loadAgentOutput(cfg.AgentOutputPath, cfg.GooseLogPath, "codex")
 	if err != nil {

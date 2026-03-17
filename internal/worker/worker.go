@@ -304,7 +304,13 @@ func RunWithExecutor(ex CommandExecutor) error {
 				closesSection = fmt.Sprintf("\n\nCloses #%d", cfg.IssueNumber)
 			}
 			runDuration := runsummary.FormatDuration(int64(time.Since(started).Seconds()))
-			body := runsummary.BuildPRBody(cfg.RunID, commitBody, agentOutput, runDuration, closesSection)
+			var totalTokens *int64
+			if usage, ok, err := runsummary.ReadRecordedTokenUsage(filepath.Join(cfg.MetaDir, runsummary.RecordedTokenUsageFile)); err != nil {
+				log.Printf("[%s] recorded token usage warning: %v", nowUTC(), err)
+			} else if ok && usage.TotalTokens > 0 {
+				totalTokens = &usage.TotalTokens
+			}
+			body := runsummary.BuildPRBody(cfg.RunID, commitBody, agentOutput, runDuration, closesSection, totalTokens)
 			if err := os.WriteFile(cfg.PRBodyPath, []byte(body), 0o644); err != nil {
 				return fmt.Errorf("write pr body: %w", err)
 			}

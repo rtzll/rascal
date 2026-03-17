@@ -530,6 +530,29 @@ func buildRunCompletionComment(run state.Run, target RunResponseTarget, repo str
 }
 
 func loadRunTokenUsage(run state.Run) (state.RunTokenUsage, bool, error) {
+	if run.AgentRuntime == runtime.RuntimeCodex {
+		usage, ok, err := runsummary.ReadRecordedTokenUsage(filepath.Join(strings.TrimSpace(run.RunDir), runsummary.RecordedTokenUsageFile))
+		if err != nil {
+			return state.RunTokenUsage{}, false, fmt.Errorf("read recorded codex token usage: %w", err)
+		}
+		if !ok {
+			return state.RunTokenUsage{}, false, nil
+		}
+		return state.RunTokenUsage{
+			RunID:                 run.ID,
+			AgentRuntime:          run.AgentRuntime,
+			Provider:              usage.Provider,
+			Model:                 usage.Model,
+			TotalTokens:           usage.TotalTokens,
+			InputTokens:           usage.InputTokens,
+			OutputTokens:          usage.OutputTokens,
+			CachedInputTokens:     usage.CachedInputTokens,
+			ReasoningOutputTokens: usage.ReasoningOutputTokens,
+			RawUsageJSON:          usage.RawUsageJSON,
+			CapturedAt:            time.Now().UTC(),
+		}, true, nil
+	}
+
 	agentPath, err := resolveRunAgentLogPath(run.RunDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
