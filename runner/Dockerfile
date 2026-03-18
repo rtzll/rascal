@@ -105,3 +105,19 @@ COPY --from=claude-runtime /root/.local/share/claude /usr/local/share/claude
 RUN claude --version
 USER rascal:rascal
 ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]
+
+FROM runner-base AS goose-claude-runner
+COPY --from=goose-runtime /usr/local/bin/goose /usr/local/bin/goose
+COPY --from=claude-runtime /root/.local/bin/claude /usr/local/bin/claude
+COPY --from=claude-runtime /root/.local/share/claude /usr/local/share/claude
+RUN goose --version && claude --version
+ENV GOOSE_PROVIDER=claude-code \
+    GOOSE_MODEL=claude-sonnet-4-5 \
+    GOOSE_MODE=auto \
+    GOOSE_MAX_TURNS=100 \
+    GOOSE_AUTO_COMPACT_THRESHOLD=0.0 \
+    GOOSE_DISABLE_KEYRING=1 \
+    GOOSE_DISABLE_SESSION_NAMING=true \
+    GOOSE_CONTEXT_STRATEGY=summarize
+USER rascal:rascal
+ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]

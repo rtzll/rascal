@@ -136,6 +136,15 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
 		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
 		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
+	case agent.RuntimeGooseClaude:
+		envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
+		envPairs["GOOSE_PROVIDER"] = "claude-code"
+		envPairs["GOOSE_MODEL"] = "claude-sonnet-4-5"
+		envPairs["GOOSE_MODE"] = "auto"
+		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
+		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
+		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
+		envPairs["CLAUDE_CONFIG_DIR"] = claudeConfigDir
 	case agent.RuntimeClaude:
 		envPairs["CLAUDE_CONFIG_DIR"] = claudeConfigDir
 	}

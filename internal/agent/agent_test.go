@@ -20,6 +20,7 @@ func TestNormalizeBackend(t *testing.T) {
 		{name: "codex explicit", in: " codex ", want: BackendCodex},
 		{name: "goose explicit", in: "GOOSE", want: BackendGoose},
 		{name: "claude explicit", in: " claude ", want: BackendClaude},
+		{name: "goose-claude explicit", in: " goose-claude ", want: BackendGooseClaude},
 	}
 
 	for _, tt := range tests {
@@ -47,6 +48,7 @@ func TestParseBackend(t *testing.T) {
 		{name: "codex explicit", in: " codex ", want: BackendCodex},
 		{name: "goose explicit", in: "GOOSE", want: BackendGoose},
 		{name: "claude explicit", in: " claude ", want: BackendClaude},
+		{name: "goose-claude explicit", in: " goose-claude ", want: BackendGooseClaude},
 		{name: "invalid", in: "other", wantErr: true},
 	}
 

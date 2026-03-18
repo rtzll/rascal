@@ -7,13 +7,15 @@ type AgentHarness = Runtime
 type AgentRuntime = Runtime
 
 const (
-	AgentHarnessGoose  = RuntimeGoose
-	AgentHarnessCodex  = RuntimeCodex
-	AgentHarnessClaude = RuntimeClaude
+	AgentHarnessGoose       = RuntimeGoose
+	AgentHarnessCodex       = RuntimeCodex
+	AgentHarnessClaude      = RuntimeClaude
+	AgentHarnessGooseClaude = RuntimeGooseClaude
 
-	AgentRuntimeGoose  = RuntimeGoose
-	AgentRuntimeCodex  = RuntimeCodex
-	AgentRuntimeClaude = RuntimeClaude
+	AgentRuntimeGoose       = RuntimeGoose
+	AgentRuntimeCodex       = RuntimeCodex
+	AgentRuntimeClaude      = RuntimeClaude
+	AgentRuntimeGooseClaude = RuntimeGooseClaude
 )
 
 type ModelProvider string

@@ -106,7 +106,7 @@ func (s *Server) failRunForMissingExecution(run state.Run, reason string) {
 
 func credentialAuthPath(runDir string, runtime agent.Runtime) (dir, file string) {
 	switch agent.NormalizeRuntime(string(runtime)) {
-	case agent.RuntimeClaude:
+	case agent.RuntimeClaude, agent.RuntimeGooseClaude:
 		dir = filepath.Join(runDir, "claude")
 		file = filepath.Join(dir, "oauth_token")
 	default:
@@ -314,7 +314,7 @@ func (s *Server) ExecuteRun(runID string) {
 				log.Printf("run %s failed to clear stale %s session for task %s: %v", run.ID, existing.AgentRuntime, run.TaskID, err)
 			}
 		}
-		if backendSessionID == "" && run.AgentRuntime == agent.BackendGoose {
+		if backendSessionID == "" && (run.AgentRuntime == agent.BackendGoose || run.AgentRuntime == agent.BackendGooseClaude) {
 			backendSessionID = runner.SessionName(run.Repo, run.TaskID)
 		}
 		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {

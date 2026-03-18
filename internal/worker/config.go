@@ -248,6 +248,8 @@ func validateCommands(ex CommandExecutor, cfg Config) error {
 		names = append(names, "codex")
 	case agent.BackendClaude:
 		names = append(names, "claude")
+	case agent.BackendGooseClaude:
+		names = append(names, "goose", "claude")
 	default:
 		names = append(names, "goose")
 	}

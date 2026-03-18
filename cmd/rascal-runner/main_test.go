@@ -1109,6 +1109,106 @@ func TestClaudeRunArgs(t *testing.T) {
 	})
 }
 
+func TestRunGooseClaudeFreshSession(t *testing.T) {
+	root := t.TempDir()
+	cfg := worker.Config{
+		RepoDir:          root,
+		MetaDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
+		GoosePathRoot:    filepath.Join(root, "goose"),
+		ClaudeConfigDir:  filepath.Join(root, "claude"),
+		AgentRuntime:     agent.BackendGooseClaude,
+	}
+	if err := os.MkdirAll(filepath.Join(root, "claude"), 0o755); err != nil {
+		t.Fatalf("mkdir claude dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "claude", "oauth_token"), []byte("test-oauth-token"), 0o600); err != nil {
+		t.Fatalf("write claude oauth token: %v", err)
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var gotName string
+	var gotArgs []string
+	var gotEnv []string
+	ex := fakeExecutor{
+		runFn: func(_ string, env []string, stdout, _ io.Writer, name string, args ...string) error {
+			gotName = name
+			gotArgs = append([]string(nil), args...)
+			gotEnv = append([]string(nil), env...)
+			if _, err := io.WriteString(stdout, `{"event":"message","message":"done"}`+"\n"); err != nil {
+				return fmt.Errorf("write fake goose output: %w", err)
+			}
+			return nil
+		},
+	}
+
+	output, _, err := worker.RunGooseClaude(ex, cfg)
+	if err != nil {
+		t.Fatalf("RunGooseClaude returned error: %v", err)
+	}
+	if gotName != "goose" {
+		t.Fatalf("expected goose command, got %q", gotName)
+	}
+	if !strings.Contains(output, "message") {
+		t.Fatalf("output = %q, expected goose log content", output)
+	}
+	argsText := strings.Join(gotArgs, " ")
+	if !strings.Contains(argsText, "--no-session") {
+		t.Fatalf("expected --no-session in fresh run args, got %q", argsText)
+	}
+	foundToken := false
+	for _, e := range gotEnv {
+		if e == "CLAUDE_CODE_OAUTH_TOKEN=test-oauth-token" {
+			foundToken = true
+		}
+	}
+	if !foundToken {
+		t.Fatalf("expected CLAUDE_CODE_OAUTH_TOKEN in env, got %v", gotEnv)
+	}
+}
+
+func TestRunGooseClaudeNoTokenFile(t *testing.T) {
+	root := t.TempDir()
+	cfg := worker.Config{
+		RepoDir:          root,
+		MetaDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
+		GoosePathRoot:    filepath.Join(root, "goose"),
+		ClaudeConfigDir:  filepath.Join(root, "claude"),
+		AgentRuntime:     agent.BackendGooseClaude,
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var gotEnv []string
+	ex := fakeExecutor{
+		runFn: func(_ string, env []string, stdout, _ io.Writer, _ string, _ ...string) error {
+			gotEnv = append([]string(nil), env...)
+			if _, err := io.WriteString(stdout, `{"event":"message"}`+"\n"); err != nil {
+				return fmt.Errorf("write fake goose output: %w", err)
+			}
+			return nil
+		},
+	}
+
+	_, _, err := worker.RunGooseClaude(ex, cfg)
+	if err != nil {
+		t.Fatalf("RunGooseClaude returned error: %v", err)
+	}
+	for _, e := range gotEnv {
+		if strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
+			t.Fatalf("did not expect CLAUDE_CODE_OAUTH_TOKEN when no token file exists, got %v", gotEnv)
+		}
+	}
+}
+
 func TestRunEndToEndWithFakeCommands(t *testing.T) {
 	root := t.TempDir()
 	binDir := filepath.Join(root, "bin")

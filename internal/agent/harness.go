@@ -8,6 +8,8 @@ func HarnessModelProvider(harness AgentHarness) ModelProvider {
 		return CodexModelProvider()
 	case AgentHarnessClaude:
 		return ClaudeModelProvider()
+	case AgentHarnessGooseClaude:
+		return GooseClaudeModelProvider()
 	default:
 		return ModelProviderCodex
 	}

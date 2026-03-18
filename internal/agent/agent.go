@@ -12,17 +12,19 @@ import (
 type Runtime string
 
 const (
-	RuntimeGoose  Runtime = "goose"
-	RuntimeCodex  Runtime = "codex"
-	RuntimeClaude Runtime = "claude"
+	RuntimeGoose       Runtime = "goose"
+	RuntimeCodex       Runtime = "codex"
+	RuntimeClaude      Runtime = "claude"
+	RuntimeGooseClaude Runtime = "goose-claude"
 )
 
 type Backend = Runtime
 
 const (
-	BackendGoose  = RuntimeGoose
-	BackendCodex  = RuntimeCodex
-	BackendClaude = RuntimeClaude
+	BackendGoose       = RuntimeGoose
+	BackendCodex       = RuntimeCodex
+	BackendClaude      = RuntimeClaude
+	BackendGooseClaude = RuntimeGooseClaude
 )
 
 func NormalizeRuntime(raw string) Runtime {
@@ -49,6 +51,8 @@ func ParseRuntime(raw string) (Runtime, error) {
 		return RuntimeCodex, nil
 	case string(RuntimeClaude):
 		return RuntimeClaude, nil
+	case string(RuntimeGooseClaude):
+		return RuntimeGooseClaude, nil
 	default:
 		return "", fmt.Errorf("unknown agent runtime %q", raw)
 	}

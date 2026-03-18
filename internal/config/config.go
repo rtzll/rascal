@@ -40,6 +40,7 @@ type ServerConfig struct {
 	RunnerImageGoose        string
 	RunnerImageCodex        string
 	RunnerImageClaude       string
+	RunnerImageGooseClaude  string
 	RunnerMaxAttempts       int
 	CredentialStrategy      credentialstrategy.Name
 	CredentialLeaseTTL      time.Duration
@@ -98,6 +99,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		RunnerImageGoose:        envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", defaults.GooseRunnerImageTag),
 		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
 		RunnerImageClaude:       envOrDefault("RASCAL_RUNNER_IMAGE_CLAUDE", defaults.ClaudeRunnerImageTag),
+		RunnerImageGooseClaude:  envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE", defaults.GooseClaudeRunnerImageTag),
 		RunnerMaxAttempts:       envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
 		CredentialStrategy:      credentialStrategy,
 		CredentialLeaseTTL:      envDurationOrDefault("RASCAL_CREDENTIAL_LEASE_TTL", 90*time.Second),
@@ -138,6 +140,8 @@ func (c ServerConfig) RunnerImageForRuntime(runtime agent.Runtime) string {
 		return strings.TrimSpace(c.RunnerImageCodex)
 	case agent.RuntimeClaude:
 		return strings.TrimSpace(c.RunnerImageClaude)
+	case agent.RuntimeGooseClaude:
+		return strings.TrimSpace(c.RunnerImageGooseClaude)
 	default:
 		return strings.TrimSpace(c.RunnerImageGoose)
 	}
