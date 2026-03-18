@@ -37,9 +37,10 @@ type Config struct {
 	GooseDebug   bool
 	AgentRuntime agent.Runtime
 
-	GoosePathRoot string
-	CodexHome     string
-	TaskSession   runner.TaskSessionSpec
+	GoosePathRoot   string
+	CodexHome       string
+	ClaudeConfigDir string
+	TaskSession     runner.TaskSessionSpec
 }
 
 func LoadConfig() (Config, error) {
@@ -124,6 +125,7 @@ func LoadConfig() (Config, error) {
 	}
 	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))
 	codexHome := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CODEX_HOME")), filepath.Join(metaDir, "codex"))
+	claudeConfigDir := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")), filepath.Join(metaDir, "claude"))
 
 	return Config{
 		RunID:            runID,
@@ -148,6 +150,7 @@ func LoadConfig() (Config, error) {
 		AgentRuntime:     agentRuntime,
 		GoosePathRoot:    goosePathRoot,
 		CodexHome:        codexHome,
+		ClaudeConfigDir:  claudeConfigDir,
 		TaskSession: runner.TaskSessionSpec{
 			Mode:             agentSessionMode,
 			Resume:           agentSessionResume,
@@ -243,6 +246,8 @@ func validateCommands(ex CommandExecutor, cfg Config) error {
 	switch configuredAgentRuntime(cfg) {
 	case agent.BackendCodex:
 		names = append(names, "codex")
+	case agent.BackendClaude:
+		names = append(names, "claude")
 	default:
 		names = append(names, "goose")
 	}

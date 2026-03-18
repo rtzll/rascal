@@ -346,7 +346,7 @@ func TestLoadConfigRejectsInvalidAgentRuntime(t *testing.T) {
 	t.Setenv("RASCAL_TASK_ID", "task_invalid_backend")
 	t.Setenv("RASCAL_REPO", "owner/repo")
 	t.Setenv("GH_TOKEN", "token")
-	t.Setenv("RASCAL_AGENT_RUNTIME", "claude")
+	t.Setenv("RASCAL_AGENT_RUNTIME", "unknown-agent")
 
 	_, err := worker.LoadConfig()
 	if err == nil {
@@ -889,6 +889,224 @@ func TestRunCodexResumeSession(t *testing.T) {
 	if strings.Contains(argsText, "workspace-write") {
 		t.Fatalf("did not expect explicit sandbox arg on resume, got %q", argsText)
 	}
+}
+
+func TestRunClaudeFreshSession(t *testing.T) {
+	root := t.TempDir()
+	cfg := worker.Config{
+		RepoDir:          root,
+		MetaDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
+		ClaudeConfigDir:  filepath.Join(root, "claude"),
+		AgentRuntime:     agent.BackendClaude,
+	}
+	if err := os.MkdirAll(filepath.Join(root, "claude"), 0o755); err != nil {
+		t.Fatalf("mkdir claude dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "claude", "oauth_token"), []byte("test-oauth-token"), 0o600); err != nil {
+		t.Fatalf("write claude oauth token: %v", err)
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var gotArgs []string
+	var gotInput string
+	var gotEnv []string
+	ex := fakeExecutor{
+		runWithInputFn: func(_ string, env []string, stdin io.Reader, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "claude" {
+				t.Fatalf("unexpected command: %s", name)
+			}
+			gotArgs = append([]string(nil), args...)
+			gotEnv = append([]string(nil), env...)
+			input, err := io.ReadAll(stdin)
+			if err != nil {
+				t.Fatalf("read stdin: %v", err)
+			}
+			gotInput = string(input)
+			if err := os.WriteFile(cfg.AgentOutputPath, []byte("final claude response"), 0o644); err != nil {
+				t.Fatalf("write agent output: %v", err)
+			}
+			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
+				return fmt.Errorf("write fake claude output: %w", err)
+			}
+			return nil
+		},
+	}
+
+	output, sessionID, err := worker.RunClaude(ex, cfg)
+	if err != nil {
+		t.Fatalf("RunClaude returned error: %v", err)
+	}
+	if output != "final claude response" {
+		t.Fatalf("output = %q, want final claude response", output)
+	}
+	if sessionID != "" {
+		t.Fatalf("sessionID = %q, want empty for fresh session", sessionID)
+	}
+	if gotInput != "do thing" {
+		t.Fatalf("claude stdin = %q, want %q", gotInput, "do thing")
+	}
+	argsText := strings.Join(gotArgs, " ")
+	for _, want := range []string{"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "-o", "-"} {
+		if !strings.Contains(argsText, want) {
+			t.Fatalf("expected %q in args, got %q", want, argsText)
+		}
+	}
+	if strings.Contains(argsText, "--resume") {
+		t.Fatalf("did not expect --resume in fresh claude run, got %q", argsText)
+	}
+	foundToken := false
+	for _, e := range gotEnv {
+		if e == "CLAUDE_CODE_OAUTH_TOKEN=test-oauth-token" {
+			foundToken = true
+		}
+	}
+	if !foundToken {
+		t.Fatalf("expected CLAUDE_CODE_OAUTH_TOKEN in env, got %v", gotEnv)
+	}
+}
+
+func TestRunClaudeResumeSession(t *testing.T) {
+	root := t.TempDir()
+	cfg := worker.Config{
+		RepoDir:          root,
+		MetaDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
+		ClaudeConfigDir:  filepath.Join(root, "claude"),
+		AgentRuntime:     agent.BackendClaude,
+		TaskSession: runner.SessionSpec{
+			Mode:             agent.SessionModeAll,
+			Resume:           true,
+			RuntimeSessionID: "session-claude-abc",
+		},
+	}
+	if err := os.MkdirAll(filepath.Join(root, "claude"), 0o755); err != nil {
+		t.Fatalf("mkdir claude dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "claude", "oauth_token"), []byte("test-oauth-token"), 0o600); err != nil {
+		t.Fatalf("write claude oauth token: %v", err)
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("continue"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var gotArgs []string
+	ex := fakeExecutor{
+		runWithInputFn: func(_ string, _ []string, _ io.Reader, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "claude" {
+				t.Fatalf("unexpected command: %s", name)
+			}
+			gotArgs = append([]string(nil), args...)
+			if err := os.WriteFile(cfg.AgentOutputPath, []byte("continued"), 0o644); err != nil {
+				t.Fatalf("write agent output: %v", err)
+			}
+			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
+				return fmt.Errorf("write fake claude output: %w", err)
+			}
+			return nil
+		},
+	}
+
+	_, sessionID, err := worker.RunClaude(ex, cfg)
+	if err != nil {
+		t.Fatalf("RunClaude returned error: %v", err)
+	}
+	if sessionID != "session-claude-abc" {
+		t.Fatalf("sessionID = %q, want session-claude-abc", sessionID)
+	}
+	argsText := strings.Join(gotArgs, " ")
+	for _, want := range []string{"-p", "--resume", "session-claude-abc", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"} {
+		if !strings.Contains(argsText, want) {
+			t.Fatalf("expected %q in args, got %q", want, argsText)
+		}
+	}
+}
+
+func TestRunClaudeNoTokenFile(t *testing.T) {
+	root := t.TempDir()
+	cfg := worker.Config{
+		RepoDir:          root,
+		MetaDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
+		ClaudeConfigDir:  filepath.Join(root, "claude"),
+		AgentRuntime:     agent.BackendClaude,
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
+		t.Fatalf("write instructions: %v", err)
+	}
+
+	var gotEnv []string
+	ex := fakeExecutor{
+		runWithInputFn: func(_ string, env []string, _ io.Reader, stdout, _ io.Writer, name string, args ...string) error {
+			gotEnv = append([]string(nil), env...)
+			if err := os.WriteFile(cfg.AgentOutputPath, []byte("response"), 0o644); err != nil {
+				t.Fatalf("write agent output: %v", err)
+			}
+			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
+				return fmt.Errorf("write fake claude output: %w", err)
+			}
+			return nil
+		},
+	}
+
+	_, _, err := worker.RunClaude(ex, cfg)
+	if err != nil {
+		t.Fatalf("RunClaude returned error: %v", err)
+	}
+	for _, e := range gotEnv {
+		if strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
+			t.Fatalf("did not expect CLAUDE_CODE_OAUTH_TOKEN when no token file exists, got %v", gotEnv)
+		}
+	}
+}
+
+func TestClaudeRunArgs(t *testing.T) {
+	cfg := worker.Config{
+		AgentOutputPath: "/tmp/output.txt",
+	}
+
+	t.Run("fresh", func(t *testing.T) {
+		args := worker.ClaudeRunArgs(cfg, false)
+		argsText := strings.Join(args, " ")
+		if strings.Contains(argsText, "--resume") {
+			t.Fatalf("unexpected --resume in fresh args: %q", argsText)
+		}
+		for _, want := range []string{"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "-o", "/tmp/output.txt", "-"} {
+			if !strings.Contains(argsText, want) {
+				t.Fatalf("expected %q in args, got %q", want, argsText)
+			}
+		}
+	})
+
+	t.Run("resume_with_session", func(t *testing.T) {
+		cfgResume := cfg
+		cfgResume.TaskSession = runner.SessionSpec{
+			Mode:             agent.SessionModeAll,
+			Resume:           true,
+			RuntimeSessionID: "sess-42",
+		}
+		args := worker.ClaudeRunArgs(cfgResume, true)
+		argsText := strings.Join(args, " ")
+		if !strings.Contains(argsText, "--resume sess-42") {
+			t.Fatalf("expected --resume sess-42 in args, got %q", argsText)
+		}
+	})
+
+	t.Run("resume_without_session_id", func(t *testing.T) {
+		args := worker.ClaudeRunArgs(cfg, true)
+		argsText := strings.Join(args, " ")
+		if strings.Contains(argsText, "--resume") {
+			t.Fatalf("should not have --resume when session ID is empty, got %q", argsText)
+		}
+	})
 }
 
 func TestRunEndToEndWithFakeCommands(t *testing.T) {

@@ -104,13 +104,24 @@ func (s *Server) failRunForMissingExecution(run state.Run, reason string) {
 	s.finishRun(updated)
 }
 
-func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string) (string, error) {
+func credentialAuthPath(runDir string, runtime agent.Runtime) (dir, file string) {
+	switch agent.NormalizeRuntime(string(runtime)) {
+	case agent.RuntimeClaude:
+		dir = filepath.Join(runDir, "claude")
+		file = filepath.Join(dir, "oauth_token")
+	default:
+		dir = filepath.Join(runDir, "codex")
+		file = filepath.Join(dir, "auth.json")
+	}
+	return dir, file
+}
+
+func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string, runtime agent.Runtime) (string, error) {
 	requesterUserID = strings.TrimSpace(requesterUserID)
 	if requesterUserID == "" {
 		requesterUserID = "system"
 	}
-	authDir := filepath.Join(runDir, "codex")
-	authPath := filepath.Join(authDir, "auth.json")
+	authDir, authPath := credentialAuthPath(runDir, runtime)
 	if err := os.MkdirAll(authDir, 0o755); err != nil {
 		return "", fmt.Errorf("create auth dir: %w", err)
 	}
@@ -185,15 +196,15 @@ func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string)
 	return "", nil
 }
 
-func (s *Server) cleanupRunCredentialAuth(runDir, credentialLeaseID string) {
+func (s *Server) cleanupRunCredentialAuth(runDir, credentialLeaseID string, runtime agent.Runtime) {
 	if strings.TrimSpace(credentialLeaseID) != "" && s.Broker != nil {
 		if err := s.Broker.Release(context.Background(), credentialLeaseID); err != nil {
 			log.Printf("release credential lease %s failed: %v", credentialLeaseID, err)
 		}
 	}
-	path := filepath.Join(runDir, "codex", "auth.json")
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		log.Printf("remove ephemeral auth file %s failed: %v", path, err)
+	_, authPath := credentialAuthPath(runDir, runtime)
+	if err := os.Remove(authPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("remove ephemeral auth file %s failed: %v", authPath, err)
 	}
 }
 
@@ -264,14 +275,14 @@ func (s *Server) ExecuteRun(runID string) {
 	if requesterID == "" {
 		requesterID = "system"
 	}
-	credentialLeaseID, err := s.prepareRunCredentialAuth(run.ID, run.RunDir, requesterID)
+	credentialLeaseID, err := s.prepareRunCredentialAuth(run.ID, run.RunDir, requesterID, run.AgentRuntime)
 	if err != nil {
 		updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("acquire credential lease: %v", err))
 		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
 	}
-	defer s.cleanupRunCredentialAuth(run.RunDir, credentialLeaseID)
+	defer s.cleanupRunCredentialAuth(run.RunDir, credentialLeaseID, run.AgentRuntime)
 
 	if reason, statusReason, ok := s.pendingRunCancelStatus(runID); ok {
 		updated := s.setRunStatusWithFallbackReason(run, state.StatusCanceled, reason, statusReason)
@@ -714,7 +725,7 @@ func (s *Server) cleanupDetachedExecution(runID string, execRec state.RunExecuti
 		log.Printf("run %s clear run lease failed: %v", runID, err)
 	}
 	if run, ok := s.Store.GetRun(runID); ok {
-		authPath := filepath.Join(run.RunDir, "codex", "auth.json")
+		_, authPath := credentialAuthPath(run.RunDir, run.AgentRuntime)
 		if err := os.Remove(authPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("run %s remove auth file failed: %v", runID, err)
 		}

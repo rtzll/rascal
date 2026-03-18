@@ -254,7 +254,7 @@ func TestLoadServerConfigRejectsInvalidEnumEnv(t *testing.T) {
 		needle string
 	}{
 		{name: "runner mode", key: "RASCAL_RUNNER_MODE", value: "podman", needle: "unknown runner mode"},
-		{name: "agent runtime", key: "RASCAL_AGENT_RUNTIME", value: "claude", needle: "unknown agent runtime"},
+		{name: "agent runtime", key: "RASCAL_AGENT_RUNTIME", value: "unknown-agent", needle: "unknown agent runtime"},
 		{name: "credential strategy", key: "RASCAL_CREDENTIAL_STRATEGY", value: "weighted", needle: "unknown credential strategy"},
 		{name: "task session mode", key: "RASCAL_TASK_SESSION_MODE", value: "sometimes", needle: "unknown agent session mode"},
 	}

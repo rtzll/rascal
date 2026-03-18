@@ -24,6 +24,8 @@ func runAgent(ex CommandExecutor, cfg Config) (string, string, error) {
 	switch configuredAgentRuntime(cfg) {
 	case agent.BackendCodex:
 		return RunCodex(ex, cfg)
+	case agent.BackendClaude:
+		return RunClaude(ex, cfg)
 	default:
 		return RunGoose(ex, cfg)
 	}
@@ -190,6 +192,82 @@ func CodexRunArgs(cfg Config) []string {
 	}
 	args = append(args, "-")
 	return args
+}
+
+func RunClaude(ex CommandExecutor, cfg Config) (output string, sessionID string, err error) {
+	token, err := loadClaudeOAuthToken(cfg)
+	if err != nil {
+		return "", "", fmt.Errorf("load claude oauth token: %w", err)
+	}
+
+	instructions, err := os.ReadFile(cfg.InstructionsPath)
+	if err != nil {
+		return "", "", fmt.Errorf("read instructions: %w", err)
+	}
+
+	sessionID = configuredRuntimeSessionID(cfg)
+	resume := configuredSessionResume(cfg) && strings.TrimSpace(sessionID) != ""
+
+	log.Printf("[%s] running claude (backend=%s session_mode=%s session_key=%s session_id=%s resume=%t config_dir=%s)",
+		nowUTC(),
+		configuredAgentRuntime(cfg),
+		configuredSessionMode(cfg),
+		configuredSessionKey(cfg),
+		sessionID,
+		resume,
+		cfg.ClaudeConfigDir,
+	)
+
+	args := ClaudeRunArgs(cfg, resume)
+
+	logFile, err := os.OpenFile(cfg.GooseLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return "", "", fmt.Errorf("open claude log: %w", err)
+	}
+	defer func() {
+		if closeErr := logFile.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close claude log: %w", closeErr)
+		}
+	}()
+
+	env := []string{}
+	if token != "" {
+		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+token)
+	}
+
+	if err := ex.RunWithInput(cfg.RepoDir, env, strings.NewReader(string(instructions)), logFile, logFile, "claude", args...); err != nil {
+		return "", sessionID, fmt.Errorf("claude run failed: %w", err)
+	}
+
+	output, err = loadAgentOutput(cfg.AgentOutputPath, cfg.GooseLogPath, "claude")
+	if err != nil {
+		return "", sessionID, err
+	}
+	return output, sessionID, nil
+}
+
+func ClaudeRunArgs(cfg Config, resume bool) []string {
+	args := []string{"-p"}
+	if resume {
+		sessionID := strings.TrimSpace(configuredRuntimeSessionID(cfg))
+		if sessionID != "" {
+			args = append(args, "--resume", sessionID)
+		}
+	}
+	args = append(args, "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "-o", cfg.AgentOutputPath, "-")
+	return args
+}
+
+func loadClaudeOAuthToken(cfg Config) (string, error) {
+	sourcePath := filepath.Join(cfg.MetaDir, "claude", defaultClaudeOAuthFile)
+	data, err := os.ReadFile(sourcePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read claude oauth token: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 func ensureCodexHome(cfg Config) error {

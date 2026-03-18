@@ -7,18 +7,21 @@ type AgentHarness = Runtime
 type AgentRuntime = Runtime
 
 const (
-	AgentHarnessGoose = RuntimeGoose
-	AgentHarnessCodex = RuntimeCodex
+	AgentHarnessGoose  = RuntimeGoose
+	AgentHarnessCodex  = RuntimeCodex
+	AgentHarnessClaude = RuntimeClaude
 
-	AgentRuntimeGoose = RuntimeGoose
-	AgentRuntimeCodex = RuntimeCodex
+	AgentRuntimeGoose  = RuntimeGoose
+	AgentRuntimeCodex  = RuntimeCodex
+	AgentRuntimeClaude = RuntimeClaude
 )
 
 type ModelProvider string
 
 const (
-	ModelProviderCodex  ModelProvider = "codex"
-	ModelProviderGemini ModelProvider = "gemini"
+	ModelProviderCodex     ModelProvider = "codex"
+	ModelProviderGemini    ModelProvider = "gemini"
+	ModelProviderAnthropic ModelProvider = "anthropic"
 )
 
 func ParseAgentHarness(raw string) (AgentHarness, error) {

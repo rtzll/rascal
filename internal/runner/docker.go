@@ -29,13 +29,15 @@ const (
 	runtimeUID = 10001
 	runtimeGID = 10001
 
-	containerMetaDir         = "/rascal-meta"
-	containerWorkDir         = "/work"
-	containerGooseStateDir   = "/rascal-meta/goose"
-	containerCodexStateDir   = "/rascal-meta/codex"
-	containerGooseSessionDir = "/rascal-goose-session"
-	containerCodexSessionDir = "/rascal-codex-session"
-	containerContextJSONPath = "/rascal-meta/context.json"
+	containerMetaDir          = "/rascal-meta"
+	containerWorkDir          = "/work"
+	containerGooseStateDir    = "/rascal-meta/goose"
+	containerCodexStateDir    = "/rascal-meta/codex"
+	containerGooseSessionDir  = "/rascal-goose-session"
+	containerCodexSessionDir  = "/rascal-codex-session"
+	containerClaudeStateDir   = "/rascal-meta/claude"
+	containerClaudeSessionDir = "/rascal-claude-session"
+	containerContextJSONPath  = "/rascal-meta/context.json"
 )
 
 func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
@@ -88,12 +90,16 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 
 	codexHome := containerCodexStateDir
 	goosePathRoot := containerGooseStateDir
+	claudeConfigDir := containerClaudeStateDir
 	sessionMountTarget := ""
 	if sessionResume && sessionDir != "" {
 		switch backend {
 		case agent.BackendCodex:
 			codexHome = containerCodexSessionDir
 			sessionMountTarget = containerCodexSessionDir
+		case agent.BackendClaude:
+			claudeConfigDir = containerClaudeSessionDir
+			sessionMountTarget = containerClaudeSessionDir
 		default:
 			goosePathRoot = containerGooseSessionDir
 			sessionMountTarget = containerGooseSessionDir
@@ -121,7 +127,8 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		"GH_PROMPT_DISABLED":         "1",
 		"GIT_TERMINAL_PROMPT":        "0",
 	}
-	if backend == agent.RuntimeGoose {
+	switch backend {
+	case agent.RuntimeGoose:
 		envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
 		envPairs["GOOSE_PROVIDER"] = "codex"
 		envPairs["GOOSE_MODEL"] = "gpt-5.4"
@@ -129,6 +136,8 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
 		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
 		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
+	case agent.RuntimeClaude:
+		envPairs["CLAUDE_CONFIG_DIR"] = claudeConfigDir
 	}
 	if strings.TrimSpace(l.GitHubToken) != "" {
 		envPairs["GH_TOKEN"] = l.GitHubToken

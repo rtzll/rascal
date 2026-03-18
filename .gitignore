@@ -7,3 +7,4 @@ coverage.out
 coverage.html
 runner/rascal-runner
 tmp/golangci-lint-cache/
+.claude/settings.local.json

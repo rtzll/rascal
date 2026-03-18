@@ -37,6 +37,14 @@ RUN set -eux; \
     install -m 0755 /tmp/goose /usr/local/bin/goose; \
     rm -f /tmp/goose.tar.bz2 /tmp/goose
 
+FROM ubuntu:24.04 AS claude-runtime
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get -qq update \
+    && apt-get -y -qq install --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && /root/.local/bin/claude --version
+
 FROM ubuntu:24.04 AS runner-base
 ARG DEBIAN_FRONTEND=noninteractive
 ARG RUNTIME_UID=10001
@@ -88,5 +96,12 @@ USER rascal:rascal
 ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]
 
 FROM runner-base AS codex-runner
+USER rascal:rascal
+ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]
+
+FROM runner-base AS claude-runner
+COPY --from=claude-runtime /root/.local/bin/claude /usr/local/bin/claude
+COPY --from=claude-runtime /root/.local/share/claude /usr/local/share/claude
+RUN claude --version
 USER rascal:rascal
 ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]

@@ -29,6 +29,7 @@ const (
 	defaultPRLabel          = "rascal"
 	defaultCodexAuthFile    = "auth.json"
 	defaultCodexSessionDir  = "sessions"
+	defaultClaudeOAuthFile  = "oauth_token"
 )
 
 var (
