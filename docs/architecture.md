@@ -10,10 +10,11 @@ from execution-plane responsibilities.
 
 - Control plane: `rascal` and `rascald`
 - Execution plane: detached runner containers launched via the Docker launcher
-- Agent harnesses: `goose` and `codex`
-- Model providers: currently `codex`, with room for future provider-specific
-  harnesses
-- Packaging: separate runner images for Goose and Codex
+- Agent harnesses: `goose`, `codex`, `claude`, and `goose-claude`
+- Model providers: `codex` and `anthropic`, with room for future
+  provider-specific harnesses
+- Packaging: separate runner images per harness (Goose, Codex, Claude,
+  Goose-Claude)
 
 In simple terms:
 
@@ -85,7 +86,8 @@ rascal (CLI) or GitHub webhook
 3. Runner container (`rascal-runner`)
 
 - Clones the repository and checks out the target branches.
-- Executes the selected `AgentHarness` (`goose` or `codex`).
+- Executes the selected `AgentHarness` (`goose`, `codex`, `claude`, or
+  `goose-claude`).
 - Commits changes, pushes the head branch, and creates or reuses a PR.
 - Writes canonical artifacts into mounted `/rascal-meta`.
 - Runtime logic lives in Go in `cmd/rascal-runner`.
@@ -115,7 +117,7 @@ These are the main layers in the Go codebase.
 - Current production implementation is Docker; `noop` exists for
   non-runtime/test scenarios.
 - Session mounting is backend-aware: Goose uses `GOOSE_PATH_ROOT`, Codex uses
-  `CODEX_HOME`.
+  `CODEX_HOME`, Claude uses `CLAUDE_CONFIG_DIR`.
 
 4. Control-plane and client boundaries
 
@@ -305,20 +307,29 @@ Common failure and recovery cases:
 
 ## Credential Handling
 
-Rascal uses stored Codex credentials managed by `rascald`.
+Rascal uses runtime-scoped stored credentials managed by `rascald`.
 
 - Stored credentials are encrypted before being persisted in SQLite.
+- Each credential has an `agent_runtime` tag (`codex` or `claude`) that
+  determines which runtimes can use it:
+  - `codex` credentials (default, including legacy credentials with empty
+    runtime): used by `codex` and `goose` runtimes via `auth.json`.
+  - `claude` credentials: used by `claude` and `goose-claude` runtimes via
+    OAuth token.
 - Each credential is either `personal` (owned by a user) or `shared`.
 - When a run starts, `rascald` asks the credential broker to lease a credential
-  for that run and records the selected credential id in state.
+  matching the run's runtime and records the selected credential id in state.
 - The broker chooses from eligible credentials using the configured allocation
-  strategy and tracks lease assignment per run.
-- The leased auth blob is written into the run-scoped `codex/auth.json` file and
-  removed during run cleanup.
+  strategy, runtime compatibility filter, and tracks lease assignment per run.
+- The leased auth blob is written into the run-scoped auth path
+  (`codex/auth.json` for codex/goose runs, `claude/oauth_token` for
+  claude/goose-claude runs) and removed during run cleanup.
 - While a run is active, `rascald` renews the credential lease. If renewal is
   lost, the run is canceled.
 - Bootstrap and deploy can seed an initial shared stored credential from a local
   Codex auth file.
+- Operators can manage credentials with `rascal auth credentials ...` and use
+  `--runtime codex|claude` to tag credentials for specific runtimes.
 
 ## Runner Environment Contract
 
@@ -332,7 +343,8 @@ Required:
 Common optional:
 
 - `RASCAL_INSTRUCTION`
-- `RASCAL_AGENT_RUNTIME` (`goose` or `codex`; defaults to `goose` when unset)
+- `RASCAL_AGENT_RUNTIME` (`goose`, `codex`, `claude`, or `goose-claude`;
+  defaults to `goose` when unset)
 - `RASCAL_BASE_BRANCH` (default: `main`)
 - `RASCAL_HEAD_BRANCH` (runner fallback default: `rascal/<run_id>` when unset;
   `rascald` normally sets a task-derived branch and may reuse the previous head

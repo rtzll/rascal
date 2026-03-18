@@ -62,6 +62,18 @@ func ParseBackend(raw string) (Backend, error) {
 	return ParseRuntime(raw)
 }
 
+// CredentialRuntime maps an agent runtime to the credential type it consumes.
+// Codex and Goose share auth.json credentials (credential runtime "codex").
+// Claude and Goose-Claude share OAuth token credentials (credential runtime "claude").
+func CredentialRuntime(runtime Runtime) Runtime {
+	switch NormalizeRuntime(string(runtime)) {
+	case RuntimeClaude, RuntimeGooseClaude:
+		return RuntimeClaude
+	default:
+		return RuntimeCodex
+	}
+}
+
 type SessionMode string
 
 const (

@@ -22,6 +22,7 @@ type CodexCredential struct {
 	ID                string         `json:"id"`
 	OwnerUserID       sql.NullString `json:"owner_user_id"`
 	Scope             string         `json:"scope"`
+	AgentRuntime      string         `json:"agent_runtime"`
 	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
 	Weight            int64          `json:"weight"`
 	Status            string         `json:"status"`

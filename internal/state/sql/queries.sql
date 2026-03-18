@@ -719,6 +719,7 @@ INSERT INTO codex_credentials (
   id,
   owner_user_id,
   scope,
+  agent_runtime,
   encrypted_auth_blob,
   weight,
   status,
@@ -727,13 +728,14 @@ INSERT INTO codex_credentials (
   created_at,
   updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdateCodexCredential :execrows
 UPDATE codex_credentials
 SET
   owner_user_id = ?,
   scope = ?,
+  agent_runtime = ?,
   encrypted_auth_blob = ?,
   weight = ?,
   status = ?,
@@ -756,6 +758,7 @@ SELECT
   id,
   owner_user_id,
   scope,
+  agent_runtime,
   encrypted_auth_blob,
   weight,
   status,
@@ -771,6 +774,7 @@ SELECT
   id,
   owner_user_id,
   scope,
+  agent_runtime,
   encrypted_auth_blob,
   weight,
   status,
@@ -787,6 +791,7 @@ SELECT
   id,
   owner_user_id,
   scope,
+  agent_runtime,
   encrypted_auth_blob,
   weight,
   status,
@@ -803,6 +808,7 @@ SELECT
   id,
   owner_user_id,
   scope,
+  agent_runtime,
   encrypted_auth_blob,
   weight,
   status,
@@ -818,6 +824,7 @@ SELECT
   c.id,
   c.owner_user_id,
   c.scope,
+  c.agent_runtime,
   c.weight,
   c.status,
   c.cooldown_until,
@@ -847,6 +854,7 @@ FROM codex_credentials AS c
 WHERE c.status = 'active'
   AND (c.cooldown_until IS NULL OR c.cooldown_until <= sqlc.arg(now))
   AND (c.scope = 'shared' OR c.owner_user_id = sqlc.arg(requester_user_id))
+  AND (c.agent_runtime = sqlc.arg(credential_runtime) OR (sqlc.arg(credential_runtime) = 'codex' AND c.agent_runtime = ''))
 ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: TryCreateCredentialLease :execrows

@@ -74,7 +74,15 @@ rascal doctor --host YOUR_SERVER_IP
 
 ## Server Credential Settings
 
-Rascal uses encrypted stored credentials for Codex runs.
+Rascal uses encrypted, runtime-scoped stored credentials for agent runs.
+
+Each credential is tagged with an `agent_runtime` (`codex` or `claude`).
+The broker automatically filters credentials matching the run's runtime:
+
+- `codex` credentials: used by `codex` and `goose` runtimes (auth.json format).
+- `claude` credentials: used by `claude` and `goose-claude` runtimes (OAuth
+  token format).
+- Legacy credentials with no runtime tag are treated as `codex` credentials.
 
 - `RASCAL_CREDENTIAL_STRATEGY` Allocation strategy for choosing among eligible
   credentials. Default: `requester_own_then_shared`
@@ -90,5 +98,7 @@ Rascal uses encrypted stored credentials for Codex runs.
   Recommended: set a dedicated encryption key instead of reusing the API token.
 
 Operators can manage stored credentials with `rascal auth credentials ...`.
-Bootstrap and deploy flows can seed an initial shared credential with
+Use `--runtime codex` or `--runtime claude` when creating credentials to tag
+them for specific runtimes.
+Bootstrap and deploy flows can seed an initial shared codex credential with
 `--codex-auth ~/.codex/auth.json`.

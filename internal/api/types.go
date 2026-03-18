@@ -86,6 +86,7 @@ type Credential struct {
 	ID            string                 `json:"id" toml:"id"`
 	OwnerUserID   string                 `json:"owner_user_id" toml:"owner_user_id"`
 	Scope         state.CredentialScope  `json:"scope" toml:"scope"`
+	AgentRuntime  string                 `json:"agent_runtime" toml:"agent_runtime"`
 	Weight        int                    `json:"weight" toml:"weight"`
 	Status        state.CredentialStatus `json:"status" toml:"status"`
 	CooldownUntil *time.Time             `json:"cooldown_until,omitempty" toml:"cooldown_until,omitempty"`
@@ -99,6 +100,7 @@ func CredentialFromState(credential state.CodexCredential) Credential {
 		ID:            credential.ID,
 		OwnerUserID:   credential.OwnerUserID,
 		Scope:         credential.Scope,
+		AgentRuntime:  credential.AgentRuntime,
 		Weight:        credential.Weight,
 		Status:        credential.Status,
 		CooldownUntil: credential.CooldownUntil,
@@ -122,16 +124,18 @@ type CredentialDisabledResponse struct {
 }
 
 type CreateCredentialRequest struct {
-	ID          string                `json:"id,omitempty"`
-	OwnerUserID string                `json:"owner_user_id,omitempty"`
-	Scope       state.CredentialScope `json:"scope,omitempty"`
-	AuthBlob    string                `json:"auth_blob"`
-	Weight      int                   `json:"weight,omitempty"`
+	ID           string                `json:"id,omitempty"`
+	OwnerUserID  string                `json:"owner_user_id,omitempty"`
+	Scope        state.CredentialScope `json:"scope,omitempty"`
+	AgentRuntime string                `json:"agent_runtime,omitempty"`
+	AuthBlob     string                `json:"auth_blob"`
+	Weight       int                   `json:"weight,omitempty"`
 }
 
 type UpdateCredentialRequest struct {
 	OwnerUserID   *string                 `json:"owner_user_id,omitempty"`
 	Scope         *state.CredentialScope  `json:"scope,omitempty"`
+	AgentRuntime  *string                 `json:"agent_runtime,omitempty"`
 	AuthBlob      *string                 `json:"auth_blob,omitempty"`
 	Weight        *int                    `json:"weight,omitempty"`
 	Status        *state.CredentialStatus `json:"status,omitempty"`

@@ -85,6 +85,7 @@ CREATE TABLE codex_credentials (
   id TEXT PRIMARY KEY,
   owner_user_id TEXT,
   scope TEXT NOT NULL,
+  agent_runtime TEXT NOT NULL DEFAULT '',
   encrypted_auth_blob BLOB NOT NULL,
   weight INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'active',
@@ -97,6 +98,7 @@ CREATE TABLE codex_credentials (
 
 CREATE INDEX idx_codex_credentials_owner ON codex_credentials (owner_user_id);
 CREATE INDEX idx_codex_credentials_scope_status ON codex_credentials (scope, status, cooldown_until);
+CREATE INDEX idx_codex_credentials_runtime ON codex_credentials (agent_runtime);
 
 CREATE TABLE credential_leases (
   id TEXT PRIMARY KEY,

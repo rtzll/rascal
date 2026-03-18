@@ -9,7 +9,7 @@ rascal auth rotate --write-config
 rascal auth sync --host "$SERVER_IP"
 
 Available Commands:
-  credentials Manage stored Codex credentials on rascald
+  credentials Manage stored credentials on rascald
   rotate      Generate fresh API/webhook tokens and optionally sync remote server
   sync        Sync auth material to remote host over SSH
 

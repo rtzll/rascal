@@ -8,8 +8,9 @@ import (
 )
 
 type AcquireRequest struct {
-	RunID  string
-	UserID string
+	RunID             string
+	UserID            string
+	CredentialRuntime string
 }
 
 type Lease struct {

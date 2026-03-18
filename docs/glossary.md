@@ -11,14 +11,14 @@
   removes detached executions.
 - `Worker`: the in-execution component that performs a run inside the launched
   environment.
-- `AgentHarness`: the tool wrapper invoked by the worker. Rascal currently
-  supports `goose` and `codex`.
-- `ModelProvider`: the underlying model/service used by a harness. Today the
-  concrete provider in use is `codex`, with room for future providers.
+- `AgentHarness`: the tool wrapper invoked by the worker. Rascal supports
+  `goose`, `codex`, `claude`, and `goose-claude`.
+- `ModelProvider`: the underlying model/service used by a harness. Current
+  providers are `codex` and `anthropic`.
 - `SessionPolicy`: policy governing whether a task-scoped session may resume
   (`off`, `pr-only`, `all`).
-- `AgentRuntime`: selected `AgentHarness` runtime for a task or run, currently
-  `goose` or `codex`.
+- `AgentRuntime`: selected `AgentHarness` runtime for a task or run: `goose`,
+  `codex`, `claude`, or `goose-claude`.
 - `TaskSession`: optional task-scoped harness state used to resume later runs.
   Rascal resets it when the task switches harnesses.
 - `RunLease`: supervision ownership record for a running run. It tells Rascal
@@ -30,7 +30,7 @@
   state, schedules runs, and supervises execution.
 - `Execution plane`: detached Docker containers started for `rascal-runner`.
 - `Runner image`: Docker image used to execute a run. Rascal maintains separate
-  images for Goose and Codex harnesses.
+  images per harness (Goose, Codex, Claude, Goose-Claude).
 - `Active slot`: the currently live `rascald` slot in blue/green deploys. Only
   this slot should process webhook traffic.
 - `Inactive slot`: the standby slot prepared during blue/green deploys before
@@ -64,5 +64,10 @@
 
 ## Credential Terms
 
-- `Stored credential`: encrypted Codex auth payload stored in Rascal state.
+- `Stored credential`: encrypted auth payload stored in Rascal state, tagged
+  with an `agent_runtime` (`codex` or `claude`) that determines which runtimes
+  can use it.
 - `Credential lease`: temporary assignment of a stored credential to one run.
+- `Credential runtime`: the credential family a run needs. `codex` and `goose`
+  runtimes use `codex` credentials; `claude` and `goose-claude` runtimes use
+  `claude` credentials.

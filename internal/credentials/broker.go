@@ -49,8 +49,12 @@ func NewBroker(store *state.Store, strategy AllocationStrategy, cipher Cipher, l
 func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 	req.RunID = strings.TrimSpace(req.RunID)
 	req.UserID = strings.TrimSpace(req.UserID)
+	req.CredentialRuntime = strings.TrimSpace(req.CredentialRuntime)
 	if req.RunID == "" || req.UserID == "" {
 		return Lease{}, fmt.Errorf("run_id and user_id are required")
+	}
+	if req.CredentialRuntime == "" {
+		req.CredentialRuntime = "codex"
 	}
 	if b.store == nil || b.strategy == nil || b.cipher == nil {
 		return Lease{}, ErrNoCredentialAvailable
@@ -60,7 +64,7 @@ func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 		return Lease{}, fmt.Errorf("reclaim expired credential leases: %w", err)
 	}
 	for attempt := 0; attempt < 12; attempt++ {
-		candidates, err := b.store.ListCredentialCandidates(req.UserID, now, now.Add(-b.usageWindow))
+		candidates, err := b.store.ListCredentialCandidates(req.UserID, req.CredentialRuntime, now, now.Add(-b.usageWindow))
 		if err != nil {
 			return Lease{}, fmt.Errorf("list credential candidates for %s: %w", req.UserID, err)
 		}

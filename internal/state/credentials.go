@@ -108,6 +108,7 @@ type CodexCredential struct {
 	ID                string
 	OwnerUserID       string
 	Scope             CredentialScope
+	AgentRuntime      string
 	EncryptedAuthBlob []byte
 	Weight            int
 	Status            CredentialStatus
@@ -121,6 +122,7 @@ type CredentialCandidate struct {
 	ID            string
 	OwnerUserID   string
 	Scope         CredentialScope
+	AgentRuntime  string
 	Weight        int
 	Status        CredentialStatus
 	CooldownUntil *time.Time
@@ -160,6 +162,7 @@ type CreateCodexCredentialInput struct {
 	ID                string
 	OwnerUserID       string
 	Scope             CredentialScope
+	AgentRuntime      string
 	EncryptedAuthBlob []byte
 	Weight            int
 	Status            CredentialStatus
@@ -171,6 +174,7 @@ type UpdateCodexCredentialInput struct {
 	ID                string
 	OwnerUserID       string
 	Scope             CredentialScope
+	AgentRuntime      string
 	EncryptedAuthBlob []byte
 	Weight            int
 	Status            CredentialStatus
@@ -383,6 +387,7 @@ func (s *Store) CreateCodexCredential(in CreateCodexCredentialInput) (CodexCrede
 		ID:                in.ID,
 		OwnerUserID:       toNullString(in.OwnerUserID),
 		Scope:             string(in.Scope),
+		AgentRuntime:      strings.TrimSpace(in.AgentRuntime),
 		EncryptedAuthBlob: in.EncryptedAuthBlob,
 		Weight:            int64(in.Weight),
 		Status:            string(in.Status),
@@ -425,6 +430,7 @@ func (s *Store) UpdateCodexCredential(in UpdateCodexCredentialInput) (CodexCrede
 	rows, err := s.q.UpdateCodexCredential(context.Background(), sqlitegen.UpdateCodexCredentialParams{
 		OwnerUserID:       toNullString(in.OwnerUserID),
 		Scope:             string(in.Scope),
+		AgentRuntime:      strings.TrimSpace(in.AgentRuntime),
 		EncryptedAuthBlob: in.EncryptedAuthBlob,
 		Weight:            int64(in.Weight),
 		Status:            string(in.Status),
@@ -519,11 +525,15 @@ func (s *Store) ListAllCodexCredentials() ([]CodexCredential, error) {
 	return out, nil
 }
 
-func (s *Store) ListCredentialCandidates(requesterUserID string, now, usageWindowStart time.Time) ([]CredentialCandidate, error) {
+func (s *Store) ListCredentialCandidates(requesterUserID, credentialRuntime string, now, usageWindowStart time.Time) ([]CredentialCandidate, error) {
+	if strings.TrimSpace(credentialRuntime) == "" {
+		credentialRuntime = "codex"
+	}
 	rows, err := s.q.ListCredentialCandidates(context.Background(), sqlitegen.ListCredentialCandidatesParams{
-		Now:              now.UTC().UnixNano(),
-		UsageWindowStart: usageWindowStart.UTC().UnixNano(),
-		RequesterUserID:  toNullString(requesterUserID),
+		Now:               now.UTC().UnixNano(),
+		UsageWindowStart:  usageWindowStart.UTC().UnixNano(),
+		RequesterUserID:   toNullString(requesterUserID),
+		CredentialRuntime: credentialRuntime,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list credential candidates for %s: %w", requesterUserID, err)
@@ -534,6 +544,7 @@ func (s *Store) ListCredentialCandidates(requesterUserID string, now, usageWindo
 			ID:            row.ID,
 			OwnerUserID:   fromNullString(row.OwnerUserID),
 			Scope:         NormalizeCredentialScope(CredentialScope(row.Scope)),
+			AgentRuntime:  row.AgentRuntime,
 			Weight:        int(row.Weight),
 			Status:        NormalizeCredentialStatus(CredentialStatus(row.Status)),
 			CooldownUntil: fromNullTime(row.CooldownUntil),
@@ -707,6 +718,7 @@ func fromDBCodexCredential(row sqlitegen.CodexCredential) CodexCredential {
 		ID:                row.ID,
 		OwnerUserID:       fromNullString(row.OwnerUserID),
 		Scope:             NormalizeCredentialScope(CredentialScope(row.Scope)),
+		AgentRuntime:      row.AgentRuntime,
 		EncryptedAuthBlob: append([]byte(nil), row.EncryptedAuthBlob...),
 		Weight:            int(row.Weight),
 		Status:            NormalizeCredentialStatus(CredentialStatus(row.Status)),

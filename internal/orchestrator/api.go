@@ -405,6 +405,7 @@ func (s *Server) HandleCredentials(w http.ResponseWriter, r *http.Request) {
 			ID:                id,
 			OwnerUserID:       ownerUserID,
 			Scope:             scope,
+			AgentRuntime:      strings.TrimSpace(req.AgentRuntime),
 			EncryptedAuthBlob: encrypted,
 			Weight:            req.Weight,
 			Status:            state.CredentialStatusActive,
@@ -462,6 +463,7 @@ func (s *Server) HandleCredentialSubresources(w http.ResponseWriter, r *http.Req
 			ID:                credential.ID,
 			OwnerUserID:       credential.OwnerUserID,
 			Scope:             credential.Scope,
+			AgentRuntime:      credential.AgentRuntime,
 			EncryptedAuthBlob: credential.EncryptedAuthBlob,
 			Weight:            credential.Weight,
 			Status:            credential.Status,
@@ -489,6 +491,9 @@ func (s *Server) HandleCredentialSubresources(w http.ResponseWriter, r *http.Req
 			if scope == state.CredentialScopeShared {
 				updated.OwnerUserID = ""
 			}
+		}
+		if req.AgentRuntime != nil {
+			updated.AgentRuntime = strings.TrimSpace(*req.AgentRuntime)
 		}
 		if req.AuthBlob != nil {
 			encrypted, err := s.Cipher.Encrypt([]byte(strings.TrimSpace(*req.AuthBlob)))

@@ -71,8 +71,10 @@ rascal deploy \
   --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 ```
 
-That `--codex-auth` value seeds or updates the shared stored credential used for
-Codex runs; it is not copied to a static server-side fallback file.
+That `--codex-auth` value seeds or updates the shared stored codex credential
+used for Codex and Goose runs; it is not copied to a static server-side fallback
+file. For Claude and Goose-Claude runs, create a separate `claude` credential
+via `rascal auth credentials create --runtime claude --auth-file <path>`.
 
 Inspect remote services:
 

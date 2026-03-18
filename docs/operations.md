@@ -68,7 +68,7 @@ Operationally this means:
 | Run is stuck in `queued`                         | Control plane / scheduler              | `rascal ps`, `rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                                                    |
 | Run is `running` but appears idle                | Execution plane / backend              | `rascal logs <run_id> --follow`, inspect detached containers on host                                                                                                  |
 | Cancel does not take effect                      | Execution plane / supervision adoption | `rascal cancel <run_id>`, `rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                                       |
-| Auth failures in Codex runs                      | Credential layer                       | inspect run logs, verify stored credential status and lease availability                                                                                             |
+| Auth failures in agent runs                       | Credential layer                       | inspect run logs, verify stored credential status, runtime tag, and lease availability                                                                               |
 | Deploy succeeds locally but service is unhealthy | Deployment / blue-green cutover        | check active slot, slot readiness, Caddy logs, and rollback readiness                                                                                                |
 
 ## First-Response Commands
@@ -113,12 +113,23 @@ Agent runtime notes:
   directory.
 - Codex resumes by reusing a task-scoped `CODEX_HOME` and the last discovered
   runtime session id.
-- Switching a task between Goose and Codex is supported; Rascal clears stale
+- Claude resumes by reusing a named Claude Code session with `--resume`.
+- Goose-Claude uses Goose with Claude Code as provider, sharing the same session
+  resume behavior as Goose.
+- Switching a task between runtimes is supported; Rascal clears stale
   task-scoped resume state and starts a fresh session for the new agent runtime.
 
 ## Credential Leasing
 
-For Codex runs, Rascal uses leased stored credentials.
+Rascal uses runtime-scoped leased stored credentials for all agent runs.
+
+Each credential is tagged with an `agent_runtime` (`codex` or `claude`).
+The broker automatically selects credentials matching the run's runtime:
+
+- `codex` and `goose` runs use `codex` credentials (auth.json format).
+- `claude` and `goose-claude` runs use `claude` credentials (OAuth token
+  format).
+- Legacy credentials with no runtime tag are treated as `codex` credentials.
 
 Operational notes:
 
@@ -129,8 +140,9 @@ Operational notes:
 - Stored credential payloads are encrypted at rest in SQLite using
   `RASCAL_CREDENTIAL_ENCRYPTION_KEY`.
 - Manage credentials with `rascal auth credentials ...`.
+- Use `--runtime codex` or `--runtime claude` when creating credentials.
 - `rascal init --codex-auth ...` and `rascal deploy --codex-auth ...` seed or
-  update a shared stored credential for the server.
+  update a shared stored codex credential for the server.
 
 ## Safe Manual Interventions
 

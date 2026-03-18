@@ -167,6 +167,34 @@ func TestSessionEnabled(t *testing.T) {
 	}
 }
 
+func TestCredentialRuntime(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		runtime Runtime
+		want    Runtime
+	}{
+		{name: "codex maps to codex", runtime: RuntimeCodex, want: RuntimeCodex},
+		{name: "goose maps to codex", runtime: RuntimeGoose, want: RuntimeCodex},
+		{name: "claude maps to claude", runtime: RuntimeClaude, want: RuntimeClaude},
+		{name: "goose-claude maps to claude", runtime: RuntimeGooseClaude, want: RuntimeClaude},
+		{name: "empty maps to codex", runtime: Runtime(""), want: RuntimeCodex},
+		{name: "unknown maps to codex", runtime: Runtime("other"), want: RuntimeCodex},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := CredentialRuntime(tt.runtime); got != tt.want {
+				t.Fatalf("CredentialRuntime(%q) = %q, want %q", tt.runtime, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSessionTaskKeyStableAndSanitized(t *testing.T) {
 	t.Parallel()
 

@@ -511,6 +511,7 @@ INSERT INTO codex_credentials (
   id,
   owner_user_id,
   scope,
+  agent_runtime,
   encrypted_auth_blob,
   weight,
   status,
@@ -519,13 +520,14 @@ INSERT INTO codex_credentials (
   created_at,
   updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateCodexCredentialParams struct {
 	ID                string         `json:"id"`
 	OwnerUserID       sql.NullString `json:"owner_user_id"`
 	Scope             string         `json:"scope"`
+	AgentRuntime      string         `json:"agent_runtime"`
 	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
 	Weight            int64          `json:"weight"`
 	Status            string         `json:"status"`
@@ -540,6 +542,7 @@ func (q *Queries) CreateCodexCredential(ctx context.Context, arg CreateCodexCred
 		arg.ID,
 		arg.OwnerUserID,
 		arg.Scope,
+		arg.AgentRuntime,
 		arg.EncryptedAuthBlob,
 		arg.Weight,
 		arg.Status,
@@ -795,6 +798,7 @@ SELECT
   id,
   owner_user_id,
   scope,
+  agent_runtime,
   encrypted_auth_blob,
   weight,
   status,
@@ -813,6 +817,7 @@ func (q *Queries) GetCodexCredential(ctx context.Context, id string) (CodexCrede
 		&i.ID,
 		&i.OwnerUserID,
 		&i.Scope,
+		&i.AgentRuntime,
 		&i.EncryptedAuthBlob,
 		&i.Weight,
 		&i.Status,
@@ -1373,6 +1378,7 @@ SELECT
   id,
   owner_user_id,
   scope,
+  agent_runtime,
   encrypted_auth_blob,
   weight,
   status,
@@ -1397,6 +1403,7 @@ func (q *Queries) ListAllCodexCredentials(ctx context.Context) ([]CodexCredentia
 			&i.ID,
 			&i.OwnerUserID,
 			&i.Scope,
+			&i.AgentRuntime,
 			&i.EncryptedAuthBlob,
 			&i.Weight,
 			&i.Status,
@@ -1423,6 +1430,7 @@ SELECT
   id,
   owner_user_id,
   scope,
+  agent_runtime,
   encrypted_auth_blob,
   weight,
   status,
@@ -1448,6 +1456,7 @@ func (q *Queries) ListCodexCredentialsByOwner(ctx context.Context, ownerUserID s
 			&i.ID,
 			&i.OwnerUserID,
 			&i.Scope,
+			&i.AgentRuntime,
 			&i.EncryptedAuthBlob,
 			&i.Weight,
 			&i.Status,
@@ -1474,6 +1483,7 @@ SELECT
   c.id,
   c.owner_user_id,
   c.scope,
+  c.agent_runtime,
   c.weight,
   c.status,
   c.cooldown_until,
@@ -1503,19 +1513,22 @@ FROM codex_credentials AS c
 WHERE c.status = 'active'
   AND (c.cooldown_until IS NULL OR c.cooldown_until <= ?1)
   AND (c.scope = 'shared' OR c.owner_user_id = ?3)
+  AND (c.agent_runtime = ?4 OR (?4 = 'codex' AND c.agent_runtime = ''))
 ORDER BY c.created_at ASC, c.id ASC
 `
 
 type ListCredentialCandidatesParams struct {
-	Now              int64          `json:"now"`
-	UsageWindowStart int64          `json:"usage_window_start"`
-	RequesterUserID  sql.NullString `json:"requester_user_id"`
+	Now               int64          `json:"now"`
+	UsageWindowStart  int64          `json:"usage_window_start"`
+	RequesterUserID   sql.NullString `json:"requester_user_id"`
+	CredentialRuntime string         `json:"credential_runtime"`
 }
 
 type ListCredentialCandidatesRow struct {
 	ID            string         `json:"id"`
 	OwnerUserID   sql.NullString `json:"owner_user_id"`
 	Scope         string         `json:"scope"`
+	AgentRuntime  string         `json:"agent_runtime"`
 	Weight        int64          `json:"weight"`
 	Status        string         `json:"status"`
 	CooldownUntil sql.NullInt64  `json:"cooldown_until"`
@@ -1528,7 +1541,12 @@ type ListCredentialCandidatesRow struct {
 }
 
 func (q *Queries) ListCredentialCandidates(ctx context.Context, arg ListCredentialCandidatesParams) ([]ListCredentialCandidatesRow, error) {
-	rows, err := q.db.QueryContext(ctx, listCredentialCandidates, arg.Now, arg.UsageWindowStart, arg.RequesterUserID)
+	rows, err := q.db.QueryContext(ctx, listCredentialCandidates,
+		arg.Now,
+		arg.UsageWindowStart,
+		arg.RequesterUserID,
+		arg.CredentialRuntime,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1540,6 +1558,7 @@ func (q *Queries) ListCredentialCandidates(ctx context.Context, arg ListCredenti
 			&i.ID,
 			&i.OwnerUserID,
 			&i.Scope,
+			&i.AgentRuntime,
 			&i.Weight,
 			&i.Status,
 			&i.CooldownUntil,
@@ -1732,6 +1751,7 @@ SELECT
   id,
   owner_user_id,
   scope,
+  agent_runtime,
   encrypted_auth_blob,
   weight,
   status,
@@ -1757,6 +1777,7 @@ func (q *Queries) ListSharedCodexCredentials(ctx context.Context) ([]CodexCreden
 			&i.ID,
 			&i.OwnerUserID,
 			&i.Scope,
+			&i.AgentRuntime,
 			&i.EncryptedAuthBlob,
 			&i.Weight,
 			&i.Status,
@@ -2229,6 +2250,7 @@ UPDATE codex_credentials
 SET
   owner_user_id = ?,
   scope = ?,
+  agent_runtime = ?,
   encrypted_auth_blob = ?,
   weight = ?,
   status = ?,
@@ -2241,6 +2263,7 @@ WHERE id = ?
 type UpdateCodexCredentialParams struct {
 	OwnerUserID       sql.NullString `json:"owner_user_id"`
 	Scope             string         `json:"scope"`
+	AgentRuntime      string         `json:"agent_runtime"`
 	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
 	Weight            int64          `json:"weight"`
 	Status            string         `json:"status"`
@@ -2254,6 +2277,7 @@ func (q *Queries) UpdateCodexCredential(ctx context.Context, arg UpdateCodexCred
 	result, err := q.db.ExecContext(ctx, updateCodexCredential,
 		arg.OwnerUserID,
 		arg.Scope,
+		arg.AgentRuntime,
 		arg.EncryptedAuthBlob,
 		arg.Weight,
 		arg.Status,

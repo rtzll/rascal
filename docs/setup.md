@@ -4,7 +4,8 @@
 
 - Go 1.26+
 - Docker available on the server
-- `codex login` completed locally (`~/.codex/auth.json` exists)
+- Agent auth completed locally (e.g., `~/.codex/auth.json` for Codex, or an
+  OAuth token file for Claude Code)
 - A GitHub repository you can administer
 
 ## Tokens
