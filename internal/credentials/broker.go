@@ -49,12 +49,12 @@ func NewBroker(store *state.Store, strategy AllocationStrategy, cipher Cipher, l
 func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 	req.RunID = strings.TrimSpace(req.RunID)
 	req.UserID = strings.TrimSpace(req.UserID)
-	req.CredentialRuntime = strings.TrimSpace(req.CredentialRuntime)
+	req.Provider = strings.TrimSpace(req.Provider)
 	if req.RunID == "" || req.UserID == "" {
 		return Lease{}, fmt.Errorf("run_id and user_id are required")
 	}
-	if req.CredentialRuntime == "" {
-		req.CredentialRuntime = "codex"
+	if req.Provider == "" {
+		req.Provider = "codex"
 	}
 	if b.store == nil || b.strategy == nil || b.cipher == nil {
 		return Lease{}, ErrNoCredentialAvailable
@@ -64,7 +64,7 @@ func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 		return Lease{}, fmt.Errorf("reclaim expired credential leases: %w", err)
 	}
 	for attempt := 0; attempt < 12; attempt++ {
-		candidates, err := b.store.ListCredentialCandidates(req.UserID, req.CredentialRuntime, now, now.Add(-b.usageWindow))
+		candidates, err := b.store.ListCredentialCandidates(req.UserID, req.Provider, now, now.Add(-b.usageWindow))
 		if err != nil {
 			return Lease{}, fmt.Errorf("list credential candidates for %s: %w", req.UserID, err)
 		}
@@ -121,7 +121,7 @@ func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 			continue
 		}
 
-		credential, exists, err := b.store.GetCodexCredential(credentialID)
+		credential, exists, err := b.store.GetCredential(credentialID)
 		if err != nil {
 			if _, _, releaseErr := b.store.ReleaseCredentialLease(leaseID); releaseErr != nil {
 				return Lease{}, fmt.Errorf("release credential lease %s after lookup failure: %v: %w", leaseID, releaseErr, err)
@@ -140,7 +140,7 @@ func (b *Broker) Acquire(_ context.Context, req AcquireRequest) (Lease, error) {
 				return Lease{}, fmt.Errorf("release credential lease %s after decrypt failure: %v: %w", leaseID, releaseErr, err)
 			}
 			until := time.Now().UTC().Add(b.cooldownOnCryptoError)
-			if statusErr := b.store.SetCodexCredentialStatus(credentialID, state.CredentialStatusCooldown, &until, "credential decrypt failure"); statusErr != nil {
+			if statusErr := b.store.SetCredentialStatus(credentialID, state.CredentialStatusCooldown, &until, "credential decrypt failure"); statusErr != nil {
 				return Lease{}, fmt.Errorf("set credential %s cooldown after decrypt failure: %v: %w", credentialID, statusErr, err)
 			}
 			return Lease{}, fmt.Errorf("decrypt credential %s auth blob: %w", credentialID, err)
@@ -204,7 +204,7 @@ func (b *Broker) MarkCredentialCooldown(credentialID, reason string, duration ti
 		duration = 5 * time.Minute
 	}
 	until := time.Now().UTC().Add(duration)
-	if err := b.store.SetCodexCredentialStatus(credentialID, state.CredentialStatusCooldown, &until, strings.TrimSpace(reason)); err != nil {
+	if err := b.store.SetCredentialStatus(credentialID, state.CredentialStatusCooldown, &until, strings.TrimSpace(reason)); err != nil {
 		return fmt.Errorf("set credential %s cooldown: %w", credentialID, err)
 	}
 	return nil

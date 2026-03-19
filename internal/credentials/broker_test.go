@@ -29,7 +29,7 @@ func createCredential(t *testing.T, store *state.Store, c credentials.Cipher, id
 	if err != nil {
 		t.Fatalf("encrypt auth blob: %v", err)
 	}
-	if _, err := store.CreateCodexCredential(state.CreateCodexCredentialInput{
+	if _, err := store.CreateCredential(state.CreateCredentialInput{
 		ID:                id,
 		OwnerUserID:       owner,
 		Scope:             scope,
@@ -178,7 +178,7 @@ func TestBrokerSkipsCooldownCredentials(t *testing.T) {
 	createCredential(t, store, c, "cred-active", "", state.CredentialScopeShared)
 
 	until := time.Now().UTC().Add(10 * time.Minute)
-	if err := store.SetCodexCredentialStatus("cred-cooldown", state.CredentialStatusCooldown, &until, "auth failure"); err != nil {
+	if err := store.SetCredentialStatus("cred-cooldown", state.CredentialStatusCooldown, &until, "auth failure"); err != nil {
 		t.Fatalf("set cooldown: %v", err)
 	}
 

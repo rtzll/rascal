@@ -130,7 +130,7 @@ func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string,
 		lease, err := s.Broker.Acquire(context.Background(), credentials.AcquireRequest{
 			RunID:             runID,
 			UserID:            requesterUserID,
-			CredentialRuntime: string(agent.CredentialRuntime(runtime)),
+			Provider: string(runtime.Provider()),
 		})
 		if err == nil {
 			tmpFile, err := os.CreateTemp(authDir, "auth-*.tmp")
@@ -315,7 +315,7 @@ func (s *Server) ExecuteRun(runID string) {
 				log.Printf("run %s failed to clear stale %s session for task %s: %v", run.ID, existing.AgentRuntime, run.TaskID, err)
 			}
 		}
-		if backendSessionID == "" && agent.IsGooseRuntime(run.AgentRuntime) {
+		if backendSessionID == "" && run.AgentRuntime.Harness() == agent.HarnessGoose {
 			backendSessionID = runner.SessionName(run.Repo, run.TaskID)
 		}
 		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {
@@ -345,7 +345,7 @@ func (s *Server) ExecuteRun(runID string) {
 		Repo:         run.Repo,
 		Instruction:  run.Instruction,
 		AgentRuntime: run.AgentRuntime,
-		RunnerImage:  s.Config.RunnerImageForBackend(run.AgentRuntime),
+		RunnerImage:  s.Config.RunnerImageForRuntime(run.AgentRuntime),
 		BaseBranch:   run.BaseBranch,
 		HeadBranch:   run.HeadBranch,
 		Trigger:      runtrigger.Normalize(run.Trigger.String()),
@@ -701,7 +701,7 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		info, ok := s.Store.GetRunCredentialInfo(updated.ID)
 		if ok && strings.TrimSpace(info.CredentialID) != "" && isCredentialAuthFailure(updated.Error) {
 			until := time.Now().UTC().Add(5 * time.Minute)
-			if err := s.Store.SetCodexCredentialStatus(info.CredentialID, state.CredentialStatusCooldown, &until, updated.Error); err != nil {
+			if err := s.Store.SetCredentialStatus(info.CredentialID, state.CredentialStatusCooldown, &until, updated.Error); err != nil {
 				log.Printf("run %s set credential cooldown failed: %v", updated.ID, err)
 			} else {
 				log.Printf("audit event=credential_cooldown run_id=%s credential_id=%s until=%s", updated.ID, info.CredentialID, until.Format(time.RFC3339))

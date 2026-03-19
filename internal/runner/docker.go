@@ -41,7 +41,7 @@ const (
 )
 
 func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
-	backend := agent.NormalizeBackend(string(spec.AgentRuntime))
+	backend := agent.NormalizeRuntime(string(spec.AgentRuntime))
 	image := strings.TrimSpace(spec.RunnerImage)
 	if image == "" {
 		image = strings.TrimSpace(l.DefaultImage)
@@ -94,10 +94,10 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 	sessionMountTarget := ""
 	if sessionResume && sessionDir != "" {
 		switch backend {
-		case agent.BackendCodex:
+		case agent.RuntimeCodex:
 			codexHome = containerCodexSessionDir
 			sessionMountTarget = containerCodexSessionDir
-		case agent.BackendClaude:
+		case agent.RuntimeClaude:
 			claudeConfigDir = containerClaudeSessionDir
 			sessionMountTarget = containerClaudeSessionDir
 		default:
@@ -127,7 +127,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		"GH_PROMPT_DISABLED":         "1",
 		"GIT_TERMINAL_PROMPT":        "0",
 	}
-	if agent.IsGooseRuntime(backend) {
+	if backend.Harness() == agent.HarnessGoose {
 		envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
 		envPairs["GOOSE_MODE"] = "auto"
 		envPairs["GOOSE_DISABLE_KEYRING"] = "1"

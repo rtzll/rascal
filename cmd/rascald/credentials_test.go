@@ -55,7 +55,7 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 		t.Fatalf("create status = %d, want 201 (%s)", createRec.Code, createRec.Body.String())
 	}
 
-	created, ok, err := s.Store.GetCodexCredential("cred-owner")
+	created, ok, err := s.Store.GetCredential("cred-owner")
 	if err != nil || !ok {
 		t.Fatalf("credential not found after create: ok=%t err=%v", ok, err)
 	}
@@ -123,7 +123,7 @@ func TestCredentialAPIRejectsInvalidStatusUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encrypt auth blob: %v", err)
 	}
-	if _, err := s.Store.CreateCodexCredential(state.CreateCodexCredentialInput{
+	if _, err := s.Store.CreateCredential(state.CreateCredentialInput{
 		ID:                "cred-invalid-status",
 		OwnerUserID:       "owner",
 		Scope:             state.CredentialScopePersonal,
@@ -190,7 +190,7 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encrypt auth blob: %v", err)
 	}
-	if _, err := s.Store.CreateCodexCredential(state.CreateCodexCredentialInput{
+	if _, err := s.Store.CreateCredential(state.CreateCredentialInput{
 		ID:                "cred-owner",
 		OwnerUserID:       "owner",
 		Scope:             "personal",
@@ -266,7 +266,7 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encrypt auth blob: %v", err)
 	}
-	if _, err := s.Store.CreateCodexCredential(state.CreateCodexCredentialInput{
+	if _, err := s.Store.CreateCredential(state.CreateCredentialInput{
 		ID:                "cred-shared",
 		Scope:             "shared",
 		EncryptedAuthBlob: blob,

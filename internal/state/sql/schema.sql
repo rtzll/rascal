@@ -1,7 +1,7 @@
 CREATE TABLE tasks (
   id TEXT PRIMARY KEY,
   repo TEXT NOT NULL,
-  agent_backend TEXT NOT NULL DEFAULT 'codex',
+  agent_runtime TEXT NOT NULL DEFAULT 'codex',
   issue_number INTEGER NOT NULL DEFAULT 0,
   pr_number INTEGER NOT NULL DEFAULT 0,
   created_by_user_id TEXT NOT NULL DEFAULT '',
@@ -19,7 +19,7 @@ CREATE TABLE runs (
   task_id TEXT NOT NULL,
   repo TEXT NOT NULL,
   task TEXT NOT NULL,
-  agent_backend TEXT NOT NULL DEFAULT 'codex',
+  agent_runtime TEXT NOT NULL DEFAULT 'codex',
   base_branch TEXT NOT NULL,
   head_branch TEXT NOT NULL,
   trigger TEXT NOT NULL,
@@ -49,8 +49,8 @@ CREATE INDEX idx_runs_credential_id ON runs (credential_id, seq DESC);
 
 CREATE TABLE task_agent_sessions (
   task_id TEXT PRIMARY KEY,
-  agent_backend TEXT NOT NULL,
-  backend_session_id TEXT NOT NULL DEFAULT '',
+  agent_runtime TEXT NOT NULL,
+  runtime_session_id TEXT NOT NULL DEFAULT '',
   session_key TEXT NOT NULL DEFAULT '',
   session_root TEXT NOT NULL DEFAULT '',
   last_run_id TEXT NOT NULL DEFAULT '',
@@ -58,7 +58,7 @@ CREATE TABLE task_agent_sessions (
   updated_at INTEGER NOT NULL
 );
 
-CREATE INDEX idx_task_agent_sessions_backend_updated ON task_agent_sessions (agent_backend, updated_at DESC);
+CREATE INDEX idx_task_agent_sessions_runtime_updated ON task_agent_sessions (agent_runtime, updated_at DESC);
 
 CREATE TABLE users (
   id TEXT PRIMARY KEY,
@@ -81,11 +81,11 @@ CREATE TABLE api_keys (
 
 CREATE INDEX idx_api_keys_user_id ON api_keys (user_id);
 
-CREATE TABLE codex_credentials (
+CREATE TABLE credentials (
   id TEXT PRIMARY KEY,
   owner_user_id TEXT,
   scope TEXT NOT NULL,
-  agent_runtime TEXT NOT NULL DEFAULT '',
+  provider TEXT NOT NULL DEFAULT '',
   encrypted_auth_blob BLOB NOT NULL,
   weight INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'active',
@@ -96,9 +96,9 @@ CREATE TABLE codex_credentials (
   FOREIGN KEY(owner_user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_codex_credentials_owner ON codex_credentials (owner_user_id);
-CREATE INDEX idx_codex_credentials_scope_status ON codex_credentials (scope, status, cooldown_until);
-CREATE INDEX idx_codex_credentials_runtime ON codex_credentials (agent_runtime);
+CREATE INDEX idx_credentials_owner ON credentials (owner_user_id);
+CREATE INDEX idx_credentials_scope_status ON credentials (scope, status, cooldown_until);
+CREATE INDEX idx_credentials_provider ON credentials (provider);
 
 CREATE TABLE credential_leases (
   id TEXT PRIMARY KEY,
@@ -109,7 +109,7 @@ CREATE TABLE credential_leases (
   acquired_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
   released_at INTEGER,
-  FOREIGN KEY(credential_id) REFERENCES codex_credentials(id) ON DELETE CASCADE
+  FOREIGN KEY(credential_id) REFERENCES credentials(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_credential_leases_credential_active ON credential_leases (credential_id, released_at, expires_at);
@@ -122,7 +122,7 @@ CREATE TABLE credential_usage (
   tokens INTEGER NOT NULL DEFAULT 0,
   runs INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (credential_id, window_start),
-  FOREIGN KEY(credential_id) REFERENCES codex_credentials(id) ON DELETE CASCADE
+  FOREIGN KEY(credential_id) REFERENCES credentials(id) ON DELETE CASCADE
 );
 
 CREATE TABLE run_leases (

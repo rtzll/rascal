@@ -121,7 +121,7 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 				ID:           strings.TrimSpace(id),
 				OwnerUserID:  strings.TrimSpace(ownerUserID),
 				Scope:        resolvedScope,
-				AgentRuntime: strings.TrimSpace(runtime),
+				Provider:     strings.TrimSpace(runtime),
 				AuthBlob:     resolvedAuthBlob,
 				Weight:       weight,
 			})
@@ -174,7 +174,7 @@ func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 			}
 			if cmd.Flags().Changed("runtime") {
 				value := strings.TrimSpace(runtime)
-				req.AgentRuntime = &value
+				req.Provider = &value
 				changed = true
 			}
 			if cmd.Flags().Changed("owner-user-id") {
@@ -490,7 +490,7 @@ func renderCredentialListTable(creds []credentialRecord) error {
 	for _, cred := range creds {
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			cred.ID,
-			credentialRuntimeLabel(cred.AgentRuntime),
+			credentialRuntimeLabel(cred.Provider),
 			firstNonEmpty(strings.TrimSpace(string(cred.Scope)), "-"),
 			credentialOwnerLabel(cred),
 			firstNonEmpty(strings.TrimSpace(string(cred.Status)), "-"),
@@ -510,7 +510,7 @@ func renderCredentialDetailTable(cred credentialRecord) error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	rows := [][2]string{
 		{"id", cred.ID},
-		{"agent_runtime", credentialRuntimeLabel(cred.AgentRuntime)},
+		{"provider", credentialRuntimeLabel(cred.Provider)},
 		{"scope", string(cred.Scope)},
 		{"owner_user_id", credentialOwnerLabel(cred)},
 		{"status", string(cred.Status)},

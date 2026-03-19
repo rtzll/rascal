@@ -147,10 +147,6 @@ func (c ServerConfig) RunnerImageForRuntime(runtime agent.Runtime) string {
 	}
 }
 
-func (c ServerConfig) RunnerImageForBackend(backend agent.Backend) string {
-	return c.RunnerImageForRuntime(backend)
-}
-
 func (c ServerConfig) EffectiveTaskSessionMode() agent.SessionMode {
 	return agent.NormalizeSessionMode(string(c.TaskSession.Mode))
 }

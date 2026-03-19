@@ -202,7 +202,7 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
-		AgentRuntime: agent.BackendGooseCodex,
+		AgentRuntime: agent.RuntimeGooseCodex,
 		RunID:        "run_1",
 		TaskID:       "owner/repo#1",
 		Repo:         "owner/repo",
@@ -283,7 +283,7 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
-		AgentRuntime: agent.BackendGooseCodex,
+		AgentRuntime: agent.RuntimeGooseCodex,
 		RunID:        "run_2",
 		TaskID:       "owner/repo#2",
 		Repo:         "owner/repo",
@@ -343,7 +343,7 @@ exit 0
 		TaskID:       "owner/repo#1",
 		Repo:         "owner/repo",
 		Instruction:  "task",
-		AgentRuntime: agent.BackendCodex,
+		AgentRuntime: agent.RuntimeCodex,
 		BaseBranch:   "main",
 		HeadBranch:   "rascal/task-1",
 		Trigger:      "pr_comment",

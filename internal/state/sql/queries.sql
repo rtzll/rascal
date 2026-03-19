@@ -2,7 +2,7 @@
 INSERT INTO tasks (
   id,
   repo,
-  agent_backend,
+  agent_runtime,
   issue_number,
   pr_number,
   status,
@@ -13,7 +13,7 @@ INSERT INTO tasks (
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   repo = excluded.repo,
-  agent_backend = excluded.agent_backend,
+  agent_runtime = excluded.agent_runtime,
   issue_number = CASE WHEN excluded.issue_number > 0 THEN excluded.issue_number ELSE tasks.issue_number END,
   pr_number = CASE WHEN excluded.pr_number > 0 THEN excluded.pr_number ELSE tasks.pr_number END,
   updated_at = excluded.updated_at;
@@ -22,7 +22,7 @@ ON CONFLICT(id) DO UPDATE SET
 SELECT
   tasks.id,
   tasks.repo,
-  tasks.agent_backend,
+  tasks.agent_runtime,
   tasks.issue_number,
   tasks.pr_number,
   tasks.status,
@@ -42,7 +42,7 @@ WHERE tasks.id = ?;
 SELECT
   tasks.id,
   tasks.repo,
-  tasks.agent_backend,
+  tasks.agent_runtime,
   tasks.issue_number,
   tasks.pr_number,
   tasks.status,
@@ -93,7 +93,7 @@ INSERT INTO runs (
   task_id,
   repo,
   task,
-  agent_backend,
+  agent_runtime,
   base_branch,
   head_branch,
   trigger,
@@ -114,34 +114,34 @@ INSERT INTO runs (
   completed_at
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at;
+RETURNING seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at;
 
 -- name: GetRun :one
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?;
 
 -- name: ListRuns :many
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 ORDER BY seq DESC
 LIMIT ?;
 
 -- name: ListRunningRuns :many
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE status = 'running'
 ORDER BY seq DESC;
 
 -- name: LastRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ?
 ORDER BY seq DESC
 LIMIT 1;
 
 -- name: ActiveRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ? AND status IN ('queued', 'running')
 ORDER BY seq DESC
@@ -153,7 +153,7 @@ SET
   task_id = ?,
   repo = ?,
   task = ?,
-  agent_backend = ?,
+  agent_runtime = ?,
   base_branch = ?,
   head_branch = ?,
   trigger = ?,
@@ -228,7 +228,7 @@ RETURNING
   task_id,
   repo,
   task,
-  agent_backend,
+  agent_runtime,
   base_branch,
   head_branch,
   trigger,
@@ -283,7 +283,7 @@ RETURNING
   task_id,
   repo,
   task,
-  agent_backend,
+  agent_runtime,
   base_branch,
   head_branch,
   trigger,
@@ -604,8 +604,8 @@ WHERE id IN (
 -- name: UpsertTaskAgentSession :exec
 INSERT INTO task_agent_sessions (
   task_id,
-  agent_backend,
-  backend_session_id,
+  agent_runtime,
+  runtime_session_id,
   session_key,
   session_root,
   last_run_id,
@@ -614,8 +614,8 @@ INSERT INTO task_agent_sessions (
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(task_id) DO UPDATE SET
-  agent_backend = excluded.agent_backend,
-  backend_session_id = excluded.backend_session_id,
+  agent_runtime = excluded.agent_runtime,
+  runtime_session_id = excluded.runtime_session_id,
   session_key = excluded.session_key,
   session_root = excluded.session_root,
   last_run_id = excluded.last_run_id,
@@ -624,8 +624,8 @@ ON CONFLICT(task_id) DO UPDATE SET
 -- name: GetTaskAgentSession :one
 SELECT
   task_id,
-  agent_backend,
-  backend_session_id,
+  agent_runtime,
+  runtime_session_id,
   session_key,
   session_root,
   last_run_id,
@@ -714,12 +714,12 @@ UPDATE api_keys
 SET last_used_at = ?
 WHERE id = ?;
 
--- name: CreateCodexCredential :exec
-INSERT INTO codex_credentials (
+-- name: CreateCredential :exec
+INSERT INTO credentials (
   id,
   owner_user_id,
   scope,
-  agent_runtime,
+  provider,
   encrypted_auth_blob,
   weight,
   status,
@@ -730,12 +730,12 @@ INSERT INTO codex_credentials (
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
--- name: UpdateCodexCredential :execrows
-UPDATE codex_credentials
+-- name: UpdateCredential :execrows
+UPDATE credentials
 SET
   owner_user_id = ?,
   scope = ?,
-  agent_runtime = ?,
+  provider = ?,
   encrypted_auth_blob = ?,
   weight = ?,
   status = ?,
@@ -744,8 +744,8 @@ SET
   updated_at = ?
 WHERE id = ?;
 
--- name: SetCodexCredentialStatus :execrows
-UPDATE codex_credentials
+-- name: SetCredentialStatus :execrows
+UPDATE credentials
 SET
   status = ?,
   cooldown_until = ?,
@@ -753,12 +753,12 @@ SET
   updated_at = ?
 WHERE id = ?;
 
--- name: GetCodexCredential :one
+-- name: GetCredential :one
 SELECT
   id,
   owner_user_id,
   scope,
-  agent_runtime,
+  provider,
   encrypted_auth_blob,
   weight,
   status,
@@ -766,15 +766,15 @@ SELECT
   last_error,
   created_at,
   updated_at
-FROM codex_credentials
+FROM credentials
 WHERE id = ?;
 
--- name: ListCodexCredentialsByOwner :many
+-- name: ListCredentialsByOwner :many
 SELECT
   id,
   owner_user_id,
   scope,
-  agent_runtime,
+  provider,
   encrypted_auth_blob,
   weight,
   status,
@@ -782,16 +782,16 @@ SELECT
   last_error,
   created_at,
   updated_at
-FROM codex_credentials
+FROM credentials
 WHERE owner_user_id = ?
 ORDER BY created_at DESC;
 
--- name: ListSharedCodexCredentials :many
+-- name: ListSharedCredentials :many
 SELECT
   id,
   owner_user_id,
   scope,
-  agent_runtime,
+  provider,
   encrypted_auth_blob,
   weight,
   status,
@@ -799,16 +799,16 @@ SELECT
   last_error,
   created_at,
   updated_at
-FROM codex_credentials
+FROM credentials
 WHERE scope = 'shared'
 ORDER BY created_at DESC;
 
--- name: ListAllCodexCredentials :many
+-- name: ListAllCredentials :many
 SELECT
   id,
   owner_user_id,
   scope,
-  agent_runtime,
+  provider,
   encrypted_auth_blob,
   weight,
   status,
@@ -816,7 +816,7 @@ SELECT
   last_error,
   created_at,
   updated_at
-FROM codex_credentials
+FROM credentials
 ORDER BY created_at DESC;
 
 -- name: ListCredentialCandidates :many
@@ -824,7 +824,7 @@ SELECT
   c.id,
   c.owner_user_id,
   c.scope,
-  c.agent_runtime,
+  c.provider,
   c.weight,
   c.status,
   c.cooldown_until,
@@ -850,11 +850,11 @@ SELECT
   c.last_error,
   c.created_at,
   c.updated_at
-FROM codex_credentials AS c
+FROM credentials AS c
 WHERE c.status = 'active'
   AND (c.cooldown_until IS NULL OR c.cooldown_until <= sqlc.arg(now))
   AND (c.scope = 'shared' OR c.owner_user_id = sqlc.arg(requester_user_id))
-  AND (c.agent_runtime = sqlc.arg(credential_runtime) OR (sqlc.arg(credential_runtime) = 'codex' AND c.agent_runtime = ''))
+  AND (c.provider = sqlc.arg(provider) OR (sqlc.arg(provider) = 'codex' AND c.provider = ''))
 ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: TryCreateCredentialLease :execrows
@@ -879,7 +879,7 @@ SELECT
   NULL
 WHERE EXISTS (
   SELECT 1
-  FROM codex_credentials AS c
+  FROM credentials AS c
   WHERE c.id = sqlc.arg(credential_id)
     AND c.status = 'active'
     AND (c.cooldown_until IS NULL OR c.cooldown_until <= sqlc.arg(now))

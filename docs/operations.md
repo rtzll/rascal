@@ -61,15 +61,15 @@ Operationally this means:
 
 ## Troubleshooting by Layer
 
-| Symptom                                          | Likely layer                           | First checks                                                                                                                                                         |
-| ------------------------------------------------ | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rascal` command cannot reach server             | Control plane / transport              | `rascal config view`, `rascal doctor --host YOUR_SERVER_IP`                                                                                                          |
-| Webhook arrives but no run is created            | Control plane / webhook path           | `curl -fsS https://YOUR_DOMAIN/healthz`, `rascal logs caddy-access --host YOUR_SERVER_IP --follow`, `rascal logs rascald --host YOUR_SERVER_IP --follow`             |
-| Run is stuck in `queued`                         | Control plane / scheduler              | `rascal ps`, `rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                                                    |
-| Run is `running` but appears idle                | Execution plane / backend              | `rascal logs <run_id> --follow`, inspect detached containers on host                                                                                                  |
-| Cancel does not take effect                      | Execution plane / supervision adoption | `rascal cancel <run_id>`, `rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                                       |
-| Auth failures in agent runs                       | Credential layer                       | inspect run logs, verify stored credential status, runtime tag, and lease availability                                                                               |
-| Deploy succeeds locally but service is unhealthy | Deployment / blue-green cutover        | check active slot, slot readiness, Caddy logs, and rollback readiness                                                                                                |
+| Symptom                                          | Likely layer                           | First checks                                                                                                                                             |
+| ------------------------------------------------ | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rascal` command cannot reach server             | Control plane / transport              | `rascal config view`, `rascal doctor --host YOUR_SERVER_IP`                                                                                              |
+| Webhook arrives but no run is created            | Control plane / webhook path           | `curl -fsS https://YOUR_DOMAIN/healthz`, `rascal logs caddy-access --host YOUR_SERVER_IP --follow`, `rascal logs rascald --host YOUR_SERVER_IP --follow` |
+| Run is stuck in `queued`                         | Control plane / scheduler              | `rascal ps`, `rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                                        |
+| Run is `running` but appears idle                | Execution plane / backend              | `rascal logs <run_id> --follow`, inspect detached containers on host                                                                                     |
+| Cancel does not take effect                      | Execution plane / supervision adoption | `rascal cancel <run_id>`, `rascal logs rascald --host YOUR_SERVER_IP --follow`                                                                           |
+| Auth failures in agent runs                      | Credential layer                       | inspect run logs, verify stored credential status, runtime tag, and lease availability                                                                   |
+| Deploy succeeds locally but service is unhealthy | Deployment / blue-green cutover        | check active slot, slot readiness, Caddy logs, and rollback readiness                                                                                    |
 
 ## First-Response Commands
 
@@ -123,8 +123,8 @@ Agent runtime notes:
 
 Rascal uses runtime-scoped leased stored credentials for all agent runs.
 
-Each credential is tagged with an `agent_runtime` (`codex` or `claude`).
-The broker automatically selects credentials matching the run's runtime:
+Each credential is tagged with an `agent_runtime` (`codex` or `claude`). The
+broker automatically selects credentials matching the run's runtime:
 
 - `codex` and `goose` runs use `codex` credentials (auth.json format).
 - `claude` and `goose-claude` runs use `claude` credentials (OAuth token

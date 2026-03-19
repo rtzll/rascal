@@ -10,20 +10,20 @@ from execution-plane responsibilities.
 
 - Control plane: `rascal` and `rascald`
 - Execution plane: detached runner containers launched via the Docker launcher
-- Agent harnesses: `goose`, `codex`, `claude`, and `goose-claude`
-- Model providers: `codex` and `anthropic`, with room for future
-  provider-specific harnesses
-- Packaging: separate runner images per harness (Goose, Codex, Claude,
+- Runtimes: `goose-codex`, `codex`, `claude`, and `goose-claude`
+- Harnesses (derived from runtime): `goose` and `direct`
+- Model providers (derived from runtime): `codex` and `anthropic`
+- Packaging: separate runner images per runtime (Goose-Codex, Codex, Claude,
   Goose-Claude)
 
 In simple terms:
 
 - A Task is the long-lived unit of work.
 - A Run is one attempt to advance that task.
-- A Task tracks the harness selected for its latest run.
+- A Task tracks the runtime selected for its latest run.
 - A Task may have one current task-scoped session record.
-- A Run uses the harness recorded on that run and may resume the task's session
-  when the harness still matches.
+- A Run uses the runtime recorded on that run and may resume the task's session
+  when the runtime still matches.
 - A detached container is `RunExecution` state for a run, not the run itself.
 
 This split is important during deploys and restarts:
@@ -86,7 +86,7 @@ rascal (CLI) or GitHub webhook
 3. Runner container (`rascal-runner`)
 
 - Clones the repository and checks out the target branches.
-- Executes the selected `AgentHarness` (`goose`, `codex`, `claude`, or
+- Executes the selected runtime (`goose-codex`, `codex`, `claude`, or
   `goose-claude`).
 - Commits changes, pushes the head branch, and creates or reuses a PR.
 - Writes canonical artifacts into mounted `/rascal-meta`.
@@ -106,9 +106,10 @@ These are the main layers in the Go codebase.
 
 2. Agent abstraction
 
-- `internal/agent` defines `AgentHarness`, `ModelProvider`, and `SessionPolicy`.
-- Compatibility names like `AgentRuntime` still exist at some boundaries, but
-  the deeper abstraction is harness-plus-provider.
+- `internal/agent` defines `Runtime`, `Harness`, `ModelProvider`, and
+  `SessionMode`.
+- `Runtime` is the user-facing selection; `Harness` and `ModelProvider` are
+  derived from it via `Runtime.Harness()` and `Runtime.Provider()` methods.
 
 3. Execution abstraction
 
@@ -116,7 +117,7 @@ These are the main layers in the Go codebase.
   `Spec`/`ExecutionHandle` contract.
 - Current production implementation is Docker; `noop` exists for
   non-runtime/test scenarios.
-- Session mounting is backend-aware: Goose uses `GOOSE_PATH_ROOT`, Codex uses
+- Session mounting is harness-aware: Goose uses `GOOSE_PATH_ROOT`, Codex uses
   `CODEX_HOME`, Claude uses `CLAUDE_CONFIG_DIR`.
 
 4. Control-plane and client boundaries
@@ -150,7 +151,7 @@ These are the main layers in the Go codebase.
 - Rascal also builds one runner binary: `rascal-runner`.
 - That runner binary is packaged into separate Docker images for Goose and
   Codex.
-- `rascald` selects the runner image based on the task/run harness.
+- `rascald` selects the runner image based on the task/run runtime.
 - Blue/green deploy replaces the control plane, while runner containers remain
   detached in the execution plane.
 
@@ -161,7 +162,7 @@ These are the main layers in the Go codebase.
    the run.
 3. Scheduler claims a queued run, enforces per-task serialization, and records a
    run lease.
-4. `rascald` resolves backend/session settings and persists a deterministic
+4. `rascald` resolves runtime/session settings and persists a deterministic
    detached execution handle.
 5. `internal/runner` starts a detached Docker container for `rascal-runner`.
 6. Active slot supervises the detached execution by inspect/stop/remove
@@ -199,9 +200,9 @@ active slot A running
 ## System Invariants
 
 - A run belongs to exactly one task.
-- A run uses the harness recorded on that run.
+- A run uses the runtime recorded on that run.
 - A task may have at most one current task-scoped session record.
-- Changing a task harness must discard incompatible task-scoped session resume
+- Changing a task runtime must discard incompatible task-scoped session resume
   state before the next run starts.
 - At most one orchestrator instance should own a run lease at a time.
 - `run_executions` store detached execution metadata, not user-visible business
@@ -230,10 +231,9 @@ Key persisted entities:
 - `run_executions`: detached execution handle metadata for adoption and cleanup.
 - `run_cancels`: persisted cancel intent.
 - `task sessions`: stable harness session identifiers and mounted session roots.
-  In the current SQLite schema this data still lives in the legacy
+  In the current SQLite schema this data still lives in the
   `task_agent_sessions` table.
-- `codex_credentials`: encrypted stored credential payloads and allocation
-  metadata.
+- `credentials`: encrypted stored credential payloads and allocation metadata.
 - `credential_leases`: per-run credential assignments and lease expiry state.
 - `deliveries`: webhook dedupe/claim bookkeeping.
 
@@ -266,7 +266,7 @@ Each run directory stores metadata and artifacts such as:
 - `context.json`
 - `instructions.md`
 - `runner.log`
-- `agent.ndjson` (canonical agent stream log path for both backends)
+- `agent.ndjson` (canonical agent stream log path for all runtimes)
 - `agent_output.txt` (structured/fallback agent output, especially for Codex)
 - `commit_message.txt`
 - `pr_body.md`
@@ -283,8 +283,8 @@ Each run directory stores metadata and artifacts such as:
 - Goose resumes by named Goose session plus mounted session storage.
 - Codex resumes by reusing a task-scoped `CODEX_HOME` and the discovered harness
   session id.
-- If a task switches harness between runs, Rascal starts a fresh session for the
-  new harness and replaces the stored task session record.
+- If a task switches runtime between runs, Rascal starts a fresh session for the
+  new runtime and replaces the stored task session record.
 - If a Goose resume attempt fails because the stored session is missing or
   invalid, the runner falls back to a fresh session.
 
@@ -310,17 +310,17 @@ Common failure and recovery cases:
 Rascal uses runtime-scoped stored credentials managed by `rascald`.
 
 - Stored credentials are encrypted before being persisted in SQLite.
-- Each credential has an `agent_runtime` tag (`codex` or `claude`) that
-  determines which runtimes can use it:
+- Each credential has a `provider` tag (`codex` or `anthropic`) that determines
+  which runtimes can use it:
   - `codex` credentials (default, including legacy credentials with empty
-    runtime): used by `codex` and `goose` runtimes via `auth.json`.
-  - `claude` credentials: used by `claude` and `goose-claude` runtimes via
+    provider): used by `codex` and `goose-codex` runtimes via `auth.json`.
+  - `anthropic` credentials: used by `claude` and `goose-claude` runtimes via
     OAuth token.
 - Each credential is either `personal` (owned by a user) or `shared`.
 - When a run starts, `rascald` asks the credential broker to lease a credential
   matching the run's runtime and records the selected credential id in state.
 - The broker chooses from eligible credentials using the configured allocation
-  strategy, runtime compatibility filter, and tracks lease assignment per run.
+  strategy, provider compatibility filter, and tracks lease assignment per run.
 - The leased auth blob is written into the run-scoped auth path
   (`codex/auth.json` for codex/goose runs, `claude/oauth_token` for
   claude/goose-claude runs) and removed during run cleanup.
@@ -329,7 +329,7 @@ Rascal uses runtime-scoped stored credentials managed by `rascald`.
 - Bootstrap and deploy can seed an initial shared stored credential from a local
   Codex auth file.
 - Operators can manage credentials with `rascal auth credentials ...` and use
-  `--runtime codex|claude` to tag credentials for specific runtimes.
+  `--runtime codex|anthropic` to tag credentials for specific providers.
 
 ## Runner Environment Contract
 
