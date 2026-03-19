@@ -179,20 +179,22 @@ rascal provision --name rascal-prod --server-type cax21
 
 func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	var (
-		host               string
-		sshUser            string
-		sshKey             string
-		sshPort            int
-		goarch             string
-		apiToken           string
-		githubRuntimeToken string
-		webhookSecret      string
-		codexAuthPath      string
-		domain             string
-		agentRuntime       string
-		runnerImageGoose   string
-		runnerImageCodex   string
-		uploadEnv          bool
+		host                   string
+		sshUser                string
+		sshKey                 string
+		sshPort                int
+		goarch                 string
+		apiToken               string
+		githubRuntimeToken     string
+		webhookSecret          string
+		codexAuthPath          string
+		domain                 string
+		agentRuntime           string
+		runnerImageGoose       string
+		runnerImageCodex       string
+		runnerImageClaude      string
+		runnerImageGooseClaude string
+		uploadEnv              bool
 	)
 
 	cmd := &cobra.Command{
@@ -200,20 +202,22 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 		Short: short,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			result, err := a.runDeployExisting(deployExistingInput{
-				Host:                  host,
-				SSHUser:               sshUser,
-				SSHKey:                sshKey,
-				SSHPort:               sshPort,
-				GOARCH:                goarch,
-				APIToken:              apiToken,
-				GitHubRuntimeToken:    githubRuntimeToken,
-				WebhookSecret:         webhookSecret,
-				CodexAuthPath:         codexAuthPath,
-				Domain:                domain,
-				AgentRuntime:          agentRuntime,
-				RunnerImageGooseCodex: runnerImageGoose,
-				RunnerImageCodex:      runnerImageCodex,
-				SkipEnvUpload:         !uploadEnv,
+				Host:                   host,
+				SSHUser:                sshUser,
+				SSHKey:                 sshKey,
+				SSHPort:                sshPort,
+				GOARCH:                 goarch,
+				APIToken:               apiToken,
+				GitHubRuntimeToken:     githubRuntimeToken,
+				WebhookSecret:          webhookSecret,
+				CodexAuthPath:          codexAuthPath,
+				Domain:                 domain,
+				AgentRuntime:           agentRuntime,
+				RunnerImageGooseCodex:  runnerImageGoose,
+				RunnerImageCodex:       runnerImageCodex,
+				RunnerImageClaude:      runnerImageClaude,
+				RunnerImageGooseClaude: runnerImageGooseClaude,
+				SkipEnvUpload:          !uploadEnv,
 			})
 			if err != nil {
 				return err
@@ -247,28 +251,32 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&agentRuntime, "agent-runtime", "", "agent runtime to use on the server (goose or codex)")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose-codex", defaults.GooseCodexRunnerImageTag, "goose-codex runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
+	cmd.Flags().StringVar(&runnerImageClaude, "runner-image-claude", defaults.ClaudeRunnerImageTag, "claude runner docker image tag")
+	cmd.Flags().StringVar(&runnerImageGooseClaude, "runner-image-goose-claude", defaults.GooseClaudeRunnerImageTag, "goose-claude runner docker image tag")
 	cmd.Flags().BoolVar(&uploadEnv, "upload-env", false, "upload/update /etc/rascal/rascal.env on server")
 	return cmd
 }
 
 type deployExistingInput struct {
-	Host                  string
-	SSHUser               string
-	SSHKey                string
-	SSHPort               int
-	GOARCH                string
-	ProvisionedArch       string
-	APIToken              string
-	GitHubRuntimeToken    string
-	WebhookSecret         string
-	CodexAuthPath         string
-	Domain                string
-	AgentRuntime          string
-	RunnerImageGooseCodex string
-	RunnerImageCodex      string
-	SkipEnvUpload         bool
-	SkipIfHealthy         bool
-	RawErrors             bool
+	Host                   string
+	SSHUser                string
+	SSHKey                 string
+	SSHPort                int
+	GOARCH                 string
+	ProvisionedArch        string
+	APIToken               string
+	GitHubRuntimeToken     string
+	WebhookSecret          string
+	CodexAuthPath          string
+	Domain                 string
+	AgentRuntime           string
+	RunnerImageGooseCodex  string
+	RunnerImageCodex       string
+	RunnerImageClaude      string
+	RunnerImageGooseClaude string
+	SkipEnvUpload          bool
+	SkipIfHealthy          bool
+	RawErrors              bool
 }
 
 type deployExistingResult struct {
@@ -304,6 +312,8 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	}
 	runnerImageGoose := firstNonEmpty(strings.TrimSpace(input.RunnerImageGooseCodex), defaults.GooseCodexRunnerImageTag)
 	runnerImageCodex := firstNonEmpty(strings.TrimSpace(input.RunnerImageCodex), defaults.CodexRunnerImageTag)
+	runnerImageClaude := firstNonEmpty(strings.TrimSpace(input.RunnerImageClaude), defaults.ClaudeRunnerImageTag)
+	runnerImageGooseClaude := firstNonEmpty(strings.TrimSpace(input.RunnerImageGooseClaude), defaults.GooseClaudeRunnerImageTag)
 	sshPort := input.SSHPort
 	apiToken := firstNonEmpty(strings.TrimSpace(input.APIToken), strings.TrimSpace(a.cfg.APIToken))
 	githubRuntimeToken := strings.TrimSpace(input.GitHubRuntimeToken)
@@ -393,23 +403,25 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	}
 
 	cfg := deployConfig{
-		Host:                  host,
-		SSHUser:               firstNonEmpty(sshUser, "root"),
-		SSHKeyPath:            sshKey,
-		SSHPort:               sshPort,
-		APIToken:              apiToken,
-		WebhookSecret:         webhookSecret,
-		GitHubRuntimeToken:    githubRuntimeToken,
-		RunnerMode:            "docker",
-		AgentRuntime:          agentRuntime,
-		RunnerImageGooseCodex: runnerImageGoose,
-		RunnerImageCodex:      runnerImageCodex,
-		ServerListenAddr:      ":8080",
-		ServerDataDir:         "/var/lib/rascal",
-		ServerStatePath:       "/var/lib/rascal/state.db",
-		GOARCH:                resolvedGoarch,
-		Domain:                domain,
-		UploadEnvFile:         !input.SkipEnvUpload,
+		Host:                   host,
+		SSHUser:                firstNonEmpty(sshUser, "root"),
+		SSHKeyPath:             sshKey,
+		SSHPort:                sshPort,
+		APIToken:               apiToken,
+		WebhookSecret:          webhookSecret,
+		GitHubRuntimeToken:     githubRuntimeToken,
+		RunnerMode:             "docker",
+		AgentRuntime:           agentRuntime,
+		RunnerImageGooseCodex:  runnerImageGoose,
+		RunnerImageCodex:       runnerImageCodex,
+		RunnerImageClaude:      runnerImageClaude,
+		RunnerImageGooseClaude: runnerImageGooseClaude,
+		ServerListenAddr:       ":8080",
+		ServerDataDir:          "/var/lib/rascal",
+		ServerStatePath:        "/var/lib/rascal/state.db",
+		GOARCH:                 resolvedGoarch,
+		Domain:                 domain,
+		UploadEnvFile:          !input.SkipEnvUpload,
 	}
 	healthyExisting := false
 	if input.SkipIfHealthy {

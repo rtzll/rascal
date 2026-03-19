@@ -83,6 +83,8 @@ jobs:
       DEPLOY_PORT: ${{ vars.RASCAL_DEPLOY_SSH_PORT || secrets.RASCAL_DEPLOY_SSH_PORT || '22' }}
       DEPLOY_RUNNER_IMAGE_GOOSE_CODEX: ${{ vars.RASCAL_RUNNER_IMAGE_GOOSE_CODEX || vars.RASCAL_RUNNER_IMAGE_GOOSE || 'rascal-runner-goose-codex:latest' }}
       DEPLOY_RUNNER_IMAGE_CODEX: ${{ vars.RASCAL_RUNNER_IMAGE_CODEX || 'rascal-runner-codex:latest' }}
+      DEPLOY_RUNNER_IMAGE_CLAUDE: ${{ vars.RASCAL_RUNNER_IMAGE_CLAUDE || 'rascal-runner-claude:latest' }}
+      DEPLOY_RUNNER_IMAGE_GOOSE_CLAUDE: ${{ vars.RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE || 'rascal-runner-goose-claude:latest' }}
       DEPLOY_DOMAIN: ${{ vars.RASCAL_DOMAIN || secrets.RASCAL_DOMAIN || '' }}
     steps:
       - name: Checkout
@@ -141,4 +143,6 @@ jobs:
             --ssh-key "$HOME/.ssh/id_ed25519" \
             --domain "${DEPLOY_DOMAIN}" \
             --runner-image-goose-codex "${DEPLOY_RUNNER_IMAGE_GOOSE_CODEX}" \
-            --runner-image-codex "${DEPLOY_RUNNER_IMAGE_CODEX}"
+            --runner-image-codex "${DEPLOY_RUNNER_IMAGE_CODEX}" \
+            --runner-image-claude "${DEPLOY_RUNNER_IMAGE_CLAUDE}" \
+            --runner-image-goose-claude "${DEPLOY_RUNNER_IMAGE_GOOSE_CLAUDE}"

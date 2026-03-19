@@ -27,23 +27,25 @@ const (
 )
 
 type Config struct {
-	Host                  string
-	SSHUser               string
-	SSHKeyPath            string
-	SSHPort               int
-	Domain                string
-	APIToken              string
-	WebhookSecret         string
-	GitHubRuntimeToken    string
-	RunnerMode            runner.Mode
-	AgentRuntime          agent.Runtime
-	RunnerImageGooseCodex string
-	RunnerImageCodex      string
-	ServerListenAddr      string
-	ServerDataDir         string
-	ServerStatePath       string
-	GOARCH                string
-	UploadEnvFile         bool
+	Host                   string
+	SSHUser                string
+	SSHKeyPath             string
+	SSHPort                int
+	Domain                 string
+	APIToken               string
+	WebhookSecret          string
+	GitHubRuntimeToken     string
+	RunnerMode             runner.Mode
+	AgentRuntime           agent.Runtime
+	RunnerImageGooseCodex  string
+	RunnerImageCodex       string
+	RunnerImageClaude      string
+	RunnerImageGooseClaude string
+	ServerListenAddr       string
+	ServerDataDir          string
+	ServerStatePath        string
+	GOARCH                 string
+	UploadEnvFile          bool
 }
 
 type remoteUpload struct {
@@ -52,16 +54,18 @@ type remoteUpload struct {
 }
 
 type plan struct {
-	Version               int      `json:"version"`
-	CreatedAt             string   `json:"created_at"`
-	Host                  string   `json:"host"`
-	Domain                string   `json:"domain,omitempty"`
-	GOARCH                string   `json:"goarch"`
-	AgentRuntime          string   `json:"agent_runtime"`
-	RunnerImageGooseCodex string   `json:"runner_image_goose"`
-	RunnerImageCodex      string   `json:"runner_image_codex"`
-	UploadEnvFile         bool     `json:"upload_env_file"`
-	Steps                 []string `json:"steps"`
+	Version                int      `json:"version"`
+	CreatedAt              string   `json:"created_at"`
+	Host                   string   `json:"host"`
+	Domain                 string   `json:"domain,omitempty"`
+	GOARCH                 string   `json:"goarch"`
+	AgentRuntime           string   `json:"agent_runtime"`
+	RunnerImageGooseCodex  string   `json:"runner_image_goose"`
+	RunnerImageCodex       string   `json:"runner_image_codex"`
+	RunnerImageClaude      string   `json:"runner_image_claude"`
+	RunnerImageGooseClaude string   `json:"runner_image_goose_claude"`
+	UploadEnvFile          bool     `json:"upload_env_file"`
+	Steps                  []string `json:"steps"`
 }
 
 //go:embed assets/install_docker.sh assets/Caddyfile.tmpl
@@ -136,15 +140,17 @@ func Execute(cfg Config) error {
 
 	planPath := filepath.Join(tmpDir, "plan.json")
 	data, err := json.MarshalIndent(plan{
-		Version:               1,
-		Host:                  cfg.Host,
-		Domain:                strings.TrimSpace(cfg.Domain),
-		GOARCH:                strings.TrimSpace(cfg.GOARCH),
-		AgentRuntime:          firstNonEmpty(strings.TrimSpace(string(cfg.AgentRuntime)), string(agent.RuntimeGooseCodex)),
-		RunnerImageGooseCodex: strings.TrimSpace(cfg.RunnerImageGooseCodex),
-		RunnerImageCodex:      strings.TrimSpace(cfg.RunnerImageCodex),
-		UploadEnvFile:         cfg.UploadEnvFile,
-		CreatedAt:             time.Now().UTC().Format(time.RFC3339),
+		Version:                1,
+		Host:                   cfg.Host,
+		Domain:                 strings.TrimSpace(cfg.Domain),
+		GOARCH:                 strings.TrimSpace(cfg.GOARCH),
+		AgentRuntime:           firstNonEmpty(strings.TrimSpace(string(cfg.AgentRuntime)), string(agent.RuntimeGooseCodex)),
+		RunnerImageGooseCodex:  strings.TrimSpace(cfg.RunnerImageGooseCodex),
+		RunnerImageCodex:       strings.TrimSpace(cfg.RunnerImageCodex),
+		RunnerImageClaude:      strings.TrimSpace(cfg.RunnerImageClaude),
+		RunnerImageGooseClaude: strings.TrimSpace(cfg.RunnerImageGooseClaude),
+		UploadEnvFile:          cfg.UploadEnvFile,
+		CreatedAt:              time.Now().UTC().Format(time.RFC3339),
 		Steps: []string{
 			"prepare_remote_dirs",
 			"upload_artifacts",
@@ -212,9 +218,11 @@ tar -xzf /tmp/rascal-bootstrap/runner.tgz -C /opt/rascal
 install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner
 docker build --no-cache --target goose-codex-runner -t %s /opt/rascal/runner
 docker build --no-cache --target codex-runner -t %s /opt/rascal/runner
+docker build --no-cache --target claude-runner -t %s /opt/rascal/runner
+docker build --no-cache --target goose-claude-runner -t %s /opt/rascal/runner
 install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald
 install -m 0644 /tmp/rascal-bootstrap/rascal@.service /etc/systemd/system/rascal@.service
-`)+"\n", shellSingleQuote(cfg.RunnerImageGooseCodex), shellSingleQuote(cfg.RunnerImageCodex))); err != nil {
+`)+"\n", shellSingleQuote(cfg.RunnerImageGooseCodex), shellSingleQuote(cfg.RunnerImageCodex), shellSingleQuote(cfg.RunnerImageClaude), shellSingleQuote(cfg.RunnerImageGooseClaude))); err != nil {
 		return err
 	}
 	if cfg.UploadEnvFile {
@@ -625,6 +633,8 @@ func serverEnvFile(cfg Config) string {
 	runtime := strings.TrimSpace(string(cfg.AgentRuntime))
 	gooseImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageGooseCodex), defaults.GooseCodexRunnerImageTag)
 	codexImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageCodex), defaults.CodexRunnerImageTag)
+	claudeImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageClaude), defaults.ClaudeRunnerImageTag)
+	gooseClaudeImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageGooseClaude), defaults.GooseClaudeRunnerImageTag)
 	lines := []string{
 		fmt.Sprintf("RASCAL_LISTEN_ADDR=%s", cfg.ServerListenAddr),
 		fmt.Sprintf("RASCAL_DATA_DIR=%s", cfg.ServerDataDir),
@@ -635,6 +645,8 @@ func serverEnvFile(cfg Config) string {
 		fmt.Sprintf("RASCAL_RUNNER_MODE=%s", cfg.RunnerMode),
 		fmt.Sprintf("RASCAL_RUNNER_IMAGE_GOOSE_CODEX=%s", gooseImage),
 		fmt.Sprintf("RASCAL_RUNNER_IMAGE_CODEX=%s", codexImage),
+		fmt.Sprintf("RASCAL_RUNNER_IMAGE_CLAUDE=%s", claudeImage),
+		fmt.Sprintf("RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE=%s", gooseClaudeImage),
 		"RASCAL_RUNNER_MAX_ATTEMPTS=1",
 		"RASCAL_TASK_SESSION_MODE=all",
 		fmt.Sprintf("RASCAL_TASK_SESSION_ROOT=%s", filepath.Join(cfg.ServerDataDir, defaults.AgentSessionDirName)),
