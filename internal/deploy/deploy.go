@@ -210,8 +210,8 @@ set -eu
 mkdir -p /opt/rascal /etc/rascal
 tar -xzf /tmp/rascal-bootstrap/runner.tgz -C /opt/rascal
 install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner
-docker build --target goose-codex-runner -t %s /opt/rascal/runner
-docker build --target codex-runner -t %s /opt/rascal/runner
+docker build --no-cache --target goose-codex-runner -t %s /opt/rascal/runner
+docker build --no-cache --target codex-runner -t %s /opt/rascal/runner
 install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald
 install -m 0644 /tmp/rascal-bootstrap/rascal@.service /etc/systemd/system/rascal@.service
 `)+"\n", shellSingleQuote(cfg.RunnerImageGooseCodex), shellSingleQuote(cfg.RunnerImageCodex))); err != nil {
