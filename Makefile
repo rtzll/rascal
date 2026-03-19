@@ -15,7 +15,7 @@ test-fast:
 	go test ./...
 
 fmt:
-	gofmt -w cmd internal
+	go fmt ./...
 
 lint: codegen $(GOLANGCI_LINT)
 	mkdir -p "$(GOLANGCI_LINT_CACHE)"
