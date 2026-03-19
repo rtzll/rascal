@@ -85,8 +85,8 @@ the command fails instead of silently clearing it.
 
 That `--codex-auth` value seeds or updates the shared stored codex credential
 used for Codex and Goose runs; it is not copied to a static server-side fallback
-file. For Claude and Goose-Claude runs, create a separate `claude` credential
-via `rascal auth credentials create --runtime claude --auth-file <path>`.
+file. For Claude and Goose-Claude runs, create a separate `anthropic` credential
+via `rascal auth credentials create --provider anthropic --auth-file <path>`.
 
 Inspect remote services:
 

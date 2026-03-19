@@ -307,7 +307,7 @@ Common failure and recovery cases:
 
 ## Credential Handling
 
-Rascal uses runtime-scoped stored credentials managed by `rascald`.
+Rascal uses stored credentials tagged by provider and managed by `rascald`.
 
 - Stored credentials are encrypted before being persisted in SQLite.
 - Each credential has a `provider` tag (`codex` or `anthropic`) that determines
@@ -329,7 +329,7 @@ Rascal uses runtime-scoped stored credentials managed by `rascald`.
 - Bootstrap and deploy can seed an initial shared stored credential from a local
   Codex auth file.
 - Operators can manage credentials with `rascal auth credentials ...` and use
-  `--runtime codex|anthropic` to tag credentials for specific providers.
+  `--provider codex|anthropic` to tag credentials for specific providers.
 
 ## Runner Environment Contract
 

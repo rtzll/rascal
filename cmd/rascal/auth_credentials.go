@@ -31,8 +31,8 @@ func (a *app) newAuthCredentialsCmd() *cobra.Command {
 		Long:  "List, inspect, create, update, and change state for stored credentials managed by rascald.",
 		Example: strings.TrimSpace(`
 rascal auth credentials list
-rascal auth credentials create --auth-file ~/.codex/auth.json --scope personal --runtime codex
-rascal auth credentials create --auth-file oauth_token --scope shared --runtime claude
+rascal auth credentials create --auth-file ~/.codex/auth.json --scope personal --provider codex
+rascal auth credentials create --auth-file oauth_token --scope shared --provider anthropic
 rascal auth credentials disable cred_123
 rascal auth credentials cooldown cred_123 --for 30m --reason "upstream auth failures"
 `),
@@ -96,6 +96,7 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 	var (
 		id          string
 		scope       string
+		provider    string
 		runtime     string
 		ownerUserID string
 		weight      int
@@ -105,11 +106,15 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a stored credential",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := a.requireServerAuth(); err != nil {
 				return err
 			}
 			resolvedScope, err := normalizeCredentialScope(scope)
+			if err != nil {
+				return err
+			}
+			resolvedProvider, err := resolveCredentialProvider(cmd, provider, runtime, true)
 			if err != nil {
 				return err
 			}
@@ -121,7 +126,7 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 				ID:          strings.TrimSpace(id),
 				OwnerUserID: strings.TrimSpace(ownerUserID),
 				Scope:       resolvedScope,
-				Provider:    strings.TrimSpace(runtime),
+				Provider:    resolvedProvider,
 				AuthBlob:    resolvedAuthBlob,
 				Weight:      weight,
 			})
@@ -136,7 +141,11 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&id, "id", "", "credential id (auto-generated when empty)")
 	cmd.Flags().StringVar(&scope, "scope", "personal", "credential scope: personal|shared")
-	cmd.Flags().StringVar(&runtime, "runtime", "", "agent runtime this credential is for: codex|claude (default: codex)")
+	cmd.Flags().StringVar(&provider, "provider", "", "credential provider: codex|anthropic (default: codex)")
+	cmd.Flags().StringVar(&runtime, "runtime", "", "deprecated alias for --provider")
+	if err := cmd.Flags().MarkDeprecated("runtime", "use --provider instead"); err != nil {
+		panic(err)
+	}
 	cmd.Flags().StringVar(&ownerUserID, "owner-user-id", "", "owner user id for personal credentials (admin only)")
 	cmd.Flags().IntVar(&weight, "weight", 1, "selection weight")
 	cmd.Flags().StringVar(&authFile, "auth-file", "", "path to auth payload file to store")
@@ -147,6 +156,7 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 	var (
 		scope       string
+		provider    string
 		runtime     string
 		ownerUserID string
 		weight      int
@@ -172,8 +182,12 @@ func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 				req.Scope = &value
 				changed = true
 			}
-			if cmd.Flags().Changed("runtime") {
-				value := strings.TrimSpace(runtime)
+			resolvedProvider, err := resolveCredentialProvider(cmd, provider, runtime, false)
+			if err != nil {
+				return err
+			}
+			if cmd.Flags().Changed("provider") || cmd.Flags().Changed("runtime") {
+				value := resolvedProvider
 				req.Provider = &value
 				changed = true
 			}
@@ -212,7 +226,11 @@ func (a *app) newAuthCredentialsUpdateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&scope, "scope", "", "credential scope: personal|shared")
-	cmd.Flags().StringVar(&runtime, "runtime", "", "agent runtime: codex|claude")
+	cmd.Flags().StringVar(&provider, "provider", "", "credential provider: codex|anthropic")
+	cmd.Flags().StringVar(&runtime, "runtime", "", "deprecated alias for --provider")
+	if err := cmd.Flags().MarkDeprecated("runtime", "use --provider instead"); err != nil {
+		panic(err)
+	}
 	cmd.Flags().StringVar(&ownerUserID, "owner-user-id", "", "owner user id for personal credentials (admin only)")
 	cmd.Flags().IntVar(&weight, "weight", 0, "selection weight")
 	cmd.Flags().StringVar(&authFile, "auth-file", "", "path to replacement auth payload file")
@@ -482,15 +500,54 @@ func normalizeCredentialScope(scope string) (state.CredentialScope, error) {
 	return resolved, nil
 }
 
+func resolveCredentialProvider(cmd *cobra.Command, provider, runtime string, defaultToCodex bool) (string, error) {
+	resolvedProvider, err := normalizeCredentialProvider(provider)
+	if err != nil {
+		return "", err
+	}
+	resolvedRuntime, err := normalizeCredentialProvider(runtime)
+	if err != nil {
+		return "", err
+	}
+	providerChanged := cmd.Flags().Changed("provider")
+	runtimeChanged := cmd.Flags().Changed("runtime")
+	if providerChanged && runtimeChanged && resolvedProvider != resolvedRuntime {
+		return "", &cliError{Code: exitInput, Message: "conflicting credential provider flags", Hint: "use --provider codex|anthropic"}
+	}
+	switch {
+	case providerChanged:
+		return resolvedProvider, nil
+	case runtimeChanged:
+		return resolvedRuntime, nil
+	case defaultToCodex:
+		return "codex", nil
+	default:
+		return "", nil
+	}
+}
+
+func normalizeCredentialProvider(provider string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "":
+		return "", nil
+	case "codex":
+		return "codex", nil
+	case "anthropic", "claude":
+		return "anthropic", nil
+	default:
+		return "", &cliError{Code: exitInput, Message: "invalid credential provider", Hint: "use codex or anthropic"}
+	}
+}
+
 func renderCredentialListTable(creds []credentialRecord) error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "ID\tRUNTIME\tSCOPE\tOWNER\tSTATUS\tCOOLDOWN\tUPDATED"); err != nil {
+	if _, err := fmt.Fprintln(tw, "ID\tPROVIDER\tSCOPE\tOWNER\tSTATUS\tCOOLDOWN\tUPDATED"); err != nil {
 		return fmt.Errorf("write credential list header: %w", err)
 	}
 	for _, cred := range creds {
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			cred.ID,
-			credentialRuntimeLabel(cred.Provider),
+			credentialProviderLabel(cred.Provider),
 			firstNonEmpty(strings.TrimSpace(string(cred.Scope)), "-"),
 			credentialOwnerLabel(cred),
 			firstNonEmpty(strings.TrimSpace(string(cred.Status)), "-"),
@@ -510,7 +567,7 @@ func renderCredentialDetailTable(cred credentialRecord) error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	rows := [][2]string{
 		{"id", cred.ID},
-		{"provider", credentialRuntimeLabel(cred.Provider)},
+		{"provider", credentialProviderLabel(cred.Provider)},
 		{"scope", string(cred.Scope)},
 		{"owner_user_id", credentialOwnerLabel(cred)},
 		{"status", string(cred.Status)},
@@ -531,12 +588,12 @@ func renderCredentialDetailTable(cred credentialRecord) error {
 	return nil
 }
 
-func credentialRuntimeLabel(runtime string) string {
-	runtime = strings.TrimSpace(runtime)
-	if runtime == "" {
+func credentialProviderLabel(provider string) string {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
 		return "codex"
 	}
-	return runtime
+	return provider
 }
 
 func credentialOwnerLabel(cred credentialRecord) string {
