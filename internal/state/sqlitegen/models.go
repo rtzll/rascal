@@ -18,11 +18,11 @@ type ApiKey struct {
 	DisabledAt sql.NullInt64 `json:"disabled_at"`
 }
 
-type CodexCredential struct {
+type Credential struct {
 	ID                string         `json:"id"`
 	OwnerUserID       sql.NullString `json:"owner_user_id"`
 	Scope             string         `json:"scope"`
-	AgentRuntime      string         `json:"agent_runtime"`
+	Provider          string         `json:"provider"`
 	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
 	Weight            int64          `json:"weight"`
 	Status            string         `json:"status"`
@@ -67,7 +67,7 @@ type Run struct {
 	TaskID          string        `json:"task_id"`
 	Repo            string        `json:"repo"`
 	Task            string        `json:"task"`
-	AgentBackend    string        `json:"agent_backend"`
+	AgentRuntime    string        `json:"agent_runtime"`
 	BaseBranch      string        `json:"base_branch"`
 	HeadBranch      string        `json:"head_branch"`
 	Trigger         string        `json:"trigger"`
@@ -143,7 +143,7 @@ type SchedulerPause struct {
 type Task struct {
 	ID              string `json:"id"`
 	Repo            string `json:"repo"`
-	AgentBackend    string `json:"agent_backend"`
+	AgentRuntime    string `json:"agent_runtime"`
 	IssueNumber     int64  `json:"issue_number"`
 	PrNumber        int64  `json:"pr_number"`
 	CreatedByUserID string `json:"created_by_user_id"`
@@ -155,8 +155,8 @@ type Task struct {
 
 type TaskAgentSession struct {
 	TaskID           string `json:"task_id"`
-	AgentBackend     string `json:"agent_backend"`
-	BackendSessionID string `json:"backend_session_id"`
+	AgentRuntime     string `json:"agent_runtime"`
+	RuntimeSessionID string `json:"runtime_session_id"`
 	SessionKey       string `json:"session_key"`
 	SessionRoot      string `json:"session_root"`
 	LastRunID        string `json:"last_run_id"`

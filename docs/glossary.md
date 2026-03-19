@@ -11,16 +11,19 @@
   removes detached executions.
 - `Worker`: the in-execution component that performs a run inside the launched
   environment.
-- `AgentHarness`: the tool wrapper invoked by the worker. Rascal supports
-  `goose`, `codex`, `claude`, and `goose-claude`.
-- `ModelProvider`: the underlying model/service used by a harness. Current
-  providers are `codex` and `anthropic`.
+- `Runtime`: the user-facing selection that determines both the harness and the
+  model provider. Valid runtimes are `goose-codex`, `codex`, `claude`, and
+  `goose-claude`.
+- `Harness`: the tool wrapper invoked by the worker, derived from the runtime.
+  `goose-codex` and `goose-claude` use the `goose` harness; `codex` and `claude`
+  use the `direct` harness.
+- `ModelProvider`: the underlying model/service used by a runtime. `codex` and
+  `goose-codex` runtimes use the `codex` provider; `claude` and `goose-claude`
+  runtimes use the `anthropic` provider.
 - `SessionPolicy`: policy governing whether a task-scoped session may resume
   (`off`, `pr-only`, `all`).
-- `AgentRuntime`: selected `AgentHarness` runtime for a task or run: `goose`,
-  `codex`, `claude`, or `goose-claude`.
 - `TaskSession`: optional task-scoped harness state used to resume later runs.
-  Rascal resets it when the task switches harnesses.
+  Rascal resets it when the task switches runtimes.
 - `RunLease`: supervision ownership record for a running run. It tells Rascal
   which orchestrator instance currently owns supervision.
 
@@ -30,7 +33,7 @@
   state, schedules runs, and supervises execution.
 - `Execution plane`: detached Docker containers started for `rascal-runner`.
 - `Runner image`: Docker image used to execute a run. Rascal maintains separate
-  images per harness (Goose, Codex, Claude, Goose-Claude).
+  images per runtime (Goose-Codex, Codex, Claude, Goose-Claude).
 - `Active slot`: the currently live `rascald` slot in blue/green deploys. Only
   this slot should process webhook traffic.
 - `Inactive slot`: the standby slot prepared during blue/green deploys before
@@ -65,9 +68,9 @@
 ## Credential Terms
 
 - `Stored credential`: encrypted auth payload stored in Rascal state, tagged
-  with an `agent_runtime` (`codex` or `claude`) that determines which runtimes
-  can use it.
+  with a `provider` (`codex` or `anthropic`) that determines which runtimes can
+  use it.
 - `Credential lease`: temporary assignment of a stored credential to one run.
-- `Credential runtime`: the credential family a run needs. `codex` and `goose`
-  runtimes use `codex` credentials; `claude` and `goose-claude` runtimes use
-  `claude` credentials.
+- `Credential provider`: the credential family a run needs, derived from its
+  runtime. `codex` and `goose-codex` runtimes use `codex` credentials; `claude`
+  and `goose-claude` runtimes use `anthropic` credentials.

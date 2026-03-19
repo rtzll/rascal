@@ -22,11 +22,11 @@ type gooseSessionInfo struct {
 
 func runAgent(ex CommandExecutor, cfg Config) (string, string, error) {
 	switch configuredAgentRuntime(cfg) {
-	case agent.BackendCodex:
+	case agent.RuntimeCodex:
 		return RunCodex(ex, cfg)
-	case agent.BackendClaude:
+	case agent.RuntimeClaude:
 		return RunClaude(ex, cfg)
-	case agent.BackendGooseClaude:
+	case agent.RuntimeGooseClaude:
 		return RunGooseClaude(ex, cfg)
 	default:
 		return RunGooseCodex(ex, cfg)

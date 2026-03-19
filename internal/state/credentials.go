@@ -104,11 +104,11 @@ func ParseCredentialStatus(status string) (CredentialStatus, bool) {
 	}
 }
 
-type CodexCredential struct {
+type Credential struct {
 	ID                string
 	OwnerUserID       string
 	Scope             CredentialScope
-	AgentRuntime      string
+	Provider          string
 	EncryptedAuthBlob []byte
 	Weight            int
 	Status            CredentialStatus
@@ -122,7 +122,7 @@ type CredentialCandidate struct {
 	ID            string
 	OwnerUserID   string
 	Scope         CredentialScope
-	AgentRuntime  string
+	Provider      string
 	Weight        int
 	Status        CredentialStatus
 	CooldownUntil *time.Time
@@ -158,11 +158,11 @@ type UpsertAPIKeyInput struct {
 	Label   string
 }
 
-type CreateCodexCredentialInput struct {
+type CreateCredentialInput struct {
 	ID                string
 	OwnerUserID       string
 	Scope             CredentialScope
-	AgentRuntime      string
+	Provider          string
 	EncryptedAuthBlob []byte
 	Weight            int
 	Status            CredentialStatus
@@ -170,11 +170,11 @@ type CreateCodexCredentialInput struct {
 	LastError         string
 }
 
-type UpdateCodexCredentialInput struct {
+type UpdateCredentialInput struct {
 	ID                string
 	OwnerUserID       string
 	Scope             CredentialScope
-	AgentRuntime      string
+	Provider          string
 	EncryptedAuthBlob []byte
 	Weight            int
 	Status            CredentialStatus
@@ -363,19 +363,19 @@ func (s *Store) GetRunCredentialInfo(runID string) (RunCredentialInfo, bool) {
 	}, true
 }
 
-func (s *Store) CreateCodexCredential(in CreateCodexCredentialInput) (CodexCredential, error) {
+func (s *Store) CreateCredential(in CreateCredentialInput) (Credential, error) {
 	in.ID = strings.TrimSpace(in.ID)
 	in.OwnerUserID = strings.TrimSpace(in.OwnerUserID)
 	if in.ID == "" {
-		return CodexCredential{}, fmt.Errorf("id is required")
+		return Credential{}, fmt.Errorf("id is required")
 	}
 	scope, ok := ParseCredentialScope(string(in.Scope))
 	if !ok {
-		return CodexCredential{}, fmt.Errorf("invalid credential scope %q", in.Scope)
+		return Credential{}, fmt.Errorf("invalid credential scope %q", in.Scope)
 	}
 	status, ok := ParseCredentialStatus(string(in.Status))
 	if !ok {
-		return CodexCredential{}, fmt.Errorf("invalid credential status %q", in.Status)
+		return Credential{}, fmt.Errorf("invalid credential status %q", in.Status)
 	}
 	in.Scope = scope
 	in.Status = status
@@ -383,11 +383,11 @@ func (s *Store) CreateCodexCredential(in CreateCodexCredentialInput) (CodexCrede
 		in.Weight = 1
 	}
 	now := time.Now().UTC()
-	if err := s.q.CreateCodexCredential(context.Background(), sqlitegen.CreateCodexCredentialParams{
+	if err := s.q.CreateCredential(context.Background(), sqlitegen.CreateCredentialParams{
 		ID:                in.ID,
 		OwnerUserID:       toNullString(in.OwnerUserID),
 		Scope:             string(in.Scope),
-		AgentRuntime:      strings.TrimSpace(in.AgentRuntime),
+		Provider:          strings.TrimSpace(in.Provider),
 		EncryptedAuthBlob: in.EncryptedAuthBlob,
 		Weight:            int64(in.Weight),
 		Status:            string(in.Status),
@@ -396,41 +396,41 @@ func (s *Store) CreateCodexCredential(in CreateCodexCredentialInput) (CodexCrede
 		CreatedAt:         now.UnixNano(),
 		UpdatedAt:         now.UnixNano(),
 	}); err != nil {
-		return CodexCredential{}, fmt.Errorf("create credential %s: %w", in.ID, err)
+		return Credential{}, fmt.Errorf("create credential %s: %w", in.ID, err)
 	}
-	out, ok, err := s.GetCodexCredential(in.ID)
+	out, ok, err := s.GetCredential(in.ID)
 	if err != nil {
-		return CodexCredential{}, fmt.Errorf("update credential %s: %w", in.ID, err)
+		return Credential{}, fmt.Errorf("update credential %s: %w", in.ID, err)
 	}
 	if !ok {
-		return CodexCredential{}, fmt.Errorf("credential %q not found after create", in.ID)
+		return Credential{}, fmt.Errorf("credential %q not found after create", in.ID)
 	}
 	return out, nil
 }
 
-func (s *Store) UpdateCodexCredential(in UpdateCodexCredentialInput) (CodexCredential, error) {
+func (s *Store) UpdateCredential(in UpdateCredentialInput) (Credential, error) {
 	in.ID = strings.TrimSpace(in.ID)
 	in.OwnerUserID = strings.TrimSpace(in.OwnerUserID)
 	if in.ID == "" {
-		return CodexCredential{}, fmt.Errorf("id is required")
+		return Credential{}, fmt.Errorf("id is required")
 	}
 	scope, ok := ParseCredentialScope(string(in.Scope))
 	if !ok {
-		return CodexCredential{}, fmt.Errorf("invalid credential scope %q", in.Scope)
+		return Credential{}, fmt.Errorf("invalid credential scope %q", in.Scope)
 	}
 	status, ok := ParseCredentialStatus(string(in.Status))
 	if !ok {
-		return CodexCredential{}, fmt.Errorf("invalid credential status %q", in.Status)
+		return Credential{}, fmt.Errorf("invalid credential status %q", in.Status)
 	}
 	in.Scope = scope
 	in.Status = status
 	if in.Weight <= 0 {
 		in.Weight = 1
 	}
-	rows, err := s.q.UpdateCodexCredential(context.Background(), sqlitegen.UpdateCodexCredentialParams{
+	rows, err := s.q.UpdateCredential(context.Background(), sqlitegen.UpdateCredentialParams{
 		OwnerUserID:       toNullString(in.OwnerUserID),
 		Scope:             string(in.Scope),
-		AgentRuntime:      strings.TrimSpace(in.AgentRuntime),
+		Provider:          strings.TrimSpace(in.Provider),
 		EncryptedAuthBlob: in.EncryptedAuthBlob,
 		Weight:            int64(in.Weight),
 		Status:            string(in.Status),
@@ -440,22 +440,22 @@ func (s *Store) UpdateCodexCredential(in UpdateCodexCredentialInput) (CodexCrede
 		ID:                in.ID,
 	})
 	if err != nil {
-		return CodexCredential{}, fmt.Errorf("update credential %s: %w", in.ID, err)
+		return Credential{}, fmt.Errorf("update credential %s: %w", in.ID, err)
 	}
 	if rows == 0 {
-		return CodexCredential{}, fmt.Errorf("credential %q not found", in.ID)
+		return Credential{}, fmt.Errorf("credential %q not found", in.ID)
 	}
-	out, ok, err := s.GetCodexCredential(in.ID)
+	out, ok, err := s.GetCredential(in.ID)
 	if err != nil {
-		return CodexCredential{}, err
+		return Credential{}, err
 	}
 	if !ok {
-		return CodexCredential{}, fmt.Errorf("credential %q not found after update", in.ID)
+		return Credential{}, fmt.Errorf("credential %q not found after update", in.ID)
 	}
 	return out, nil
 }
 
-func (s *Store) SetCodexCredentialStatus(credentialID string, status CredentialStatus, cooldownUntil *time.Time, lastError string) error {
+func (s *Store) SetCredentialStatus(credentialID string, status CredentialStatus, cooldownUntil *time.Time, lastError string) error {
 	credentialID = strings.TrimSpace(credentialID)
 	if credentialID == "" {
 		return nil
@@ -465,7 +465,7 @@ func (s *Store) SetCodexCredentialStatus(credentialID string, status CredentialS
 		return fmt.Errorf("invalid credential status %q", status)
 	}
 	status = parsed
-	_, err := s.q.SetCodexCredentialStatus(context.Background(), sqlitegen.SetCodexCredentialStatusParams{
+	_, err := s.q.SetCredentialStatus(context.Background(), sqlitegen.SetCredentialStatusParams{
 		Status:        string(status),
 		CooldownUntil: toNullInt64(cooldownUntil),
 		LastError:     strings.TrimSpace(lastError),
@@ -478,62 +478,62 @@ func (s *Store) SetCodexCredentialStatus(credentialID string, status CredentialS
 	return nil
 }
 
-func (s *Store) GetCodexCredential(credentialID string) (CodexCredential, bool, error) {
-	row, err := s.q.GetCodexCredential(context.Background(), strings.TrimSpace(credentialID))
+func (s *Store) GetCredential(credentialID string) (Credential, bool, error) {
+	row, err := s.q.GetCredential(context.Background(), strings.TrimSpace(credentialID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return CodexCredential{}, false, nil
+			return Credential{}, false, nil
 		}
-		return CodexCredential{}, false, fmt.Errorf("get credential %s: %w", credentialID, err)
+		return Credential{}, false, fmt.Errorf("get credential %s: %w", credentialID, err)
 	}
-	return fromDBCodexCredential(row), true, nil
+	return fromDBCredential(row), true, nil
 }
 
-func (s *Store) ListCodexCredentialsByOwner(ownerUserID string) ([]CodexCredential, error) {
-	rows, err := s.q.ListCodexCredentialsByOwner(context.Background(), toNullString(ownerUserID))
+func (s *Store) ListCredentialsByOwner(ownerUserID string) ([]Credential, error) {
+	rows, err := s.q.ListCredentialsByOwner(context.Background(), toNullString(ownerUserID))
 	if err != nil {
 		return nil, fmt.Errorf("list credentials by owner %s: %w", ownerUserID, err)
 	}
-	out := make([]CodexCredential, 0, len(rows))
+	out := make([]Credential, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, fromDBCodexCredential(row))
+		out = append(out, fromDBCredential(row))
 	}
 	return out, nil
 }
 
-func (s *Store) ListSharedCodexCredentials() ([]CodexCredential, error) {
-	rows, err := s.q.ListSharedCodexCredentials(context.Background())
+func (s *Store) ListSharedCredentials() ([]Credential, error) {
+	rows, err := s.q.ListSharedCredentials(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("list shared credentials: %w", err)
 	}
-	out := make([]CodexCredential, 0, len(rows))
+	out := make([]Credential, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, fromDBCodexCredential(row))
+		out = append(out, fromDBCredential(row))
 	}
 	return out, nil
 }
 
-func (s *Store) ListAllCodexCredentials() ([]CodexCredential, error) {
-	rows, err := s.q.ListAllCodexCredentials(context.Background())
+func (s *Store) ListAllCredentials() ([]Credential, error) {
+	rows, err := s.q.ListAllCredentials(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("list all credentials: %w", err)
 	}
-	out := make([]CodexCredential, 0, len(rows))
+	out := make([]Credential, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, fromDBCodexCredential(row))
+		out = append(out, fromDBCredential(row))
 	}
 	return out, nil
 }
 
-func (s *Store) ListCredentialCandidates(requesterUserID, credentialRuntime string, now, usageWindowStart time.Time) ([]CredentialCandidate, error) {
-	if strings.TrimSpace(credentialRuntime) == "" {
-		credentialRuntime = "codex"
+func (s *Store) ListCredentialCandidates(requesterUserID, provider string, now, usageWindowStart time.Time) ([]CredentialCandidate, error) {
+	if strings.TrimSpace(provider) == "" {
+		provider = "codex"
 	}
 	rows, err := s.q.ListCredentialCandidates(context.Background(), sqlitegen.ListCredentialCandidatesParams{
-		Now:               now.UTC().UnixNano(),
-		UsageWindowStart:  usageWindowStart.UTC().UnixNano(),
-		RequesterUserID:   toNullString(requesterUserID),
-		CredentialRuntime: credentialRuntime,
+		Now:              now.UTC().UnixNano(),
+		UsageWindowStart: usageWindowStart.UTC().UnixNano(),
+		RequesterUserID:  toNullString(requesterUserID),
+		Provider:         provider,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list credential candidates for %s: %w", requesterUserID, err)
@@ -544,7 +544,7 @@ func (s *Store) ListCredentialCandidates(requesterUserID, credentialRuntime stri
 			ID:            row.ID,
 			OwnerUserID:   fromNullString(row.OwnerUserID),
 			Scope:         NormalizeCredentialScope(CredentialScope(row.Scope)),
-			AgentRuntime:  row.AgentRuntime,
+			Provider:      row.Provider,
 			Weight:        int(row.Weight),
 			Status:        NormalizeCredentialStatus(CredentialStatus(row.Status)),
 			CooldownUntil: fromNullTime(row.CooldownUntil),
@@ -713,12 +713,12 @@ func fromDBUser(row sqlitegen.User) User {
 	}
 }
 
-func fromDBCodexCredential(row sqlitegen.CodexCredential) CodexCredential {
-	return CodexCredential{
+func fromDBCredential(row sqlitegen.Credential) Credential {
+	return Credential{
 		ID:                row.ID,
 		OwnerUserID:       fromNullString(row.OwnerUserID),
 		Scope:             NormalizeCredentialScope(CredentialScope(row.Scope)),
-		AgentRuntime:      row.AgentRuntime,
+		Provider:          row.Provider,
 		EncryptedAuthBlob: append([]byte(nil), row.EncryptedAuthBlob...),
 		Weight:            int(row.Weight),
 		Status:            NormalizeCredentialStatus(CredentialStatus(row.Status)),

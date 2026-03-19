@@ -152,19 +152,19 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	task, err := store.UpsertTask(UpsertTaskInput{
 		ID:           "repo#2",
 		Repo:         "owner/repo",
-		AgentRuntime: agent.BackendGooseCodex,
+		AgentRuntime: agent.RuntimeGooseCodex,
 		IssueNumber:  2,
 	})
 	if err != nil {
 		t.Fatalf("upsert goose task: %v", err)
 	}
-	if task.AgentRuntime != agent.BackendGooseCodex {
-		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.BackendGooseCodex)
+	if task.AgentRuntime != agent.RuntimeGooseCodex {
+		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.RuntimeGooseCodex)
 	}
 
 	session, err := store.UpsertTaskAgentSession(UpsertTaskAgentSessionInput{
 		TaskID:           task.ID,
-		AgentRuntime:     agent.BackendGooseCodex,
+		AgentRuntime:     agent.RuntimeGooseCodex,
 		RuntimeSessionID: "goose-session",
 		SessionKey:       "owner-repo-2",
 		SessionRoot:      "/tmp/goose-session",
@@ -173,26 +173,26 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert goose task session: %v", err)
 	}
-	if session.AgentRuntime != agent.BackendGooseCodex {
-		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, agent.BackendGooseCodex)
+	if session.AgentRuntime != agent.RuntimeGooseCodex {
+		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, agent.RuntimeGooseCodex)
 	}
 
 	task, err = store.UpsertTask(UpsertTaskInput{
 		ID:           task.ID,
 		Repo:         task.Repo,
-		AgentRuntime: agent.BackendCodex,
+		AgentRuntime: agent.RuntimeCodex,
 		IssueNumber:  task.IssueNumber,
 	})
 	if err != nil {
 		t.Fatalf("migrate task backend to codex: %v", err)
 	}
-	if task.AgentRuntime != agent.BackendCodex {
-		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.BackendCodex)
+	if task.AgentRuntime != agent.RuntimeCodex {
+		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.RuntimeCodex)
 	}
 
 	session, err = store.UpsertTaskAgentSession(UpsertTaskAgentSessionInput{
 		TaskID:           task.ID,
-		AgentRuntime:     agent.BackendCodex,
+		AgentRuntime:     agent.RuntimeCodex,
 		RuntimeSessionID: "",
 		SessionKey:       "owner-repo-2",
 		SessionRoot:      "/tmp/codex-session",
@@ -201,8 +201,8 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate task session backend to codex: %v", err)
 	}
-	if session.AgentRuntime != agent.BackendCodex {
-		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, agent.BackendCodex)
+	if session.AgentRuntime != agent.RuntimeCodex {
+		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, agent.RuntimeCodex)
 	}
 	if session.RuntimeSessionID != "" {
 		t.Fatalf("session id = %q, want empty after backend migration", session.RuntimeSessionID)
@@ -332,7 +332,7 @@ func TestStoreRejectsInvalidCredentialScopeAndStatus(t *testing.T) {
 		t.Fatalf("new store: %v", err)
 	}
 
-	if _, err := store.CreateCodexCredential(CreateCodexCredentialInput{
+	if _, err := store.CreateCredential(CreateCredentialInput{
 		ID:                "cred-invalid-scope",
 		Scope:             CredentialScope("team"),
 		EncryptedAuthBlob: []byte("blob"),
@@ -340,7 +340,7 @@ func TestStoreRejectsInvalidCredentialScopeAndStatus(t *testing.T) {
 		t.Fatal("expected invalid credential scope to fail")
 	}
 
-	if _, err := store.CreateCodexCredential(CreateCodexCredentialInput{
+	if _, err := store.CreateCredential(CreateCredentialInput{
 		ID:                "cred-invalid-status",
 		Scope:             CredentialScopeShared,
 		Status:            CredentialStatus("paused"),
@@ -349,7 +349,7 @@ func TestStoreRejectsInvalidCredentialScopeAndStatus(t *testing.T) {
 		t.Fatal("expected invalid credential status to fail")
 	}
 
-	if err := store.SetCodexCredentialStatus("cred-unknown", CredentialStatus("paused"), nil, "bad"); err == nil {
+	if err := store.SetCredentialStatus("cred-unknown", CredentialStatus("paused"), nil, "bad"); err == nil {
 		t.Fatal("expected invalid status update to fail")
 	}
 }

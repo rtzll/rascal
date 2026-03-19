@@ -7,21 +7,21 @@ import (
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
-func TestNormalizeBackend(t *testing.T) {
+func TestNormalizeRuntime(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
 		in   string
-		want Backend
+		want Runtime
 	}{
-		{name: "default empty", in: "", want: BackendGooseCodex},
-		{name: "default unknown", in: "other", want: BackendGooseCodex},
-		{name: "codex explicit", in: " codex ", want: BackendCodex},
-		{name: "goose-codex explicit", in: "GOOSE-CODEX", want: BackendGooseCodex},
-		{name: "goose alias", in: "GOOSE", want: BackendGooseCodex},
-		{name: "claude explicit", in: " claude ", want: BackendClaude},
-		{name: "goose-claude explicit", in: " goose-claude ", want: BackendGooseClaude},
+		{name: "default empty", in: "", want: RuntimeGooseCodex},
+		{name: "default unknown", in: "other", want: RuntimeGooseCodex},
+		{name: "codex explicit", in: " codex ", want: RuntimeCodex},
+		{name: "goose-codex explicit", in: "GOOSE-CODEX", want: RuntimeGooseCodex},
+		{name: "goose alias", in: "GOOSE", want: RuntimeGooseCodex},
+		{name: "claude explicit", in: " claude ", want: RuntimeClaude},
+		{name: "goose-claude explicit", in: " goose-claude ", want: RuntimeGooseClaude},
 	}
 
 	for _, tt := range tests {
@@ -29,28 +29,28 @@ func TestNormalizeBackend(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := NormalizeBackend(tt.in); got != tt.want {
-				t.Fatalf("NormalizeBackend(%q) = %q, want %q", tt.in, got, tt.want)
+			if got := NormalizeRuntime(tt.in); got != tt.want {
+				t.Fatalf("NormalizeRuntime(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestParseBackend(t *testing.T) {
+func TestParseRuntime(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name    string
 		in      string
-		want    Backend
+		want    Runtime
 		wantErr bool
 	}{
-		{name: "default empty", in: "", want: BackendGooseCodex},
-		{name: "codex explicit", in: " codex ", want: BackendCodex},
-		{name: "goose-codex explicit", in: "GOOSE-CODEX", want: BackendGooseCodex},
-		{name: "goose alias", in: "GOOSE", want: BackendGooseCodex},
-		{name: "claude explicit", in: " claude ", want: BackendClaude},
-		{name: "goose-claude explicit", in: " goose-claude ", want: BackendGooseClaude},
+		{name: "default empty", in: "", want: RuntimeGooseCodex},
+		{name: "codex explicit", in: " codex ", want: RuntimeCodex},
+		{name: "goose-codex explicit", in: "GOOSE-CODEX", want: RuntimeGooseCodex},
+		{name: "goose alias", in: "GOOSE", want: RuntimeGooseCodex},
+		{name: "claude explicit", in: " claude ", want: RuntimeClaude},
+		{name: "goose-claude explicit", in: " goose-claude ", want: RuntimeGooseClaude},
 		{name: "invalid", in: "other", wantErr: true},
 	}
 
@@ -59,18 +59,18 @@ func TestParseBackend(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := ParseBackend(tt.in)
+			got, err := ParseRuntime(tt.in)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("ParseBackend(%q) error = nil, want error", tt.in)
+					t.Fatalf("ParseRuntime(%q) error = nil, want error", tt.in)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("ParseBackend(%q) returned error: %v", tt.in, err)
+				t.Fatalf("ParseRuntime(%q) returned error: %v", tt.in, err)
 			}
 			if got != tt.want {
-				t.Fatalf("ParseBackend(%q) = %q, want %q", tt.in, got, tt.want)
+				t.Fatalf("ParseRuntime(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
@@ -169,20 +169,20 @@ func TestSessionEnabled(t *testing.T) {
 	}
 }
 
-func TestCredentialRuntime(t *testing.T) {
+func TestRuntimeHarness(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name    string
 		runtime Runtime
-		want    Runtime
+		want    Harness
 	}{
-		{name: "codex maps to codex", runtime: RuntimeCodex, want: RuntimeCodex},
-		{name: "goose-codex maps to codex", runtime: RuntimeGooseCodex, want: RuntimeCodex},
-		{name: "claude maps to claude", runtime: RuntimeClaude, want: RuntimeClaude},
-		{name: "goose-claude maps to claude", runtime: RuntimeGooseClaude, want: RuntimeClaude},
-		{name: "empty maps to codex", runtime: Runtime(""), want: RuntimeCodex},
-		{name: "unknown maps to codex", runtime: Runtime("other"), want: RuntimeCodex},
+		{name: "goose-codex is goose", runtime: RuntimeGooseCodex, want: HarnessGoose},
+		{name: "goose-claude is goose", runtime: RuntimeGooseClaude, want: HarnessGoose},
+		{name: "codex is direct", runtime: RuntimeCodex, want: HarnessDirect},
+		{name: "claude is direct", runtime: RuntimeClaude, want: HarnessDirect},
+		{name: "empty defaults to goose", runtime: Runtime(""), want: HarnessGoose},
+		{name: "unknown defaults to goose", runtime: Runtime("other"), want: HarnessGoose},
 	}
 
 	for _, tt := range tests {
@@ -190,8 +190,36 @@ func TestCredentialRuntime(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := CredentialRuntime(tt.runtime); got != tt.want {
-				t.Fatalf("CredentialRuntime(%q) = %q, want %q", tt.runtime, got, tt.want)
+			if got := tt.runtime.Harness(); got != tt.want {
+				t.Fatalf("Runtime(%q).Harness() = %q, want %q", tt.runtime, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRuntimeProvider(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		runtime Runtime
+		want    ModelProvider
+	}{
+		{name: "codex maps to codex", runtime: RuntimeCodex, want: ModelProviderCodex},
+		{name: "goose-codex maps to codex", runtime: RuntimeGooseCodex, want: ModelProviderCodex},
+		{name: "claude maps to anthropic", runtime: RuntimeClaude, want: ModelProviderAnthropic},
+		{name: "goose-claude maps to anthropic", runtime: RuntimeGooseClaude, want: ModelProviderAnthropic},
+		{name: "empty maps to codex", runtime: Runtime(""), want: ModelProviderCodex},
+		{name: "unknown maps to codex", runtime: Runtime("other"), want: ModelProviderCodex},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := tt.runtime.Provider(); got != tt.want {
+				t.Fatalf("Runtime(%q).Provider() = %q, want %q", tt.runtime, got, tt.want)
 			}
 		})
 	}

@@ -9,6 +9,13 @@ import (
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
+type Harness string
+
+const (
+	HarnessGoose  Harness = "goose"
+	HarnessDirect Harness = "direct"
+)
+
 type Runtime string
 
 const (
@@ -18,25 +25,12 @@ const (
 	RuntimeGooseClaude Runtime = "goose-claude"
 )
 
-type Backend = Runtime
-
-const (
-	BackendGooseCodex  = RuntimeGooseCodex
-	BackendCodex       = RuntimeCodex
-	BackendClaude      = RuntimeClaude
-	BackendGooseClaude = RuntimeGooseClaude
-)
-
 func NormalizeRuntime(raw string) Runtime {
 	runtime, err := ParseRuntime(raw)
 	if err != nil {
 		return RuntimeGooseCodex
 	}
 	return runtime
-}
-
-func NormalizeBackend(raw string) Backend {
-	return NormalizeRuntime(raw)
 }
 
 func (r Runtime) String() string {
@@ -58,41 +52,26 @@ func ParseRuntime(raw string) (Runtime, error) {
 	}
 }
 
-func ParseBackend(raw string) (Backend, error) {
-	return ParseRuntime(raw)
-}
-
-// CredentialRuntime maps an agent runtime to the credential type it consumes.
-// Codex and Goose-Codex share auth.json credentials (credential runtime "codex").
-// Claude and Goose-Claude share OAuth token credentials (credential runtime "claude").
-func CredentialRuntime(runtime Runtime) Runtime {
-	switch NormalizeRuntime(string(runtime)) {
-	case RuntimeClaude, RuntimeGooseClaude:
-		return RuntimeClaude
+// Harness returns whether this runtime uses the goose harness or runs the
+// provider directly.
+func (r Runtime) Harness() Harness {
+	switch NormalizeRuntime(string(r)) {
+	case RuntimeGooseCodex, RuntimeGooseClaude:
+		return HarnessGoose
 	default:
-		return RuntimeCodex
+		return HarnessDirect
 	}
 }
 
-// RuntimeProvider returns the model provider for the given runtime.
-func RuntimeProvider(runtime Runtime) ModelProvider {
-	switch NormalizeRuntime(string(runtime)) {
+// Provider returns the model provider for this runtime.
+func (r Runtime) Provider() ModelProvider {
+	switch NormalizeRuntime(string(r)) {
 	case RuntimeGooseCodex, RuntimeCodex:
 		return ModelProviderCodex
 	case RuntimeClaude, RuntimeGooseClaude:
 		return ModelProviderAnthropic
 	default:
 		return ModelProviderCodex
-	}
-}
-
-// IsGooseRuntime reports whether the runtime uses the goose harness.
-func IsGooseRuntime(runtime Runtime) bool {
-	switch NormalizeRuntime(string(runtime)) {
-	case RuntimeGooseCodex, RuntimeGooseClaude:
-		return true
-	default:
-		return false
 	}
 }
 

@@ -341,13 +341,13 @@ func (s *Server) HandleCredentials(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		var (
-			creds []state.CodexCredential
+			creds []state.Credential
 			err   error
 		)
 		if requesterIsAdmin(r.Context()) {
-			creds, err = s.Store.ListAllCodexCredentials()
+			creds, err = s.Store.ListAllCredentials()
 		} else {
-			creds, err = s.Store.ListCodexCredentialsByOwner(requesterUserID(r.Context()))
+			creds, err = s.Store.ListCredentialsByOwner(requesterUserID(r.Context()))
 		}
 		if err != nil {
 			http.Error(w, "failed to list credentials", http.StatusInternalServerError)
@@ -401,11 +401,11 @@ func (s *Server) HandleCredentials(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to encrypt auth blob", http.StatusInternalServerError)
 			return
 		}
-		credential, err := s.Store.CreateCodexCredential(state.CreateCodexCredentialInput{
+		credential, err := s.Store.CreateCredential(state.CreateCredentialInput{
 			ID:                id,
 			OwnerUserID:       ownerUserID,
 			Scope:             scope,
-			AgentRuntime:      strings.TrimSpace(req.AgentRuntime),
+			Provider:          strings.TrimSpace(req.Provider),
 			EncryptedAuthBlob: encrypted,
 			Weight:            req.Weight,
 			Status:            state.CredentialStatusActive,
@@ -433,7 +433,7 @@ func (s *Server) HandleCredentialSubresources(w http.ResponseWriter, r *http.Req
 		http.Error(w, "invalid credential id", http.StatusBadRequest)
 		return
 	}
-	credential, ok, err := s.Store.GetCodexCredential(id)
+	credential, ok, err := s.Store.GetCredential(id)
 	if err != nil {
 		http.Error(w, "failed to load credential", http.StatusInternalServerError)
 		return
@@ -447,7 +447,7 @@ func (s *Server) HandleCredentialSubresources(w http.ResponseWriter, r *http.Req
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, api.CredentialResponse{Credential: credentialResponse(credential)})
 	case http.MethodDelete:
-		if err := s.Store.SetCodexCredentialStatus(credential.ID, state.CredentialStatusDisabled, nil, "disabled by API"); err != nil {
+		if err := s.Store.SetCredentialStatus(credential.ID, state.CredentialStatusDisabled, nil, "disabled by API"); err != nil {
 			http.Error(w, "failed to disable credential", http.StatusInternalServerError)
 			return
 		}
@@ -459,11 +459,11 @@ func (s *Server) HandleCredentialSubresources(w http.ResponseWriter, r *http.Req
 			http.Error(w, "invalid JSON body", http.StatusBadRequest)
 			return
 		}
-		updated := state.UpdateCodexCredentialInput{
+		updated := state.UpdateCredentialInput{
 			ID:                credential.ID,
 			OwnerUserID:       credential.OwnerUserID,
 			Scope:             credential.Scope,
-			AgentRuntime:      credential.AgentRuntime,
+			Provider:          credential.Provider,
 			EncryptedAuthBlob: credential.EncryptedAuthBlob,
 			Weight:            credential.Weight,
 			Status:            credential.Status,
@@ -492,8 +492,8 @@ func (s *Server) HandleCredentialSubresources(w http.ResponseWriter, r *http.Req
 				updated.OwnerUserID = ""
 			}
 		}
-		if req.AgentRuntime != nil {
-			updated.AgentRuntime = strings.TrimSpace(*req.AgentRuntime)
+		if req.Provider != nil {
+			updated.Provider = strings.TrimSpace(*req.Provider)
 		}
 		if req.AuthBlob != nil {
 			encrypted, err := s.Cipher.Encrypt([]byte(strings.TrimSpace(*req.AuthBlob)))
@@ -531,7 +531,7 @@ func (s *Server) HandleCredentialSubresources(w http.ResponseWriter, r *http.Req
 		if req.LastError != nil {
 			updated.LastError = strings.TrimSpace(*req.LastError)
 		}
-		credential, err := s.Store.UpdateCodexCredential(updated)
+		credential, err := s.Store.UpdateCredential(updated)
 		if err != nil {
 			http.Error(w, "failed to update credential: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -543,14 +543,14 @@ func (s *Server) HandleCredentialSubresources(w http.ResponseWriter, r *http.Req
 	}
 }
 
-func (s *Server) canAccessCredential(ctx context.Context, credential state.CodexCredential) bool {
+func (s *Server) canAccessCredential(ctx context.Context, credential state.Credential) bool {
 	if requesterIsAdmin(ctx) {
 		return true
 	}
 	return credential.Scope == state.CredentialScopePersonal && credential.OwnerUserID == requesterUserID(ctx)
 }
 
-func credentialResponse(credential state.CodexCredential) api.Credential {
+func credentialResponse(credential state.Credential) api.Credential {
 	return api.CredentialFromState(credential)
 }
 

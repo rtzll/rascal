@@ -86,7 +86,7 @@ type Credential struct {
 	ID            string                 `json:"id" toml:"id"`
 	OwnerUserID   string                 `json:"owner_user_id" toml:"owner_user_id"`
 	Scope         state.CredentialScope  `json:"scope" toml:"scope"`
-	AgentRuntime  string                 `json:"agent_runtime" toml:"agent_runtime"`
+	Provider      string                 `json:"provider" toml:"provider"`
 	Weight        int                    `json:"weight" toml:"weight"`
 	Status        state.CredentialStatus `json:"status" toml:"status"`
 	CooldownUntil *time.Time             `json:"cooldown_until,omitempty" toml:"cooldown_until,omitempty"`
@@ -95,12 +95,12 @@ type Credential struct {
 	UpdatedAt     time.Time              `json:"updated_at" toml:"updated_at"`
 }
 
-func CredentialFromState(credential state.CodexCredential) Credential {
+func CredentialFromState(credential state.Credential) Credential {
 	return Credential{
 		ID:            credential.ID,
 		OwnerUserID:   credential.OwnerUserID,
 		Scope:         credential.Scope,
-		AgentRuntime:  credential.AgentRuntime,
+		Provider:      credential.Provider,
 		Weight:        credential.Weight,
 		Status:        credential.Status,
 		CooldownUntil: credential.CooldownUntil,
@@ -127,7 +127,7 @@ type CreateCredentialRequest struct {
 	ID           string                `json:"id,omitempty"`
 	OwnerUserID  string                `json:"owner_user_id,omitempty"`
 	Scope        state.CredentialScope `json:"scope,omitempty"`
-	AgentRuntime string                `json:"agent_runtime,omitempty"`
+	Provider     string                `json:"provider,omitempty"`
 	AuthBlob     string                `json:"auth_blob"`
 	Weight       int                   `json:"weight,omitempty"`
 }
@@ -135,7 +135,7 @@ type CreateCredentialRequest struct {
 type UpdateCredentialRequest struct {
 	OwnerUserID   *string                 `json:"owner_user_id,omitempty"`
 	Scope         *state.CredentialScope  `json:"scope,omitempty"`
-	AgentRuntime  *string                 `json:"agent_runtime,omitempty"`
+	Provider      *string                 `json:"provider,omitempty"`
 	AuthBlob      *string                 `json:"auth_blob,omitempty"`
 	Weight        *int                    `json:"weight,omitempty"`
 	Status        *state.CredentialStatus `json:"status,omitempty"`

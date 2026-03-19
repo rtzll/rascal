@@ -319,7 +319,7 @@ func testDeployConfig() Config {
 		SSHUser:          "root",
 		SSHPort:          22,
 		Domain:           "rascal.example.com",
-		AgentRuntime:     agent.BackendCodex,
+		AgentRuntime:     agent.RuntimeCodex,
 		RunnerImageGooseCodex: defaults.GooseCodexRunnerImageTag,
 		RunnerImageCodex: defaults.CodexRunnerImageTag,
 		ServerListenAddr: ":8080",

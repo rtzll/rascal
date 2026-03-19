@@ -11,7 +11,7 @@ import (
 )
 
 const activeRunForTask = `-- name: ActiveRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ? AND status IN ('queued', 'running')
 ORDER BY seq DESC
@@ -24,7 +24,7 @@ type ActiveRunForTaskRow struct {
 	TaskID       string        `json:"task_id"`
 	Repo         string        `json:"repo"`
 	Task         string        `json:"task"`
-	AgentBackend string        `json:"agent_backend"`
+	AgentRuntime string        `json:"agent_runtime"`
 	BaseBranch   string        `json:"base_branch"`
 	HeadBranch   string        `json:"head_branch"`
 	Trigger      string        `json:"trigger"`
@@ -54,7 +54,7 @@ func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (ActiveRu
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
-		&i.AgentBackend,
+		&i.AgentRuntime,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -213,7 +213,7 @@ RETURNING
   task_id,
   repo,
   task,
-  agent_backend,
+  agent_runtime,
   base_branch,
   head_branch,
   trigger,
@@ -245,7 +245,7 @@ type ClaimNextQueuedRunRow struct {
 	TaskID       string        `json:"task_id"`
 	Repo         string        `json:"repo"`
 	Task         string        `json:"task"`
-	AgentBackend string        `json:"agent_backend"`
+	AgentRuntime string        `json:"agent_runtime"`
 	BaseBranch   string        `json:"base_branch"`
 	HeadBranch   string        `json:"head_branch"`
 	Trigger      string        `json:"trigger"`
@@ -275,7 +275,7 @@ func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRun
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
-		&i.AgentBackend,
+		&i.AgentRuntime,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -334,7 +334,7 @@ RETURNING
   task_id,
   repo,
   task,
-  agent_backend,
+  agent_runtime,
   base_branch,
   head_branch,
   trigger,
@@ -367,7 +367,7 @@ type ClaimNextQueuedRunForTaskRow struct {
 	TaskID       string        `json:"task_id"`
 	Repo         string        `json:"repo"`
 	Task         string        `json:"task"`
-	AgentBackend string        `json:"agent_backend"`
+	AgentRuntime string        `json:"agent_runtime"`
 	BaseBranch   string        `json:"base_branch"`
 	HeadBranch   string        `json:"head_branch"`
 	Trigger      string        `json:"trigger"`
@@ -397,7 +397,7 @@ func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQu
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
-		&i.AgentBackend,
+		&i.AgentRuntime,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -506,12 +506,12 @@ func (q *Queries) CountRunLeasesByOwner(ctx context.Context, ownerID string) (in
 	return count, err
 }
 
-const createCodexCredential = `-- name: CreateCodexCredential :exec
-INSERT INTO codex_credentials (
+const createCredential = `-- name: CreateCredential :exec
+INSERT INTO credentials (
   id,
   owner_user_id,
   scope,
-  agent_runtime,
+  provider,
   encrypted_auth_blob,
   weight,
   status,
@@ -523,11 +523,11 @@ INSERT INTO codex_credentials (
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
-type CreateCodexCredentialParams struct {
+type CreateCredentialParams struct {
 	ID                string         `json:"id"`
 	OwnerUserID       sql.NullString `json:"owner_user_id"`
 	Scope             string         `json:"scope"`
-	AgentRuntime      string         `json:"agent_runtime"`
+	Provider          string         `json:"provider"`
 	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
 	Weight            int64          `json:"weight"`
 	Status            string         `json:"status"`
@@ -537,12 +537,12 @@ type CreateCodexCredentialParams struct {
 	UpdatedAt         int64          `json:"updated_at"`
 }
 
-func (q *Queries) CreateCodexCredential(ctx context.Context, arg CreateCodexCredentialParams) error {
-	_, err := q.db.ExecContext(ctx, createCodexCredential,
+func (q *Queries) CreateCredential(ctx context.Context, arg CreateCredentialParams) error {
+	_, err := q.db.ExecContext(ctx, createCredential,
 		arg.ID,
 		arg.OwnerUserID,
 		arg.Scope,
-		arg.AgentRuntime,
+		arg.Provider,
 		arg.EncryptedAuthBlob,
 		arg.Weight,
 		arg.Status,
@@ -654,7 +654,7 @@ const findTaskByPR = `-- name: FindTaskByPR :one
 SELECT
   tasks.id,
   tasks.repo,
-  tasks.agent_backend,
+  tasks.agent_runtime,
   tasks.issue_number,
   tasks.pr_number,
   tasks.status,
@@ -679,7 +679,7 @@ type FindTaskByPRParams struct {
 type FindTaskByPRRow struct {
 	ID           string `json:"id"`
 	Repo         string `json:"repo"`
-	AgentBackend string `json:"agent_backend"`
+	AgentRuntime string `json:"agent_runtime"`
 	IssueNumber  int64  `json:"issue_number"`
 	PrNumber     int64  `json:"pr_number"`
 	Status       string `json:"status"`
@@ -695,7 +695,7 @@ func (q *Queries) FindTaskByPR(ctx context.Context, arg FindTaskByPRParams) (Fin
 	err := row.Scan(
 		&i.ID,
 		&i.Repo,
-		&i.AgentBackend,
+		&i.AgentRuntime,
 		&i.IssueNumber,
 		&i.PrNumber,
 		&i.Status,
@@ -793,12 +793,12 @@ func (q *Queries) GetActiveSchedulerPause(ctx context.Context, arg GetActiveSche
 	return i, err
 }
 
-const getCodexCredential = `-- name: GetCodexCredential :one
+const getCredential = `-- name: GetCredential :one
 SELECT
   id,
   owner_user_id,
   scope,
-  agent_runtime,
+  provider,
   encrypted_auth_blob,
   weight,
   status,
@@ -806,18 +806,18 @@ SELECT
   last_error,
   created_at,
   updated_at
-FROM codex_credentials
+FROM credentials
 WHERE id = ?
 `
 
-func (q *Queries) GetCodexCredential(ctx context.Context, id string) (CodexCredential, error) {
-	row := q.db.QueryRowContext(ctx, getCodexCredential, id)
-	var i CodexCredential
+func (q *Queries) GetCredential(ctx context.Context, id string) (Credential, error) {
+	row := q.db.QueryRowContext(ctx, getCredential, id)
+	var i Credential
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerUserID,
 		&i.Scope,
-		&i.AgentRuntime,
+		&i.Provider,
 		&i.EncryptedAuthBlob,
 		&i.Weight,
 		&i.Status,
@@ -852,7 +852,7 @@ func (q *Queries) GetCredentialLease(ctx context.Context, id string) (Credential
 }
 
 const getRun = `-- name: GetRun :one
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?
 `
@@ -863,7 +863,7 @@ type GetRunRow struct {
 	TaskID       string        `json:"task_id"`
 	Repo         string        `json:"repo"`
 	Task         string        `json:"task"`
-	AgentBackend string        `json:"agent_backend"`
+	AgentRuntime string        `json:"agent_runtime"`
 	BaseBranch   string        `json:"base_branch"`
 	HeadBranch   string        `json:"head_branch"`
 	Trigger      string        `json:"trigger"`
@@ -893,7 +893,7 @@ func (q *Queries) GetRun(ctx context.Context, id string) (GetRunRow, error) {
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
-		&i.AgentBackend,
+		&i.AgentRuntime,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -1038,7 +1038,7 @@ const getTask = `-- name: GetTask :one
 SELECT
   tasks.id,
   tasks.repo,
-  tasks.agent_backend,
+  tasks.agent_runtime,
   tasks.issue_number,
   tasks.pr_number,
   tasks.status,
@@ -1058,7 +1058,7 @@ WHERE tasks.id = ?
 type GetTaskRow struct {
 	ID           string `json:"id"`
 	Repo         string `json:"repo"`
-	AgentBackend string `json:"agent_backend"`
+	AgentRuntime string `json:"agent_runtime"`
 	IssueNumber  int64  `json:"issue_number"`
 	PrNumber     int64  `json:"pr_number"`
 	Status       string `json:"status"`
@@ -1074,7 +1074,7 @@ func (q *Queries) GetTask(ctx context.Context, id string) (GetTaskRow, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.Repo,
-		&i.AgentBackend,
+		&i.AgentRuntime,
 		&i.IssueNumber,
 		&i.PrNumber,
 		&i.Status,
@@ -1089,8 +1089,8 @@ func (q *Queries) GetTask(ctx context.Context, id string) (GetTaskRow, error) {
 const getTaskAgentSession = `-- name: GetTaskAgentSession :one
 SELECT
   task_id,
-  agent_backend,
-  backend_session_id,
+  agent_runtime,
+  runtime_session_id,
   session_key,
   session_root,
   last_run_id,
@@ -1105,8 +1105,8 @@ func (q *Queries) GetTaskAgentSession(ctx context.Context, taskID string) (TaskA
 	var i TaskAgentSession
 	err := row.Scan(
 		&i.TaskID,
-		&i.AgentBackend,
-		&i.BackendSessionID,
+		&i.AgentRuntime,
+		&i.RuntimeSessionID,
 		&i.SessionKey,
 		&i.SessionRoot,
 		&i.LastRunID,
@@ -1160,7 +1160,7 @@ INSERT INTO runs (
   task_id,
   repo,
   task,
-  agent_backend,
+  agent_runtime,
   base_branch,
   head_branch,
   trigger,
@@ -1181,7 +1181,7 @@ INSERT INTO runs (
   completed_at
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+RETURNING seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 `
 
 type InsertRunParams struct {
@@ -1189,7 +1189,7 @@ type InsertRunParams struct {
 	TaskID       string        `json:"task_id"`
 	Repo         string        `json:"repo"`
 	Task         string        `json:"task"`
-	AgentBackend string        `json:"agent_backend"`
+	AgentRuntime string        `json:"agent_runtime"`
 	BaseBranch   string        `json:"base_branch"`
 	HeadBranch   string        `json:"head_branch"`
 	Trigger      string        `json:"trigger"`
@@ -1216,7 +1216,7 @@ type InsertRunRow struct {
 	TaskID       string        `json:"task_id"`
 	Repo         string        `json:"repo"`
 	Task         string        `json:"task"`
-	AgentBackend string        `json:"agent_backend"`
+	AgentRuntime string        `json:"agent_runtime"`
 	BaseBranch   string        `json:"base_branch"`
 	HeadBranch   string        `json:"head_branch"`
 	Trigger      string        `json:"trigger"`
@@ -1243,7 +1243,7 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRun
 		arg.TaskID,
 		arg.Repo,
 		arg.Task,
-		arg.AgentBackend,
+		arg.AgentRuntime,
 		arg.BaseBranch,
 		arg.HeadBranch,
 		arg.Trigger,
@@ -1270,7 +1270,7 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRun
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
-		&i.AgentBackend,
+		&i.AgentRuntime,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -1307,7 +1307,7 @@ func (q *Queries) IsTaskCompleted(ctx context.Context, id string) (bool, error) 
 }
 
 const lastRunForTask = `-- name: LastRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ?
 ORDER BY seq DESC
@@ -1320,7 +1320,7 @@ type LastRunForTaskRow struct {
 	TaskID       string        `json:"task_id"`
 	Repo         string        `json:"repo"`
 	Task         string        `json:"task"`
-	AgentBackend string        `json:"agent_backend"`
+	AgentRuntime string        `json:"agent_runtime"`
 	BaseBranch   string        `json:"base_branch"`
 	HeadBranch   string        `json:"head_branch"`
 	Trigger      string        `json:"trigger"`
@@ -1350,7 +1350,7 @@ func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (LastRunFor
 		&i.TaskID,
 		&i.Repo,
 		&i.Task,
-		&i.AgentBackend,
+		&i.AgentRuntime,
 		&i.BaseBranch,
 		&i.HeadBranch,
 		&i.Trigger,
@@ -1373,12 +1373,12 @@ func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (LastRunFor
 	return i, err
 }
 
-const listAllCodexCredentials = `-- name: ListAllCodexCredentials :many
+const listAllCredentials = `-- name: ListAllCredentials :many
 SELECT
   id,
   owner_user_id,
   scope,
-  agent_runtime,
+  provider,
   encrypted_auth_blob,
   weight,
   status,
@@ -1386,77 +1386,24 @@ SELECT
   last_error,
   created_at,
   updated_at
-FROM codex_credentials
+FROM credentials
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListAllCodexCredentials(ctx context.Context) ([]CodexCredential, error) {
-	rows, err := q.db.QueryContext(ctx, listAllCodexCredentials)
+func (q *Queries) ListAllCredentials(ctx context.Context) ([]Credential, error) {
+	rows, err := q.db.QueryContext(ctx, listAllCredentials)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CodexCredential{}
+	items := []Credential{}
 	for rows.Next() {
-		var i CodexCredential
+		var i Credential
 		if err := rows.Scan(
 			&i.ID,
 			&i.OwnerUserID,
 			&i.Scope,
-			&i.AgentRuntime,
-			&i.EncryptedAuthBlob,
-			&i.Weight,
-			&i.Status,
-			&i.CooldownUntil,
-			&i.LastError,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listCodexCredentialsByOwner = `-- name: ListCodexCredentialsByOwner :many
-SELECT
-  id,
-  owner_user_id,
-  scope,
-  agent_runtime,
-  encrypted_auth_blob,
-  weight,
-  status,
-  cooldown_until,
-  last_error,
-  created_at,
-  updated_at
-FROM codex_credentials
-WHERE owner_user_id = ?
-ORDER BY created_at DESC
-`
-
-func (q *Queries) ListCodexCredentialsByOwner(ctx context.Context, ownerUserID sql.NullString) ([]CodexCredential, error) {
-	rows, err := q.db.QueryContext(ctx, listCodexCredentialsByOwner, ownerUserID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []CodexCredential{}
-	for rows.Next() {
-		var i CodexCredential
-		if err := rows.Scan(
-			&i.ID,
-			&i.OwnerUserID,
-			&i.Scope,
-			&i.AgentRuntime,
+			&i.Provider,
 			&i.EncryptedAuthBlob,
 			&i.Weight,
 			&i.Status,
@@ -1483,7 +1430,7 @@ SELECT
   c.id,
   c.owner_user_id,
   c.scope,
-  c.agent_runtime,
+  c.provider,
   c.weight,
   c.status,
   c.cooldown_until,
@@ -1509,26 +1456,26 @@ SELECT
   c.last_error,
   c.created_at,
   c.updated_at
-FROM codex_credentials AS c
+FROM credentials AS c
 WHERE c.status = 'active'
   AND (c.cooldown_until IS NULL OR c.cooldown_until <= ?1)
   AND (c.scope = 'shared' OR c.owner_user_id = ?3)
-  AND (c.agent_runtime = ?4 OR (?4 = 'codex' AND c.agent_runtime = ''))
+  AND (c.provider = ?4 OR (?4 = 'codex' AND c.provider = ''))
 ORDER BY c.created_at ASC, c.id ASC
 `
 
 type ListCredentialCandidatesParams struct {
-	Now               int64          `json:"now"`
-	UsageWindowStart  int64          `json:"usage_window_start"`
-	RequesterUserID   sql.NullString `json:"requester_user_id"`
-	CredentialRuntime string         `json:"credential_runtime"`
+	Now              int64          `json:"now"`
+	UsageWindowStart int64          `json:"usage_window_start"`
+	RequesterUserID  sql.NullString `json:"requester_user_id"`
+	Provider         string         `json:"provider"`
 }
 
 type ListCredentialCandidatesRow struct {
 	ID            string         `json:"id"`
 	OwnerUserID   sql.NullString `json:"owner_user_id"`
 	Scope         string         `json:"scope"`
-	AgentRuntime  string         `json:"agent_runtime"`
+	Provider      string         `json:"provider"`
 	Weight        int64          `json:"weight"`
 	Status        string         `json:"status"`
 	CooldownUntil sql.NullInt64  `json:"cooldown_until"`
@@ -1545,7 +1492,7 @@ func (q *Queries) ListCredentialCandidates(ctx context.Context, arg ListCredenti
 		arg.Now,
 		arg.UsageWindowStart,
 		arg.RequesterUserID,
-		arg.CredentialRuntime,
+		arg.Provider,
 	)
 	if err != nil {
 		return nil, err
@@ -1558,7 +1505,7 @@ func (q *Queries) ListCredentialCandidates(ctx context.Context, arg ListCredenti
 			&i.ID,
 			&i.OwnerUserID,
 			&i.Scope,
-			&i.AgentRuntime,
+			&i.Provider,
 			&i.Weight,
 			&i.Status,
 			&i.CooldownUntil,
@@ -1582,8 +1529,61 @@ func (q *Queries) ListCredentialCandidates(ctx context.Context, arg ListCredenti
 	return items, nil
 }
 
+const listCredentialsByOwner = `-- name: ListCredentialsByOwner :many
+SELECT
+  id,
+  owner_user_id,
+  scope,
+  provider,
+  encrypted_auth_blob,
+  weight,
+  status,
+  cooldown_until,
+  last_error,
+  created_at,
+  updated_at
+FROM credentials
+WHERE owner_user_id = ?
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListCredentialsByOwner(ctx context.Context, ownerUserID sql.NullString) ([]Credential, error) {
+	rows, err := q.db.QueryContext(ctx, listCredentialsByOwner, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Credential{}
+	for rows.Next() {
+		var i Credential
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.Scope,
+			&i.Provider,
+			&i.EncryptedAuthBlob,
+			&i.Weight,
+			&i.Status,
+			&i.CooldownUntil,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunningRuns = `-- name: ListRunningRuns :many
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE status = 'running'
 ORDER BY seq DESC
@@ -1595,7 +1595,7 @@ type ListRunningRunsRow struct {
 	TaskID       string        `json:"task_id"`
 	Repo         string        `json:"repo"`
 	Task         string        `json:"task"`
-	AgentBackend string        `json:"agent_backend"`
+	AgentRuntime string        `json:"agent_runtime"`
 	BaseBranch   string        `json:"base_branch"`
 	HeadBranch   string        `json:"head_branch"`
 	Trigger      string        `json:"trigger"`
@@ -1631,7 +1631,7 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]ListRunningRunsRow, er
 			&i.TaskID,
 			&i.Repo,
 			&i.Task,
-			&i.AgentBackend,
+			&i.AgentRuntime,
 			&i.BaseBranch,
 			&i.HeadBranch,
 			&i.Trigger,
@@ -1665,7 +1665,7 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]ListRunningRunsRow, er
 }
 
 const listRuns = `-- name: ListRuns :many
-SELECT seq, id, task_id, repo, task, agent_backend, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 ORDER BY seq DESC
 LIMIT ?
@@ -1677,7 +1677,7 @@ type ListRunsRow struct {
 	TaskID       string        `json:"task_id"`
 	Repo         string        `json:"repo"`
 	Task         string        `json:"task"`
-	AgentBackend string        `json:"agent_backend"`
+	AgentRuntime string        `json:"agent_runtime"`
 	BaseBranch   string        `json:"base_branch"`
 	HeadBranch   string        `json:"head_branch"`
 	Trigger      string        `json:"trigger"`
@@ -1713,7 +1713,7 @@ func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]ListRunsRow, err
 			&i.TaskID,
 			&i.Repo,
 			&i.Task,
-			&i.AgentBackend,
+			&i.AgentRuntime,
 			&i.BaseBranch,
 			&i.HeadBranch,
 			&i.Trigger,
@@ -1746,12 +1746,12 @@ func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]ListRunsRow, err
 	return items, nil
 }
 
-const listSharedCodexCredentials = `-- name: ListSharedCodexCredentials :many
+const listSharedCredentials = `-- name: ListSharedCredentials :many
 SELECT
   id,
   owner_user_id,
   scope,
-  agent_runtime,
+  provider,
   encrypted_auth_blob,
   weight,
   status,
@@ -1759,25 +1759,25 @@ SELECT
   last_error,
   created_at,
   updated_at
-FROM codex_credentials
+FROM credentials
 WHERE scope = 'shared'
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListSharedCodexCredentials(ctx context.Context) ([]CodexCredential, error) {
-	rows, err := q.db.QueryContext(ctx, listSharedCodexCredentials)
+func (q *Queries) ListSharedCredentials(ctx context.Context) ([]Credential, error) {
+	rows, err := q.db.QueryContext(ctx, listSharedCredentials)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CodexCredential{}
+	items := []Credential{}
 	for rows.Next() {
-		var i CodexCredential
+		var i Credential
 		if err := rows.Scan(
 			&i.ID,
 			&i.OwnerUserID,
 			&i.Scope,
-			&i.AgentRuntime,
+			&i.Provider,
 			&i.EncryptedAuthBlob,
 			&i.Weight,
 			&i.Status,
@@ -1999,8 +1999,8 @@ func (q *Queries) RenewRunLease(ctx context.Context, arg RenewRunLeaseParams) (i
 	return result.RowsAffected()
 }
 
-const setCodexCredentialStatus = `-- name: SetCodexCredentialStatus :execrows
-UPDATE codex_credentials
+const setCredentialStatus = `-- name: SetCredentialStatus :execrows
+UPDATE credentials
 SET
   status = ?,
   cooldown_until = ?,
@@ -2009,7 +2009,7 @@ SET
 WHERE id = ?
 `
 
-type SetCodexCredentialStatusParams struct {
+type SetCredentialStatusParams struct {
 	Status        string        `json:"status"`
 	CooldownUntil sql.NullInt64 `json:"cooldown_until"`
 	LastError     string        `json:"last_error"`
@@ -2017,8 +2017,8 @@ type SetCodexCredentialStatusParams struct {
 	ID            string        `json:"id"`
 }
 
-func (q *Queries) SetCodexCredentialStatus(ctx context.Context, arg SetCodexCredentialStatusParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setCodexCredentialStatus,
+func (q *Queries) SetCredentialStatus(ctx context.Context, arg SetCredentialStatusParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setCredentialStatus,
 		arg.Status,
 		arg.CooldownUntil,
 		arg.LastError,
@@ -2199,7 +2199,7 @@ SELECT
   NULL
 WHERE EXISTS (
   SELECT 1
-  FROM codex_credentials AS c
+  FROM credentials AS c
   WHERE c.id = ?2
     AND c.status = 'active'
     AND (c.cooldown_until IS NULL OR c.cooldown_until <= ?8)
@@ -2245,12 +2245,12 @@ func (q *Queries) TryCreateCredentialLease(ctx context.Context, arg TryCreateCre
 	return result.RowsAffected()
 }
 
-const updateCodexCredential = `-- name: UpdateCodexCredential :execrows
-UPDATE codex_credentials
+const updateCredential = `-- name: UpdateCredential :execrows
+UPDATE credentials
 SET
   owner_user_id = ?,
   scope = ?,
-  agent_runtime = ?,
+  provider = ?,
   encrypted_auth_blob = ?,
   weight = ?,
   status = ?,
@@ -2260,10 +2260,10 @@ SET
 WHERE id = ?
 `
 
-type UpdateCodexCredentialParams struct {
+type UpdateCredentialParams struct {
 	OwnerUserID       sql.NullString `json:"owner_user_id"`
 	Scope             string         `json:"scope"`
-	AgentRuntime      string         `json:"agent_runtime"`
+	Provider          string         `json:"provider"`
 	EncryptedAuthBlob []byte         `json:"encrypted_auth_blob"`
 	Weight            int64          `json:"weight"`
 	Status            string         `json:"status"`
@@ -2273,11 +2273,11 @@ type UpdateCodexCredentialParams struct {
 	ID                string         `json:"id"`
 }
 
-func (q *Queries) UpdateCodexCredential(ctx context.Context, arg UpdateCodexCredentialParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, updateCodexCredential,
+func (q *Queries) UpdateCredential(ctx context.Context, arg UpdateCredentialParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateCredential,
 		arg.OwnerUserID,
 		arg.Scope,
-		arg.AgentRuntime,
+		arg.Provider,
 		arg.EncryptedAuthBlob,
 		arg.Weight,
 		arg.Status,
@@ -2298,7 +2298,7 @@ SET
   task_id = ?,
   repo = ?,
   task = ?,
-  agent_backend = ?,
+  agent_runtime = ?,
   base_branch = ?,
   head_branch = ?,
   trigger = ?,
@@ -2324,7 +2324,7 @@ type UpdateRunParams struct {
 	TaskID       string        `json:"task_id"`
 	Repo         string        `json:"repo"`
 	Task         string        `json:"task"`
-	AgentBackend string        `json:"agent_backend"`
+	AgentRuntime string        `json:"agent_runtime"`
 	BaseBranch   string        `json:"base_branch"`
 	HeadBranch   string        `json:"head_branch"`
 	Trigger      string        `json:"trigger"`
@@ -2351,7 +2351,7 @@ func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (int64, er
 		arg.TaskID,
 		arg.Repo,
 		arg.Task,
-		arg.AgentBackend,
+		arg.AgentRuntime,
 		arg.BaseBranch,
 		arg.HeadBranch,
 		arg.Trigger,
@@ -2742,7 +2742,7 @@ const upsertTask = `-- name: UpsertTask :exec
 INSERT INTO tasks (
   id,
   repo,
-  agent_backend,
+  agent_runtime,
   issue_number,
   pr_number,
   status,
@@ -2753,7 +2753,7 @@ INSERT INTO tasks (
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   repo = excluded.repo,
-  agent_backend = excluded.agent_backend,
+  agent_runtime = excluded.agent_runtime,
   issue_number = CASE WHEN excluded.issue_number > 0 THEN excluded.issue_number ELSE tasks.issue_number END,
   pr_number = CASE WHEN excluded.pr_number > 0 THEN excluded.pr_number ELSE tasks.pr_number END,
   updated_at = excluded.updated_at
@@ -2762,7 +2762,7 @@ ON CONFLICT(id) DO UPDATE SET
 type UpsertTaskParams struct {
 	ID           string `json:"id"`
 	Repo         string `json:"repo"`
-	AgentBackend string `json:"agent_backend"`
+	AgentRuntime string `json:"agent_runtime"`
 	IssueNumber  int64  `json:"issue_number"`
 	PrNumber     int64  `json:"pr_number"`
 	Status       string `json:"status"`
@@ -2775,7 +2775,7 @@ func (q *Queries) UpsertTask(ctx context.Context, arg UpsertTaskParams) error {
 	_, err := q.db.ExecContext(ctx, upsertTask,
 		arg.ID,
 		arg.Repo,
-		arg.AgentBackend,
+		arg.AgentRuntime,
 		arg.IssueNumber,
 		arg.PrNumber,
 		arg.Status,
@@ -2789,8 +2789,8 @@ func (q *Queries) UpsertTask(ctx context.Context, arg UpsertTaskParams) error {
 const upsertTaskAgentSession = `-- name: UpsertTaskAgentSession :exec
 INSERT INTO task_agent_sessions (
   task_id,
-  agent_backend,
-  backend_session_id,
+  agent_runtime,
+  runtime_session_id,
   session_key,
   session_root,
   last_run_id,
@@ -2799,8 +2799,8 @@ INSERT INTO task_agent_sessions (
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(task_id) DO UPDATE SET
-  agent_backend = excluded.agent_backend,
-  backend_session_id = excluded.backend_session_id,
+  agent_runtime = excluded.agent_runtime,
+  runtime_session_id = excluded.runtime_session_id,
   session_key = excluded.session_key,
   session_root = excluded.session_root,
   last_run_id = excluded.last_run_id,
@@ -2809,8 +2809,8 @@ ON CONFLICT(task_id) DO UPDATE SET
 
 type UpsertTaskAgentSessionParams struct {
 	TaskID           string `json:"task_id"`
-	AgentBackend     string `json:"agent_backend"`
-	BackendSessionID string `json:"backend_session_id"`
+	AgentRuntime     string `json:"agent_runtime"`
+	RuntimeSessionID string `json:"runtime_session_id"`
 	SessionKey       string `json:"session_key"`
 	SessionRoot      string `json:"session_root"`
 	LastRunID        string `json:"last_run_id"`
@@ -2821,8 +2821,8 @@ type UpsertTaskAgentSessionParams struct {
 func (q *Queries) UpsertTaskAgentSession(ctx context.Context, arg UpsertTaskAgentSessionParams) error {
 	_, err := q.db.ExecContext(ctx, upsertTaskAgentSession,
 		arg.TaskID,
-		arg.AgentBackend,
-		arg.BackendSessionID,
+		arg.AgentRuntime,
+		arg.RuntimeSessionID,
 		arg.SessionKey,
 		arg.SessionRoot,
 		arg.LastRunID,

@@ -754,7 +754,7 @@ func TestRunCodexFreshSession(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		CodexHome:        codexHome,
-		AgentRuntime:     agent.BackendCodex,
+		AgentRuntime:     agent.RuntimeCodex,
 	}
 	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
 		t.Fatalf("mkdir codex sessions: %v", err)
@@ -833,7 +833,7 @@ func TestRunCodexResumeSession(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		CodexHome:        codexHome,
-		AgentRuntime:     agent.BackendCodex,
+		AgentRuntime:     agent.RuntimeCodex,
 		TaskSession: runner.SessionSpec{
 			Mode:             agent.SessionModeAll,
 			Resume:           true,
@@ -900,7 +900,7 @@ func TestRunClaudeFreshSession(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		ClaudeConfigDir:  filepath.Join(root, "claude"),
-		AgentRuntime:     agent.BackendClaude,
+		AgentRuntime:     agent.RuntimeClaude,
 	}
 	if err := os.MkdirAll(filepath.Join(root, "claude"), 0o755); err != nil {
 		t.Fatalf("mkdir claude dir: %v", err)
@@ -979,7 +979,7 @@ func TestRunClaudeResumeSession(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		ClaudeConfigDir:  filepath.Join(root, "claude"),
-		AgentRuntime:     agent.BackendClaude,
+		AgentRuntime:     agent.RuntimeClaude,
 		TaskSession: runner.SessionSpec{
 			Mode:             agent.SessionModeAll,
 			Resume:           true,
@@ -1037,7 +1037,7 @@ func TestRunClaudeNoTokenFile(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		ClaudeConfigDir:  filepath.Join(root, "claude"),
-		AgentRuntime:     agent.BackendClaude,
+		AgentRuntime:     agent.RuntimeClaude,
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
@@ -1119,7 +1119,7 @@ func TestRunGooseClaudeFreshSession(t *testing.T) {
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		GoosePathRoot:    filepath.Join(root, "goose"),
 		ClaudeConfigDir:  filepath.Join(root, "claude"),
-		AgentRuntime:     agent.BackendGooseClaude,
+		AgentRuntime:     agent.RuntimeGooseClaude,
 	}
 	if err := os.MkdirAll(filepath.Join(root, "claude"), 0o755); err != nil {
 		t.Fatalf("mkdir claude dir: %v", err)
@@ -1181,7 +1181,7 @@ func TestRunGooseClaudeNoTokenFile(t *testing.T) {
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		GoosePathRoot:    filepath.Join(root, "goose"),
 		ClaudeConfigDir:  filepath.Join(root, "claude"),
-		AgentRuntime:     agent.BackendGooseClaude,
+		AgentRuntime:     agent.RuntimeGooseClaude,
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)

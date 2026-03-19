@@ -119,7 +119,7 @@ func LoadConfig() (Config, error) {
 		if agentSessionKey == "" {
 			agentSessionKey = runner.TaskSessionKey(repo, taskID)
 		}
-		if backendSessionID == "" && agent.IsGooseRuntime(agentRuntime) {
+		if backendSessionID == "" && agentRuntime.Harness() == agent.HarnessGoose {
 			backendSessionID = runner.TaskSessionName(repo, taskID)
 		}
 	}
@@ -244,11 +244,11 @@ func requireCommands(ex CommandExecutor, names ...string) error {
 func validateCommands(ex CommandExecutor, cfg Config) error {
 	names := []string{"git", "gh"}
 	switch configuredAgentRuntime(cfg) {
-	case agent.BackendCodex:
+	case agent.RuntimeCodex:
 		names = append(names, "codex")
-	case agent.BackendClaude:
+	case agent.RuntimeClaude:
 		names = append(names, "claude")
-	case agent.BackendGooseClaude:
+	case agent.RuntimeGooseClaude:
 		names = append(names, "goose", "claude")
 	default:
 		names = append(names, "goose")

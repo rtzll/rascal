@@ -10,7 +10,7 @@ import (
 type AcquireRequest struct {
 	RunID             string
 	UserID            string
-	CredentialRuntime string
+	Provider string
 }
 
 type Lease struct {
