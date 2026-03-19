@@ -124,12 +124,12 @@ type CredentialDisabledResponse struct {
 }
 
 type CreateCredentialRequest struct {
-	ID           string                `json:"id,omitempty"`
-	OwnerUserID  string                `json:"owner_user_id,omitempty"`
-	Scope        state.CredentialScope `json:"scope,omitempty"`
-	Provider     string                `json:"provider,omitempty"`
-	AuthBlob     string                `json:"auth_blob"`
-	Weight       int                   `json:"weight,omitempty"`
+	ID          string                `json:"id,omitempty"`
+	OwnerUserID string                `json:"owner_user_id,omitempty"`
+	Scope       state.CredentialScope `json:"scope,omitempty"`
+	Provider    string                `json:"provider,omitempty"`
+	AuthBlob    string                `json:"auth_blob"`
+	Weight      int                   `json:"weight,omitempty"`
 }
 
 type UpdateCredentialRequest struct {

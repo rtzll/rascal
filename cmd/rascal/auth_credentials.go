@@ -94,13 +94,13 @@ func (a *app) newAuthCredentialsGetCmd() *cobra.Command {
 
 func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 	var (
-		id           string
-		scope        string
-		runtime      string
-		ownerUserID  string
-		weight       int
-		authFile     string
-		authBlob     string
+		id          string
+		scope       string
+		runtime     string
+		ownerUserID string
+		weight      int
+		authFile    string
+		authBlob    string
 	)
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -118,12 +118,12 @@ func (a *app) newAuthCredentialsCreateCmd() *cobra.Command {
 				return err
 			}
 			cred, err := a.createCredential(credentialCreateRequest{
-				ID:           strings.TrimSpace(id),
-				OwnerUserID:  strings.TrimSpace(ownerUserID),
-				Scope:        resolvedScope,
-				Provider:     strings.TrimSpace(runtime),
-				AuthBlob:     resolvedAuthBlob,
-				Weight:       weight,
+				ID:          strings.TrimSpace(id),
+				OwnerUserID: strings.TrimSpace(ownerUserID),
+				Scope:       resolvedScope,
+				Provider:    strings.TrimSpace(runtime),
+				AuthBlob:    resolvedAuthBlob,
+				Weight:      weight,
 			})
 			if err != nil {
 				return err

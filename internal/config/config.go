@@ -37,7 +37,7 @@ type ServerConfig struct {
 	RunnerMode              runner.Mode
 	AgentRuntime            agent.Runtime
 	RunnerImage             string
-	RunnerImageGooseCodex        string
+	RunnerImageGooseCodex   string
 	RunnerImageCodex        string
 	RunnerImageClaude       string
 	RunnerImageGooseClaude  string

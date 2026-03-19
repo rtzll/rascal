@@ -8,8 +8,8 @@ import (
 )
 
 type AcquireRequest struct {
-	RunID             string
-	UserID            string
+	RunID    string
+	UserID   string
 	Provider string
 }
 

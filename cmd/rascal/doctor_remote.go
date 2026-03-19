@@ -11,20 +11,20 @@ import (
 )
 
 type remoteDoctorStatus struct {
-	Host                  string `json:"host"`
-	RascalService         bool   `json:"rascal_service"`
-	ActiveSlot            string `json:"active_slot,omitempty"`
-	DockerInstalled       bool   `json:"docker_installed"`
-	SQLiteInstalled       bool   `json:"sqlite_installed"`
-	CaddyInstalled        bool   `json:"caddy_installed"`
-	EnvFilePresent        bool   `json:"env_file_present"`
-	AuthRuntimeSynced     bool   `json:"auth_runtime_synced"`
-	RunnerImageConfigured bool   `json:"runner_image_configured"`
-	RunnerImagePresent    bool   `json:"runner_image_present"`
-	RunnerImageGooseCodex     string `json:"runner_image_goose,omitempty"`
-	RunnerImageCodex      string `json:"runner_image_codex,omitempty"`
-	RunnerImageGooseCodexID    string `json:"runner_image_goose_id,omitempty"`
-	RunnerImageCodexID    string `json:"runner_image_codex_id,omitempty"`
+	Host                    string `json:"host"`
+	RascalService           bool   `json:"rascal_service"`
+	ActiveSlot              string `json:"active_slot,omitempty"`
+	DockerInstalled         bool   `json:"docker_installed"`
+	SQLiteInstalled         bool   `json:"sqlite_installed"`
+	CaddyInstalled          bool   `json:"caddy_installed"`
+	EnvFilePresent          bool   `json:"env_file_present"`
+	AuthRuntimeSynced       bool   `json:"auth_runtime_synced"`
+	RunnerImageConfigured   bool   `json:"runner_image_configured"`
+	RunnerImagePresent      bool   `json:"runner_image_present"`
+	RunnerImageGooseCodex   string `json:"runner_image_goose,omitempty"`
+	RunnerImageCodex        string `json:"runner_image_codex,omitempty"`
+	RunnerImageGooseCodexID string `json:"runner_image_goose_id,omitempty"`
+	RunnerImageCodexID      string `json:"runner_image_codex_id,omitempty"`
 }
 
 func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
