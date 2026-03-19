@@ -211,7 +211,7 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 				CodexAuthPath:      codexAuthPath,
 				Domain:             domain,
 				AgentRuntime:       agentRuntime,
-				RunnerImageGoose:   runnerImageGoose,
+				RunnerImageGooseCodex:   runnerImageGoose,
 				RunnerImageCodex:   runnerImageCodex,
 				SkipEnvUpload:      !uploadEnv,
 			})
@@ -245,7 +245,7 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	cmd.Flags().StringVar(&agentRuntime, "agent-runtime", "", "agent runtime to use on the server (goose or codex)")
-	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose", defaults.GooseRunnerImageTag, "goose runner docker image tag")
+	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose-codex", defaults.GooseCodexRunnerImageTag, "goose-codex runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
 	cmd.Flags().BoolVar(&uploadEnv, "upload-env", false, "upload/update /etc/rascal/rascal.env on server")
 	return cmd
@@ -264,7 +264,7 @@ type deployExistingInput struct {
 	CodexAuthPath      string
 	Domain             string
 	AgentRuntime       string
-	RunnerImageGoose   string
+	RunnerImageGooseCodex   string
 	RunnerImageCodex   string
 	SkipEnvUpload      bool
 	SkipIfHealthy      bool
@@ -302,7 +302,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		}
 		agentRuntime = parsedRuntime
 	}
-	runnerImageGoose := firstNonEmpty(strings.TrimSpace(input.RunnerImageGoose), defaults.GooseRunnerImageTag)
+	runnerImageGoose := firstNonEmpty(strings.TrimSpace(input.RunnerImageGooseCodex), defaults.GooseCodexRunnerImageTag)
 	runnerImageCodex := firstNonEmpty(strings.TrimSpace(input.RunnerImageCodex), defaults.CodexRunnerImageTag)
 	sshPort := input.SSHPort
 	apiToken := firstNonEmpty(strings.TrimSpace(input.APIToken), strings.TrimSpace(a.cfg.APIToken))
@@ -402,7 +402,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		GitHubRuntimeToken: githubRuntimeToken,
 		RunnerMode:         "docker",
 		AgentRuntime:       agentRuntime,
-		RunnerImageGoose:   runnerImageGoose,
+		RunnerImageGooseCodex:   runnerImageGoose,
 		RunnerImageCodex:   runnerImageCodex,
 		ServerListenAddr:   ":8080",
 		ServerDataDir:      "/var/lib/rascal",

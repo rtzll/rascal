@@ -152,19 +152,19 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	task, err := store.UpsertTask(UpsertTaskInput{
 		ID:           "repo#2",
 		Repo:         "owner/repo",
-		AgentRuntime: agent.BackendGoose,
+		AgentRuntime: agent.BackendGooseCodex,
 		IssueNumber:  2,
 	})
 	if err != nil {
 		t.Fatalf("upsert goose task: %v", err)
 	}
-	if task.AgentRuntime != agent.BackendGoose {
-		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.BackendGoose)
+	if task.AgentRuntime != agent.BackendGooseCodex {
+		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.BackendGooseCodex)
 	}
 
 	session, err := store.UpsertTaskAgentSession(UpsertTaskAgentSessionInput{
 		TaskID:           task.ID,
-		AgentRuntime:     agent.BackendGoose,
+		AgentRuntime:     agent.BackendGooseCodex,
 		RuntimeSessionID: "goose-session",
 		SessionKey:       "owner-repo-2",
 		SessionRoot:      "/tmp/goose-session",
@@ -173,8 +173,8 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert goose task session: %v", err)
 	}
-	if session.AgentRuntime != agent.BackendGoose {
-		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, agent.BackendGoose)
+	if session.AgentRuntime != agent.BackendGooseCodex {
+		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, agent.BackendGooseCodex)
 	}
 
 	task, err = store.UpsertTask(UpsertTaskInput{
@@ -382,7 +382,7 @@ func TestStoreUpsertRunTokenUsage(t *testing.T) {
 	reasoningOutputTokens := int64(10)
 	usage, err := store.UpsertRunTokenUsage(RunTokenUsage{
 		RunID:                 run.ID,
-		AgentRuntime:          agent.RuntimeGoose,
+		AgentRuntime:          agent.RuntimeGooseCodex,
 		Provider:              "openai",
 		Model:                 "gpt-5-codex",
 		TotalTokens:           150,

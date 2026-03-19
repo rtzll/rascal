@@ -12,7 +12,7 @@ import (
 type Runtime string
 
 const (
-	RuntimeGoose       Runtime = "goose"
+	RuntimeGooseCodex  Runtime = "goose-codex"
 	RuntimeCodex       Runtime = "codex"
 	RuntimeClaude      Runtime = "claude"
 	RuntimeGooseClaude Runtime = "goose-claude"
@@ -21,7 +21,7 @@ const (
 type Backend = Runtime
 
 const (
-	BackendGoose       = RuntimeGoose
+	BackendGooseCodex  = RuntimeGooseCodex
 	BackendCodex       = RuntimeCodex
 	BackendClaude      = RuntimeClaude
 	BackendGooseClaude = RuntimeGooseClaude
@@ -30,7 +30,7 @@ const (
 func NormalizeRuntime(raw string) Runtime {
 	runtime, err := ParseRuntime(raw)
 	if err != nil {
-		return RuntimeGoose
+		return RuntimeGooseCodex
 	}
 	return runtime
 }
@@ -45,8 +45,8 @@ func (r Runtime) String() string {
 
 func ParseRuntime(raw string) (Runtime, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", string(RuntimeGoose):
-		return RuntimeGoose, nil
+	case "", string(RuntimeGooseCodex), "goose":
+		return RuntimeGooseCodex, nil
 	case string(RuntimeCodex):
 		return RuntimeCodex, nil
 	case string(RuntimeClaude):
@@ -63,7 +63,7 @@ func ParseBackend(raw string) (Backend, error) {
 }
 
 // CredentialRuntime maps an agent runtime to the credential type it consumes.
-// Codex and Goose share auth.json credentials (credential runtime "codex").
+// Codex and Goose-Codex share auth.json credentials (credential runtime "codex").
 // Claude and Goose-Claude share OAuth token credentials (credential runtime "claude").
 func CredentialRuntime(runtime Runtime) Runtime {
 	switch NormalizeRuntime(string(runtime)) {
@@ -71,6 +71,28 @@ func CredentialRuntime(runtime Runtime) Runtime {
 		return RuntimeClaude
 	default:
 		return RuntimeCodex
+	}
+}
+
+// RuntimeProvider returns the model provider for the given runtime.
+func RuntimeProvider(runtime Runtime) ModelProvider {
+	switch NormalizeRuntime(string(runtime)) {
+	case RuntimeGooseCodex, RuntimeCodex:
+		return ModelProviderCodex
+	case RuntimeClaude, RuntimeGooseClaude:
+		return ModelProviderAnthropic
+	default:
+		return ModelProviderCodex
+	}
+}
+
+// IsGooseRuntime reports whether the runtime uses the goose harness.
+func IsGooseRuntime(runtime Runtime) bool {
+	switch NormalizeRuntime(string(runtime)) {
+	case RuntimeGooseCodex, RuntimeGooseClaude:
+		return true
+	default:
+		return false
 	}
 }
 

@@ -2,8 +2,8 @@ package agent
 
 func HarnessModelProvider(harness AgentHarness) ModelProvider {
 	switch NormalizeAgentHarness(string(harness)) {
-	case AgentHarnessGoose:
-		return GooseModelProvider()
+	case AgentHarnessGooseCodex:
+		return GooseCodexModelProvider()
 	case AgentHarnessCodex:
 		return CodexModelProvider()
 	case AgentHarnessClaude:

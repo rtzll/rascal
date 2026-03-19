@@ -7,12 +7,12 @@ type AgentHarness = Runtime
 type AgentRuntime = Runtime
 
 const (
-	AgentHarnessGoose       = RuntimeGoose
+	AgentHarnessGooseCodex  = RuntimeGooseCodex
 	AgentHarnessCodex       = RuntimeCodex
 	AgentHarnessClaude      = RuntimeClaude
 	AgentHarnessGooseClaude = RuntimeGooseClaude
 
-	AgentRuntimeGoose       = RuntimeGoose
+	AgentRuntimeGooseCodex  = RuntimeGooseCodex
 	AgentRuntimeCodex       = RuntimeCodex
 	AgentRuntimeClaude      = RuntimeClaude
 	AgentRuntimeGooseClaude = RuntimeGooseClaude

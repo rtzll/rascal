@@ -416,7 +416,7 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 		},
 	}
 
-	if _, _, err := worker.RunGoose(ex, cfg); err != nil {
+	if _, _, err := worker.RunGooseCodex(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -467,7 +467,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 		},
 	}
 
-	if _, _, err := worker.RunGoose(ex, cfg); err != nil {
+	if _, _, err := worker.RunGooseCodex(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -520,7 +520,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 		},
 	}
 
-	if _, _, err := worker.RunGoose(ex, cfg); err != nil {
+	if _, _, err := worker.RunGooseCodex(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")
@@ -591,7 +591,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 		},
 	}
 
-	if _, _, err := worker.RunGoose(ex, cfg); err != nil {
+	if _, _, err := worker.RunGooseCodex(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	if len(calls) != 2 {
@@ -674,7 +674,7 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 		},
 	}
 
-	_, _, err := worker.RunGoose(ex, cfg)
+	_, _, err := worker.RunGooseCodex(ex, cfg)
 	if err == nil {
 		t.Fatal("expected runGoose to fail")
 	}
@@ -734,7 +734,7 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 		},
 	}
 
-	if _, _, err := worker.RunGoose(ex, cfg); err != nil {
+	if _, _, err := worker.RunGooseCodex(ex, cfg); err != nil {
 		t.Fatalf("runGoose returned error: %v", err)
 	}
 	argsText := strings.Join(gotArgs, " ")

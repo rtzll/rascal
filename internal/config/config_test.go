@@ -180,14 +180,14 @@ func TestLoadServerConfigDefaultsAgentRuntimeToGoose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadServerConfig returned error: %v", err)
 	}
-	if cfg.AgentRuntime != "goose" {
-		t.Fatalf("AgentRuntime = %q, want goose", cfg.AgentRuntime)
+	if cfg.AgentRuntime != "goose-codex" {
+		t.Fatalf("AgentRuntime = %q, want goose-codex", cfg.AgentRuntime)
 	}
 	if cfg.RunnerMode != runner.ModeNoop {
 		t.Fatalf("RunnerMode = %q, want noop", cfg.RunnerMode)
 	}
-	if cfg.RunnerImage != "rascal-runner-goose:latest" {
-		t.Fatalf("RunnerImage = %q, want rascal-runner-goose:latest", cfg.RunnerImage)
+	if cfg.RunnerImage != "rascal-runner-goose-codex:latest" {
+		t.Fatalf("RunnerImage = %q, want rascal-runner-goose-codex:latest", cfg.RunnerImage)
 	}
 }
 

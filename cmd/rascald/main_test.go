@@ -1129,16 +1129,16 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return len(s.Store.ListRuns(10)) == 1 }, "run queued")
 
 	run := s.Store.ListRuns(10)[0]
-	if run.AgentRuntime != agent.BackendGoose {
-		t.Fatalf("run backend = %s, want %s", run.AgentRuntime, agent.BackendGoose)
+	if run.AgentRuntime != agent.BackendGooseCodex {
+		t.Fatalf("run backend = %s, want %s", run.AgentRuntime, agent.BackendGooseCodex)
 	}
 
 	task, ok := s.Store.GetTask(taskID)
 	if !ok {
 		t.Fatalf("missing task %s", taskID)
 	}
-	if task.AgentRuntime != agent.BackendGoose {
-		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.BackendGoose)
+	if task.AgentRuntime != agent.BackendGooseCodex {
+		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.BackendGooseCodex)
 	}
 
 	var session state.TaskAgentSession
@@ -1147,8 +1147,8 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 		session, ok = s.Store.GetTaskAgentSession(taskID)
 		return ok
 	}, "migrated task session")
-	if session.AgentRuntime != agent.BackendGoose {
-		t.Fatalf("task session backend = %s, want %s", session.AgentRuntime, agent.BackendGoose)
+	if session.AgentRuntime != agent.BackendGooseCodex {
+		t.Fatalf("task session backend = %s, want %s", session.AgentRuntime, agent.BackendGooseCodex)
 	}
 	if session.RuntimeSessionID == "" {
 		t.Fatal("task session id should be set after runtime migration")
@@ -2782,7 +2782,7 @@ func TestExecuteRunSetsAgentSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	s.Config.AgentRuntime = agent.BackendGoose
+	s.Config.AgentRuntime = agent.BackendGooseCodex
 	sessionRoot := filepath.Join(t.TempDir(), "goose-sessions")
 	s.Config.TaskSession = config.AgentSessionConfig{
 		Mode:    agent.SessionModePROnly,
@@ -2829,7 +2829,7 @@ func TestExecuteRunDisablesAgentSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	s.Config.AgentRuntime = agent.BackendGoose
+	s.Config.AgentRuntime = agent.BackendGooseCodex
 	s.Config.TaskSession = config.AgentSessionConfig{
 		Mode:    agent.SessionModePROnly,
 		Root:    filepath.Join(t.TempDir(), "goose-sessions"),
@@ -3024,7 +3024,7 @@ func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected run token usage for %s", run.ID)
 	}
-	if usage.AgentRuntime != agent.BackendGoose {
+	if usage.AgentRuntime != agent.BackendGooseCodex {
 		t.Fatalf("backend = %q, want goose", usage.AgentRuntime)
 	}
 	if usage.Model != "gpt-5-codex" {

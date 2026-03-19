@@ -1,7 +1,7 @@
 package defaults
 
 const (
-	GooseRunnerImageTag       = "rascal-runner-goose:latest"
+	GooseCodexRunnerImageTag  = "rascal-runner-goose-codex:latest"
 	CodexRunnerImageTag       = "rascal-runner-codex:latest"
 	ClaudeRunnerImageTag      = "rascal-runner-claude:latest"
 	GooseClaudeRunnerImageTag = "rascal-runner-goose-claude:latest"
