@@ -243,7 +243,7 @@ func (s *Store) UpsertTaskAgentSession(in UpsertTaskAgentSessionInput) (TaskAgen
 	now := time.Now().UTC().UnixNano()
 	if err := s.q.UpsertTaskAgentSession(context.Background(), sqlitegen.UpsertTaskAgentSessionParams{
 		TaskID:           in.TaskID,
-		AgentRuntime:       in.AgentRuntime.String(),
+		AgentRuntime:     in.AgentRuntime.String(),
 		RuntimeSessionID: in.RuntimeSessionID,
 		SessionKey:       in.SessionKey,
 		SessionRoot:      in.SessionRoot,

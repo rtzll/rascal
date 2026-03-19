@@ -315,18 +315,18 @@ func TestServerEnvFileOmitsLegacyRunnerImageEnv(t *testing.T) {
 
 func testDeployConfig() Config {
 	return Config{
-		Host:             "example-host",
-		SSHUser:          "root",
-		SSHPort:          22,
-		Domain:           "rascal.example.com",
-		AgentRuntime:     agent.RuntimeCodex,
+		Host:                  "example-host",
+		SSHUser:               "root",
+		SSHPort:               22,
+		Domain:                "rascal.example.com",
+		AgentRuntime:          agent.RuntimeCodex,
 		RunnerImageGooseCodex: defaults.GooseCodexRunnerImageTag,
-		RunnerImageCodex: defaults.CodexRunnerImageTag,
-		ServerListenAddr: ":8080",
-		ServerDataDir:    "/var/lib/rascal",
-		ServerStatePath:  "/var/lib/rascal/state.db",
-		GOARCH:           "amd64",
-		UploadEnvFile:    false,
+		RunnerImageCodex:      defaults.CodexRunnerImageTag,
+		ServerListenAddr:      ":8080",
+		ServerDataDir:         "/var/lib/rascal",
+		ServerStatePath:       "/var/lib/rascal/state.db",
+		GOARCH:                "amd64",
+		UploadEnvFile:         false,
 	}
 }
 

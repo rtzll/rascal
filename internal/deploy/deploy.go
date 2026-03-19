@@ -27,23 +27,23 @@ const (
 )
 
 type Config struct {
-	Host               string
-	SSHUser            string
-	SSHKeyPath         string
-	SSHPort            int
-	Domain             string
-	APIToken           string
-	WebhookSecret      string
-	GitHubRuntimeToken string
-	RunnerMode         runner.Mode
-	AgentRuntime       agent.Runtime
-	RunnerImageGooseCodex   string
-	RunnerImageCodex   string
-	ServerListenAddr   string
-	ServerDataDir      string
-	ServerStatePath    string
-	GOARCH             string
-	UploadEnvFile      bool
+	Host                  string
+	SSHUser               string
+	SSHKeyPath            string
+	SSHPort               int
+	Domain                string
+	APIToken              string
+	WebhookSecret         string
+	GitHubRuntimeToken    string
+	RunnerMode            runner.Mode
+	AgentRuntime          agent.Runtime
+	RunnerImageGooseCodex string
+	RunnerImageCodex      string
+	ServerListenAddr      string
+	ServerDataDir         string
+	ServerStatePath       string
+	GOARCH                string
+	UploadEnvFile         bool
 }
 
 type remoteUpload struct {
@@ -52,16 +52,16 @@ type remoteUpload struct {
 }
 
 type plan struct {
-	Version          int      `json:"version"`
-	CreatedAt        string   `json:"created_at"`
-	Host             string   `json:"host"`
-	Domain           string   `json:"domain,omitempty"`
-	GOARCH           string   `json:"goarch"`
-	AgentRuntime     string   `json:"agent_runtime"`
+	Version               int      `json:"version"`
+	CreatedAt             string   `json:"created_at"`
+	Host                  string   `json:"host"`
+	Domain                string   `json:"domain,omitempty"`
+	GOARCH                string   `json:"goarch"`
+	AgentRuntime          string   `json:"agent_runtime"`
 	RunnerImageGooseCodex string   `json:"runner_image_goose"`
-	RunnerImageCodex string   `json:"runner_image_codex"`
-	UploadEnvFile    bool     `json:"upload_env_file"`
-	Steps            []string `json:"steps"`
+	RunnerImageCodex      string   `json:"runner_image_codex"`
+	UploadEnvFile         bool     `json:"upload_env_file"`
+	Steps                 []string `json:"steps"`
 }
 
 //go:embed assets/install_docker.sh assets/Caddyfile.tmpl
@@ -136,15 +136,15 @@ func Execute(cfg Config) error {
 
 	planPath := filepath.Join(tmpDir, "plan.json")
 	data, err := json.MarshalIndent(plan{
-		Version:          1,
-		Host:             cfg.Host,
-		Domain:           strings.TrimSpace(cfg.Domain),
-		GOARCH:           strings.TrimSpace(cfg.GOARCH),
-		AgentRuntime:     firstNonEmpty(strings.TrimSpace(string(cfg.AgentRuntime)), string(agent.RuntimeGooseCodex)),
+		Version:               1,
+		Host:                  cfg.Host,
+		Domain:                strings.TrimSpace(cfg.Domain),
+		GOARCH:                strings.TrimSpace(cfg.GOARCH),
+		AgentRuntime:          firstNonEmpty(strings.TrimSpace(string(cfg.AgentRuntime)), string(agent.RuntimeGooseCodex)),
 		RunnerImageGooseCodex: strings.TrimSpace(cfg.RunnerImageGooseCodex),
-		RunnerImageCodex: strings.TrimSpace(cfg.RunnerImageCodex),
-		UploadEnvFile:    cfg.UploadEnvFile,
-		CreatedAt:        time.Now().UTC().Format(time.RFC3339),
+		RunnerImageCodex:      strings.TrimSpace(cfg.RunnerImageCodex),
+		UploadEnvFile:         cfg.UploadEnvFile,
+		CreatedAt:             time.Now().UTC().Format(time.RFC3339),
 		Steps: []string{
 			"prepare_remote_dirs",
 			"upload_artifacts",

@@ -128,8 +128,8 @@ func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string,
 
 	if s.Broker != nil {
 		lease, err := s.Broker.Acquire(context.Background(), credentials.AcquireRequest{
-			RunID:             runID,
-			UserID:            requesterUserID,
+			RunID:    runID,
+			UserID:   requesterUserID,
 			Provider: string(runtime.Provider()),
 		})
 		if err == nil {
