@@ -74,15 +74,15 @@ rascal doctor --host YOUR_SERVER_IP
 
 ## Server Credential Settings
 
-Rascal uses encrypted, runtime-scoped stored credentials for agent runs.
+Rascal uses encrypted stored credentials tagged by provider for agent runs.
 
-Each credential is tagged with an `agent_runtime` (`codex` or `claude`). The
+Each credential is tagged with a `provider` (`codex` or `anthropic`). The
 broker automatically filters credentials matching the run's runtime:
 
-- `codex` credentials: used by `codex` and `goose` runtimes (auth.json format).
-- `claude` credentials: used by `claude` and `goose-claude` runtimes (OAuth
+- `codex` credentials: used by `codex` and `goose-codex` runtimes (auth.json format).
+- `anthropic` credentials: used by `claude` and `goose-claude` runtimes (OAuth
   token format).
-- Legacy credentials with no runtime tag are treated as `codex` credentials.
+- Legacy credentials with no provider tag are treated as `codex` credentials.
 
 - `RASCAL_CREDENTIAL_STRATEGY` Allocation strategy for choosing among eligible
   credentials. Default: `requester_own_then_shared`
@@ -98,6 +98,6 @@ broker automatically filters credentials matching the run's runtime:
   Recommended: set a dedicated encryption key instead of reusing the API token.
 
 Operators can manage stored credentials with `rascal auth credentials ...`. Use
-`--runtime codex` or `--runtime claude` when creating credentials to tag them
-for specific runtimes. Bootstrap and deploy flows can seed an initial shared
+`--provider codex` or `--provider anthropic` when creating credentials to tag
+them for specific runtimes. Bootstrap and deploy flows can seed an initial shared
 codex credential with `--codex-auth ~/.codex/auth.json`.

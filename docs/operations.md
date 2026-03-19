@@ -121,15 +121,15 @@ Agent runtime notes:
 
 ## Credential Leasing
 
-Rascal uses runtime-scoped leased stored credentials for all agent runs.
+Rascal uses leased stored credentials tagged by provider for all agent runs.
 
-Each credential is tagged with an `agent_runtime` (`codex` or `claude`). The
+Each credential is tagged with a `provider` (`codex` or `anthropic`). The
 broker automatically selects credentials matching the run's runtime:
 
-- `codex` and `goose` runs use `codex` credentials (auth.json format).
-- `claude` and `goose-claude` runs use `claude` credentials (OAuth token
+- `codex` and `goose-codex` runs use `codex` credentials (auth.json format).
+- `claude` and `goose-claude` runs use `anthropic` credentials (OAuth token
   format).
-- Legacy credentials with no runtime tag are treated as `codex` credentials.
+- Legacy credentials with no provider tag are treated as `codex` credentials.
 
 Operational notes:
 
@@ -140,7 +140,7 @@ Operational notes:
 - Stored credential payloads are encrypted at rest in SQLite using
   `RASCAL_CREDENTIAL_ENCRYPTION_KEY`.
 - Manage credentials with `rascal auth credentials ...`.
-- Use `--runtime codex` or `--runtime claude` when creating credentials.
+- Use `--provider codex` or `--provider anthropic` when creating credentials.
 - `rascal init --codex-auth ...` and `rascal deploy --codex-auth ...` seed or
   update a shared stored codex credential for the server.
 

@@ -160,6 +160,9 @@ func TestAuthCredentialsCreateUsesAuthFile(t *testing.T) {
 	if payload.Scope != "shared" {
 		t.Fatalf("payload scope = %q, want shared", payload.Scope)
 	}
+	if payload.Provider != "codex" {
+		t.Fatalf("payload provider = %q, want codex", payload.Provider)
+	}
 	if payload.Weight != 5 {
 		t.Fatalf("unexpected numeric payload: %+v", payload)
 	}
@@ -172,6 +175,55 @@ func TestAuthCredentialsCreateUsesAuthFile(t *testing.T) {
 	}
 	if out.Credential.ID != "cred_create" {
 		t.Fatalf("unexpected credential output: %+v", out.Credential)
+	}
+}
+
+func TestAuthCredentialsCreateDeprecatedRuntimeAliasMapsClaudeToAnthropic(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "oauth_token")
+	if err := os.WriteFile(authPath, []byte("token"), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	var payload credentialCreateRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/v1/credentials" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(credentialGetResponse{
+			Credential: credentialRecord{
+				ID:        "cred_create",
+				Scope:     payload.Scope,
+				Weight:    payload.Weight,
+				Status:    "active",
+				CreatedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+				UpdatedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := newCredentialTestApp(srv)
+	cmd := a.newAuthCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"credentials", "create",
+		"--auth-file", authPath,
+		"--runtime", "claude",
+	})
+	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
+		t.Fatalf("credentials create with deprecated alias: %v", err)
+	}
+	if payload.Provider != "anthropic" {
+		t.Fatalf("payload provider = %q, want anthropic", payload.Provider)
 	}
 }
 
@@ -211,6 +263,7 @@ func TestAuthCredentialsUpdateSendsChangedFields(t *testing.T) {
 	cmd.SetArgs([]string{
 		"credentials", "update", "cred_update",
 		"--scope", "personal",
+		"--provider", "anthropic",
 		"--owner-user-id", "user_2",
 		"--weight", "9",
 		"--auth-blob", `{"token":"updated"}`,
@@ -220,6 +273,9 @@ func TestAuthCredentialsUpdateSendsChangedFields(t *testing.T) {
 	}
 	if raw.Scope == nil || *raw.Scope != "personal" {
 		t.Fatalf("unexpected scope payload: %v", raw.Scope)
+	}
+	if raw.Provider == nil || *raw.Provider != "anthropic" {
+		t.Fatalf("unexpected provider payload: %v", raw.Provider)
 	}
 	if raw.OwnerUserID == nil || *raw.OwnerUserID != "user_2" {
 		t.Fatalf("unexpected owner payload: %v", raw.OwnerUserID)
