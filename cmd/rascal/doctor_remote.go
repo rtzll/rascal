@@ -21,9 +21,9 @@ type remoteDoctorStatus struct {
 	AuthRuntimeSynced     bool   `json:"auth_runtime_synced"`
 	RunnerImageConfigured bool   `json:"runner_image_configured"`
 	RunnerImagePresent    bool   `json:"runner_image_present"`
-	RunnerImageGoose      string `json:"runner_image_goose,omitempty"`
+	RunnerImageGooseCodex     string `json:"runner_image_goose,omitempty"`
 	RunnerImageCodex      string `json:"runner_image_codex,omitempty"`
-	RunnerImageGooseID    string `json:"runner_image_goose_id,omitempty"`
+	RunnerImageGooseCodexID    string `json:"runner_image_goose_id,omitempty"`
 	RunnerImageCodexID    string `json:"runner_image_codex_id,omitempty"`
 }
 
@@ -74,13 +74,13 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 	}, "\n"))
 	runnerImages, err := runLocalCapture("ssh", sshArgs(cfg, strings.Join([]string{
 		"set -eu",
-		fmt.Sprintf(`goose_image=%q`, defaults.GooseRunnerImageTag),
+		fmt.Sprintf(`goose_image=%q`, defaults.GooseCodexRunnerImageTag),
 		fmt.Sprintf(`codex_image=%q`, defaults.CodexRunnerImageTag),
 		`if [ -f /etc/rascal/rascal.env ]; then`,
 		`  set -a`,
 		`  . /etc/rascal/rascal.env`,
 		`  set +a`,
-		`  if [ -n "${RASCAL_RUNNER_IMAGE_GOOSE:-}" ]; then goose_image=$RASCAL_RUNNER_IMAGE_GOOSE; fi`,
+		`  if [ -n "${RASCAL_RUNNER_IMAGE_GOOSE_CODEX:-}" ]; then goose_image=$RASCAL_RUNNER_IMAGE_GOOSE_CODEX; elif [ -n "${RASCAL_RUNNER_IMAGE_GOOSE:-}" ]; then goose_image=$RASCAL_RUNNER_IMAGE_GOOSE; fi`,
 		`  if [ -n "${RASCAL_RUNNER_IMAGE_CODEX:-}" ]; then codex_image=$RASCAL_RUNNER_IMAGE_CODEX; fi`,
 		`fi`,
 		`printf 'goose=%s\ncodex=%s\n' "$goose_image" "$codex_image"`,
@@ -95,7 +95,7 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 			}
 			switch strings.TrimSpace(key) {
 			case "goose":
-				status.RunnerImageGoose = strings.TrimSpace(value)
+				status.RunnerImageGooseCodex = strings.TrimSpace(value)
 			case "codex":
 				status.RunnerImageCodex = strings.TrimSpace(value)
 			}
@@ -107,7 +107,7 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		`set -a`,
 		`. /etc/rascal/rascal.env`,
 		`set +a`,
-		`goose_image=${RASCAL_RUNNER_IMAGE_GOOSE:-}`,
+		`goose_image=${RASCAL_RUNNER_IMAGE_GOOSE_CODEX:-${RASCAL_RUNNER_IMAGE_GOOSE:-}}`,
 		`codex_image=${RASCAL_RUNNER_IMAGE_CODEX:-}`,
 		`[ -n "$goose_image" ]`,
 		`[ -n "$codex_image" ]`,
@@ -124,7 +124,7 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 			}
 			switch strings.TrimSpace(key) {
 			case "goose_id":
-				status.RunnerImageGooseID = strings.TrimSpace(value)
+				status.RunnerImageGooseCodexID = strings.TrimSpace(value)
 			case "codex_id":
 				status.RunnerImageCodexID = strings.TrimSpace(value)
 			}
@@ -136,7 +136,7 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		`set -a`,
 		`. /etc/rascal/rascal.env`,
 		`set +a`,
-		`[ -n "${RASCAL_RUNNER_IMAGE_GOOSE:-}" ]`,
+		`[ -n "${RASCAL_RUNNER_IMAGE_GOOSE_CODEX:-${RASCAL_RUNNER_IMAGE_GOOSE:-}}" ]`,
 		`[ -n "${RASCAL_RUNNER_IMAGE_CODEX:-}" ]`,
 		"echo ok",
 	}, "\n"))
@@ -148,13 +148,13 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		`  set -a`,
 		`  . /etc/rascal/rascal.env`,
 		`  set +a`,
-		`  goose_image=${RASCAL_RUNNER_IMAGE_GOOSE:-}`,
+		`  goose_image=${RASCAL_RUNNER_IMAGE_GOOSE_CODEX:-${RASCAL_RUNNER_IMAGE_GOOSE:-}}`,
 		`  codex_image=${RASCAL_RUNNER_IMAGE_CODEX:-}`,
 		`  [ -n "$goose_image" ]`,
 		`  [ -n "$codex_image" ]`,
 		`fi`,
 		`docker image inspect "$goose_image" "$codex_image" >/dev/null 2>&1 && echo ok`,
-	}, "\n"), defaults.GooseRunnerImageTag, defaults.CodexRunnerImageTag))
+	}, "\n"), defaults.GooseCodexRunnerImageTag, defaults.CodexRunnerImageTag))
 	return status, nil
 }
 

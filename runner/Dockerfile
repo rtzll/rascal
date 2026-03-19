@@ -81,7 +81,7 @@ RUN groupadd --system --gid "${RUNTIME_GID}" rascal \
     && useradd --system --uid "${RUNTIME_UID}" --gid "${RUNTIME_GID}" --create-home --home-dir /home/rascal --shell /usr/sbin/nologin rascal \
     && install -d -m 0755 -o rascal -g rascal /work /rascal-meta
 
-FROM runner-base AS goose-runner
+FROM runner-base AS goose-codex-runner
 COPY --from=goose-runtime /usr/local/bin/goose /usr/local/bin/goose
 RUN goose --version
 ENV GOOSE_PROVIDER=codex \

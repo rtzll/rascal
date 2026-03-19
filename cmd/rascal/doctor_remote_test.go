@@ -31,14 +31,14 @@ func TestRunRemoteDoctorUsesSlotUnitsOnly(t *testing.T) {
 	if !status.RunnerImageConfigured {
 		t.Fatal("expected explicit runner image config check to pass")
 	}
-	if status.RunnerImageGoose != "rascal-runner-goose:latest" {
-		t.Fatalf("runner image goose = %q, want rascal-runner-goose:latest", status.RunnerImageGoose)
+	if status.RunnerImageGooseCodex != "rascal-runner-goose-codex:latest" {
+		t.Fatalf("runner image goose-codex = %q, want rascal-runner-goose-codex:latest", status.RunnerImageGooseCodex)
 	}
 	if status.RunnerImageCodex != "rascal-runner-codex:latest" {
 		t.Fatalf("runner image codex = %q, want rascal-runner-codex:latest", status.RunnerImageCodex)
 	}
-	if status.RunnerImageGooseID != "sha256:goose123" {
-		t.Fatalf("runner image goose id = %q, want sha256:goose123", status.RunnerImageGooseID)
+	if status.RunnerImageGooseCodexID != "sha256:goose123" {
+		t.Fatalf("runner image goose-codex id = %q, want sha256:goose123", status.RunnerImageGooseCodexID)
 	}
 	if status.RunnerImageCodexID != "sha256:codex456" {
 		t.Fatalf("runner image codex id = %q, want sha256:codex456", status.RunnerImageCodexID)
@@ -100,7 +100,7 @@ if [[ "$cmd" == *"case \"\$slot\" in blue|green) echo \"\$slot\" ;;"* ]]; then
   exit 0
 fi
 if [[ "$cmd" == *"printf 'goose=%s\\ncodex=%s\\n'"* ]]; then
-  printf 'goose=rascal-runner-goose:latest\ncodex=rascal-runner-codex:latest\n'
+  printf 'goose=rascal-runner-goose-codex:latest\ncodex=rascal-runner-codex:latest\n'
   exit 0
 fi
 if [[ "$cmd" == *"printf 'goose_id=%s\\n'"* ]]; then

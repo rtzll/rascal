@@ -9,21 +9,21 @@ rascal deploy --host "$SERVER_IP" --upload-env --github-runtime-token "$RASCAL_G
 rascal deploy --host "$SERVER_IP" --codex-auth ~/.codex/auth.json
 
 Flags:
-      --agent-runtime string          agent runtime to use on the server (goose or codex)
-      --api-token string              orchestrator API token
-      --codex-auth string             local Codex auth.json path to seed as a stored shared credential
-      --domain string                 public domain for TLS/Caddy
-      --github-runtime-token string   GitHub runtime token
-      --goarch string                 GOARCH for rascald binary (auto-detected when empty)
-  -h, --help                          help for deploy
-      --host string                   existing server host (defaults to config host/ssh_host)
-      --runner-image-codex string     codex runner docker image tag (default "rascal-runner-codex:latest")
-      --runner-image-goose string     goose runner docker image tag (default "rascal-runner-goose:latest")
-      --ssh-key string                SSH private key path
-      --ssh-port int                  SSH target port (default 22)
-      --ssh-user string               SSH target user (default "root")
-      --upload-env                    upload/update /etc/rascal/rascal.env on server
-      --webhook-secret string         GitHub webhook secret
+      --agent-runtime string              agent runtime to use on the server (goose or codex)
+      --api-token string                  orchestrator API token
+      --codex-auth string                 local Codex auth.json path to seed as a stored shared credential
+      --domain string                     public domain for TLS/Caddy
+      --github-runtime-token string       GitHub runtime token
+      --goarch string                     GOARCH for rascald binary (auto-detected when empty)
+  -h, --help                              help for deploy
+      --host string                       existing server host (defaults to config host/ssh_host)
+      --runner-image-codex string         codex runner docker image tag (default "rascal-runner-codex:latest")
+      --runner-image-goose-codex string   goose-codex runner docker image tag (default "rascal-runner-goose-codex:latest")
+      --ssh-key string                    SSH private key path
+      --ssh-port int                      SSH target port (default 22)
+      --ssh-user string                   SSH target user (default "root")
+      --upload-env                        upload/update /etc/rascal/rascal.env on server
+      --webhook-secret string             GitHub webhook secret
 
 Global Flags:
       --client-ssh-host string   SSH target host for API transport=ssh/auto

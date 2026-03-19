@@ -291,7 +291,7 @@ func TestDoctorJSONOutputIncludesTypedRemoteStatus(t *testing.T) {
 			AuthRuntimeSynced:     true,
 			RunnerImageConfigured: true,
 			RunnerImagePresent:    true,
-			RunnerImageGoose:      "rascal-runner-goose:latest",
+			RunnerImageGooseCodex: "rascal-runner-goose-codex:latest",
 			RunnerImageCodex:      "rascal-runner-codex:latest",
 		}, nil
 	}
@@ -333,8 +333,8 @@ func TestDoctorJSONOutputIncludesTypedRemoteStatus(t *testing.T) {
 	if !out.Remote.RascalService || out.Remote.ActiveSlot != "blue" {
 		t.Fatalf("unexpected remote status: %+v", out.Remote)
 	}
-	if out.Remote.RunnerImageGoose != "rascal-runner-goose:latest" {
-		t.Fatalf("runner_image_goose = %q, want rascal-runner-goose:latest", out.Remote.RunnerImageGoose)
+	if out.Remote.RunnerImageGooseCodex != "rascal-runner-goose-codex:latest" {
+		t.Fatalf("runner_image_goose_codex = %q, want rascal-runner-goose-codex:latest", out.Remote.RunnerImageGooseCodex)
 	}
 }
 

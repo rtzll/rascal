@@ -29,11 +29,11 @@ func runAgent(ex CommandExecutor, cfg Config) (string, string, error) {
 	case agent.BackendGooseClaude:
 		return RunGooseClaude(ex, cfg)
 	default:
-		return RunGoose(ex, cfg)
+		return RunGooseCodex(ex, cfg)
 	}
 }
 
-func RunGoose(ex CommandExecutor, cfg Config) (string, string, error) {
+func RunGooseCodex(ex CommandExecutor, cfg Config) (string, string, error) {
 	sessionID := configuredRuntimeSessionID(cfg)
 	sessionMode := configuredSessionMode(cfg)
 	sessionKey := configuredSessionKey(cfg)

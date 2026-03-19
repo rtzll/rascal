@@ -315,7 +315,7 @@ func (s *Server) ExecuteRun(runID string) {
 				log.Printf("run %s failed to clear stale %s session for task %s: %v", run.ID, existing.AgentRuntime, run.TaskID, err)
 			}
 		}
-		if backendSessionID == "" && (run.AgentRuntime == agent.BackendGoose || run.AgentRuntime == agent.BackendGooseClaude) {
+		if backendSessionID == "" && agent.IsGooseRuntime(run.AgentRuntime) {
 			backendSessionID = runner.SessionName(run.Repo, run.TaskID)
 		}
 		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {

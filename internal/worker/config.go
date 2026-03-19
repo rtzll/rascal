@@ -119,7 +119,7 @@ func LoadConfig() (Config, error) {
 		if agentSessionKey == "" {
 			agentSessionKey = runner.TaskSessionKey(repo, taskID)
 		}
-		if backendSessionID == "" && agentRuntime == agent.RuntimeGoose {
+		if backendSessionID == "" && agent.IsGooseRuntime(agentRuntime) {
 			backendSessionID = runner.TaskSessionName(repo, taskID)
 		}
 	}

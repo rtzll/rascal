@@ -37,7 +37,7 @@ type ServerConfig struct {
 	RunnerMode              runner.Mode
 	AgentRuntime            agent.Runtime
 	RunnerImage             string
-	RunnerImageGoose        string
+	RunnerImageGooseCodex        string
 	RunnerImageCodex        string
 	RunnerImageClaude       string
 	RunnerImageGooseClaude  string
@@ -96,7 +96,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		BotLogin:                strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
 		RunnerMode:              runnerMode,
 		AgentRuntime:            agentRuntime,
-		RunnerImageGoose:        envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE", defaults.GooseRunnerImageTag),
+		RunnerImageGooseCodex:   firstNonEmptyEnvOrDefault(defaults.GooseCodexRunnerImageTag, "RASCAL_RUNNER_IMAGE_GOOSE_CODEX", "RASCAL_RUNNER_IMAGE_GOOSE"),
 		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
 		RunnerImageClaude:       envOrDefault("RASCAL_RUNNER_IMAGE_CLAUDE", defaults.ClaudeRunnerImageTag),
 		RunnerImageGooseClaude:  envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE", defaults.GooseClaudeRunnerImageTag),
@@ -143,7 +143,7 @@ func (c ServerConfig) RunnerImageForRuntime(runtime agent.Runtime) string {
 	case agent.RuntimeGooseClaude:
 		return strings.TrimSpace(c.RunnerImageGooseClaude)
 	default:
-		return strings.TrimSpace(c.RunnerImageGoose)
+		return strings.TrimSpace(c.RunnerImageGooseCodex)
 	}
 }
 
@@ -293,6 +293,13 @@ func firstNonEmptyEnv(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstNonEmptyEnvOrDefault(fallback string, keys ...string) string {
+	if v := firstNonEmptyEnv(keys...); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func envIntOrDefault(key string, fallback int) int {

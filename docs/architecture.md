@@ -343,8 +343,8 @@ Required:
 Common optional:
 
 - `RASCAL_INSTRUCTION`
-- `RASCAL_AGENT_RUNTIME` (`goose`, `codex`, `claude`, or `goose-claude`;
-  defaults to `goose` when unset)
+- `RASCAL_AGENT_RUNTIME` (`goose-codex`, `codex`, `claude`, or `goose-claude`;
+  defaults to `goose-codex` when unset; `goose` is accepted as an alias)
 - `RASCAL_BASE_BRANCH` (default: `main`)
 - `RASCAL_HEAD_BRANCH` (runner fallback default: `rascal/<run_id>` when unset;
   `rascald` normally sets a task-derived branch and may reuse the previous head

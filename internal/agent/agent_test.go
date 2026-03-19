@@ -15,10 +15,11 @@ func TestNormalizeBackend(t *testing.T) {
 		in   string
 		want Backend
 	}{
-		{name: "default empty", in: "", want: BackendGoose},
-		{name: "default unknown", in: "other", want: BackendGoose},
+		{name: "default empty", in: "", want: BackendGooseCodex},
+		{name: "default unknown", in: "other", want: BackendGooseCodex},
 		{name: "codex explicit", in: " codex ", want: BackendCodex},
-		{name: "goose explicit", in: "GOOSE", want: BackendGoose},
+		{name: "goose-codex explicit", in: "GOOSE-CODEX", want: BackendGooseCodex},
+		{name: "goose alias", in: "GOOSE", want: BackendGooseCodex},
 		{name: "claude explicit", in: " claude ", want: BackendClaude},
 		{name: "goose-claude explicit", in: " goose-claude ", want: BackendGooseClaude},
 	}
@@ -44,9 +45,10 @@ func TestParseBackend(t *testing.T) {
 		want    Backend
 		wantErr bool
 	}{
-		{name: "default empty", in: "", want: BackendGoose},
+		{name: "default empty", in: "", want: BackendGooseCodex},
 		{name: "codex explicit", in: " codex ", want: BackendCodex},
-		{name: "goose explicit", in: "GOOSE", want: BackendGoose},
+		{name: "goose-codex explicit", in: "GOOSE-CODEX", want: BackendGooseCodex},
+		{name: "goose alias", in: "GOOSE", want: BackendGooseCodex},
 		{name: "claude explicit", in: " claude ", want: BackendClaude},
 		{name: "goose-claude explicit", in: " goose-claude ", want: BackendGooseClaude},
 		{name: "invalid", in: "other", wantErr: true},
@@ -176,7 +178,7 @@ func TestCredentialRuntime(t *testing.T) {
 		want    Runtime
 	}{
 		{name: "codex maps to codex", runtime: RuntimeCodex, want: RuntimeCodex},
-		{name: "goose maps to codex", runtime: RuntimeGoose, want: RuntimeCodex},
+		{name: "goose-codex maps to codex", runtime: RuntimeGooseCodex, want: RuntimeCodex},
 		{name: "claude maps to claude", runtime: RuntimeClaude, want: RuntimeClaude},
 		{name: "goose-claude maps to claude", runtime: RuntimeGooseClaude, want: RuntimeClaude},
 		{name: "empty maps to codex", runtime: Runtime(""), want: RuntimeCodex},

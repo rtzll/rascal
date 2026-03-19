@@ -107,8 +107,7 @@ func TestFindWebhookByURL(t *testing.T) {
 	}
 	if hook == nil {
 		t.Fatal("expected webhook to be found")
-	}
-	if hook.ID != 2 {
+	} else if hook.ID != 2 {
 		t.Fatalf("unexpected hook id: %d", hook.ID)
 	}
 }

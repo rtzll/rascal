@@ -1625,11 +1625,11 @@ func (a *app) newDoctorCmd() *cobra.Command {
 						}
 						a.println("remote (%s): rascal=%v slot=%v docker=%v sqlite=%v caddy=%v env=%v auth_synced=%v codex_auth=%v runner_image_configured=%v runner_image=%v",
 							remote.Host, remote.RascalService, activeSlot, remote.DockerInstalled, remote.SQLiteInstalled, remote.CaddyInstalled, remote.EnvFilePresent, remote.AuthRuntimeSynced, false, remote.RunnerImageConfigured, remote.RunnerImagePresent)
-						if gooseImage := strings.TrimSpace(remote.RunnerImageGoose); gooseImage != "" {
-							a.println("remote goose runner image: %s", gooseImage)
+						if gooseImage := strings.TrimSpace(remote.RunnerImageGooseCodex); gooseImage != "" {
+							a.println("remote goose-codex runner image: %s", gooseImage)
 						}
-						if gooseImageID := strings.TrimSpace(remote.RunnerImageGooseID); gooseImageID != "" {
-							a.println("remote goose runner image id: %s", gooseImageID)
+						if gooseImageID := strings.TrimSpace(remote.RunnerImageGooseCodexID); gooseImageID != "" {
+							a.println("remote goose-codex runner image id: %s", gooseImageID)
 						}
 						if codexImage := strings.TrimSpace(remote.RunnerImageCodex); codexImage != "" {
 							a.println("remote codex runner image: %s", codexImage)
@@ -1657,7 +1657,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 					if strings.TrimSpace(remote.Error) == "" && !remote.RunnerImageConfigured {
 						targetUser := firstNonEmpty(strings.TrimSpace(sshUser), strings.TrimSpace(a.cfg.SSHUser), "root")
 						targetHost := firstNonEmpty(strings.TrimSpace(host), strings.TrimSpace(a.cfg.SSHHost), strings.TrimSpace(a.cfg.Host))
-						a.println("hint: remote rascal.env must set explicit runner images: `ssh %s@%s 'printf \"RASCAL_RUNNER_IMAGE_GOOSE=rascal-runner-goose:latest\\nRASCAL_RUNNER_IMAGE_CODEX=rascal-runner-codex:latest\\n\" >> /etc/rascal/rascal.env'`", targetUser, targetHost)
+						a.println("hint: remote rascal.env must set explicit runner images: `ssh %s@%s 'printf \"RASCAL_RUNNER_IMAGE_GOOSE_CODEX=rascal-runner-goose-codex:latest\\nRASCAL_RUNNER_IMAGE_CODEX=rascal-runner-codex:latest\\n\" >> /etc/rascal/rascal.env'`", targetUser, targetHost)
 					}
 				}
 				return nil

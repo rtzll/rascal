@@ -127,23 +127,20 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		"GH_PROMPT_DISABLED":         "1",
 		"GIT_TERMINAL_PROMPT":        "0",
 	}
-	switch backend {
-	case agent.RuntimeGoose:
+	if agent.IsGooseRuntime(backend) {
 		envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
+		envPairs["GOOSE_MODE"] = "auto"
+		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
+		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
+		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
+	}
+	switch backend {
+	case agent.RuntimeGooseCodex:
 		envPairs["GOOSE_PROVIDER"] = "codex"
 		envPairs["GOOSE_MODEL"] = "gpt-5.4"
-		envPairs["GOOSE_MODE"] = "auto"
-		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
-		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
-		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
 	case agent.RuntimeGooseClaude:
-		envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
 		envPairs["GOOSE_PROVIDER"] = "claude-code"
 		envPairs["GOOSE_MODEL"] = "claude-sonnet-4-5"
-		envPairs["GOOSE_MODE"] = "auto"
-		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
-		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
-		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
 		envPairs["CLAUDE_CONFIG_DIR"] = claudeConfigDir
 	case agent.RuntimeClaude:
 		envPairs["CLAUDE_CONFIG_DIR"] = claudeConfigDir

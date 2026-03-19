@@ -37,7 +37,7 @@ type Config struct {
 	GitHubRuntimeToken string
 	RunnerMode         runner.Mode
 	AgentRuntime       agent.Runtime
-	RunnerImageGoose   string
+	RunnerImageGooseCodex   string
 	RunnerImageCodex   string
 	ServerListenAddr   string
 	ServerDataDir      string
@@ -58,7 +58,7 @@ type plan struct {
 	Domain           string   `json:"domain,omitempty"`
 	GOARCH           string   `json:"goarch"`
 	AgentRuntime     string   `json:"agent_runtime"`
-	RunnerImageGoose string   `json:"runner_image_goose"`
+	RunnerImageGooseCodex string   `json:"runner_image_goose"`
 	RunnerImageCodex string   `json:"runner_image_codex"`
 	UploadEnvFile    bool     `json:"upload_env_file"`
 	Steps            []string `json:"steps"`
@@ -140,8 +140,8 @@ func Execute(cfg Config) error {
 		Host:             cfg.Host,
 		Domain:           strings.TrimSpace(cfg.Domain),
 		GOARCH:           strings.TrimSpace(cfg.GOARCH),
-		AgentRuntime:     firstNonEmpty(strings.TrimSpace(string(cfg.AgentRuntime)), string(agent.RuntimeGoose)),
-		RunnerImageGoose: strings.TrimSpace(cfg.RunnerImageGoose),
+		AgentRuntime:     firstNonEmpty(strings.TrimSpace(string(cfg.AgentRuntime)), string(agent.RuntimeGooseCodex)),
+		RunnerImageGooseCodex: strings.TrimSpace(cfg.RunnerImageGooseCodex),
 		RunnerImageCodex: strings.TrimSpace(cfg.RunnerImageCodex),
 		UploadEnvFile:    cfg.UploadEnvFile,
 		CreatedAt:        time.Now().UTC().Format(time.RFC3339),
@@ -210,11 +210,11 @@ set -eu
 mkdir -p /opt/rascal /etc/rascal
 tar -xzf /tmp/rascal-bootstrap/runner.tgz -C /opt/rascal
 install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner
-docker build --target goose-runner -t %s /opt/rascal/runner
+docker build --target goose-codex-runner -t %s /opt/rascal/runner
 docker build --target codex-runner -t %s /opt/rascal/runner
 install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald
 install -m 0644 /tmp/rascal-bootstrap/rascal@.service /etc/systemd/system/rascal@.service
-`)+"\n", shellSingleQuote(cfg.RunnerImageGoose), shellSingleQuote(cfg.RunnerImageCodex))); err != nil {
+`)+"\n", shellSingleQuote(cfg.RunnerImageGooseCodex), shellSingleQuote(cfg.RunnerImageCodex))); err != nil {
 		return err
 	}
 	if cfg.UploadEnvFile {
@@ -623,7 +623,7 @@ func firstNonEmpty(values ...string) string {
 
 func serverEnvFile(cfg Config) string {
 	runtime := strings.TrimSpace(string(cfg.AgentRuntime))
-	gooseImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageGoose), defaults.GooseRunnerImageTag)
+	gooseImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageGooseCodex), defaults.GooseCodexRunnerImageTag)
 	codexImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageCodex), defaults.CodexRunnerImageTag)
 	lines := []string{
 		fmt.Sprintf("RASCAL_LISTEN_ADDR=%s", cfg.ServerListenAddr),
@@ -633,7 +633,7 @@ func serverEnvFile(cfg Config) string {
 		fmt.Sprintf("RASCAL_GITHUB_TOKEN=%s", cfg.GitHubRuntimeToken),
 		fmt.Sprintf("RASCAL_GITHUB_WEBHOOK_SECRET=%s", cfg.WebhookSecret),
 		fmt.Sprintf("RASCAL_RUNNER_MODE=%s", cfg.RunnerMode),
-		fmt.Sprintf("RASCAL_RUNNER_IMAGE_GOOSE=%s", gooseImage),
+		fmt.Sprintf("RASCAL_RUNNER_IMAGE_GOOSE_CODEX=%s", gooseImage),
 		fmt.Sprintf("RASCAL_RUNNER_IMAGE_CODEX=%s", codexImage),
 		"RASCAL_RUNNER_MAX_ATTEMPTS=1",
 		"RASCAL_TASK_SESSION_MODE=all",
