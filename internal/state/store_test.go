@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
@@ -152,19 +152,19 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	task, err := store.UpsertTask(UpsertTaskInput{
 		ID:           "repo#2",
 		Repo:         "owner/repo",
-		AgentRuntime: agent.RuntimeGooseCodex,
+		AgentRuntime: runtime.RuntimeGooseCodex,
 		IssueNumber:  2,
 	})
 	if err != nil {
 		t.Fatalf("upsert goose task: %v", err)
 	}
-	if task.AgentRuntime != agent.RuntimeGooseCodex {
-		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.RuntimeGooseCodex)
+	if task.AgentRuntime != runtime.RuntimeGooseCodex {
+		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, runtime.RuntimeGooseCodex)
 	}
 
 	session, err := store.UpsertTaskAgentSession(UpsertTaskAgentSessionInput{
 		TaskID:           task.ID,
-		AgentRuntime:     agent.RuntimeGooseCodex,
+		AgentRuntime:     runtime.RuntimeGooseCodex,
 		RuntimeSessionID: "goose-session",
 		SessionKey:       "owner-repo-2",
 		SessionRoot:      "/tmp/goose-session",
@@ -173,26 +173,26 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert goose task session: %v", err)
 	}
-	if session.AgentRuntime != agent.RuntimeGooseCodex {
-		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, agent.RuntimeGooseCodex)
+	if session.AgentRuntime != runtime.RuntimeGooseCodex {
+		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, runtime.RuntimeGooseCodex)
 	}
 
 	task, err = store.UpsertTask(UpsertTaskInput{
 		ID:           task.ID,
 		Repo:         task.Repo,
-		AgentRuntime: agent.RuntimeCodex,
+		AgentRuntime: runtime.RuntimeCodex,
 		IssueNumber:  task.IssueNumber,
 	})
 	if err != nil {
 		t.Fatalf("migrate task backend to codex: %v", err)
 	}
-	if task.AgentRuntime != agent.RuntimeCodex {
-		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.RuntimeCodex)
+	if task.AgentRuntime != runtime.RuntimeCodex {
+		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, runtime.RuntimeCodex)
 	}
 
 	session, err = store.UpsertTaskAgentSession(UpsertTaskAgentSessionInput{
 		TaskID:           task.ID,
-		AgentRuntime:     agent.RuntimeCodex,
+		AgentRuntime:     runtime.RuntimeCodex,
 		RuntimeSessionID: "",
 		SessionKey:       "owner-repo-2",
 		SessionRoot:      "/tmp/codex-session",
@@ -201,8 +201,8 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate task session backend to codex: %v", err)
 	}
-	if session.AgentRuntime != agent.RuntimeCodex {
-		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, agent.RuntimeCodex)
+	if session.AgentRuntime != runtime.RuntimeCodex {
+		t.Fatalf("session backend = %s, want %s", session.AgentRuntime, runtime.RuntimeCodex)
 	}
 	if session.RuntimeSessionID != "" {
 		t.Fatalf("session id = %q, want empty after backend migration", session.RuntimeSessionID)
@@ -382,7 +382,7 @@ func TestStoreUpsertRunTokenUsage(t *testing.T) {
 	reasoningOutputTokens := int64(10)
 	usage, err := store.UpsertRunTokenUsage(RunTokenUsage{
 		RunID:                 run.ID,
-		AgentRuntime:          agent.RuntimeGooseCodex,
+		AgentRuntime:          runtime.RuntimeGooseCodex,
 		Provider:              "openai",
 		Model:                 "gpt-5-codex",
 		TotalTokens:           150,

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 )
 
 type gooseSessionInfo struct {
@@ -22,11 +22,11 @@ type gooseSessionInfo struct {
 
 func runAgent(ex CommandExecutor, cfg Config) (string, string, error) {
 	switch configuredAgentRuntime(cfg) {
-	case agent.RuntimeCodex:
+	case runtime.RuntimeCodex:
 		return RunCodex(ex, cfg)
-	case agent.RuntimeClaude:
+	case runtime.RuntimeClaude:
 		return RunClaude(ex, cfg)
-	case agent.RuntimeGooseClaude:
+	case runtime.RuntimeGooseClaude:
 		return RunGooseClaude(ex, cfg)
 	default:
 		return RunGooseCodex(ex, cfg)
@@ -93,7 +93,7 @@ func RunGooseCodex(ex CommandExecutor, cfg Config) (string, string, error) {
 
 func GooseRunArgs(cfg Config, resume bool) []string {
 	args := []string{"run"}
-	if configuredSessionMode(cfg) != agent.SessionModeOff && configuredRuntimeSessionID(cfg) != "" {
+	if configuredSessionMode(cfg) != runtime.SessionModeOff && configuredRuntimeSessionID(cfg) != "" {
 		args = append(args, "--name", configuredRuntimeSessionID(cfg))
 		if resume {
 			args = append(args, "--resume")

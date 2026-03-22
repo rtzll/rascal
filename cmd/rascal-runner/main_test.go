@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/worker"
@@ -256,7 +256,7 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.Trigger != runtrigger.NameCLI {
 		t.Fatalf("expected default trigger cli, got %q", cfg.Trigger)
 	}
-	if cfg.TaskSession.Mode != agent.SessionModeOff {
+	if cfg.TaskSession.Mode != runtime.SessionModeOff {
 		t.Fatalf("expected default agent session mode off, got %q", cfg.TaskSession.Mode)
 	}
 	if cfg.TaskSession.Resume {
@@ -324,8 +324,8 @@ func TestLoadConfigRespectsTaskSessionEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig returned error: %v", err)
 	}
-	if cfg.TaskSession.Mode != agent.SessionModePROnly {
-		t.Fatalf("TaskSession.Mode = %q, want %q", cfg.TaskSession.Mode, agent.SessionModePROnly)
+	if cfg.TaskSession.Mode != runtime.SessionModePROnly {
+		t.Fatalf("TaskSession.Mode = %q, want %q", cfg.TaskSession.Mode, runtime.SessionModePROnly)
 	}
 	if !cfg.TaskSession.Resume {
 		t.Fatal("TaskSession.Resume should be true")
@@ -396,7 +396,7 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 		InstructionsPath: filepath.Join(root, "instructions.md"),
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
-		TaskSession:      runner.SessionSpec{Mode: agent.SessionModeOff},
+		TaskSession:      runner.SessionSpec{Mode: runtime.SessionModeOff},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
@@ -437,7 +437,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
 		TaskSession: runner.SessionSpec{
-			Mode:             agent.SessionModePROnly,
+			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
 			RuntimeSessionID: "rascal-owner-repo-task-abc123",
@@ -490,7 +490,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
 		TaskSession: runner.SessionSpec{
-			Mode:             agent.SessionModePROnly,
+			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-missing",
 			RuntimeSessionID: "rascal-owner-repo-task-missing",
@@ -542,7 +542,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 		GooseDebug:       false,
 		GoosePathRoot:    sessionRoot,
 		TaskSession: runner.SessionSpec{
-			Mode:             agent.SessionModePROnly,
+			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
 			RuntimeSessionID: "rascal-owner-repo-task-abc123",
@@ -650,7 +650,7 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
 		TaskSession: runner.SessionSpec{
-			Mode:             agent.SessionModePROnly,
+			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
 			RuntimeSessionID: "rascal-owner-repo-task-abc123",
@@ -704,7 +704,7 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
 		TaskSession: runner.SessionSpec{
-			Mode:             agent.SessionModePROnly,
+			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
 			RuntimeSessionID: "rascal-owner-repo-task-abc123",
@@ -754,7 +754,7 @@ func TestRunCodexFreshSession(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		CodexHome:        codexHome,
-		AgentRuntime:     agent.RuntimeCodex,
+		AgentRuntime:     runtime.RuntimeCodex,
 	}
 	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
 		t.Fatalf("mkdir codex sessions: %v", err)
@@ -833,9 +833,9 @@ func TestRunCodexResumeSession(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		CodexHome:        codexHome,
-		AgentRuntime:     agent.RuntimeCodex,
+		AgentRuntime:     runtime.RuntimeCodex,
 		TaskSession: runner.SessionSpec{
-			Mode:             agent.SessionModeAll,
+			Mode:             runtime.SessionModeAll,
 			Resume:           true,
 			RuntimeSessionID: "session-abc",
 		},
@@ -900,7 +900,7 @@ func TestRunClaudeFreshSession(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		ClaudeConfigDir:  filepath.Join(root, "claude"),
-		AgentRuntime:     agent.RuntimeClaude,
+		AgentRuntime:     runtime.RuntimeClaude,
 	}
 	if err := os.MkdirAll(filepath.Join(root, "claude"), 0o755); err != nil {
 		t.Fatalf("mkdir claude dir: %v", err)
@@ -979,9 +979,9 @@ func TestRunClaudeResumeSession(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		ClaudeConfigDir:  filepath.Join(root, "claude"),
-		AgentRuntime:     agent.RuntimeClaude,
+		AgentRuntime:     runtime.RuntimeClaude,
 		TaskSession: runner.SessionSpec{
-			Mode:             agent.SessionModeAll,
+			Mode:             runtime.SessionModeAll,
 			Resume:           true,
 			RuntimeSessionID: "session-claude-abc",
 		},
@@ -1037,7 +1037,7 @@ func TestRunClaudeNoTokenFile(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		ClaudeConfigDir:  filepath.Join(root, "claude"),
-		AgentRuntime:     agent.RuntimeClaude,
+		AgentRuntime:     runtime.RuntimeClaude,
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
@@ -1089,7 +1089,7 @@ func TestClaudeRunArgs(t *testing.T) {
 	t.Run("resume_with_session", func(t *testing.T) {
 		cfgResume := cfg
 		cfgResume.TaskSession = runner.SessionSpec{
-			Mode:             agent.SessionModeAll,
+			Mode:             runtime.SessionModeAll,
 			Resume:           true,
 			RuntimeSessionID: "sess-42",
 		}
@@ -1119,7 +1119,7 @@ func TestRunGooseClaudeFreshSession(t *testing.T) {
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		GoosePathRoot:    filepath.Join(root, "goose"),
 		ClaudeConfigDir:  filepath.Join(root, "claude"),
-		AgentRuntime:     agent.RuntimeGooseClaude,
+		AgentRuntime:     runtime.RuntimeGooseClaude,
 	}
 	if err := os.MkdirAll(filepath.Join(root, "claude"), 0o755); err != nil {
 		t.Fatalf("mkdir claude dir: %v", err)
@@ -1181,7 +1181,7 @@ func TestRunGooseClaudeNoTokenFile(t *testing.T) {
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		GoosePathRoot:    filepath.Join(root, "goose"),
 		ClaudeConfigDir:  filepath.Join(root, "claude"),
-		AgentRuntime:     agent.RuntimeGooseClaude,
+		AgentRuntime:     runtime.RuntimeGooseClaude,
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)

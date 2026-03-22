@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 )
 
 // DockerLauncher runs a task inside a Docker container.
@@ -41,7 +41,7 @@ const (
 )
 
 func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
-	backend := agent.NormalizeRuntime(string(spec.AgentRuntime))
+	backend := runtime.NormalizeRuntime(string(spec.AgentRuntime))
 	image := strings.TrimSpace(spec.RunnerImage)
 	if image == "" {
 		image = strings.TrimSpace(l.DefaultImage)
@@ -94,10 +94,10 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 	sessionMountTarget := ""
 	if sessionResume && sessionDir != "" {
 		switch backend {
-		case agent.RuntimeCodex:
+		case runtime.RuntimeCodex:
 			codexHome = containerCodexSessionDir
 			sessionMountTarget = containerCodexSessionDir
-		case agent.RuntimeClaude:
+		case runtime.RuntimeClaude:
 			claudeConfigDir = containerClaudeSessionDir
 			sessionMountTarget = containerClaudeSessionDir
 		default:
@@ -127,7 +127,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		"GH_PROMPT_DISABLED":         "1",
 		"GIT_TERMINAL_PROMPT":        "0",
 	}
-	if backend.Harness() == agent.HarnessGoose {
+	if backend.Harness() == runtime.HarnessGoose {
 		envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
 		envPairs["GOOSE_MODE"] = "auto"
 		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
@@ -135,14 +135,14 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
 	}
 	switch backend {
-	case agent.RuntimeGooseCodex:
+	case runtime.RuntimeGooseCodex:
 		envPairs["GOOSE_PROVIDER"] = "codex"
 		envPairs["GOOSE_MODEL"] = "gpt-5.4"
-	case agent.RuntimeGooseClaude:
+	case runtime.RuntimeGooseClaude:
 		envPairs["GOOSE_PROVIDER"] = "claude-code"
 		envPairs["GOOSE_MODEL"] = "claude-sonnet-4-5"
 		envPairs["CLAUDE_CONFIG_DIR"] = claudeConfigDir
-	case agent.RuntimeClaude:
+	case runtime.RuntimeClaude:
 		envPairs["CLAUDE_CONFIG_DIR"] = claudeConfigDir
 	}
 	if strings.TrimSpace(l.GitHubToken) != "" {
@@ -178,7 +178,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 	if _, err := fmt.Fprintf(logFile, "[%s] task session agent_runtime=%s mode=%s resume=%t key=%s session_id=%s path_root=%s\n",
 		time.Now().UTC().Format(time.RFC3339),
 		backend,
-		agent.NormalizeSessionMode(string(sessionMode)),
+		runtime.NormalizeSessionMode(string(sessionMode)),
 		sessionResume,
 		sessionKey,
 		backendSessionID,

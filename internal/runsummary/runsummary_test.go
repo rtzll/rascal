@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
@@ -278,7 +278,7 @@ func TestBuildStartComment(t *testing.T) {
 			RunID:             "run_abc123",
 			RequestedBy:       "alice",
 			Trigger:           runtrigger.NameIssueLabel,
-			AgentRuntime:      agent.RuntimeCodex,
+			AgentRuntime:      runtime.RuntimeCodex,
 			RunnerCommit:      "abc1234",
 			BaseBranch:        "main",
 			HeadBranch:        "rascal/fix-flaky-test-abc123",
@@ -313,7 +313,7 @@ func TestBuildStartComment(t *testing.T) {
 		body := BuildStartComment(StartCommentInput{
 			RunID:         "run_pr_feedback",
 			Trigger:       runtrigger.NamePRReviewComment,
-			AgentRuntime:  agent.RuntimeCodex,
+			AgentRuntime:  runtime.RuntimeCodex,
 			BaseBranch:    "main",
 			HeadBranch:    "rascal/pr-77",
 			SessionMode:   "pr-only",

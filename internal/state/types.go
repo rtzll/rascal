@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
@@ -199,7 +199,7 @@ type Run struct {
 	TaskID       string          `json:"task_id"`
 	Repo         string          `json:"repo"`
 	Instruction  string          `json:"instruction"`
-	AgentRuntime agent.Runtime   `json:"agent_runtime"`
+	AgentRuntime runtime.Runtime   `json:"agent_runtime"`
 	BaseBranch   string          `json:"base_branch"`
 	HeadBranch   string          `json:"head_branch"`
 	Trigger      runtrigger.Name `json:"trigger"`
@@ -225,7 +225,7 @@ type Run struct {
 type Task struct {
 	ID           string        `json:"id"`
 	Repo         string        `json:"repo"`
-	AgentRuntime agent.Runtime `json:"agent_runtime"`
+	AgentRuntime runtime.Runtime `json:"agent_runtime"`
 	IssueNumber  int           `json:"issue_number,omitempty"`
 	PRNumber     int           `json:"pr_number,omitempty"`
 	Status       TaskStatus    `json:"status"`
@@ -322,7 +322,7 @@ type RunExecution struct {
 
 type RunTokenUsage struct {
 	RunID                 string        `json:"run_id"`
-	AgentRuntime          agent.Runtime `json:"agent_runtime"`
+	AgentRuntime          runtime.Runtime `json:"agent_runtime"`
 	Provider              string        `json:"provider,omitempty"`
 	Model                 string        `json:"model,omitempty"`
 	TotalTokens           int64         `json:"total_tokens"`
@@ -375,7 +375,7 @@ type CreateRunInput struct {
 	TaskID       string
 	Repo         string
 	Instruction  string
-	AgentRuntime agent.Runtime
+	AgentRuntime runtime.Runtime
 	BaseBranch   string
 	HeadBranch   string
 	Trigger      runtrigger.Name
@@ -390,14 +390,14 @@ type CreateRunInput struct {
 type UpsertTaskInput struct {
 	ID           string
 	Repo         string
-	AgentRuntime agent.Runtime
+	AgentRuntime runtime.Runtime
 	IssueNumber  int
 	PRNumber     int
 }
 
 type TaskSession struct {
 	TaskID           string        `json:"task_id"`
-	AgentRuntime     agent.Runtime `json:"agent_runtime"`
+	AgentRuntime     runtime.Runtime `json:"agent_runtime"`
 	RuntimeSessionID string        `json:"runtime_session_id,omitempty"`
 	SessionKey       string        `json:"session_key,omitempty"`
 	SessionRoot      string        `json:"session_root,omitempty"`
@@ -410,7 +410,7 @@ type TaskAgentSession = TaskSession
 
 type UpsertTaskSessionInput struct {
 	TaskID           string
-	AgentRuntime     agent.Runtime
+	AgentRuntime     runtime.Runtime
 	RuntimeSessionID string
 	SessionKey       string
 	SessionRoot      string

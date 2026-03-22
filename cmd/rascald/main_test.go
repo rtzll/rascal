@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	agentrt "github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/credentials"
 	ghapi "github.com/rtzll/rascal/internal/github"
@@ -1095,21 +1095,21 @@ func TestHandleWebhookIssueEditedRequeuesRuns(t *testing.T) {
 func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeLauncher{})
-	s.Config.TaskSession.Mode = agent.SessionModeAll
+	s.Config.TaskSession.Mode = agentrt.SessionModeAll
 	defer waitForServerIdle(t, s)
 
 	const taskID = "owner/repo#7"
 	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
 		ID:           taskID,
 		Repo:         "owner/repo",
-		AgentRuntime: agent.RuntimeCodex,
+		AgentRuntime: agentrt.RuntimeCodex,
 		IssueNumber:  7,
 	}); err != nil {
 		t.Fatalf("upsert legacy task: %v", err)
 	}
 	if _, err := s.Store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
 		TaskID:           taskID,
-		AgentRuntime:     agent.RuntimeCodex,
+		AgentRuntime:     agentrt.RuntimeCodex,
 		RuntimeSessionID: "legacy-codex-session",
 		SessionKey:       "legacy",
 		SessionRoot:      filepath.Join(t.TempDir(), "legacy-session"),
@@ -1129,16 +1129,16 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return len(s.Store.ListRuns(10)) == 1 }, "run queued")
 
 	run := s.Store.ListRuns(10)[0]
-	if run.AgentRuntime != agent.RuntimeGooseCodex {
-		t.Fatalf("run backend = %s, want %s", run.AgentRuntime, agent.RuntimeGooseCodex)
+	if run.AgentRuntime != agentrt.RuntimeGooseCodex {
+		t.Fatalf("run backend = %s, want %s", run.AgentRuntime, agentrt.RuntimeGooseCodex)
 	}
 
 	task, ok := s.Store.GetTask(taskID)
 	if !ok {
 		t.Fatalf("missing task %s", taskID)
 	}
-	if task.AgentRuntime != agent.RuntimeGooseCodex {
-		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agent.RuntimeGooseCodex)
+	if task.AgentRuntime != agentrt.RuntimeGooseCodex {
+		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agentrt.RuntimeGooseCodex)
 	}
 
 	var session state.TaskAgentSession
@@ -1147,8 +1147,8 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 		session, ok = s.Store.GetTaskAgentSession(taskID)
 		return ok
 	}, "migrated task session")
-	if session.AgentRuntime != agent.RuntimeGooseCodex {
-		t.Fatalf("task session backend = %s, want %s", session.AgentRuntime, agent.RuntimeGooseCodex)
+	if session.AgentRuntime != agentrt.RuntimeGooseCodex {
+		t.Fatalf("task session backend = %s, want %s", session.AgentRuntime, agentrt.RuntimeGooseCodex)
 	}
 	if session.RuntimeSessionID == "" {
 		t.Fatal("task session id should be set after runtime migration")
@@ -2782,10 +2782,10 @@ func TestExecuteRunSetsAgentSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	s.Config.AgentRuntime = agent.RuntimeGooseCodex
+	s.Config.AgentRuntime = agentrt.RuntimeGooseCodex
 	sessionRoot := filepath.Join(t.TempDir(), "goose-sessions")
 	s.Config.TaskSession = config.AgentSessionConfig{
-		Mode:    agent.SessionModePROnly,
+		Mode:    agentrt.SessionModePROnly,
 		Root:    sessionRoot,
 		TTLDays: 0,
 	}
@@ -2829,9 +2829,9 @@ func TestExecuteRunDisablesAgentSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 
-	s.Config.AgentRuntime = agent.RuntimeGooseCodex
+	s.Config.AgentRuntime = agentrt.RuntimeGooseCodex
 	s.Config.TaskSession = config.AgentSessionConfig{
-		Mode:    agent.SessionModePROnly,
+		Mode:    agentrt.SessionModePROnly,
 		Root:    filepath.Join(t.TempDir(), "goose-sessions"),
 		TTLDays: 0,
 	}
@@ -3024,7 +3024,7 @@ func TestExecuteRunPersistsStructuredRunTokenUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected run token usage for %s", run.ID)
 	}
-	if usage.AgentRuntime != agent.RuntimeGooseCodex {
+	if usage.AgentRuntime != agentrt.RuntimeGooseCodex {
 		t.Fatalf("backend = %q, want goose", usage.AgentRuntime)
 	}
 	if usage.Model != "gpt-5-codex" {
@@ -3490,8 +3490,8 @@ func TestPostRunStartCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 		t.Fatalf("write response target: %v", err)
 	}
 
-	s.PostRunStartCommentBestEffort(run, agent.SessionModeAll, true)
-	s.PostRunStartCommentBestEffort(run, agent.SessionModeAll, true)
+	s.PostRunStartCommentBestEffort(run, agentrt.SessionModeAll, true)
+	s.PostRunStartCommentBestEffort(run, agentrt.SessionModeAll, true)
 
 	if calls := fakeGH.createCommentCalls(); calls != 1 {
 		t.Fatalf("expected a single github comment call, got %d", calls)
@@ -3556,7 +3556,7 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 		t.Fatalf("write response target: %v", err)
 	}
 
-	s.PostRunStartCommentBestEffort(run, agent.SessionModeAll, false)
+	s.PostRunStartCommentBestEffort(run, agentrt.SessionModeAll, false)
 
 	if calls := fakeGH.createCommentCalls(); calls != 1 {
 		t.Fatalf("expected one github comment call after first attempt, got %d", calls)
@@ -3568,7 +3568,7 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 		t.Fatalf("expected start marker to be absent after failed post, stat err=%v", err)
 	}
 
-	s.PostRunStartCommentBestEffort(run, agent.SessionModeAll, false)
+	s.PostRunStartCommentBestEffort(run, agentrt.SessionModeAll, false)
 
 	if calls := fakeGH.createCommentCalls(); calls != 2 {
 		t.Fatalf("expected second github comment call on retry, got %d", calls)
@@ -3626,7 +3626,7 @@ func TestPostRunStartCommentIncludesRunnerBuildCommit(t *testing.T) {
 		t.Fatalf("write response target: %v", err)
 	}
 
-	s.PostRunStartCommentBestEffort(run, agent.SessionModeAll, false)
+	s.PostRunStartCommentBestEffort(run, agentrt.SessionModeAll, false)
 
 	comments := fakeGH.postedComments()
 	if len(comments) != 1 {

@@ -1,4 +1,4 @@
-package agent
+package runtime
 
 import "github.com/rtzll/rascal/internal/runtrigger"
 

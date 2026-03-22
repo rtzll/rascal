@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/defaults"
 )
 
@@ -319,7 +319,7 @@ func testDeployConfig() Config {
 		SSHUser:               "root",
 		SSHPort:               22,
 		Domain:                "rascal.example.com",
-		AgentRuntime:          agent.RuntimeCodex,
+		AgentRuntime:          runtime.RuntimeCodex,
 		RunnerImageGooseCodex: defaults.GooseCodexRunnerImageTag,
 		RunnerImageCodex:      defaults.CodexRunnerImageTag,
 		ServerListenAddr:      ":8080",

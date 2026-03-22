@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
@@ -17,7 +17,7 @@ type Spec struct {
 	TaskID       string
 	Repo         string
 	Instruction  string
-	AgentRuntime agent.Runtime
+	AgentRuntime runtime.Runtime
 	RunnerImage  string
 	BaseBranch   string
 	HeadBranch   string
@@ -67,7 +67,7 @@ func ExecutionHandleForRun(runID string) ExecutionHandle {
 }
 
 type TaskSessionSpec struct {
-	Mode             agent.SessionMode
+	Mode             runtime.SessionMode
 	Resume           bool
 	TaskDir          string
 	TaskKey          string

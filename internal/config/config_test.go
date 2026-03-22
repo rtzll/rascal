@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runner"
 )
 
@@ -161,7 +161,7 @@ func TestLoadServerConfigGooseSessionDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadServerConfig returned error: %v", err)
 	}
-	if cfg.TaskSession.Mode != agent.SessionModeAll {
+	if cfg.TaskSession.Mode != runtime.SessionModeAll {
 		t.Fatalf("TaskSession.Mode = %q, want all", cfg.TaskSession.Mode)
 	}
 	wantRoot := filepath.Join(dataDir, "agent-sessions")
@@ -201,7 +201,7 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadServerConfig returned error: %v", err)
 	}
-	if cfg.TaskSession.Mode != agent.SessionModePROnly {
+	if cfg.TaskSession.Mode != runtime.SessionModePROnly {
 		t.Fatalf("TaskSession.Mode = %q, want pr-only", cfg.TaskSession.Mode)
 	}
 	if cfg.TaskSession.Root != root {

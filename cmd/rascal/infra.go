@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/defaults"
 	"github.com/spf13/cobra"
 )
@@ -302,9 +302,9 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	provisionedArch := strings.TrimSpace(input.ProvisionedArch)
 	codexAuthPath := strings.TrimSpace(input.CodexAuthPath)
 	domain := firstNonEmpty(strings.TrimSpace(input.Domain), strings.TrimSpace(a.cfg.Domain))
-	var agentRuntime agent.Runtime
+	var agentRuntime runtime.Runtime
 	if raw := strings.TrimSpace(input.AgentRuntime); raw != "" {
-		parsedRuntime, err := agent.ParseRuntime(raw)
+		parsedRuntime, err := runtime.ParseRuntime(raw)
 		if err != nil {
 			return deployExistingResult{}, &cliError{Code: exitInput, Message: "invalid --agent-runtime", Cause: err}
 		}

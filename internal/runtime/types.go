@@ -1,4 +1,4 @@
-package agent
+package runtime
 
 type ModelProvider string
 

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
@@ -35,7 +35,7 @@ type Config struct {
 	PRBodyPath       string
 
 	GooseDebug   bool
-	AgentRuntime agent.Runtime
+	AgentRuntime runtime.Runtime
 
 	GoosePathRoot   string
 	CodexHome       string
@@ -100,17 +100,17 @@ func LoadConfig() (Config, error) {
 		}
 	}
 
-	agentRuntime, err := agent.ParseRuntime(strings.TrimSpace(os.Getenv("RASCAL_AGENT_RUNTIME")))
+	agentRuntime, err := runtime.ParseRuntime(strings.TrimSpace(os.Getenv("RASCAL_AGENT_RUNTIME")))
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid RASCAL_AGENT_RUNTIME: %w", err)
 	}
 	agentSessionModeRaw := strings.TrimSpace(os.Getenv("RASCAL_TASK_SESSION_MODE"))
-	agentSessionMode, err := agent.ParseSessionMode(agentSessionModeRaw)
+	agentSessionMode, err := runtime.ParseSessionMode(agentSessionModeRaw)
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid agent session mode: %w", err)
 	}
 	agentSessionResume := parseBoolEnv(strings.TrimSpace(os.Getenv("RASCAL_TASK_SESSION_RESUME")), false)
-	if agentSessionMode == agent.SessionModeOff {
+	if agentSessionMode == runtime.SessionModeOff {
 		agentSessionResume = false
 	}
 	agentSessionKey := strings.TrimSpace(os.Getenv("RASCAL_TASK_SESSION_KEY"))
@@ -119,7 +119,7 @@ func LoadConfig() (Config, error) {
 		if agentSessionKey == "" {
 			agentSessionKey = runner.TaskSessionKey(repo, taskID)
 		}
-		if backendSessionID == "" && agentRuntime.Harness() == agent.HarnessGoose {
+		if backendSessionID == "" && agentRuntime.Harness() == runtime.HarnessGoose {
 			backendSessionID = runner.TaskSessionName(repo, taskID)
 		}
 	}
@@ -183,12 +183,12 @@ func parseBoolEnv(raw string, fallback bool) bool {
 	}
 }
 
-func configuredAgentRuntime(cfg Config) agent.Runtime {
-	return agent.NormalizeRuntime(string(cfg.AgentRuntime))
+func configuredAgentRuntime(cfg Config) runtime.Runtime {
+	return runtime.NormalizeRuntime(string(cfg.AgentRuntime))
 }
 
-func configuredSessionMode(cfg Config) agent.SessionMode {
-	return agent.NormalizeSessionMode(string(cfg.TaskSession.Mode))
+func configuredSessionMode(cfg Config) runtime.SessionMode {
+	return runtime.NormalizeSessionMode(string(cfg.TaskSession.Mode))
 }
 
 func configuredSessionResume(cfg Config) bool {
@@ -244,11 +244,11 @@ func requireCommands(ex CommandExecutor, names ...string) error {
 func validateCommands(ex CommandExecutor, cfg Config) error {
 	names := []string{"git", "gh"}
 	switch configuredAgentRuntime(cfg) {
-	case agent.RuntimeCodex:
+	case runtime.RuntimeCodex:
 		names = append(names, "codex")
-	case agent.RuntimeClaude:
+	case runtime.RuntimeClaude:
 		names = append(names, "claude")
-	case agent.RuntimeGooseClaude:
+	case runtime.RuntimeGooseClaude:
 		names = append(names, "goose", "claude")
 	default:
 		names = append(names, "goose")

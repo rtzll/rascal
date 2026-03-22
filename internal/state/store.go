@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/pressly/goose/v3"
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state/sqlitegen"
 	_ "modernc.org/sqlite"
@@ -121,7 +121,7 @@ func NewRunID() (string, error) {
 func (s *Store) UpsertTask(in UpsertTaskInput) (Task, error) {
 	in.ID = strings.TrimSpace(in.ID)
 	in.Repo = NormalizeRepo(in.Repo)
-	in.AgentRuntime = agent.NormalizeRuntime(string(in.AgentRuntime))
+	in.AgentRuntime = runtime.NormalizeRuntime(string(in.AgentRuntime))
 	if in.ID == "" || in.Repo == "" {
 		return Task{}, fmt.Errorf("task id and repo are required")
 	}
@@ -231,7 +231,7 @@ func (s *Store) MarkTaskOpen(taskID string) error {
 
 func (s *Store) UpsertTaskAgentSession(in UpsertTaskAgentSessionInput) (TaskAgentSession, error) {
 	in.TaskID = strings.TrimSpace(in.TaskID)
-	in.AgentRuntime = agent.NormalizeRuntime(string(in.AgentRuntime))
+	in.AgentRuntime = runtime.NormalizeRuntime(string(in.AgentRuntime))
 	in.RuntimeSessionID = strings.TrimSpace(in.RuntimeSessionID)
 	in.SessionKey = strings.TrimSpace(in.SessionKey)
 	in.SessionRoot = strings.TrimSpace(in.SessionRoot)
@@ -295,7 +295,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	in.ID = strings.TrimSpace(in.ID)
 	in.TaskID = strings.TrimSpace(in.TaskID)
 	in.Repo = NormalizeRepo(in.Repo)
-	in.AgentRuntime = agent.NormalizeRuntime(string(in.AgentRuntime))
+	in.AgentRuntime = runtime.NormalizeRuntime(string(in.AgentRuntime))
 	if in.ID == "" || in.TaskID == "" || in.Repo == "" {
 		return Run{}, fmt.Errorf("id, task_id and repo are required")
 	}
@@ -793,7 +793,7 @@ func (s *Store) DeleteRunExecution(runID string) error {
 
 func (s *Store) UpsertRunTokenUsage(usage RunTokenUsage) (RunTokenUsage, error) {
 	usage.RunID = strings.TrimSpace(usage.RunID)
-	usage.AgentRuntime = agent.NormalizeRuntime(string(usage.AgentRuntime))
+	usage.AgentRuntime = runtime.NormalizeRuntime(string(usage.AgentRuntime))
 	usage.Provider = strings.TrimSpace(usage.Provider)
 	usage.Model = strings.TrimSpace(usage.Model)
 	usage.RawUsageJSON = strings.TrimSpace(usage.RawUsageJSON)
@@ -1100,7 +1100,7 @@ func fromDBTaskParts(id, repo, agentRuntime string, issueNumber, prNumber int64,
 	return Task{
 		ID:           id,
 		Repo:         repo,
-		AgentRuntime: agent.NormalizeRuntime(agentRuntime),
+		AgentRuntime: runtime.NormalizeRuntime(agentRuntime),
 		IssueNumber:  int(issueNumber),
 		PRNumber:     int(prNumber),
 		Status:       NormalizeTaskStatus(TaskStatus(status)),
@@ -1125,7 +1125,7 @@ func fromDBRunParts(id, taskID, repo, task, agentRuntime, baseBranch, headBranch
 		TaskID:       taskID,
 		Repo:         repo,
 		Instruction:  task,
-		AgentRuntime: agent.NormalizeRuntime(agentRuntime),
+		AgentRuntime: runtime.NormalizeRuntime(agentRuntime),
 		BaseBranch:   baseBranch,
 		HeadBranch:   headBranch,
 		Trigger:      runtrigger.Normalize(trigger),
@@ -1203,7 +1203,7 @@ func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {
 func fromDBTaskAgentSession(s sqlitegen.TaskAgentSession) TaskSession {
 	return TaskSession{
 		TaskID:           s.TaskID,
-		AgentRuntime:     agent.NormalizeRuntime(s.AgentRuntime),
+		AgentRuntime:     runtime.NormalizeRuntime(s.AgentRuntime),
 		RuntimeSessionID: s.RuntimeSessionID,
 		SessionKey:       s.SessionKey,
 		SessionRoot:      s.SessionRoot,
@@ -1219,7 +1219,7 @@ func toDBUpdateRunParams(r Run) sqlitegen.UpdateRunParams {
 		TaskID:       r.TaskID,
 		Repo:         r.Repo,
 		Task:         r.Instruction,
-		AgentRuntime: agent.NormalizeRuntime(string(r.AgentRuntime)).String(),
+		AgentRuntime: runtime.NormalizeRuntime(string(r.AgentRuntime)).String(),
 		BaseBranch:   r.BaseBranch,
 		HeadBranch:   r.HeadBranch,
 		Trigger:      r.Trigger.String(),
@@ -1252,7 +1252,7 @@ func optionalPositiveInt64(v int) sql.NullInt64 {
 func fromDBRunTokenUsage(row sqlitegen.RunTokenUsage) RunTokenUsage {
 	return RunTokenUsage{
 		RunID:                 row.RunID,
-		AgentRuntime:          agent.NormalizeRuntime(row.Backend),
+		AgentRuntime:          runtime.NormalizeRuntime(row.Backend),
 		Provider:              row.Provider,
 		Model:                 row.Model,
 		TotalTokens:           row.TotalTokens,

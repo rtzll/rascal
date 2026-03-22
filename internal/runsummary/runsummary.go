@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
@@ -31,7 +31,7 @@ type StartCommentInput struct {
 	RunID             string
 	RequestedBy       string
 	Trigger           runtrigger.Name
-	AgentRuntime      agent.Runtime
+	AgentRuntime      runtime.Runtime
 	RunnerCommit      string
 	BaseBranch        string
 	HeadBranch        string

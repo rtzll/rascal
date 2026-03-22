@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 )
 
 func TestSanitizeContainerName(t *testing.T) {
@@ -202,7 +202,7 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
-		AgentRuntime: agent.RuntimeGooseCodex,
+		AgentRuntime: runtime.RuntimeGooseCodex,
 		RunID:        "run_1",
 		TaskID:       "owner/repo#1",
 		Repo:         "owner/repo",
@@ -213,7 +213,7 @@ exit 0
 		Debug:        true,
 		RunDir:       runDir,
 		TaskSession: SessionSpec{
-			Mode:             agent.SessionModePROnly,
+			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskDir:          sessionDir,
 			TaskKey:          "owner-repo-1-abc123",
@@ -283,7 +283,7 @@ exit 0
 
 	launcher := DockerLauncher{Image: "rascal-runner:latest"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
-		AgentRuntime: agent.RuntimeGooseCodex,
+		AgentRuntime: runtime.RuntimeGooseCodex,
 		RunID:        "run_2",
 		TaskID:       "owner/repo#2",
 		Repo:         "owner/repo",
@@ -294,7 +294,7 @@ exit 0
 		Debug:        false,
 		RunDir:       runDir,
 		TaskSession: SessionSpec{
-			Mode: agent.SessionModePROnly,
+			Mode: runtime.SessionModePROnly,
 		},
 	})
 	if err != nil {
@@ -343,14 +343,14 @@ exit 0
 		TaskID:       "owner/repo#1",
 		Repo:         "owner/repo",
 		Instruction:  "task",
-		AgentRuntime: agent.RuntimeCodex,
+		AgentRuntime: runtime.RuntimeCodex,
 		BaseBranch:   "main",
 		HeadBranch:   "rascal/task-1",
 		Trigger:      "pr_comment",
 		Debug:        true,
 		RunDir:       runDir,
 		TaskSession: SessionSpec{
-			Mode:             agent.SessionModePROnly,
+			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskDir:          sessionDir,
 			TaskKey:          "owner-repo-1-abc123",

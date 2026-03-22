@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/defaults"
 	"github.com/rtzll/rascal/internal/runner"
@@ -16,7 +16,7 @@ import (
 )
 
 type TaskSessionConfig struct {
-	Mode    agent.SessionMode
+	Mode    runtime.SessionMode
 	Root    string
 	TTLDays int
 }
@@ -35,7 +35,7 @@ type ServerConfig struct {
 	GitHubWebhookSecret     string
 	BotLogin                string
 	RunnerMode              runner.Mode
-	AgentRuntime            agent.Runtime
+	AgentRuntime            runtime.Runtime
 	RunnerImage             string
 	RunnerImageGooseCodex   string
 	RunnerImageCodex        string
@@ -122,7 +122,7 @@ func (c ServerConfig) Ensure() error {
 	if err := os.MkdirAll(filepath.Join(c.DataDir, "runs"), 0o755); err != nil {
 		return fmt.Errorf("create runs directory: %w", err)
 	}
-	if c.EffectiveTaskSessionMode() != agent.SessionModeOff {
+	if c.EffectiveTaskSessionMode() != runtime.SessionModeOff {
 		root := strings.TrimSpace(c.EffectiveTaskSessionRoot())
 		if root == "" {
 			root = filepath.Join(c.DataDir, defaults.AgentSessionDirName)
@@ -134,24 +134,24 @@ func (c ServerConfig) Ensure() error {
 	return nil
 }
 
-func (c ServerConfig) RunnerImageForRuntime(runtime agent.Runtime) string {
-	switch agent.NormalizeRuntime(string(runtime)) {
-	case agent.RuntimeCodex:
+func (c ServerConfig) RunnerImageForRuntime(rt runtime.Runtime) string {
+	switch runtime.NormalizeRuntime(string(rt)) {
+	case runtime.RuntimeCodex:
 		return strings.TrimSpace(c.RunnerImageCodex)
-	case agent.RuntimeClaude:
+	case runtime.RuntimeClaude:
 		return strings.TrimSpace(c.RunnerImageClaude)
-	case agent.RuntimeGooseClaude:
+	case runtime.RuntimeGooseClaude:
 		return strings.TrimSpace(c.RunnerImageGooseClaude)
 	default:
 		return strings.TrimSpace(c.RunnerImageGooseCodex)
 	}
 }
 
-func (c ServerConfig) EffectiveTaskSessionMode() agent.SessionMode {
-	return agent.NormalizeSessionMode(string(c.TaskSession.Mode))
+func (c ServerConfig) EffectiveTaskSessionMode() runtime.SessionMode {
+	return runtime.NormalizeSessionMode(string(c.TaskSession.Mode))
 }
 
-func (c ServerConfig) EffectiveAgentSessionMode() agent.SessionMode {
+func (c ServerConfig) EffectiveAgentSessionMode() runtime.SessionMode {
 	return c.EffectiveTaskSessionMode()
 }
 
@@ -334,12 +334,12 @@ func envDurationOrDefault(key string, fallback time.Duration) time.Duration {
 	return out
 }
 
-func loadAgentRuntime() (agent.Runtime, error) {
+func loadAgentRuntime() (runtime.Runtime, error) {
 	raw := strings.TrimSpace(os.Getenv("RASCAL_AGENT_RUNTIME"))
 	if raw == "" {
 		raw = "goose"
 	}
-	runtime, err := agent.ParseRuntime(raw)
+	runtime, err := runtime.ParseRuntime(raw)
 	if err != nil {
 		return "", fmt.Errorf("parse RASCAL_AGENT_RUNTIME: %w", err)
 	}
@@ -358,17 +358,17 @@ func loadTaskSessionConfig(dataDir string) (TaskSessionConfig, error) {
 	}, nil
 }
 
-func loadTaskSessionMode() (agent.SessionMode, error) {
+func loadTaskSessionMode() (runtime.SessionMode, error) {
 	if raw, ok := os.LookupEnv("RASCAL_TASK_SESSION_MODE"); ok {
 		if strings.TrimSpace(raw) != "" {
-			mode, err := agent.ParseSessionMode(raw)
+			mode, err := runtime.ParseSessionMode(raw)
 			if err != nil {
 				return "", fmt.Errorf("parse RASCAL_TASK_SESSION_MODE: %w", err)
 			}
 			return mode, nil
 		}
 	}
-	return agent.SessionModeAll, nil
+	return runtime.SessionModeAll, nil
 }
 
 func loadTaskSessionRoot(dataDir string) string {

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/defaults"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/logs"
@@ -269,7 +269,7 @@ func requesterForRun(run state.Run, target RunResponseTarget, requesterUserID st
 	return requesterUserID
 }
 
-func (s *Server) PostRunStartCommentBestEffort(run state.Run, sessionMode agent.SessionMode, sessionResume bool) {
+func (s *Server) PostRunStartCommentBestEffort(run state.Run, sessionMode runtime.SessionMode, sessionResume bool) {
 	if strings.TrimSpace(s.Config.GitHubToken) == "" || s.GitHub == nil {
 		return
 	}
@@ -439,7 +439,7 @@ func resolveRunCommentTarget(run state.Run, target RunResponseTarget) (string, i
 	return repo, issueNumber
 }
 
-func buildRunStartComment(run state.Run, target RunResponseTarget, requestedBy string, sessionMode agent.SessionMode, sessionResume bool) string {
+func buildRunStartComment(run state.Run, target RunResponseTarget, requestedBy string, sessionMode runtime.SessionMode, sessionResume bool) string {
 	var queueDelaySeconds *int64
 	if run.StartedAt != nil {
 		delay := int64(run.StartedAt.UTC().Sub(run.CreatedAt.UTC()).Seconds())

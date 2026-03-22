@@ -1,14 +1,14 @@
 package runner
 
 import (
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 const (
-	SessionModeOff    = string(agent.SessionModeOff)
-	SessionModePROnly = string(agent.SessionModePROnly)
-	SessionModeAll    = string(agent.SessionModeAll)
+	SessionModeOff    = string(runtime.SessionModeOff)
+	SessionModePROnly = string(runtime.SessionModePROnly)
+	SessionModeAll    = string(runtime.SessionModeAll)
 
 	GooseSessionModeOff    = SessionModeOff
 	GooseSessionModePROnly = SessionModePROnly
@@ -16,15 +16,15 @@ const (
 )
 
 func NormalizeSessionMode(mode string) string {
-	return string(agent.NormalizeSessionMode(mode))
+	return string(runtime.NormalizeSessionMode(mode))
 }
 
 func SessionEnabled(mode string, trigger runtrigger.Name) bool {
-	return agent.SessionEnabled(agent.NormalizeSessionMode(mode), trigger)
+	return runtime.SessionEnabled(runtime.NormalizeSessionMode(mode), trigger)
 }
 
 func TaskSessionKey(repo, taskID string) string {
-	return agent.TaskSessionKey(repo, taskID)
+	return runtime.TaskSessionKey(repo, taskID)
 }
 
 func SessionTaskKey(repo, taskID string) string {

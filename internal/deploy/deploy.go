@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/defaults"
 	"github.com/rtzll/rascal/internal/remote"
 	"github.com/rtzll/rascal/internal/runner"
@@ -36,7 +36,7 @@ type Config struct {
 	WebhookSecret          string
 	GitHubRuntimeToken     string
 	RunnerMode             runner.Mode
-	AgentRuntime           agent.Runtime
+	AgentRuntime           runtime.Runtime
 	RunnerImageGooseCodex  string
 	RunnerImageCodex       string
 	RunnerImageClaude      string
@@ -144,7 +144,7 @@ func Execute(cfg Config) error {
 		Host:                   cfg.Host,
 		Domain:                 strings.TrimSpace(cfg.Domain),
 		GOARCH:                 strings.TrimSpace(cfg.GOARCH),
-		AgentRuntime:           firstNonEmpty(strings.TrimSpace(string(cfg.AgentRuntime)), string(agent.RuntimeGooseCodex)),
+		AgentRuntime:           firstNonEmpty(strings.TrimSpace(string(cfg.AgentRuntime)), string(runtime.RuntimeGooseCodex)),
 		RunnerImageGooseCodex:  strings.TrimSpace(cfg.RunnerImageGooseCodex),
 		RunnerImageCodex:       strings.TrimSpace(cfg.RunnerImageCodex),
 		RunnerImageClaude:      strings.TrimSpace(cfg.RunnerImageClaude),

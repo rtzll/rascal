@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rtzll/rascal/internal/agent"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/credentials"
 	"github.com/rtzll/rascal/internal/defaults"
 	ghapi "github.com/rtzll/rascal/internal/github"
@@ -104,9 +104,9 @@ func (s *Server) failRunForMissingExecution(run state.Run, reason string) {
 	s.finishRun(updated)
 }
 
-func credentialAuthPath(runDir string, runtime agent.Runtime) (dir, file string) {
-	switch agent.NormalizeRuntime(string(runtime)) {
-	case agent.RuntimeClaude, agent.RuntimeGooseClaude:
+func credentialAuthPath(runDir string, rt runtime.Runtime) (dir, file string) {
+	switch runtime.NormalizeRuntime(string(rt)) {
+	case runtime.RuntimeClaude, runtime.RuntimeGooseClaude:
 		dir = filepath.Join(runDir, "claude")
 		file = filepath.Join(dir, "oauth_token")
 	default:
@@ -116,12 +116,12 @@ func credentialAuthPath(runDir string, runtime agent.Runtime) (dir, file string)
 	return dir, file
 }
 
-func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string, runtime agent.Runtime) (string, error) {
+func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string, rt runtime.Runtime) (string, error) {
 	requesterUserID = strings.TrimSpace(requesterUserID)
 	if requesterUserID == "" {
 		requesterUserID = "system"
 	}
-	authDir, authPath := credentialAuthPath(runDir, runtime)
+	authDir, authPath := credentialAuthPath(runDir, rt)
 	if err := os.MkdirAll(authDir, 0o755); err != nil {
 		return "", fmt.Errorf("create auth dir: %w", err)
 	}
@@ -130,7 +130,7 @@ func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string,
 		lease, err := s.Broker.Acquire(context.Background(), credentials.AcquireRequest{
 			RunID:    runID,
 			UserID:   requesterUserID,
-			Provider: string(runtime.Provider()),
+			Provider: string(rt.Provider()),
 		})
 		if err == nil {
 			tmpFile, err := os.CreateTemp(authDir, "auth-*.tmp")
@@ -197,13 +197,13 @@ func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string,
 	return "", nil
 }
 
-func (s *Server) cleanupRunCredentialAuth(runDir, credentialLeaseID string, runtime agent.Runtime) {
+func (s *Server) cleanupRunCredentialAuth(runDir, credentialLeaseID string, rt runtime.Runtime) {
 	if strings.TrimSpace(credentialLeaseID) != "" && s.Broker != nil {
 		if err := s.Broker.Release(context.Background(), credentialLeaseID); err != nil {
 			log.Printf("release credential lease %s failed: %v", credentialLeaseID, err)
 		}
 	}
-	_, authPath := credentialAuthPath(runDir, runtime)
+	_, authPath := credentialAuthPath(runDir, rt)
 	if err := os.Remove(authPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Printf("remove ephemeral auth file %s failed: %v", authPath, err)
 	}
@@ -293,11 +293,11 @@ func (s *Server) ExecuteRun(runID string) {
 	}
 
 	sessionMode := s.Config.EffectiveAgentSessionMode()
-	if sessionMode != agent.SessionModeOff {
+	if sessionMode != runtime.SessionModeOff {
 		s.cleanupAgentSessionsBestEffort()
 	}
 
-	sessionResume := agent.SessionEnabled(sessionMode, runtrigger.Normalize(run.Trigger.String()))
+	sessionResume := runtime.SessionEnabled(sessionMode, runtrigger.Normalize(run.Trigger.String()))
 	sessionTaskKey := ""
 	sessionTaskDir := ""
 	backendSessionID := ""
@@ -306,7 +306,7 @@ func (s *Server) ExecuteRun(runID string) {
 		sessionRoot = filepath.Join(s.Config.DataDir, defaults.AgentSessionDirName)
 	}
 	if sessionResume {
-		sessionTaskKey = agent.SessionTaskKey(run.Repo, run.TaskID)
+		sessionTaskKey = runtime.SessionTaskKey(run.Repo, run.TaskID)
 		sessionTaskDir = filepath.Join(sessionRoot, sessionTaskKey)
 		if existing, ok := s.Store.GetTaskAgentSession(run.TaskID); ok {
 			if existing.AgentRuntime == run.AgentRuntime {
@@ -315,7 +315,7 @@ func (s *Server) ExecuteRun(runID string) {
 				log.Printf("run %s failed to clear stale %s session for task %s: %v", run.ID, existing.AgentRuntime, run.TaskID, err)
 			}
 		}
-		if backendSessionID == "" && run.AgentRuntime.Harness() == agent.HarnessGoose {
+		if backendSessionID == "" && run.AgentRuntime.Harness() == runtime.HarnessGoose {
 			backendSessionID = runner.SessionName(run.Repo, run.TaskID)
 		}
 		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {
