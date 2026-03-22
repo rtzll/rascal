@@ -153,7 +153,7 @@ type Task struct {
 	UpdatedAt       int64  `json:"updated_at"`
 }
 
-type TaskAgentSession struct {
+type TaskSession struct {
 	TaskID           string `json:"task_id"`
 	AgentRuntime     string `json:"agent_runtime"`
 	RuntimeSessionID string `json:"runtime_session_id"`

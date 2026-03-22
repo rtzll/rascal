@@ -1107,7 +1107,7 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert legacy task: %v", err)
 	}
-	if _, err := s.Store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
+	if _, err := s.Store.UpsertTaskSession(state.UpsertTaskSessionInput{
 		TaskID:           taskID,
 		AgentRuntime:     agentrt.RuntimeCodex,
 		RuntimeSessionID: "legacy-codex-session",
@@ -1141,10 +1141,10 @@ func TestHandleWebhookIssueLabeledMigratesTaskBackend(t *testing.T) {
 		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, agentrt.RuntimeGooseCodex)
 	}
 
-	var session state.TaskAgentSession
+	var session state.TaskSession
 	waitFor(t, time.Second, func() bool {
 		var ok bool
-		session, ok = s.Store.GetTaskAgentSession(taskID)
+		session, ok = s.Store.GetTaskSession(taskID)
 		return ok
 	}, "migrated task session")
 	if session.AgentRuntime != agentrt.RuntimeGooseCodex {
@@ -2784,7 +2784,7 @@ func TestExecuteRunSetsAgentSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 
 	s.Config.AgentRuntime = agentrt.RuntimeGooseCodex
 	sessionRoot := filepath.Join(t.TempDir(), "goose-sessions")
-	s.Config.TaskSession = config.AgentSessionConfig{
+	s.Config.TaskSession = config.TaskSessionConfig{
 		Mode:    agentrt.SessionModePROnly,
 		Root:    sessionRoot,
 		TTLDays: 0,
@@ -2830,7 +2830,7 @@ func TestExecuteRunDisablesAgentSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	s.Config.AgentRuntime = agentrt.RuntimeGooseCodex
-	s.Config.TaskSession = config.AgentSessionConfig{
+	s.Config.TaskSession = config.TaskSessionConfig{
 		Mode:    agentrt.SessionModePROnly,
 		Root:    filepath.Join(t.TempDir(), "goose-sessions"),
 		TTLDays: 0,

@@ -23,11 +23,11 @@ import (
 )
 
 func (s *Server) cleanupAgentSessionsBestEffort() {
-	ttlDays := s.Config.EffectiveAgentSessionTTLDays()
+	ttlDays := s.Config.EffectiveTaskSessionTTLDays()
 	if ttlDays <= 0 {
 		return
 	}
-	root := strings.TrimSpace(s.Config.EffectiveAgentSessionRoot())
+	root := strings.TrimSpace(s.Config.EffectiveTaskSessionRoot())
 	if root == "" {
 		root = filepath.Join(s.Config.DataDir, defaults.AgentSessionDirName)
 	}

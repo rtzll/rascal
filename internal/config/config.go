@@ -21,8 +21,6 @@ type TaskSessionConfig struct {
 	TTLDays int
 }
 
-type AgentSessionConfig = TaskSessionConfig
-
 // ServerConfig controls rascald runtime behavior.
 type ServerConfig struct {
 	ListenAddr              string
@@ -151,24 +149,12 @@ func (c ServerConfig) EffectiveTaskSessionMode() runtime.SessionMode {
 	return runtime.NormalizeSessionMode(string(c.TaskSession.Mode))
 }
 
-func (c ServerConfig) EffectiveAgentSessionMode() runtime.SessionMode {
-	return c.EffectiveTaskSessionMode()
-}
-
 func (c ServerConfig) EffectiveTaskSessionRoot() string {
 	return strings.TrimSpace(c.TaskSession.Root)
 }
 
-func (c ServerConfig) EffectiveAgentSessionRoot() string {
-	return c.EffectiveTaskSessionRoot()
-}
-
 func (c ServerConfig) EffectiveTaskSessionTTLDays() int {
 	return c.TaskSession.TTLDays
-}
-
-func (c ServerConfig) EffectiveAgentSessionTTLDays() int {
-	return c.EffectiveTaskSessionTTLDays()
 }
 
 func (c ServerConfig) AuthEnabled() bool {

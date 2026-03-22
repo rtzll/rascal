@@ -229,7 +229,7 @@ func (s *Store) MarkTaskOpen(taskID string) error {
 	return nil
 }
 
-func (s *Store) UpsertTaskAgentSession(in UpsertTaskAgentSessionInput) (TaskAgentSession, error) {
+func (s *Store) UpsertTaskSession(in UpsertTaskSessionInput) (TaskSession, error) {
 	in.TaskID = strings.TrimSpace(in.TaskID)
 	in.AgentRuntime = runtime.NormalizeRuntime(string(in.AgentRuntime))
 	in.RuntimeSessionID = strings.TrimSpace(in.RuntimeSessionID)
@@ -237,11 +237,11 @@ func (s *Store) UpsertTaskAgentSession(in UpsertTaskAgentSessionInput) (TaskAgen
 	in.SessionRoot = strings.TrimSpace(in.SessionRoot)
 	in.LastRunID = strings.TrimSpace(in.LastRunID)
 	if in.TaskID == "" {
-		return TaskAgentSession{}, fmt.Errorf("task id is required")
+		return TaskSession{}, fmt.Errorf("task id is required")
 	}
 
 	now := time.Now().UTC().UnixNano()
-	if err := s.q.UpsertTaskAgentSession(context.Background(), sqlitegen.UpsertTaskAgentSessionParams{
+	if err := s.q.UpsertTaskSession(context.Background(), sqlitegen.UpsertTaskSessionParams{
 		TaskID:           in.TaskID,
 		AgentRuntime:     in.AgentRuntime.String(),
 		RuntimeSessionID: in.RuntimeSessionID,
@@ -251,32 +251,32 @@ func (s *Store) UpsertTaskAgentSession(in UpsertTaskAgentSessionInput) (TaskAgen
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}); err != nil {
-		return TaskAgentSession{}, fmt.Errorf("upsert task agent session for task %q: %w", in.TaskID, err)
+		return TaskSession{}, fmt.Errorf("upsert task agent session for task %q: %w", in.TaskID, err)
 	}
-	row, err := s.q.GetTaskAgentSession(context.Background(), in.TaskID)
+	row, err := s.q.GetTaskSession(context.Background(), in.TaskID)
 	if err != nil {
-		return TaskAgentSession{}, fmt.Errorf("load task agent session for task %q: %w", in.TaskID, err)
+		return TaskSession{}, fmt.Errorf("load task agent session for task %q: %w", in.TaskID, err)
 	}
-	return fromDBTaskAgentSession(row), nil
+	return fromDBTaskSession(row), nil
 }
 
-func (s *Store) GetTaskAgentSession(taskID string) (TaskAgentSession, bool) {
-	row, err := s.q.GetTaskAgentSession(context.Background(), strings.TrimSpace(taskID))
+func (s *Store) GetTaskSession(taskID string) (TaskSession, bool) {
+	row, err := s.q.GetTaskSession(context.Background(), strings.TrimSpace(taskID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return TaskAgentSession{}, false
+			return TaskSession{}, false
 		}
-		return TaskAgentSession{}, false
+		return TaskSession{}, false
 	}
-	return fromDBTaskAgentSession(row), true
+	return fromDBTaskSession(row), true
 }
 
-func (s *Store) DeleteTaskAgentSession(taskID string) error {
+func (s *Store) DeleteTaskSession(taskID string) error {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
 		return nil
 	}
-	_, err := s.q.DeleteTaskAgentSession(context.Background(), taskID)
+	_, err := s.q.DeleteTaskSession(context.Background(), taskID)
 	if err != nil {
 		return fmt.Errorf("delete task agent session for task %q: %w", taskID, err)
 	}
@@ -1200,7 +1200,7 @@ func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {
 	}
 }
 
-func fromDBTaskAgentSession(s sqlitegen.TaskAgentSession) TaskSession {
+func fromDBTaskSession(s sqlitegen.TaskSession) TaskSession {
 	return TaskSession{
 		TaskID:           s.TaskID,
 		AgentRuntime:     runtime.NormalizeRuntime(s.AgentRuntime),

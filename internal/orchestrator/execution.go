@@ -292,7 +292,7 @@ func (s *Server) ExecuteRun(runID string) {
 		return
 	}
 
-	sessionMode := s.Config.EffectiveAgentSessionMode()
+	sessionMode := s.Config.EffectiveTaskSessionMode()
 	if sessionMode != runtime.SessionModeOff {
 		s.cleanupAgentSessionsBestEffort()
 	}
@@ -301,17 +301,17 @@ func (s *Server) ExecuteRun(runID string) {
 	sessionTaskKey := ""
 	sessionTaskDir := ""
 	backendSessionID := ""
-	sessionRoot := strings.TrimSpace(s.Config.EffectiveAgentSessionRoot())
+	sessionRoot := strings.TrimSpace(s.Config.EffectiveTaskSessionRoot())
 	if sessionRoot == "" {
 		sessionRoot = filepath.Join(s.Config.DataDir, defaults.AgentSessionDirName)
 	}
 	if sessionResume {
 		sessionTaskKey = runtime.SessionTaskKey(run.Repo, run.TaskID)
 		sessionTaskDir = filepath.Join(sessionRoot, sessionTaskKey)
-		if existing, ok := s.Store.GetTaskAgentSession(run.TaskID); ok {
+		if existing, ok := s.Store.GetTaskSession(run.TaskID); ok {
 			if existing.AgentRuntime == run.AgentRuntime {
 				backendSessionID = strings.TrimSpace(existing.RuntimeSessionID)
-			} else if err := s.Store.DeleteTaskAgentSession(run.TaskID); err != nil {
+			} else if err := s.Store.DeleteTaskSession(run.TaskID); err != nil {
 				log.Printf("run %s failed to clear stale %s session for task %s: %v", run.ID, existing.AgentRuntime, run.TaskID, err)
 			}
 		}
@@ -324,7 +324,7 @@ func (s *Server) ExecuteRun(runID string) {
 			s.finishRun(updated)
 			return
 		}
-		if _, err := s.Store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
+		if _, err := s.Store.UpsertTaskSession(state.UpsertTaskSessionInput{
 			TaskID:           run.TaskID,
 			AgentRuntime:     run.AgentRuntime,
 			RuntimeSessionID: backendSessionID,
@@ -354,7 +354,7 @@ func (s *Server) ExecuteRun(runID string) {
 		PRNumber:     run.PRNumber,
 		Context:      run.Context,
 		Debug:        run.Debug,
-		TaskSession: runner.SessionSpec{
+		TaskSession: runner.TaskSessionSpec{
 			Mode:             sessionMode,
 			Resume:           sessionResume,
 			TaskDir:          sessionTaskDir,
@@ -595,14 +595,14 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		meta.ExitCode = observedExitCode
 	}
 	if strings.TrimSpace(meta.TaskSessionID) != "" {
-		existing, _ := s.Store.GetTaskAgentSession(run.TaskID)
+		existing, _ := s.Store.GetTaskSession(run.TaskID)
 		sessionKey := ""
 		sessionRoot := ""
 		if existing.AgentRuntime == run.AgentRuntime {
 			sessionKey = existing.SessionKey
 			sessionRoot = existing.SessionRoot
 		}
-		if _, err := s.Store.UpsertTaskAgentSession(state.UpsertTaskAgentSessionInput{
+		if _, err := s.Store.UpsertTaskSession(state.UpsertTaskSessionInput{
 			TaskID:           run.TaskID,
 			AgentRuntime:     run.AgentRuntime,
 			RuntimeSessionID: strings.TrimSpace(meta.TaskSessionID),

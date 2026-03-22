@@ -212,7 +212,7 @@ exit 0
 		Trigger:      "pr_comment",
 		Debug:        true,
 		RunDir:       runDir,
-		TaskSession: SessionSpec{
+		TaskSession: TaskSessionSpec{
 			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskDir:          sessionDir,
@@ -293,7 +293,7 @@ exit 0
 		Trigger:      "issue_label",
 		Debug:        false,
 		RunDir:       runDir,
-		TaskSession: SessionSpec{
+		TaskSession: TaskSessionSpec{
 			Mode: runtime.SessionModePROnly,
 		},
 	})
@@ -349,7 +349,7 @@ exit 0
 		Trigger:      "pr_comment",
 		Debug:        true,
 		RunDir:       runDir,
-		TaskSession: SessionSpec{
+		TaskSession: TaskSessionSpec{
 			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskDir:          sessionDir,

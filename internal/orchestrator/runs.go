@@ -60,7 +60,7 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 		return state.Run{}, errTaskCompleted
 	}
 	if existingTask, ok := s.Store.GetTask(req.TaskID); ok && existingTask.AgentRuntime != s.Config.AgentRuntime {
-		if err := s.Store.DeleteTaskAgentSession(req.TaskID); err != nil {
+		if err := s.Store.DeleteTaskSession(req.TaskID); err != nil {
 			return state.Run{}, fmt.Errorf("clear stale task session for backend migration: %w", err)
 		}
 	}

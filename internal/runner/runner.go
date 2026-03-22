@@ -74,8 +74,6 @@ type TaskSessionSpec struct {
 	RuntimeSessionID string
 }
 
-type SessionSpec = TaskSessionSpec
-
 func NormalizeMode(raw string) Mode {
 	mode, err := ParseMode(raw)
 	if err != nil {

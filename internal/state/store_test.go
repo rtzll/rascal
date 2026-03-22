@@ -162,7 +162,7 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, runtime.RuntimeGooseCodex)
 	}
 
-	session, err := store.UpsertTaskAgentSession(UpsertTaskAgentSessionInput{
+	session, err := store.UpsertTaskSession(UpsertTaskSessionInput{
 		TaskID:           task.ID,
 		AgentRuntime:     runtime.RuntimeGooseCodex,
 		RuntimeSessionID: "goose-session",
@@ -190,7 +190,7 @@ func TestStoreAllowsTaskSessionBackendMigration(t *testing.T) {
 		t.Fatalf("task backend = %s, want %s", task.AgentRuntime, runtime.RuntimeCodex)
 	}
 
-	session, err = store.UpsertTaskAgentSession(UpsertTaskAgentSessionInput{
+	session, err = store.UpsertTaskSession(UpsertTaskSessionInput{
 		TaskID:           task.ID,
 		AgentRuntime:     runtime.RuntimeCodex,
 		RuntimeSessionID: "",

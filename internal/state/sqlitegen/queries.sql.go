@@ -626,13 +626,13 @@ func (q *Queries) DeleteRunLeaseForOwner(ctx context.Context, arg DeleteRunLease
 	return result.RowsAffected()
 }
 
-const deleteTaskAgentSession = `-- name: DeleteTaskAgentSession :execrows
+const deleteTaskSession = `-- name: DeleteTaskSession :execrows
 DELETE FROM task_agent_sessions
 WHERE task_id = ?
 `
 
-func (q *Queries) DeleteTaskAgentSession(ctx context.Context, taskID string) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteTaskAgentSession, taskID)
+func (q *Queries) DeleteTaskSession(ctx context.Context, taskID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteTaskSession, taskID)
 	if err != nil {
 		return 0, err
 	}
@@ -1086,7 +1086,7 @@ func (q *Queries) GetTask(ctx context.Context, id string) (GetTaskRow, error) {
 	return i, err
 }
 
-const getTaskAgentSession = `-- name: GetTaskAgentSession :one
+const getTaskSession = `-- name: GetTaskSession :one
 SELECT
   task_id,
   agent_runtime,
@@ -1100,9 +1100,9 @@ FROM task_agent_sessions
 WHERE task_id = ?
 `
 
-func (q *Queries) GetTaskAgentSession(ctx context.Context, taskID string) (TaskAgentSession, error) {
-	row := q.db.QueryRowContext(ctx, getTaskAgentSession, taskID)
-	var i TaskAgentSession
+func (q *Queries) GetTaskSession(ctx context.Context, taskID string) (TaskSession, error) {
+	row := q.db.QueryRowContext(ctx, getTaskSession, taskID)
+	var i TaskSession
 	err := row.Scan(
 		&i.TaskID,
 		&i.AgentRuntime,
@@ -2786,7 +2786,7 @@ func (q *Queries) UpsertTask(ctx context.Context, arg UpsertTaskParams) error {
 	return err
 }
 
-const upsertTaskAgentSession = `-- name: UpsertTaskAgentSession :exec
+const upsertTaskSession = `-- name: UpsertTaskSession :exec
 INSERT INTO task_agent_sessions (
   task_id,
   agent_runtime,
@@ -2807,7 +2807,7 @@ ON CONFLICT(task_id) DO UPDATE SET
   updated_at = excluded.updated_at
 `
 
-type UpsertTaskAgentSessionParams struct {
+type UpsertTaskSessionParams struct {
 	TaskID           string `json:"task_id"`
 	AgentRuntime     string `json:"agent_runtime"`
 	RuntimeSessionID string `json:"runtime_session_id"`
@@ -2818,8 +2818,8 @@ type UpsertTaskAgentSessionParams struct {
 	UpdatedAt        int64  `json:"updated_at"`
 }
 
-func (q *Queries) UpsertTaskAgentSession(ctx context.Context, arg UpsertTaskAgentSessionParams) error {
-	_, err := q.db.ExecContext(ctx, upsertTaskAgentSession,
+func (q *Queries) UpsertTaskSession(ctx context.Context, arg UpsertTaskSessionParams) error {
+	_, err := q.db.ExecContext(ctx, upsertTaskSession,
 		arg.TaskID,
 		arg.AgentRuntime,
 		arg.RuntimeSessionID,

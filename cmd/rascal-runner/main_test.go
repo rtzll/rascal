@@ -396,7 +396,7 @@ func TestRunGooseNoSessionByDefault(t *testing.T) {
 		InstructionsPath: filepath.Join(root, "instructions.md"),
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
-		TaskSession:      runner.SessionSpec{Mode: runtime.SessionModeOff},
+		TaskSession:      runner.TaskSessionSpec{Mode: runtime.SessionModeOff},
 	}
 	if err := os.WriteFile(cfg.InstructionsPath, []byte("do thing"), 0o644); err != nil {
 		t.Fatalf("write instructions: %v", err)
@@ -436,7 +436,7 @@ func TestRunGooseUsesNamedResumeSessionWhenEnabled(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
-		TaskSession: runner.SessionSpec{
+		TaskSession: runner.TaskSessionSpec{
 			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
@@ -489,7 +489,7 @@ func TestRunGooseSkipsResumeWhenNamedSessionIsMissing(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
-		TaskSession: runner.SessionSpec{
+		TaskSession: runner.TaskSessionSpec{
 			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-missing",
@@ -541,7 +541,7 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
 		GoosePathRoot:    sessionRoot,
-		TaskSession: runner.SessionSpec{
+		TaskSession: runner.TaskSessionSpec{
 			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
@@ -649,7 +649,7 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
-		TaskSession: runner.SessionSpec{
+		TaskSession: runner.TaskSessionSpec{
 			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
@@ -703,7 +703,7 @@ func TestRunGooseKeepsResumeWhenSessionPreflightFails(t *testing.T) {
 		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
 		GooseDebug:       false,
 		GoosePathRoot:    filepath.Join(root, "goose-sessions"),
-		TaskSession: runner.SessionSpec{
+		TaskSession: runner.TaskSessionSpec{
 			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
 			TaskKey:          "owner-repo-task-abc123",
@@ -834,7 +834,7 @@ func TestRunCodexResumeSession(t *testing.T) {
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		CodexHome:        codexHome,
 		AgentRuntime:     runtime.RuntimeCodex,
-		TaskSession: runner.SessionSpec{
+		TaskSession: runner.TaskSessionSpec{
 			Mode:             runtime.SessionModeAll,
 			Resume:           true,
 			RuntimeSessionID: "session-abc",
@@ -980,7 +980,7 @@ func TestRunClaudeResumeSession(t *testing.T) {
 		AgentOutputPath:  filepath.Join(root, "agent_output.txt"),
 		ClaudeConfigDir:  filepath.Join(root, "claude"),
 		AgentRuntime:     runtime.RuntimeClaude,
-		TaskSession: runner.SessionSpec{
+		TaskSession: runner.TaskSessionSpec{
 			Mode:             runtime.SessionModeAll,
 			Resume:           true,
 			RuntimeSessionID: "session-claude-abc",
@@ -1088,7 +1088,7 @@ func TestClaudeRunArgs(t *testing.T) {
 
 	t.Run("resume_with_session", func(t *testing.T) {
 		cfgResume := cfg
-		cfgResume.TaskSession = runner.SessionSpec{
+		cfgResume.TaskSession = runner.TaskSessionSpec{
 			Mode:             runtime.SessionModeAll,
 			Resume:           true,
 			RuntimeSessionID: "sess-42",

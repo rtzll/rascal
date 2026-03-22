@@ -406,8 +406,6 @@ type TaskSession struct {
 	UpdatedAt        time.Time     `json:"updated_at"`
 }
 
-type TaskAgentSession = TaskSession
-
 type UpsertTaskSessionInput struct {
 	TaskID           string
 	AgentRuntime     runtime.Runtime
@@ -417,4 +415,3 @@ type UpsertTaskSessionInput struct {
 	LastRunID        string
 }
 
-type UpsertTaskAgentSessionInput = UpsertTaskSessionInput

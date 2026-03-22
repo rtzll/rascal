@@ -601,7 +601,7 @@ WHERE id IN (
   LIMIT ?
 );
 
--- name: UpsertTaskAgentSession :exec
+-- name: UpsertTaskSession :exec
 INSERT INTO task_agent_sessions (
   task_id,
   agent_runtime,
@@ -621,7 +621,7 @@ ON CONFLICT(task_id) DO UPDATE SET
   last_run_id = excluded.last_run_id,
   updated_at = excluded.updated_at;
 
--- name: GetTaskAgentSession :one
+-- name: GetTaskSession :one
 SELECT
   task_id,
   agent_runtime,
@@ -634,7 +634,7 @@ SELECT
 FROM task_agent_sessions
 WHERE task_id = ?;
 
--- name: DeleteTaskAgentSession :execrows
+-- name: DeleteTaskSession :execrows
 DELETE FROM task_agent_sessions
 WHERE task_id = ?;
 
