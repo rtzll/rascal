@@ -96,7 +96,7 @@
 
 ## Flagged ambiguities
 
-- **"Execution"** alone is ambiguous — it could mean a **Run** (business concept), a **RunExecution** (infrastructure metadata), or a **Detached Execution** (the actual container). Always qualify with the full term.
+- **"Execution"** alone is ambiguous in conversation — it could mean a **Run** (business concept), a **RunExecution** (infrastructure metadata), or a **Detached Execution** (the actual container). In code, every type is already qualified (`ExecutionHandle`, `RunExecution`, `ExecutionState`), so no rename is needed. Always qualify with the full term in docs and discussion.
 - ~~**"Agent"** was used as a code namespace for runtime configuration types.~~ **Resolved**: package renamed from `internal/agent` to `internal/runtime`.
 - ~~**"SessionPolicy" vs "TaskSessionPolicy" vs "SessionMode"** — code used three aliases for one concept.~~ **Resolved**: aliases removed, `SessionMode` is the sole canonical type.
 - ~~**"Worker pause"** in the orchestrator code paused the Scheduler, not workers.~~ **Resolved**: renamed to `schedulerPauseScope` / `SchedulerPauseScope` / `activeSchedulerPause()`.
