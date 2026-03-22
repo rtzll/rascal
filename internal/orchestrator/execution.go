@@ -316,7 +316,7 @@ func (s *Server) ExecuteRun(runID string) {
 			}
 		}
 		if backendSessionID == "" && run.AgentRuntime.Harness() == runtime.HarnessGoose {
-			backendSessionID = runner.SessionName(run.Repo, run.TaskID)
+			backendSessionID = runner.TaskSessionName(run.Repo, run.TaskID)
 		}
 		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {
 			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("create agent session dir: %v", err))

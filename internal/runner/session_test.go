@@ -53,12 +53,12 @@ func TestSessionEnabled(t *testing.T) {
 	}
 }
 
-func TestSessionTaskKeyStableAndBounded(t *testing.T) {
+func TestTaskSessionKeyStableAndBounded(t *testing.T) {
 	t.Parallel()
 
-	a := SessionTaskKey("Owner/Repo", "owner/repo#123")
-	b := SessionTaskKey("Owner/Repo", "owner/repo#123")
-	c := SessionTaskKey("Owner/Repo", "owner/repo#124")
+	a := TaskSessionKey("Owner/Repo", "owner/repo#123")
+	b := TaskSessionKey("Owner/Repo", "owner/repo#123")
+	c := TaskSessionKey("Owner/Repo", "owner/repo#124")
 
 	if a != b {
 		t.Fatalf("expected stable key, got %q vs %q", a, b)
@@ -77,10 +77,10 @@ func TestSessionTaskKeyStableAndBounded(t *testing.T) {
 	}
 }
 
-func TestSessionNameBounded(t *testing.T) {
+func TestTaskSessionNameBounded(t *testing.T) {
 	t.Parallel()
 
-	name := SessionName(strings.Repeat("repo-", 20), strings.Repeat("task-", 20))
+	name := TaskSessionName(strings.Repeat("repo-", 20), strings.Repeat("task-", 20))
 	if !strings.HasPrefix(name, "rascal-") {
 		t.Fatalf("expected name prefix rascal-, got %q", name)
 	}
