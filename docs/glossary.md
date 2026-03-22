@@ -7,8 +7,8 @@
 - `Run`: one execution attempt to advance a task.
 - `RunExecution`: detached execution metadata for a run, such as container
   identity and observed state.
-- `Runner`: the execution launcher abstraction that starts, inspects, stops, and
-  removes detached executions.
+- `Runner`: the execution abstraction (`runner.Runner` interface) that starts,
+  inspects, stops, and removes detached executions.
 - `Worker`: the in-execution component that performs a run inside the launched
   environment.
 - `Runtime`: the user-facing selection that determines both the harness and the
@@ -20,8 +20,8 @@
 - `ModelProvider`: the underlying model/service used by a runtime. `codex` and
   `goose-codex` runtimes use the `codex` provider; `claude` and `goose-claude`
   runtimes use the `anthropic` provider.
-- `SessionPolicy`: policy governing whether a task-scoped session may resume
-  (`off`, `pr-only`, `all`).
+- `SessionMode`: policy governing whether a task-scoped session may resume
+  (`off`, `pr-only`, `all`). Defined in `internal/runtime`.
 - `TaskSession`: optional task-scoped harness state used to resume later runs.
   Rascal resets it when the task switches runtimes.
 - `RunLease`: supervision ownership record for a running run. It tells Rascal
@@ -40,6 +40,8 @@
   cutover.
 - `Draining`: shutdown mode where an old slot stops accepting work and
   relinquishes run supervision without canceling detached execution.
+- `Scheduler pause`: temporary suspension of all task scheduling, triggered by
+  control-plane conditions such as provider usage limits.
 - `Deep module`: a package boundary that owns a cohesive area of behavior, such
   as `internal/github`, `internal/apiclient`, `internal/clientconfig`, or
   `internal/remote`.

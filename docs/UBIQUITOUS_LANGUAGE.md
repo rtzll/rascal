@@ -97,7 +97,9 @@
 ## Flagged ambiguities
 
 - **"Execution"** alone is ambiguous — it could mean a **Run** (business concept), a **RunExecution** (infrastructure metadata), or a **Detached Execution** (the actual container). Always qualify with the full term.
-- **"Agent"** is used as a code namespace (`internal/agent/`) for runtime configuration types, not as a domain entity. Avoid using "agent" to refer to the worker, the harness, or the runtime. Prefer the specific term.
-- **"SessionPolicy" vs "TaskSessionPolicy" vs "SessionMode"** — code uses these as aliases. Canonical term should be **Task Session Policy** to make the task-scoping explicit.
-- **"Worker pause"** in the orchestrator code (`workerPauseScope = "workers"`) actually pauses the **Scheduler**, not individual **Workers**. The canonical term **Scheduler Pause** better reflects what is actually suspended.
-- **"Backend"** is overloaded — used for container backend type (in **Execution Handle**) and could be confused with **Model Provider**. Context usually disambiguates, but prefer the specific term when writing documentation.
+- ~~**"Agent"** was used as a code namespace for runtime configuration types.~~ **Resolved**: package renamed from `internal/agent` to `internal/runtime`.
+- ~~**"SessionPolicy" vs "TaskSessionPolicy" vs "SessionMode"** — code used three aliases for one concept.~~ **Resolved**: aliases removed, `SessionMode` is the sole canonical type.
+- ~~**"Worker pause"** in the orchestrator code paused the Scheduler, not workers.~~ **Resolved**: renamed to `schedulerPauseScope` / `SchedulerPauseScope` / `activeSchedulerPause()`.
+- ~~**"Backend"** variables held Runtime values, not ExecutionBackend values.~~ **Resolved**: local variables renamed to `agentRuntime` and `runtimeSessionID`.
+- ~~**"Launcher"** was a type alias for Runner with no semantic distinction.~~ **Resolved**: alias removed, `Runner` is the sole canonical type. `DockerLauncher` → `DockerRunner`, `NoopLauncher` → `NoopRunner`.
+- **"Backend"** (the `ExecutionBackend` type) is still used for container backend type in **Execution Handle**. Context disambiguates from **Model Provider**, but prefer the specific term when writing documentation.
