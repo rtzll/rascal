@@ -54,6 +54,9 @@ RUN apt-get -qq update && apt-get -y -qq install --no-install-recommends \
     git gh \
     bash jq ripgrep make patch diffutils file less sqlite3 \
     python3 libxcb1 libgomp1 \
+    build-essential \
+    procps \
+    dnsutils iputils-ping netcat-openbsd traceroute net-tools \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=codex-runtime /usr/local/ /usr/local/
