@@ -114,13 +114,13 @@ func LoadConfig() (Config, error) {
 		agentSessionResume = false
 	}
 	agentSessionKey := strings.TrimSpace(os.Getenv("RASCAL_TASK_SESSION_KEY"))
-	backendSessionID := strings.TrimSpace(os.Getenv("RASCAL_TASK_SESSION_ID"))
+	runtimeSessionID := strings.TrimSpace(os.Getenv("RASCAL_TASK_SESSION_ID"))
 	if agentSessionResume {
 		if agentSessionKey == "" {
 			agentSessionKey = runner.TaskSessionKey(repo, taskID)
 		}
-		if backendSessionID == "" && agentRuntime.Harness() == runtime.HarnessGoose {
-			backendSessionID = runner.TaskSessionName(repo, taskID)
+		if runtimeSessionID == "" && agentRuntime.Harness() == runtime.HarnessGoose {
+			runtimeSessionID = runner.TaskSessionName(repo, taskID)
 		}
 	}
 	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))
@@ -155,7 +155,7 @@ func LoadConfig() (Config, error) {
 			Mode:             agentSessionMode,
 			Resume:           agentSessionResume,
 			TaskKey:          agentSessionKey,
-			RuntimeSessionID: backendSessionID,
+			RuntimeSessionID: runtimeSessionID,
 		},
 	}, nil
 }

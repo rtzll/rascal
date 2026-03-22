@@ -41,7 +41,7 @@ const (
 )
 
 func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
-	backend := runtime.NormalizeRuntime(string(spec.AgentRuntime))
+	agentRuntime := runtime.NormalizeRuntime(string(spec.AgentRuntime))
 	image := strings.TrimSpace(spec.RunnerImage)
 	if image == "" {
 		image = strings.TrimSpace(l.DefaultImage)
@@ -63,7 +63,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 	sessionResume := spec.TaskSession.Resume
 	sessionMode := spec.TaskSession.Mode
 	sessionKey := strings.TrimSpace(spec.TaskSession.TaskKey)
-	backendSessionID := strings.TrimSpace(spec.TaskSession.RuntimeSessionID)
+	runtimeSessionID := strings.TrimSpace(spec.TaskSession.RuntimeSessionID)
 	if sessionResume && sessionDir != "" {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 			return ExecutionHandle{}, fmt.Errorf("create agent session dir: %w", err)
@@ -84,7 +84,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		}
 	}()
 
-	if _, err := fmt.Fprintf(logFile, "[%s] starting docker runner image=%s agent_runtime=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), image, backend, spec.RunID); err != nil {
+	if _, err := fmt.Fprintf(logFile, "[%s] starting docker runner image=%s agent_runtime=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), image, agentRuntime, spec.RunID); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("write runner log header: %w", err)
 	}
 
@@ -93,7 +93,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 	claudeConfigDir := containerClaudeStateDir
 	sessionMountTarget := ""
 	if sessionResume && sessionDir != "" {
-		switch backend {
+		switch agentRuntime {
 		case runtime.RuntimeCodex:
 			codexHome = containerCodexSessionDir
 			sessionMountTarget = containerCodexSessionDir
@@ -110,7 +110,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		"RASCAL_TASK_ID":             spec.TaskID,
 		"RASCAL_INSTRUCTION":         spec.Instruction,
 		"RASCAL_REPO":                spec.Repo,
-		"RASCAL_AGENT_RUNTIME":       backend.String(),
+		"RASCAL_AGENT_RUNTIME":       agentRuntime.String(),
 		"RASCAL_BASE_BRANCH":         spec.BaseBranch,
 		"RASCAL_HEAD_BRANCH":         spec.HeadBranch,
 		"RASCAL_TRIGGER":             spec.Trigger.String(),
@@ -122,19 +122,19 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 		"RASCAL_TASK_SESSION_MODE":   string(sessionMode),
 		"RASCAL_TASK_SESSION_RESUME": strconv.FormatBool(sessionResume),
 		"RASCAL_TASK_SESSION_KEY":    sessionKey,
-		"RASCAL_TASK_SESSION_ID":     backendSessionID,
+		"RASCAL_TASK_SESSION_ID":     runtimeSessionID,
 		"CODEX_HOME":                 codexHome,
 		"GH_PROMPT_DISABLED":         "1",
 		"GIT_TERMINAL_PROMPT":        "0",
 	}
-	if backend.Harness() == runtime.HarnessGoose {
+	if agentRuntime.Harness() == runtime.HarnessGoose {
 		envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
 		envPairs["GOOSE_MODE"] = "auto"
 		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
 		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
 		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
 	}
-	switch backend {
+	switch agentRuntime {
 	case runtime.RuntimeGooseCodex:
 		envPairs["GOOSE_PROVIDER"] = "codex"
 		envPairs["GOOSE_MODEL"] = "gpt-5.4"
@@ -177,11 +177,11 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 
 	if _, err := fmt.Fprintf(logFile, "[%s] task session agent_runtime=%s mode=%s resume=%t key=%s session_id=%s path_root=%s\n",
 		time.Now().UTC().Format(time.RFC3339),
-		backend,
+		agentRuntime,
 		runtime.NormalizeSessionMode(string(sessionMode)),
 		sessionResume,
 		sessionKey,
-		backendSessionID,
+		runtimeSessionID,
 		firstNonEmptySessionPath(sessionMountTarget, goosePathRoot),
 	); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("write runner session log: %w", err)
