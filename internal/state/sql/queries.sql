@@ -602,7 +602,7 @@ WHERE id IN (
 );
 
 -- name: UpsertTaskSession :exec
-INSERT INTO task_agent_sessions (
+INSERT INTO task_sessions (
   task_id,
   agent_runtime,
   runtime_session_id,
@@ -631,11 +631,11 @@ SELECT
   last_run_id,
   created_at,
   updated_at
-FROM task_agent_sessions
+FROM task_sessions
 WHERE task_id = ?;
 
 -- name: DeleteTaskSession :execrows
-DELETE FROM task_agent_sessions
+DELETE FROM task_sessions
 WHERE task_id = ?;
 
 -- name: SetTaskCreatedByUser :execrows

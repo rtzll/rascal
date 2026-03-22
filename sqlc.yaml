@@ -9,5 +9,3 @@ sql:
         out: "internal/state/sqlitegen"
         emit_json_tags: true
         emit_empty_slices: true
-        rename:
-          task_agent_session: TaskSession

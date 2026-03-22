@@ -47,7 +47,7 @@ CREATE INDEX idx_runs_task_seq ON runs (task_id, seq DESC);
 CREATE INDEX idx_runs_created_by ON runs (created_by_user_id, seq DESC);
 CREATE INDEX idx_runs_credential_id ON runs (credential_id, seq DESC);
 
-CREATE TABLE task_agent_sessions (
+CREATE TABLE task_sessions (
   task_id TEXT PRIMARY KEY,
   agent_runtime TEXT NOT NULL,
   runtime_session_id TEXT NOT NULL DEFAULT '',
@@ -58,7 +58,7 @@ CREATE TABLE task_agent_sessions (
   updated_at INTEGER NOT NULL
 );
 
-CREATE INDEX idx_task_agent_sessions_runtime_updated ON task_agent_sessions (agent_runtime, updated_at DESC);
+CREATE INDEX idx_task_sessions_runtime_updated ON task_sessions (agent_runtime, updated_at DESC);
 
 CREATE TABLE users (
   id TEXT PRIMARY KEY,
