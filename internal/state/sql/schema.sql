@@ -18,7 +18,7 @@ CREATE TABLE runs (
   id TEXT NOT NULL UNIQUE,
   task_id TEXT NOT NULL,
   repo TEXT NOT NULL,
-  task TEXT NOT NULL,
+  task TEXT NOT NULL, -- domain model calls this "Instruction"; kept as "task" for historical compatibility
   agent_runtime TEXT NOT NULL DEFAULT 'codex',
   base_branch TEXT NOT NULL,
   head_branch TEXT NOT NULL,

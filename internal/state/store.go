@@ -354,7 +354,7 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		ID:           in.ID,
 		TaskID:       in.TaskID,
 		Repo:         in.Repo,
-		Task:         in.Instruction,
+		Task:         in.Instruction, // DB column "task" maps to domain "Instruction"
 		AgentRuntime: in.AgentRuntime.String(),
 		BaseBranch:   baseBranch,
 		HeadBranch:   in.HeadBranch,
