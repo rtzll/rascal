@@ -854,8 +854,8 @@ func (s *Server) requeueRun(runID string) error {
 	return nil
 }
 
-func (s *Server) activeWorkerPause() (time.Time, string, bool) {
-	pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(workerPauseScope, time.Now().UTC())
+func (s *Server) activeSchedulerPause() (time.Time, string, bool) {
+	pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(schedulerPauseScope, time.Now().UTC())
 	if err != nil {
 		log.Printf("load active worker pause failed: %v", err)
 		return time.Time{}, "", false
@@ -867,7 +867,7 @@ func (s *Server) pauseWorkersUntil(until time.Time, reason string) time.Time {
 	if until.IsZero() {
 		until = time.Now().UTC().Add(defaultUsageLimitPause)
 	}
-	effective, err := s.Store.PauseScheduler(workerPauseScope, reason, until)
+	effective, err := s.Store.PauseScheduler(schedulerPauseScope, reason, until)
 	if err != nil {
 		log.Printf("persist worker pause until %s failed: %v", until.Format(time.RFC3339), err)
 		effective = until.UTC()

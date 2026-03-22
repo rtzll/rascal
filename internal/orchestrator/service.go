@@ -39,14 +39,14 @@ const agentLogFile = "agent.ndjson"
 const legacyAgentLogFile = "goose.ndjson"
 const agentOutputFile = "agent_output.txt"
 const runFailureCommentBodyMarker = "<!-- rascal:failure-comment -->"
-const workerPauseScope = "workers"
+const schedulerPauseScope = "workers"
 const defaultUsageLimitPause = 15 * time.Minute
 const minimumUsageLimitPause = 1 * time.Minute
 
 const RunLeaseTTL = runLeaseTTL
 const RunStartCommentBodyMarker = runStartCommentBodyMarker
 const RunCompletionCommentBodyMarker = runCompletionCommentBodyMarker
-const WorkerPauseScope = workerPauseScope
+const SchedulerPauseScope = schedulerPauseScope
 
 var usageLimitPattern = regexp.MustCompile(`(?i)(?:you['’]?ve hit your usage limit|hit your usage limit|usage limit)`)
 var retryAtPattern = regexp.MustCompile(`(?i)try again at ([^\r\n.]+)`)

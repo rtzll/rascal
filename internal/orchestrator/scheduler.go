@@ -16,7 +16,7 @@ func (s *Server) ScheduleRuns(preferredTaskID string) {
 	}
 	preferredTaskID = strings.TrimSpace(preferredTaskID)
 
-	if pauseUntil, pauseReason, paused := s.activeWorkerPause(); paused {
+	if pauseUntil, pauseReason, paused := s.activeSchedulerPause(); paused {
 		s.ensureResumeTimer(pauseUntil)
 		log.Printf("run scheduling paused until %s: %s", pauseUntil.Format(time.RFC3339), pauseReason)
 		return
@@ -26,7 +26,7 @@ func (s *Server) ScheduleRuns(preferredTaskID string) {
 	defer s.scheduleMu.Unlock()
 
 	for {
-		if pauseUntil, pauseReason, paused := s.activeWorkerPause(); paused {
+		if pauseUntil, pauseReason, paused := s.activeSchedulerPause(); paused {
 			s.ensureResumeTimer(pauseUntil)
 			log.Printf("run scheduling paused until %s: %s", pauseUntil.Format(time.RFC3339), pauseReason)
 			return

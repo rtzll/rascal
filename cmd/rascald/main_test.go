@@ -3192,7 +3192,7 @@ func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 	if _, err := os.Stat(orchestrator.RunFailureCommentMarkerPath(run.RunDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected no failure marker, got err=%v", err)
 	}
-	if pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(orchestrator.WorkerPauseScope, time.Now().UTC()); err != nil {
+	if pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(orchestrator.SchedulerPauseScope, time.Now().UTC()); err != nil {
 		t.Fatalf("load scheduler pause: %v", err)
 	} else if !ok {
 		t.Fatal("expected active scheduler pause after usage limit")
@@ -3313,7 +3313,7 @@ func TestExecuteRunDoesNotRequeueSuccessfulRunWhenTranscriptMentionsUsageLimit(t
 	if updated.Status != state.StatusReview {
 		t.Fatalf("expected review status after successful run, got %s", updated.Status)
 	}
-	if pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(orchestrator.WorkerPauseScope, time.Now().UTC()); err != nil {
+	if pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(orchestrator.SchedulerPauseScope, time.Now().UTC()); err != nil {
 		t.Fatalf("load scheduler pause: %v", err)
 	} else if ok {
 		t.Fatalf("did not expect scheduler pause, got until=%s reason=%q", pauseUntil, reason)
@@ -3392,7 +3392,7 @@ func TestScheduleRunsResumesAfterPauseDeadline(t *testing.T) {
 	defer waitForServerIdle(t, s)
 
 	pauseUntil := time.Now().UTC().Add(150 * time.Millisecond)
-	if _, err := s.Store.PauseScheduler(orchestrator.WorkerPauseScope, "test pause", pauseUntil); err != nil {
+	if _, err := s.Store.PauseScheduler(orchestrator.SchedulerPauseScope, "test pause", pauseUntil); err != nil {
 		t.Fatalf("pause scheduler: %v", err)
 	}
 
