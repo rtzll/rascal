@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestNoopLauncherWritesArtifacts(t *testing.T) {
+func TestNoopRunnerWritesArtifacts(t *testing.T) {
 	t.Parallel()
 
 	runDir := t.TempDir()
@@ -20,7 +20,7 @@ func TestNoopLauncherWritesArtifacts(t *testing.T) {
 		RunDir:     runDir,
 	}
 
-	launcher := NoopLauncher{}
+	launcher := NoopRunner{}
 	handle, err := launcher.StartDetached(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("start noop launcher: %v", err)

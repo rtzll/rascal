@@ -60,7 +60,7 @@ func (s *Server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 	handle := runExecutionHandle(execRec)
 	inspectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	execState, err := s.Launcher.Inspect(inspectCtx, handle)
+	execState, err := s.Runner.Inspect(inspectCtx, handle)
 	switch {
 	case errors.Is(err, runner.ErrExecutionNotFound):
 		s.failRunForMissingExecution(run, "detached container missing during adoption")
@@ -499,7 +499,7 @@ func (s *Server) superviseRun(ctx context.Context, runID string, execRec state.R
 					}
 					if !stopRequested {
 						stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
-						stopErr := s.Launcher.Stop(stopCtx, handle, 10*time.Second)
+						stopErr := s.Runner.Stop(stopCtx, handle, 10*time.Second)
 						stopCancel()
 						if stopErr != nil && !errors.Is(stopErr, runner.ErrExecutionNotFound) && !errors.Is(stopErr, context.Canceled) {
 							log.Printf("run %s stop after credential lease loss failed: %v", runID, stopErr)
@@ -511,7 +511,7 @@ func (s *Server) superviseRun(ctx context.Context, runID string, execRec state.R
 			}
 
 			now := time.Now().UTC()
-			execState, err := s.Launcher.Inspect(ctx, handle)
+			execState, err := s.Runner.Inspect(ctx, handle)
 			if errors.Is(err, runner.ErrExecutionNotFound) {
 				run, ok := s.Store.GetRun(runID)
 				if ok {
@@ -532,7 +532,7 @@ func (s *Server) superviseRun(ctx context.Context, runID string, execRec state.R
 					execStatus = state.RunExecutionStatusStopping
 					if !stopRequested {
 						stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
-						stopErr := s.Launcher.Stop(stopCtx, handle, 10*time.Second)
+						stopErr := s.Runner.Stop(stopCtx, handle, 10*time.Second)
 						stopCancel()
 						if stopErr != nil && !errors.Is(stopErr, runner.ErrExecutionNotFound) && !errors.Is(stopErr, context.Canceled) {
 							log.Printf("run %s stop failed: %v", runID, stopErr)
@@ -714,7 +714,7 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 
 func (s *Server) cleanupDetachedExecution(runID string, execRec state.RunExecution) {
 	removeCtx, removeCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	err := s.Launcher.Remove(removeCtx, runExecutionHandle(execRec))
+	err := s.Runner.Remove(removeCtx, runExecutionHandle(execRec))
 	removeCancel()
 	if err != nil && !errors.Is(err, runner.ErrExecutionNotFound) && !errors.Is(err, context.Canceled) {
 		log.Printf("run %s remove detached container failed: %v", runID, err)
@@ -742,7 +742,7 @@ func (s *Server) stopRunExecutionBestEffort(runID string, note string) {
 		log.Printf("run %s mark execution stopping failed: %v", runID, err)
 	}
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	err := s.Launcher.Stop(stopCtx, runExecutionHandle(execRec), 10*time.Second)
+	err := s.Runner.Stop(stopCtx, runExecutionHandle(execRec), 10*time.Second)
 	stopCancel()
 	if err != nil && !errors.Is(err, runner.ErrExecutionNotFound) && !errors.Is(err, context.Canceled) {
 		log.Printf("run %s stop execution failed (%s): %v", runID, note, err)
@@ -770,7 +770,7 @@ func (s *Server) startDetachedWithRetry(ctx context.Context, spec runner.Spec) (
 		if err := ctx.Err(); err != nil {
 			return handle, fmt.Errorf("check start-detached context: %w", err)
 		}
-		handle, err = s.Launcher.StartDetached(ctx, spec)
+		handle, err = s.Runner.StartDetached(ctx, spec)
 		if err == nil {
 			return handle, nil
 		}

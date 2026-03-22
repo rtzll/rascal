@@ -46,7 +46,7 @@ func main() {
 	s := orchestrator.NewServer(
 		cfg,
 		store,
-		runner.NewLauncher(cfg.RunnerMode, cfg.RunnerImageForRuntime(cfg.AgentRuntime), cfg.GitHubToken),
+		runner.NewRunner(cfg.RunnerMode, cfg.RunnerImageForRuntime(cfg.AgentRuntime), cfg.GitHubToken),
 		ghapi.NewAPIClient(cfg.GitHubToken),
 		credentials.NewBroker(store, allocStrategy, cipher, cfg.CredentialLeaseTTL),
 		cipher,

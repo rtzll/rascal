@@ -68,7 +68,7 @@ type GitHubClient interface {
 type Server struct {
 	Config   config.ServerConfig
 	Store    *state.Store
-	Launcher runner.Launcher
+	Runner runner.Runner
 	GitHub   GitHubClient
 	Broker   credentials.CredentialBroker
 	Cipher   credentials.Cipher
@@ -132,14 +132,14 @@ type createIssueTaskRequest = api.CreateIssueTaskRequest
 type createCredentialRequest = api.CreateCredentialRequest
 type updateCredentialRequest = api.UpdateCredentialRequest
 
-func NewServer(cfg config.ServerConfig, store *state.Store, launcher runner.Launcher, gh GitHubClient, broker credentials.CredentialBroker, cipher credentials.Cipher, instanceID string) *Server {
+func NewServer(cfg config.ServerConfig, store *state.Store, r runner.Runner, gh GitHubClient, broker credentials.CredentialBroker, cipher credentials.Cipher, instanceID string) *Server {
 	if strings.TrimSpace(instanceID) == "" {
 		instanceID = fmt.Sprintf("%s-%d-%d", strings.TrimSpace(cfg.Slot), os.Getpid(), time.Now().UTC().UnixNano())
 	}
 	return &Server{
 		Config:        cfg,
 		Store:         store,
-		Launcher:      launcher,
+		Runner:        r,
 		GitHub:        gh,
 		Broker:        broker,
 		Cipher:        cipher,
@@ -249,7 +249,7 @@ func (s *Server) requestRunCancelBestEffort(runID, reason, source string) {
 }
 
 func (s *Server) removeRunExecutionBestEffort(ctx context.Context, handle runner.ExecutionHandle, runID, note string) {
-	err := s.Launcher.Remove(ctx, handle)
+	err := s.Runner.Remove(ctx, handle)
 	if err != nil && !errors.Is(err, runner.ErrExecutionNotFound) && !errors.Is(err, context.Canceled) {
 		log.Printf("run %s remove execution failed (%s): %v", runID, note, err)
 	}

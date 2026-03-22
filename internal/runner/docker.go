@@ -17,8 +17,8 @@ import (
 	"github.com/rtzll/rascal/internal/runtime"
 )
 
-// DockerLauncher runs a task inside a Docker container.
-type DockerLauncher struct {
+// DockerRunner runs a task inside a Docker container.
+type DockerRunner struct {
 	DefaultImage string
 	Image        string
 	GitHubToken  string
@@ -40,7 +40,7 @@ const (
 	containerContextJSONPath  = "/rascal-meta/context.json"
 )
 
-func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
+func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
 	agentRuntime := runtime.NormalizeRuntime(string(spec.AgentRuntime))
 	image := strings.TrimSpace(spec.RunnerImage)
 	if image == "" {
@@ -211,7 +211,7 @@ func (l DockerLauncher) StartDetached(ctx context.Context, spec Spec) (handle Ex
 	}, nil
 }
 
-func (l DockerLauncher) Inspect(ctx context.Context, handle ExecutionHandle) (ExecutionState, error) {
+func (l DockerRunner) Inspect(ctx context.Context, handle ExecutionHandle) (ExecutionState, error) {
 	target := dockerExecutionTarget(handle)
 	if target == "" {
 		return ExecutionState{}, fmt.Errorf("execution target is required")
@@ -251,7 +251,7 @@ func firstNonEmptySessionPath(values ...string) string {
 	return ""
 }
 
-func (l DockerLauncher) Stop(ctx context.Context, handle ExecutionHandle, timeout time.Duration) error {
+func (l DockerRunner) Stop(ctx context.Context, handle ExecutionHandle, timeout time.Duration) error {
 	target := dockerExecutionTarget(handle)
 	if target == "" {
 		return fmt.Errorf("execution target is required")
@@ -277,7 +277,7 @@ func (l DockerLauncher) Stop(ctx context.Context, handle ExecutionHandle, timeou
 	return nil
 }
 
-func (l DockerLauncher) Remove(ctx context.Context, handle ExecutionHandle) error {
+func (l DockerRunner) Remove(ctx context.Context, handle ExecutionHandle) error {
 	target := dockerExecutionTarget(handle)
 	if target == "" {
 		return fmt.Errorf("execution target is required")

@@ -103,17 +103,11 @@ type Runner interface {
 	Remove(ctx context.Context, handle ExecutionHandle) error
 }
 
-type Launcher = Runner
-
 func NewRunner(mode Mode, image, githubToken string) Runner {
 	switch NormalizeMode(string(mode)) {
 	case ModeDocker:
-		return DockerLauncher{DefaultImage: image, GitHubToken: githubToken}
+		return DockerRunner{DefaultImage: image, GitHubToken: githubToken}
 	default:
-		return NoopLauncher{}
+		return NoopRunner{}
 	}
-}
-
-func NewLauncher(mode Mode, image, githubToken string) Launcher {
-	return NewRunner(mode, image, githubToken)
 }

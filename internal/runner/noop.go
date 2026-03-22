@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-// NoopLauncher is a safe default for local development.
-type NoopLauncher struct{}
+// NoopRunner is a safe default for local development.
+type NoopRunner struct{}
 
-func (NoopLauncher) StartDetached(_ context.Context, spec Spec) (handle ExecutionHandle, err error) {
+func (NoopRunner) StartDetached(_ context.Context, spec Spec) (handle ExecutionHandle, err error) {
 	if err := os.MkdirAll(spec.RunDir, 0o755); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("create run dir: %w", err)
 	}
@@ -53,15 +53,15 @@ func (NoopLauncher) StartDetached(_ context.Context, spec Spec) (handle Executio
 	}, nil
 }
 
-func (NoopLauncher) Inspect(_ context.Context, _ ExecutionHandle) (ExecutionState, error) {
+func (NoopRunner) Inspect(_ context.Context, _ ExecutionHandle) (ExecutionState, error) {
 	exitCode := 0
 	return ExecutionState{Running: false, ExitCode: &exitCode}, nil
 }
 
-func (NoopLauncher) Stop(_ context.Context, _ ExecutionHandle, _ time.Duration) error {
+func (NoopRunner) Stop(_ context.Context, _ ExecutionHandle, _ time.Duration) error {
 	return nil
 }
 
-func (NoopLauncher) Remove(_ context.Context, _ ExecutionHandle) error {
+func (NoopRunner) Remove(_ context.Context, _ ExecutionHandle) error {
 	return nil
 }

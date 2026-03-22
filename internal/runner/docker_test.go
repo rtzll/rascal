@@ -29,7 +29,7 @@ func TestSanitizeContainerName(t *testing.T) {
 	}
 }
 
-func TestDockerLauncherStartDetachedUsesStableNameAndNoRM(t *testing.T) {
+func TestDockerRunnerStartDetachedUsesStableNameAndNoRM(t *testing.T) {
 	tmp := t.TempDir()
 	logPath := filepath.Join(tmp, "docker_calls.log")
 	fakeDocker := filepath.Join(tmp, "docker")
@@ -55,7 +55,7 @@ exit 0
 		t.Fatalf("create run dir: %v", err)
 	}
 
-	launcher := DockerLauncher{Image: "rascal-runner:latest"}
+	launcher := DockerRunner{Image: "rascal-runner:latest"}
 	handle, err := launcher.StartDetached(context.Background(), Spec{
 		RunID:       "run_detached",
 		TaskID:      "task_detached",
@@ -97,7 +97,7 @@ exit 0
 	}
 }
 
-func TestDockerLauncherInspectStopAndRemove(t *testing.T) {
+func TestDockerRunnerInspectStopAndRemove(t *testing.T) {
 	tmp := t.TempDir()
 	logPath := filepath.Join(tmp, "docker_calls.log")
 	fakeDocker := filepath.Join(tmp, "docker")
@@ -133,7 +133,7 @@ exit 0
 	oldPath := os.Getenv("PATH")
 	t.Setenv("PATH", tmp+string(os.PathListSeparator)+oldPath)
 
-	launcher := DockerLauncher{Image: "rascal-runner:latest"}
+	launcher := DockerRunner{Image: "rascal-runner:latest"}
 	runningState, err := launcher.Inspect(context.Background(), ExecutionHandle{ID: "running-id"})
 	if err != nil {
 		t.Fatalf("inspect running container: %v", err)
@@ -177,7 +177,7 @@ exit 0
 	}
 }
 
-func TestDockerLauncherUsesTaskSessionMountWhenResumeEnabled(t *testing.T) {
+func TestDockerRunnerUsesTaskSessionMountWhenResumeEnabled(t *testing.T) {
 	tmp := t.TempDir()
 	logPath := filepath.Join(tmp, "docker_calls.log")
 	fakeDocker := filepath.Join(tmp, "docker")
@@ -200,7 +200,7 @@ exit 0
 		t.Fatalf("create run dir: %v", err)
 	}
 
-	launcher := DockerLauncher{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
+	launcher := DockerRunner{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
 		AgentRuntime: runtime.RuntimeGooseCodex,
 		RunID:        "run_1",
@@ -259,7 +259,7 @@ exit 0
 	}
 }
 
-func TestDockerLauncherKeepsRunScopedGoosePathWhenSessionResumeDisabled(t *testing.T) {
+func TestDockerRunnerKeepsRunScopedGoosePathWhenSessionResumeDisabled(t *testing.T) {
 	tmp := t.TempDir()
 	logPath := filepath.Join(tmp, "docker_calls.log")
 	fakeDocker := filepath.Join(tmp, "docker")
@@ -281,7 +281,7 @@ exit 0
 		t.Fatalf("create run dir: %v", err)
 	}
 
-	launcher := DockerLauncher{Image: "rascal-runner:latest"}
+	launcher := DockerRunner{Image: "rascal-runner:latest"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
 		AgentRuntime: runtime.RuntimeGooseCodex,
 		RunID:        "run_2",
@@ -314,7 +314,7 @@ exit 0
 	}
 }
 
-func TestDockerLauncherUsesTaskScopedCodexHomeWhenResumeEnabled(t *testing.T) {
+func TestDockerRunnerUsesTaskScopedCodexHomeWhenResumeEnabled(t *testing.T) {
 	tmp := t.TempDir()
 	logPath := filepath.Join(tmp, "docker_calls.log")
 	fakeDocker := filepath.Join(tmp, "docker")
@@ -337,7 +337,7 @@ exit 0
 		t.Fatalf("create run dir: %v", err)
 	}
 
-	launcher := DockerLauncher{Image: "rascal-runner-codex:latest", GitHubToken: "gh-token"}
+	launcher := DockerRunner{Image: "rascal-runner-codex:latest", GitHubToken: "gh-token"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
 		RunID:        "run_codex_1",
 		TaskID:       "owner/repo#1",
@@ -380,7 +380,7 @@ exit 0
 	}
 }
 
-func TestDockerLauncherIncludesNoNewPrivilegesSecurityOpt(t *testing.T) {
+func TestDockerRunnerIncludesNoNewPrivilegesSecurityOpt(t *testing.T) {
 	tmp := t.TempDir()
 	logPath := filepath.Join(tmp, "docker_calls.log")
 	fakeDocker := filepath.Join(tmp, "docker")
@@ -404,7 +404,7 @@ exit 0
 		t.Fatalf("create run dir: %v", err)
 	}
 
-	launcher := DockerLauncher{Image: "rascal-runner:latest"}
+	launcher := DockerRunner{Image: "rascal-runner:latest"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
 		RunID:       "run_security",
 		TaskID:      "task_security",

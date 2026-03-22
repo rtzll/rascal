@@ -24,7 +24,7 @@ func withPrincipal(req *http.Request, userID string, role state.UserRole) *http.
 }
 
 func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
-	s := newTestServer(t, &fakeLauncher{})
+	s := newTestServer(t, &fakeRunner{})
 	cipher, err := credentials.NewAESCipher("test-secret")
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
@@ -109,7 +109,7 @@ func TestCredentialAPIOwnerAdminAuthorization(t *testing.T) {
 }
 
 func TestCredentialAPIRejectsInvalidStatusUpdate(t *testing.T) {
-	s := newTestServer(t, &fakeLauncher{})
+	s := newTestServer(t, &fakeRunner{})
 	cipher, err := credentials.NewAESCipher("test-secret")
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
@@ -144,7 +144,7 @@ func TestCredentialAPIRejectsInvalidStatusUpdate(t *testing.T) {
 }
 
 func TestCreateTaskPersistsRequesterIdentity(t *testing.T) {
-	s := newTestServer(t, &fakeLauncher{})
+	s := newTestServer(t, &fakeRunner{})
 	defer waitForServerIdle(t, s)
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader([]byte(`{"repo":"owner/repo","task":"do work"}`)))
 	req = withPrincipal(req, "owner", state.UserRoleUser)
@@ -170,7 +170,7 @@ func TestCreateTaskPersistsRequesterIdentity(t *testing.T) {
 
 func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 	waitCh := make(chan struct{})
-	s := newTestServer(t, &fakeLauncher{waitCh: waitCh, res: fakeRunResult{ExitCode: 0}})
+	s := newTestServer(t, &fakeRunner{waitCh: waitCh, res: fakeRunResult{ExitCode: 0}})
 	defer waitForServerIdle(t, s)
 	cipher, err := credentials.NewAESCipher("test-secret")
 	if err != nil {
@@ -244,7 +244,7 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 
 func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 	waitCh := make(chan struct{})
-	launcher := &fakeLauncher{waitCh: waitCh, res: fakeRunResult{ExitCode: 0}}
+	launcher := &fakeRunner{waitCh: waitCh, res: fakeRunResult{ExitCode: 0}}
 	s := newTestServer(t, launcher)
 	defer waitForServerIdle(t, s)
 	cipher, err := credentials.NewAESCipher("test-secret")
