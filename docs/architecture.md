@@ -106,7 +106,7 @@ These are the main layers in the Go codebase.
 
 2. Agent abstraction
 
-- `internal/agent` defines `Runtime`, `Harness`, `ModelProvider`, and
+- `internal/runtime` defines `Runtime`, `Harness`, `ModelProvider`, and
   `SessionMode`.
 - `Runtime` is the user-facing selection; `Harness` and `ModelProvider` are
   derived from it via `Runtime.Harness()` and `Runtime.Provider()` methods.
