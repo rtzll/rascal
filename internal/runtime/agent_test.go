@@ -225,6 +225,142 @@ func TestRuntimeProvider(t *testing.T) {
 	}
 }
 
+func TestIsRascalLabel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		label string
+		want  bool
+	}{
+		{name: "bare rascal", label: "rascal", want: true},
+		{name: "bare rascal uppercase", label: "RASCAL", want: true},
+		{name: "rascal:claude", label: "rascal:claude", want: true},
+		{name: "rascal:codex", label: "rascal:codex", want: true},
+		{name: "RASCAL:CLAUDE", label: "RASCAL:CLAUDE", want: true},
+		{name: "not rascal", label: "bug", want: false},
+		{name: "rascal prefix no colon", label: "rascalicious", want: false},
+		{name: "empty", label: "", want: false},
+		{name: "just colon", label: "rascal:", want: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsRascalLabel(tt.label); got != tt.want {
+				t.Fatalf("IsRascalLabel(%q) = %t, want %t", tt.label, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseLabel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		label string
+		want  Runtime
+		ok    bool
+	}{
+		{name: "rascal:claude", label: "rascal:claude", want: RuntimeClaude, ok: true},
+		{name: "rascal:codex", label: "rascal:codex", want: RuntimeCodex, ok: true},
+		{name: "rascal:goose-codex", label: "rascal:goose-codex", want: RuntimeGooseCodex, ok: true},
+		{name: "rascal:goose-claude", label: "rascal:goose-claude", want: RuntimeGooseClaude, ok: true},
+		{name: "case insensitive", label: "RASCAL:CLAUDE", want: RuntimeClaude, ok: true},
+		{name: "bare rascal", label: "rascal", want: "", ok: false},
+		{name: "unknown suffix", label: "rascal:gpt4", want: "", ok: false},
+		{name: "not rascal", label: "bug", want: "", ok: false},
+		{name: "empty suffix", label: "rascal:", want: "", ok: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := ParseLabel(tt.label)
+			if ok != tt.ok || got != tt.want {
+				t.Fatalf("ParseLabel(%q) = (%q, %t), want (%q, %t)", tt.label, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+func TestParseLabelStrict(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		label   string
+		want    Runtime
+		wantErr bool
+	}{
+		{name: "valid claude", label: "rascal:claude", want: RuntimeClaude},
+		{name: "bare rascal", label: "rascal", want: ""},
+		{name: "not rascal", label: "bug", want: ""},
+		{name: "unknown suffix", label: "rascal:gpt4", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := ParseLabelStrict(tt.label)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ParseLabelStrict(%q) error = nil, want error", tt.label)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseLabelStrict(%q) returned error: %v", tt.label, err)
+			}
+			if got != tt.want {
+				t.Fatalf("ParseLabelStrict(%q) = %q, want %q", tt.label, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRuntimeFromLabels(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		labels  []string
+		want    Runtime
+		ok      bool
+		wantErr bool
+	}{
+		{name: "no labels", labels: nil, want: "", ok: false},
+		{name: "no runtime labels", labels: []string{"rascal", "bug"}, want: "", ok: false},
+		{name: "single runtime", labels: []string{"rascal", "rascal:claude"}, want: RuntimeClaude, ok: true},
+		{name: "multiple runtimes alphabetical", labels: []string{"rascal:codex", "rascal:claude"}, want: RuntimeClaude, ok: true},
+		{name: "unknown suffix errors", labels: []string{"rascal:gpt4"}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok, err := RuntimeFromLabels(tt.labels)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("RuntimeFromLabels(%v) error = nil, want error", tt.labels)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RuntimeFromLabels(%v) returned error: %v", tt.labels, err)
+			}
+			if ok != tt.ok || got != tt.want {
+				t.Fatalf("RuntimeFromLabels(%v) = (%q, %t), want (%q, %t)", tt.labels, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
 func TestSessionTaskKeyStableAndSanitized(t *testing.T) {
 	t.Parallel()
 

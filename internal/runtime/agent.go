@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/rtzll/rascal/internal/runtrigger"
@@ -35,6 +36,91 @@ func NormalizeRuntime(raw string) Runtime {
 
 func (r Runtime) String() string {
 	return string(NormalizeRuntime(string(r)))
+}
+
+const LabelPrefix = "rascal"
+
+// IsRascalLabel returns true if the label name starts with "rascal" (case-insensitive).
+func IsRascalLabel(name string) bool {
+	return strings.EqualFold(name, LabelPrefix) ||
+		(len(name) > len(LabelPrefix)+1 &&
+			strings.EqualFold(name[:len(LabelPrefix)], LabelPrefix) &&
+			name[len(LabelPrefix)] == ':')
+}
+
+// ParseLabel extracts a Runtime from a GitHub label like "rascal:claude".
+// Returns the runtime and true if the label contains a valid runtime suffix.
+// Returns zero value and false if the label is bare "rascal" (no suffix) or not a rascal label.
+func ParseLabel(name string) (Runtime, bool) {
+	name = strings.TrimSpace(name)
+	if !IsRascalLabel(name) {
+		return "", false
+	}
+	idx := strings.IndexByte(name, ':')
+	if idx < 0 {
+		return "", false // bare "rascal" label — no runtime specified
+	}
+	suffix := strings.TrimSpace(name[idx+1:])
+	if suffix == "" {
+		return "", false
+	}
+	rt, err := ParseRuntime(suffix)
+	if err != nil {
+		return "", false
+	}
+	return rt, true
+}
+
+// ParseLabelStrict is like ParseLabel but returns an error for unrecognized suffixes.
+// Returns ("", nil) for bare "rascal" or non-rascal labels.
+func ParseLabelStrict(name string) (Runtime, error) {
+	name = strings.TrimSpace(name)
+	if !IsRascalLabel(name) {
+		return "", nil
+	}
+	idx := strings.IndexByte(name, ':')
+	if idx < 0 {
+		return "", nil // bare "rascal"
+	}
+	suffix := strings.TrimSpace(name[idx+1:])
+	if suffix == "" {
+		return "", nil
+	}
+	rt, err := ParseRuntime(suffix)
+	if err != nil {
+		return "", fmt.Errorf("unknown runtime in label %q: %w", name, err)
+	}
+	return rt, nil
+}
+
+// RuntimeFromLabels scans a set of label names for rascal:* runtime labels.
+// If multiple runtime labels are present, the alphabetically first one wins.
+// Returns the runtime and true if found. Returns ("", false) if no runtime label
+// is present. Returns ("", false) with a non-nil error if a label has an
+// unrecognized runtime suffix.
+func RuntimeFromLabels(labelNames []string) (Runtime, bool, error) {
+	var runtimeLabels []string
+	for _, name := range labelNames {
+		name = strings.TrimSpace(name)
+		if !IsRascalLabel(name) || strings.IndexByte(name, ':') < 0 {
+			continue
+		}
+		runtimeLabels = append(runtimeLabels, name)
+	}
+	if len(runtimeLabels) == 0 {
+		return "", false, nil
+	}
+	sort.Strings(runtimeLabels)
+	for _, label := range runtimeLabels {
+		rt, err := ParseLabelStrict(label)
+		if err != nil {
+			return "", false, err
+		}
+		if rt != "" {
+			return rt, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func ParseRuntime(raw string) (Runtime, error) {
