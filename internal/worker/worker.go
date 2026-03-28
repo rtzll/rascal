@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rtzll/rascal/internal/reviewhandoff"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runsummary"
 )
@@ -44,6 +45,7 @@ var (
 type prView struct {
 	Number int    `json:"number"`
 	URL    string `json:"url"`
+	Body   string `json:"body"`
 }
 
 type CommandExecutor interface {
@@ -285,6 +287,17 @@ func RunWithExecutor(ex CommandExecutor) error {
 
 	var view prView
 	var found bool
+	var handoff reviewhandoff.Report
+	if err := RunStage("review_handoff", func() error {
+		var err error
+		handoff, err = buildReviewHandoff(ex, cfg, authorName)
+		if err != nil {
+			return fmt.Errorf("build review handoff: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return fail(err)
+	}
 	if err := RunStage("load_pr", func() error {
 		var err error
 		view, found, err = loadPRView(ex, cfg)
@@ -304,7 +317,7 @@ func RunWithExecutor(ex CommandExecutor) error {
 				closesSection = fmt.Sprintf("\n\nCloses #%d", cfg.IssueNumber)
 			}
 			runDuration := runsummary.FormatDuration(int64(time.Since(started).Seconds()))
-			body := runsummary.BuildPRBody(cfg.RunID, commitBody, agentOutput, runDuration, closesSection)
+			body := runsummary.BuildPRBody(cfg.RunID, commitBody, agentOutput, runDuration, closesSection, reviewhandoff.RenderPRSection(handoff))
 			if err := os.WriteFile(cfg.PRBodyPath, []byte(body), 0o644); err != nil {
 				return fmt.Errorf("write pr body: %w", err)
 			}
@@ -333,6 +346,26 @@ func RunWithExecutor(ex CommandExecutor) error {
 						}
 					}
 				}
+			}
+			return nil
+		}); err != nil {
+			return fail(err)
+		}
+	} else {
+		if err := RunStage("pr_update_handoff", func() error {
+			body := reviewhandoff.UpsertPRSection(view.Body, handoff)
+			if strings.TrimSpace(body) == strings.TrimSpace(view.Body) {
+				return nil
+			}
+			if err := os.WriteFile(cfg.PRBodyPath, []byte(body), 0o644); err != nil {
+				return fmt.Errorf("write updated pr body: %w", err)
+			}
+			if _, err := runCommand(ex, cfg.RepoDir, nil, "gh", "pr", "edit",
+				strconv.Itoa(view.Number),
+				"--repo", cfg.Repo,
+				"--body-file", cfg.PRBodyPath,
+			); err != nil {
+				return fmt.Errorf("gh pr edit failed: %w", err)
 			}
 			return nil
 		}); err != nil {

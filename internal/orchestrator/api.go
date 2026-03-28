@@ -22,6 +22,7 @@ import (
 	"github.com/rtzll/rascal/internal/api"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/logs"
+	"github.com/rtzll/rascal/internal/reviewhandoff"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -631,7 +632,16 @@ func (s *Server) HandleGetRun(w http.ResponseWriter, runID string) {
 		http.Error(w, "run not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, api.RunResponse{Run: run})
+	report, found, err := reviewhandoff.ReadReport(run.RunDir)
+	if err != nil {
+		http.Error(w, "failed to load review handoff", http.StatusInternalServerError)
+		return
+	}
+	resp := api.RunResponse{Run: run}
+	if found {
+		resp.ReviewHandoff = &report
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) HandleCancelRun(w http.ResponseWriter, runID string) {

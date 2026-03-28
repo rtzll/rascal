@@ -33,6 +33,7 @@ type Config struct {
 	CommitMsgPath    string
 	AgentOutputPath  string
 	PRBodyPath       string
+	ReviewHandoffDir string
 
 	GooseDebug   bool
 	AgentRuntime runtime.Runtime
@@ -146,6 +147,7 @@ func LoadConfig() (Config, error) {
 		CommitMsgPath:    filepath.Join(metaDir, defaultCommitMsgFile),
 		AgentOutputPath:  filepath.Join(metaDir, defaultAgentOutputFile),
 		PRBodyPath:       filepath.Join(metaDir, defaultPRBodyFile),
+		ReviewHandoffDir: metaDir,
 		GooseDebug:       debug,
 		AgentRuntime:     agentRuntime,
 		GoosePathRoot:    goosePathRoot,

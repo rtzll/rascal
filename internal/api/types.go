@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/runtime"
+	"github.com/rtzll/rascal/internal/reviewhandoff"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -50,7 +51,8 @@ type CreateIssueTaskRequest struct {
 }
 
 type RunResponse struct {
-	Run state.Run `json:"run" toml:"run"`
+	Run           state.Run             `json:"run" toml:"run"`
+	ReviewHandoff *reviewhandoff.Report `json:"review_handoff,omitempty" toml:"review_handoff,omitempty"`
 }
 
 type RunsResponse struct {

@@ -207,6 +207,23 @@ func TestBuildPRBody(t *testing.T) {
 			t.Fatalf("expected a single outer details close tag:\n%s", body)
 		}
 	})
+
+	t.Run("includes extra review handoff section before footer", func(t *testing.T) {
+		body := BuildPRBody(
+			"run_4",
+			"",
+			`{"usage":{"total_tokens":321}}`,
+			"9s",
+			"",
+			"## Review Handoff\n- Risk: `medium`",
+		)
+		if !strings.Contains(body, "## Review Handoff") {
+			t.Fatalf("missing extra section:\n%s", body)
+		}
+		if !strings.Contains(body, "## Review Handoff\n- Risk: `medium`\n\n---\n\nRascal run `run_4` completed") {
+			t.Fatalf("expected extra section before footer:\n%s", body)
+		}
+	})
 }
 
 func TestBuildCompletionComment(t *testing.T) {
