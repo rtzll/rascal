@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,11 +128,15 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 	}
 
 	if err := s.WriteRunFiles(run); err != nil {
-		s.setRunStatusBestEffort(run.ID, state.StatusFailed, err.Error())
+		if _, transErr := s.SM.Transition(run.ID, state.StatusFailed, WithError(err.Error())); transErr != nil {
+			log.Printf("run %s fail on write run files failed: %v", run.ID, transErr)
+		}
 		return state.Run{}, fmt.Errorf("prepare run files: %w", err)
 	}
 	if err := s.WriteRunResponseTarget(run, req.ResponseTarget); err != nil {
-		s.setRunStatusBestEffort(run.ID, state.StatusFailed, err.Error())
+		if _, transErr := s.SM.Transition(run.ID, state.StatusFailed, WithError(err.Error())); transErr != nil {
+			log.Printf("run %s fail on write response target failed: %v", run.ID, transErr)
+		}
 		return state.Run{}, fmt.Errorf("prepare run response target: %w", err)
 	}
 	s.ScheduleRuns(run.TaskID)

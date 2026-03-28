@@ -652,7 +652,7 @@ func (s *Server) HandleCancelRun(w http.ResponseWriter, runID string) {
 	}
 
 	if run.Status == state.StatusQueued {
-		updated, err := s.Store.SetRunStatus(runID, state.StatusCanceled, "canceled by user")
+		updated, err := s.SM.Transition(runID, state.StatusCanceled, WithError("canceled by user"))
 		if err != nil {
 			http.Error(w, "failed to cancel run", http.StatusInternalServerError)
 			return

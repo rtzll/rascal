@@ -836,24 +836,6 @@ func parseRetryDelay(raw string) (time.Duration, bool) {
 	return total, true
 }
 
-func (s *Server) requeueRun(runID string) error {
-	_, err := s.Store.UpdateRun(runID, func(r *state.Run) error {
-		if r.Status != state.StatusRunning {
-			return nil
-		}
-		r.Status = state.StatusQueued
-		r.Error = ""
-		r.StatusReason = state.RunStatusReasonNone
-		r.StartedAt = nil
-		r.CompletedAt = nil
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("requeue run %q: %w", runID, err)
-	}
-	return nil
-}
-
 func (s *Server) activeSchedulerPause() (time.Time, string, bool) {
 	pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(schedulerPauseScope, time.Now().UTC())
 	if err != nil {

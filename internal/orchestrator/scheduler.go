@@ -48,17 +48,23 @@ func (s *Server) ScheduleRuns(preferredTaskID string) {
 		}
 
 		if reason, statusReason, ok := s.pendingRunCancelStatus(run.ID); ok {
-			s.setRunStatusBestEffortWithReason(run.ID, state.StatusCanceled, reason, statusReason)
+			if _, err := s.SM.Transition(run.ID, state.StatusCanceled, WithError(reason), WithReason(statusReason)); err != nil {
+				log.Printf("run %s cancel on schedule failed: %v", run.ID, err)
+			}
 			s.clearRunCancelBestEffort(run.ID)
 			continue
 		}
 
 		if s.isDraining() {
-			s.setRunStatusBestEffortWithReason(run.ID, state.StatusCanceled, "orchestrator shutting down", state.RunStatusReasonShutdown)
+			if _, err := s.SM.Transition(run.ID, state.StatusCanceled, WithError("orchestrator shutting down"), WithReason(state.RunStatusReasonShutdown)); err != nil {
+				log.Printf("run %s cancel on drain failed: %v", run.ID, err)
+			}
 			return
 		}
 		if err := s.Store.UpsertRunLease(run.ID, s.InstanceID, runLeaseTTL); err != nil {
-			s.setRunStatusBestEffort(run.ID, state.StatusFailed, fmt.Sprintf("claim run lease: %v", err))
+			if _, transErr := s.SM.Transition(run.ID, state.StatusFailed, WithError(fmt.Sprintf("claim run lease: %v", err))); transErr != nil {
+				log.Printf("run %s fail on lease claim failed: %v", run.ID, transErr)
+			}
 			continue
 		}
 
@@ -76,29 +82,42 @@ func (s *Server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {
 		if !strings.EqualFold(run.Repo, repo) || run.PRNumber != prNumber {
 			continue
 		}
-		s.updateRunBestEffort(run.ID, func(r *state.Run) error {
-			now := time.Now().UTC()
-			if merged {
-				r.PRStatus = state.PRStatusMerged
-				if r.Status == state.StatusReview {
-					r.Status = state.StatusSucceeded
-					r.Error = ""
-					r.CompletedAt = &now
+		if merged {
+			if run.Status == state.StatusReview {
+				if _, err := s.SM.TransitionBatch(run.ID, state.StatusSucceeded, func(r *state.Run) {
+					r.PRStatus = state.PRStatusMerged
+				}); err != nil {
+					log.Printf("run %s reconcile PR merged (review→succeeded) failed: %v", run.ID, err)
 				}
-				return nil
+			} else {
+				// Update PRStatus without changing run status.
+				if _, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
+					r.PRStatus = state.PRStatusMerged
+					return nil
+				}); err != nil {
+					log.Printf("run %s update PR status to merged failed: %v", run.ID, err)
+				}
 			}
-			if r.PRStatus == state.PRStatusMerged {
-				return nil
+		} else {
+			if run.PRStatus == state.PRStatusMerged {
+				continue
 			}
-			r.PRStatus = state.PRStatusClosedUnmerged
-			if r.Status == state.StatusReview {
-				r.Status = state.StatusCanceled
-				r.Error = "pull request closed without merge"
-				r.StatusReason = state.RunStatusReasonPRClosed
-				r.CompletedAt = &now
+			if run.Status == state.StatusReview {
+				if _, err := s.SM.TransitionBatch(run.ID, state.StatusCanceled, func(r *state.Run) {
+					r.PRStatus = state.PRStatusClosedUnmerged
+				}, WithError("pull request closed without merge"), WithReason(state.RunStatusReasonPRClosed)); err != nil {
+					log.Printf("run %s reconcile PR closed (review→canceled) failed: %v", run.ID, err)
+				}
+			} else {
+				// Update PRStatus without changing run status.
+				if _, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
+					r.PRStatus = state.PRStatusClosedUnmerged
+					return nil
+				}); err != nil {
+					log.Printf("run %s update PR status to closed_unmerged failed: %v", run.ID, err)
+				}
 			}
-			return nil
-		})
+		}
 	}
 }
 
@@ -112,13 +131,18 @@ func (s *Server) reconcileReopenedPRRuns(repo string, prNumber int) {
 		if !strings.EqualFold(run.Repo, repo) || run.PRNumber != prNumber {
 			continue
 		}
-		s.updateRunBestEffort(run.ID, func(r *state.Run) error {
+		if run.PRStatus == state.PRStatusMerged {
+			continue
+		}
+		if _, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
 			if r.PRStatus == state.PRStatusMerged {
 				return nil
 			}
 			r.PRStatus = state.PRStatusOpen
 			return nil
-		})
+		}); err != nil {
+			log.Printf("run %s reconcile PR reopened failed: %v", run.ID, err)
+		}
 	}
 }
 
@@ -219,6 +243,8 @@ func (s *Server) cancelQueuedReviewThreadRuns(taskID, repo string, prNumber int,
 		if !ok || target.ReviewThreadID != reviewThreadID {
 			continue
 		}
-		s.setRunStatusBestEffortWithReason(run.ID, state.StatusCanceled, reason, state.RunStatusReasonReviewThreadResolved)
+		if _, err := s.SM.Transition(run.ID, state.StatusCanceled, WithError(reason), WithReason(state.RunStatusReasonReviewThreadResolved)); err != nil {
+			log.Printf("run %s cancel for resolved review thread failed: %v", run.ID, err)
+		}
 	}
 }

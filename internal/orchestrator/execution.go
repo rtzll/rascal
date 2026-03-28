@@ -28,7 +28,9 @@ func (s *Server) RecoverRunningRuns() {
 			continue
 		}
 		if reason, statusReason, ok := s.pendingRunCancelStatus(run.ID); ok {
-			s.setRunStatusBestEffortWithReason(run.ID, state.StatusCanceled, reason, statusReason)
+			if _, err := s.SM.Transition(run.ID, state.StatusCanceled, WithError(reason), WithReason(statusReason)); err != nil {
+				log.Printf("recover run %s cancel failed: %v", run.ID, err)
+			}
 			s.clearRunCancelBestEffort(run.ID)
 			continue
 		}
@@ -39,7 +41,7 @@ func (s *Server) RecoverRunningRuns() {
 				continue
 			}
 			s.deleteRunLeaseBestEffort(run.ID)
-			if err := s.requeueRun(run.ID); err != nil {
+			if err := s.SM.Requeue(run.ID); err != nil {
 				log.Printf("recover run %s after expired lease: %v", run.ID, err)
 			}
 			continue
@@ -50,7 +52,7 @@ func (s *Server) RecoverRunningRuns() {
 		if run.StartedAt != nil && run.StartedAt.After(now.Add(-runLeaseTTL)) {
 			continue
 		}
-		if err := s.requeueRun(run.ID); err != nil {
+		if err := s.SM.Requeue(run.ID); err != nil {
 			log.Printf("recover run %s without lease: %v", run.ID, err)
 		}
 	}
@@ -98,7 +100,16 @@ func (s *Server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 }
 
 func (s *Server) failRunForMissingExecution(run state.Run, reason string) {
-	updated := s.setRunStatusWithFallback(run, state.StatusFailed, reason)
+	updated, err := s.SM.Transition(run.ID, state.StatusFailed, WithError(reason))
+	if err != nil {
+		log.Printf("run %s fail for missing execution failed: %v", run.ID, err)
+		// Fall back to persisted state for downstream use.
+		if got, ok := s.Store.GetRun(run.ID); ok {
+			updated = got
+		} else {
+			updated = run
+		}
+	}
 	s.deleteRunExecutionBestEffort(run.ID)
 	s.deleteRunLeaseBestEffort(run.ID)
 	s.finishRun(updated)
@@ -223,14 +234,14 @@ func (s *Server) ExecuteRun(runID string) {
 		return
 	}
 	if reason, statusReason, ok := s.pendingRunCancelStatus(runID); ok {
-		updated := s.setRunStatusWithFallbackReason(run, state.StatusCanceled, reason, statusReason)
+		updated := s.transitionOrGetRun(run, state.StatusCanceled, WithError(reason), WithReason(statusReason))
 		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
 	}
 
 	if s.Store.IsTaskCompleted(run.TaskID) {
-		updated := s.setRunStatusWithFallbackReason(run, state.StatusCanceled, "task is already completed", state.RunStatusReasonTaskCompleted)
+		updated := s.transitionOrGetRun(run, state.StatusCanceled, WithError("task is already completed"), WithReason(state.RunStatusReasonTaskCompleted))
 		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
@@ -239,7 +250,7 @@ func (s *Server) ExecuteRun(runID string) {
 	if run.Status == state.StatusQueued {
 		claimedRun, claimed, err := s.Store.ClaimRunStart(runID)
 		if err != nil {
-			updated := s.setRunStatusWithFallback(run, state.StatusFailed, err.Error())
+			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(err.Error()))
 			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
@@ -260,7 +271,7 @@ func (s *Server) ExecuteRun(runID string) {
 	s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionEyes)
 
 	if err := s.Store.UpsertRunLease(run.ID, s.InstanceID, runLeaseTTL); err != nil {
-		updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("claim run lease: %v", err))
+		updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("claim run lease: %v", err)))
 		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
@@ -278,7 +289,7 @@ func (s *Server) ExecuteRun(runID string) {
 	}
 	credentialLeaseID, err := s.prepareRunCredentialAuth(run.ID, run.RunDir, requesterID, run.AgentRuntime)
 	if err != nil {
-		updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("acquire credential lease: %v", err))
+		updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("acquire credential lease: %v", err)))
 		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
@@ -286,7 +297,7 @@ func (s *Server) ExecuteRun(runID string) {
 	defer s.cleanupRunCredentialAuth(run.RunDir, credentialLeaseID, run.AgentRuntime)
 
 	if reason, statusReason, ok := s.pendingRunCancelStatus(runID); ok {
-		updated := s.setRunStatusWithFallbackReason(run, state.StatusCanceled, reason, statusReason)
+		updated := s.transitionOrGetRun(run, state.StatusCanceled, WithError(reason), WithReason(statusReason))
 		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
@@ -319,7 +330,7 @@ func (s *Server) ExecuteRun(runID string) {
 			backendSessionID = runner.TaskSessionName(run.Repo, run.TaskID)
 		}
 		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {
-			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("create agent session dir: %v", err))
+			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("create agent session dir: %v", err)))
 			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
@@ -332,7 +343,7 @@ func (s *Server) ExecuteRun(runID string) {
 			SessionRoot:      sessionTaskDir,
 			LastRunID:        run.ID,
 		}); err != nil {
-			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("persist agent session: %v", err))
+			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("persist agent session: %v", err)))
 			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
@@ -376,7 +387,7 @@ func (s *Server) ExecuteRun(runID string) {
 			Status:        state.RunExecutionStatusCreated,
 			ExitCode:      0,
 		}); err != nil {
-			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("persist run execution: %v", err))
+			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("persist run execution: %v", err)))
 			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
@@ -385,7 +396,7 @@ func (s *Server) ExecuteRun(runID string) {
 		handle, err := s.startDetachedWithRetry(context.Background(), spec)
 		if err != nil {
 			s.deleteRunExecutionBestEffort(run.ID)
-			updated := s.setRunStatusWithFallback(run, state.StatusFailed, err.Error())
+			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(err.Error()))
 			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
@@ -403,7 +414,7 @@ func (s *Server) ExecuteRun(runID string) {
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
 			s.removeRunExecutionBestEffort(stopCtx, handle, run.ID, "cleanup failed persisted execution")
 			stopCancel()
-			updated := s.setRunStatusWithFallback(run, state.StatusFailed, fmt.Sprintf("persist run execution: %v", err))
+			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("persist run execution: %v", err)))
 			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
@@ -618,7 +629,7 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	if runFailed {
 		if retryAt, reason, ok := detectUsageLimitPause(run, meta.Error); ok {
 			effectiveRetryAt := s.pauseWorkersUntil(retryAt, fmt.Sprintf("run %s hit provider usage limit: %s", run.ID, reason))
-			if err := s.requeueRun(run.ID); err != nil {
+			if err := s.SM.Requeue(run.ID); err != nil {
 				log.Printf("run %s usage-limit requeue failed: %v", run.ID, err)
 			} else {
 				log.Printf("run %s requeued after usage limit; scheduling resumes at %s", run.ID, effectiveRetryAt.Format(time.RFC3339))
@@ -664,14 +675,7 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		log.Printf("run %s parse token usage failed: %v", run.ID, tokenUsageErr)
 	}
 
-	now := time.Now().UTC()
-	updated, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
-		r.Status = status
-		r.Error = errText
-		r.StatusReason = statusReason
-		if !state.IsFinalRunStatus(status) {
-			r.StatusReason = state.RunStatusReasonNone
-		}
+	updated, err := s.SM.TransitionBatch(run.ID, status, func(r *state.Run) {
 		r.PRNumber = maxInt(r.PRNumber, meta.PRNumber)
 		if strings.TrimSpace(meta.PRURL) != "" {
 			r.PRURL = strings.TrimSpace(meta.PRURL)
@@ -680,12 +684,10 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 			r.HeadSHA = strings.TrimSpace(meta.HeadSHA)
 		}
 		r.PRStatus = prStatus
-		r.CompletedAt = &now
-		return nil
-	})
+	}, WithError(errText), WithReason(statusReason))
 	if err != nil {
 		log.Printf("failed to persist detached run result for %s: %v", run.ID, err)
-		updated = s.setRunStatusWithFallback(run, state.StatusFailed, err.Error())
+		updated = s.transitionOrGetRun(run, state.StatusFailed, WithError(err.Error()))
 	}
 	if hasTokenUsage {
 		if _, err := s.Store.UpsertRunTokenUsage(tokenUsage); err != nil {

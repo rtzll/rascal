@@ -73,6 +73,7 @@ type Server struct {
 	GitHub   GitHubClient
 	Broker   credentials.CredentialBroker
 	Cipher   credentials.Cipher
+	SM       *RunStateMachine
 
 	mu            sync.Mutex
 	runCancels    map[string]context.CancelFunc
@@ -145,6 +146,7 @@ func NewServer(cfg config.ServerConfig, store *state.Store, r runner.Runner, gh 
 		GitHub:        gh,
 		Broker:        broker,
 		Cipher:        cipher,
+		SM:            NewRunStateMachine(store),
 		runCancels:    make(map[string]context.CancelFunc),
 		MaxConcurrent: defaultMaxConcurrent(),
 		InstanceID:    instanceID,
@@ -159,46 +161,11 @@ func (s *Server) RecoverQueuedCancels() {
 			continue
 		}
 		if reason, statusReason, ok := s.pendingRunCancelStatus(run.ID); ok {
-			s.setRunStatusBestEffortWithReason(run.ID, state.StatusCanceled, reason, statusReason)
+			if _, err := s.SM.Transition(run.ID, state.StatusCanceled, WithError(reason), WithReason(statusReason)); err != nil {
+				log.Printf("run %s recover queued cancel failed: %v", run.ID, err)
+			}
 			s.clearRunCancelBestEffort(run.ID)
 		}
-	}
-}
-
-func (s *Server) setRunStatusWithFallback(run state.Run, status state.RunStatus, errText string) state.Run {
-	return s.setRunStatusWithFallbackReason(run, status, errText, state.RunStatusReasonNone)
-}
-
-func (s *Server) setRunStatusWithFallbackReason(run state.Run, status state.RunStatus, errText string, statusReason state.RunStatusReason) state.Run {
-	updated, err := s.Store.SetRunStatusWithReason(run.ID, status, errText, statusReason)
-	if err == nil {
-		return updated
-	}
-
-	log.Printf("failed to set run status %q for %s: %v", status, run.ID, err)
-	now := time.Now().UTC()
-	run.Status = status
-	run.Error = errText
-	run.StatusReason = state.NormalizeRunStatusReason(statusReason)
-	run.UpdatedAt = now
-	if status == state.StatusRunning {
-		run.StartedAt = &now
-	}
-	if state.IsFinalRunStatus(status) {
-		run.CompletedAt = &now
-	} else {
-		run.StatusReason = state.RunStatusReasonNone
-	}
-	return run
-}
-
-func (s *Server) setRunStatusBestEffort(runID string, status state.RunStatus, errText string) {
-	s.setRunStatusBestEffortWithReason(runID, status, errText, state.RunStatusReasonNone)
-}
-
-func (s *Server) setRunStatusBestEffortWithReason(runID string, status state.RunStatus, errText string, statusReason state.RunStatusReason) {
-	if _, err := s.Store.SetRunStatusWithReason(runID, status, errText, statusReason); err != nil {
-		log.Printf("run %s set status %q failed: %v", runID, status, err)
 	}
 }
 
@@ -235,12 +202,6 @@ func (s *Server) setTaskPRBestEffort(taskID, repo string, prNumber int) {
 func (s *Server) cancelQueuedRunsBestEffort(taskID, reason string, statusReason state.RunStatusReason) {
 	if err := s.Store.CancelQueuedRuns(taskID, reason, statusReason); err != nil {
 		log.Printf("task %s cancel queued runs failed: %v", taskID, err)
-	}
-}
-
-func (s *Server) updateRunBestEffort(runID string, fn func(*state.Run) error) {
-	if _, err := s.Store.UpdateRun(runID, fn); err != nil {
-		log.Printf("run %s update failed: %v", runID, err)
 	}
 }
 
@@ -285,6 +246,22 @@ func (s *Server) supervisorTick() time.Duration {
 		return s.SupervisorInterval
 	}
 	return runSupervisorTick
+}
+
+// transitionOrGetRun attempts a status transition via the state machine.
+// On failure, it falls back to the persisted run state (or the provided
+// fallback) so callers always have a run to pass to notification and
+// cleanup functions.
+func (s *Server) transitionOrGetRun(fallback state.Run, to state.RunStatus, opts ...TransitionOption) state.Run {
+	updated, err := s.SM.Transition(fallback.ID, to, opts...)
+	if err != nil {
+		log.Printf("run %s transition to %q failed: %v", fallback.ID, to, err)
+		if got, ok := s.Store.GetRun(fallback.ID); ok {
+			return got
+		}
+		return fallback
+	}
+	return updated
 }
 
 func (s *Server) startRetryBackoff(attempt int) time.Duration {
