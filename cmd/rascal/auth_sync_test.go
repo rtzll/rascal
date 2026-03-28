@@ -25,7 +25,7 @@ func TestSyncRemoteAuthValidation(t *testing.T) {
 
 	t.Run("missing auth values", func(t *testing.T) {
 		err := syncRemoteAuth(syncRemoteAuthConfig{Host: "example-host"})
-		if err == nil || !strings.Contains(err.Error(), "api token, github runtime token, and webhook secret are required") {
+		if err == nil || !strings.Contains(err.Error(), "api token and github runtime token are required") {
 			t.Fatalf("expected missing auth values error, got: %v", err)
 		}
 	})
@@ -127,6 +127,38 @@ func TestSyncRemoteAuthIncludesRestartWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestSyncRemoteAuthPreservesRemoteWebhookSecretWhenOmitted(t *testing.T) {
+	logDir := setupSyncCommandFakes(t)
+
+	err := syncRemoteAuth(syncRemoteAuthConfig{
+		Host:          "example-host",
+		APIToken:      "api-token",
+		GitHubRuntime: "runtime-token",
+		Restart:       false,
+	})
+	if err != nil {
+		t.Fatalf("syncRemoteAuth: %v", err)
+	}
+
+	payload, err := os.ReadFile(filepath.Join(logDir, "scp_payload.env"))
+	if err != nil {
+		t.Fatalf("read uploaded payload: %v", err)
+	}
+	gotPayload := string(payload)
+	if strings.Contains(gotPayload, "RASCAL_GITHUB_WEBHOOK_SECRET=") {
+		t.Fatalf("expected webhook secret to be omitted from payload, got:\n%s", gotPayload)
+	}
+
+	sshLog, err := os.ReadFile(filepath.Join(logDir, "ssh_calls.log"))
+	if err != nil {
+		t.Fatalf("read ssh log: %v", err)
+	}
+	sshCalls := string(sshLog)
+	if !strings.Contains(sshCalls, `grep -q -E '^RASCAL_GITHUB_WEBHOOK_SECRET=' /etc/rascal/rascal.env`) {
+		t.Fatalf("expected remote webhook secret preservation check, got:\n%s", sshCalls)
+	}
+}
+
 func TestAuthSyncCommandUsesConfiguredSSHHost(t *testing.T) {
 	logDir := setupSyncCommandFakes(t)
 
@@ -157,6 +189,27 @@ func TestAuthSyncCommandUsesConfiguredSSHHost(t *testing.T) {
 	sshCalls := string(sshLog)
 	if !strings.Contains(sshCalls, "root@configured-host") {
 		t.Fatalf("expected configured ssh host in calls, got:\n%s", sshCalls)
+	}
+}
+
+func TestAuthSyncCommandAllowsMissingWebhookSecret(t *testing.T) {
+	setupSyncCommandFakes(t)
+
+	a := &app{
+		cfg: config.ClientConfig{
+			SSHHost:  "configured-host",
+			APIToken: "api-token",
+		},
+		output: "json",
+	}
+	t.Setenv("RASCAL_GITHUB_TOKEN", "runtime-token")
+	cmd := a.newAuthSyncCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--restart-service=false"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("auth sync command: %v", err)
 	}
 }
 

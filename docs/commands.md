@@ -52,7 +52,12 @@ rascal github status OWNER/REPO
 rascal github setup OWNER/REPO --github-admin-token "$GITHUB_ADMIN_TOKEN" --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET"
 rascal github disable OWNER/REPO --github-admin-token "$GITHUB_ADMIN_TOKEN"
 rascal github webhook test --repo OWNER/REPO --webhook-secret "$RASCAL_GITHUB_WEBHOOK_SECRET" --dry-run
+rascal auth sync --host "$SERVER_IP"
 ```
+
+`rascal auth sync` preserves the existing server webhook secret when
+`--webhook-secret` is omitted. Pass `--webhook-secret` only when you intend to
+rotate it.
 
 ## Provisioning
 

@@ -2172,9 +2172,6 @@ func (a *app) newAuthSyncCmd() *cobra.Command {
 			if githubRuntimeToken == "" {
 				return &cliError{Code: exitInput, Message: "missing GitHub runtime token", Hint: "pass --github-runtime-token or set RASCAL_GITHUB_TOKEN"}
 			}
-			if webhookSecret == "" {
-				return &cliError{Code: exitInput, Message: "missing webhook secret", Hint: "pass --webhook-secret"}
-			}
 			if err := syncRemoteAuth(syncRemoteAuthConfig{
 				Host:          host,
 				SSHUser:       sshCfg.SSHUser,

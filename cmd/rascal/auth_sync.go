@@ -34,8 +34,8 @@ func syncRemoteAuth(cfg syncRemoteAuthConfig) error {
 		return fmt.Errorf("host is required")
 	}
 
-	if cfg.APIToken == "" || cfg.GitHubRuntime == "" || cfg.WebhookSecret == "" {
-		return fmt.Errorf("api token, github runtime token, and webhook secret are required")
+	if cfg.APIToken == "" || cfg.GitHubRuntime == "" {
+		return fmt.Errorf("api token and github runtime token are required")
 	}
 	for _, value := range []string{cfg.APIToken, cfg.GitHubRuntime, cfg.WebhookSecret} {
 		if strings.Contains(value, "\n") || strings.Contains(value, "\r") {
@@ -65,12 +65,14 @@ func syncRemoteAuth(cfg syncRemoteAuthConfig) error {
 		}
 	}()
 
-	content := fmt.Sprintf(
-		"RASCAL_API_TOKEN=%s\nRASCAL_GITHUB_TOKEN=%s\nRASCAL_GITHUB_WEBHOOK_SECRET=%s\n",
-		cfg.APIToken,
-		cfg.GitHubRuntime,
-		cfg.WebhookSecret,
-	)
+	lines := []string{
+		fmt.Sprintf("RASCAL_API_TOKEN=%s", cfg.APIToken),
+		fmt.Sprintf("RASCAL_GITHUB_TOKEN=%s", cfg.GitHubRuntime),
+	}
+	if cfg.WebhookSecret != "" {
+		lines = append(lines, fmt.Sprintf("RASCAL_GITHUB_WEBHOOK_SECRET=%s", cfg.WebhookSecret))
+	}
+	content := strings.Join(lines, "\n") + "\n"
 	if _, err := tmpFile.WriteString(content); err != nil {
 		if closeErr := tmpFile.Close(); closeErr != nil {
 			return fmt.Errorf("write temp auth file: %w (close temp auth file: %v)", err, closeErr)
@@ -87,6 +89,14 @@ func syncRemoteAuth(cfg syncRemoteAuthConfig) error {
 	steps = append(steps,
 		"touch /etc/rascal/rascal.env",
 		"chmod 600 /etc/rascal/rascal.env",
+	)
+	if cfg.WebhookSecret == "" {
+		// Preserve the existing server-side webhook secret when rotating only tokens.
+		steps = append(steps,
+			`if ! grep -q -E '^RASCAL_GITHUB_WEBHOOK_SECRET=' /etc/rascal/rascal.env; then echo "remote webhook secret missing from /etc/rascal/rascal.env" >&2; exit 1; fi`,
+		)
+	}
+	steps = append(steps,
 		"awk -F= 'NR==FNR {u[$1]=$0; next} !($1 in u) {print $0} END {for (k in u) print u[k]}' /tmp/rascal-bootstrap/auth.env.update /etc/rascal/rascal.env > /tmp/rascal-bootstrap/rascal.env.merged",
 		"install -m 0600 /tmp/rascal-bootstrap/rascal.env.merged /etc/rascal/rascal.env",
 	)

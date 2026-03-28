@@ -71,6 +71,18 @@ rascal deploy \
   --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 ```
 
+To rotate only the server-side GitHub runtime token later, you can sync auth
+without re-supplying the webhook secret:
+
+```bash
+set -a; source .rascal.env; set +a
+rascal auth sync --host "$HOST"
+```
+
+That preserves the existing `RASCAL_GITHUB_WEBHOOK_SECRET` already stored in
+`/etc/rascal/rascal.env`. If the server does not already have a webhook secret,
+the command fails instead of silently clearing it.
+
 That `--codex-auth` value seeds or updates the shared stored codex credential
 used for Codex and Goose runs; it is not copied to a static server-side fallback
 file. For Claude and Goose-Claude runs, create a separate `claude` credential
