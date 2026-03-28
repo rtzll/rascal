@@ -68,7 +68,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("rascald listening on %s (runner=%s backend=%s)", cfg.ListenAddr, cfg.RunnerMode, cfg.AgentRuntime)
+	log.Printf("rascald listening on %s (runner=%s runtime=%s)", cfg.ListenAddr, cfg.RunnerMode, cfg.AgentRuntime)
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- httpServer.ListenAndServe()

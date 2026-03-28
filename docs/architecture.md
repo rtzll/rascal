@@ -231,8 +231,7 @@ Key persisted entities:
 - `run_executions`: detached execution handle metadata for adoption and cleanup.
 - `run_cancels`: persisted cancel intent.
 - `task sessions`: stable harness session identifiers and mounted session roots.
-  In the current SQLite schema this data still lives in the
-  `task_agent_sessions` table.
+  In the current SQLite schema this data lives in the `task_sessions` table.
 - `credentials`: encrypted stored credential payloads and allocation metadata.
 - `credential_leases`: per-run credential assignments and lease expiry state.
 - `deliveries`: webhook dedupe/claim bookkeeping.

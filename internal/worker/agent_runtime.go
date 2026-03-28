@@ -48,7 +48,7 @@ func RunGooseCodex(ex CommandExecutor, cfg Config) (string, string, error) {
 		}
 	}
 
-	log.Printf("[%s] running goose (backend=%s debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
+	log.Printf("[%s] running goose (runtime=%s debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
 		nowUTC(),
 		configuredAgentRuntime(cfg),
 		cfg.GooseDebug,
@@ -145,7 +145,7 @@ func RunCodex(ex CommandExecutor, cfg Config) (output string, sessionID string, 
 	}
 
 	args := CodexRunArgs(cfg)
-	log.Printf("[%s] running codex (backend=%s session_mode=%s session_key=%s session_id=%s resume=%t home=%s)",
+	log.Printf("[%s] running codex (runtime=%s session_mode=%s session_key=%s session_id=%s resume=%t home=%s)",
 		nowUTC(),
 		configuredAgentRuntime(cfg),
 		configuredSessionMode(cfg),
@@ -218,7 +218,7 @@ func RunClaude(ex CommandExecutor, cfg Config) (output string, sessionID string,
 	sessionID = configuredRuntimeSessionID(cfg)
 	resume := configuredSessionResume(cfg) && strings.TrimSpace(sessionID) != ""
 
-	log.Printf("[%s] running claude (backend=%s session_mode=%s session_key=%s session_id=%s resume=%t config_dir=%s)",
+	log.Printf("[%s] running claude (runtime=%s session_mode=%s session_key=%s session_id=%s resume=%t config_dir=%s)",
 		nowUTC(),
 		configuredAgentRuntime(cfg),
 		configuredSessionMode(cfg),
@@ -300,7 +300,7 @@ func RunGooseClaude(ex CommandExecutor, cfg Config) (string, string, error) {
 		}
 	}
 
-	log.Printf("[%s] running goose-claude (backend=%s debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
+	log.Printf("[%s] running goose-claude (runtime=%s debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
 		nowUTC(),
 		configuredAgentRuntime(cfg),
 		cfg.GooseDebug,

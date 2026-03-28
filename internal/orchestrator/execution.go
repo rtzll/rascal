@@ -220,7 +220,7 @@ func (s *Server) ExecuteRun(runID string) {
 	sessionResume := runtime.SessionEnabled(sessionMode, runtrigger.Normalize(run.Trigger.String()))
 	sessionTaskKey := ""
 	sessionTaskDir := ""
-	backendSessionID := ""
+	runtimeSessionID := ""
 	sessionRoot := strings.TrimSpace(s.Config.EffectiveTaskSessionRoot())
 	if sessionRoot == "" {
 		sessionRoot = filepath.Join(s.Config.DataDir, defaults.AgentSessionDirName)
@@ -230,13 +230,13 @@ func (s *Server) ExecuteRun(runID string) {
 		sessionTaskDir = filepath.Join(sessionRoot, sessionTaskKey)
 		if existing, ok := s.Store.GetTaskSession(run.TaskID); ok {
 			if existing.AgentRuntime == run.AgentRuntime {
-				backendSessionID = strings.TrimSpace(existing.RuntimeSessionID)
+				runtimeSessionID = strings.TrimSpace(existing.RuntimeSessionID)
 			} else if err := s.Store.DeleteTaskSession(run.TaskID); err != nil {
 				log.Printf("run %s failed to clear stale %s session for task %s: %v", run.ID, existing.AgentRuntime, run.TaskID, err)
 			}
 		}
-		if backendSessionID == "" && run.AgentRuntime.Harness() == runtime.HarnessGoose {
-			backendSessionID = runner.TaskSessionName(run.Repo, run.TaskID)
+		if runtimeSessionID == "" && run.AgentRuntime.Harness() == runtime.HarnessGoose {
+			runtimeSessionID = runner.TaskSessionName(run.Repo, run.TaskID)
 		}
 		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {
 			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("create agent session dir: %v", err)))
@@ -252,7 +252,7 @@ func (s *Server) ExecuteRun(runID string) {
 		if _, err := s.Store.UpsertTaskSession(state.UpsertTaskSessionInput{
 			TaskID:           run.TaskID,
 			AgentRuntime:     run.AgentRuntime,
-			RuntimeSessionID: backendSessionID,
+			RuntimeSessionID: runtimeSessionID,
 			SessionKey:       sessionTaskKey,
 			SessionRoot:      sessionTaskDir,
 			LastRunID:        run.ID,
@@ -289,10 +289,10 @@ func (s *Server) ExecuteRun(runID string) {
 			Resume:           sessionResume,
 			TaskDir:          sessionTaskDir,
 			TaskKey:          sessionTaskKey,
-			RuntimeSessionID: backendSessionID,
+			RuntimeSessionID: runtimeSessionID,
 		},
 	}
-	log.Printf("run %s backend=%s session_mode=%s resume=%t key=%s session_id=%s", run.ID, run.AgentRuntime, sessionMode, sessionResume, sessionTaskKey, backendSessionID)
+	log.Printf("run %s runtime=%s session_mode=%s resume=%t key=%s session_id=%s", run.ID, run.AgentRuntime, sessionMode, sessionResume, sessionTaskKey, runtimeSessionID)
 	execRec, hasExec := s.Store.GetRunExecution(run.ID)
 	if !hasExec {
 		// Persist a deterministic handle before launch so the next slot can
