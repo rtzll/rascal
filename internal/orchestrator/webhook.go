@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
 	"github.com/rtzll/rascal/internal/api"
 	ghapi "github.com/rtzll/rascal/internal/github"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -93,18 +95,27 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 		}
 		switch ev.Action {
 		case "labeled":
-			if !strings.EqualFold(ev.Label.Name, "rascal") {
+			if !runtime.IsRascalLabel(ev.Label.Name) {
 				return nil
 			}
 			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
-			_, err := s.CreateAndQueueRun(RunRequest{
-				TaskID:      taskID,
-				Repo:        ev.Repository.FullName,
-				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
-				Trigger:     runtrigger.NameIssueLabel,
-				IssueNumber: ev.Issue.Number,
-				Context:     fmt.Sprintf("Triggered by label 'rascal' on issue #%d", ev.Issue.Number),
-				Debug:       boolPtr(true),
+			// Dedup: if task already has an active (queued or running) run, skip.
+			if _, active := s.Store.ActiveRunForTask(taskID); active {
+				return nil
+			}
+			agentRuntime, err := s.runtimeFromIssueLabels(ctx, ev.Repository.FullName, ev.Issue.Number, ev.Issue.Labels)
+			if err != nil {
+				return err
+			}
+			_, err = s.CreateAndQueueRun(RunRequest{
+				TaskID:       taskID,
+				Repo:         ev.Repository.FullName,
+				Instruction:  ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				AgentRuntime: agentRuntime,
+				Trigger:      runtrigger.NameIssueLabel,
+				IssueNumber:  ev.Issue.Number,
+				Context:      fmt.Sprintf("Triggered by label '%s' on issue #%d", ev.Label.Name, ev.Issue.Number),
+				Debug:        boolPtr(true),
 				ResponseTarget: &RunResponseTarget{
 					Repo:        ev.Repository.FullName,
 					IssueNumber: ev.Issue.Number,
@@ -117,27 +128,37 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 			}
 			return err
 		case "unlabeled":
-			if !strings.EqualFold(ev.Label.Name, "rascal") {
+			if !runtime.IsRascalLabel(ev.Label.Name) {
 				return nil
 			}
+			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
+			if err := s.Store.CancelQueuedRuns(taskID, "label removed", state.RunStatusReasonUserCanceled); err != nil {
+				return fmt.Errorf("cancel queued runs for unlabeled issue: %w", err)
+			}
+			s.cancelRunningTaskRuns(taskID, "label removed", state.RunStatusReasonUserCanceled)
 			s.removeIssueReactionsBestEffort(ev.Repository.FullName, ev.Issue.Number)
 			return nil
 		case "edited":
-			if !ghapi.IssueHasLabel(ev.Issue.Labels, "rascal") {
+			if !ghapi.IssueHasRascalLabel(ev.Issue.Labels) {
 				return nil
 			}
 			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
 			if err := s.Store.CancelQueuedRuns(taskID, "issue edited", state.RunStatusReasonIssueEdited); err != nil {
 				return fmt.Errorf("cancel queued runs for edited issue: %w", err)
 			}
-			_, err := s.CreateAndQueueRun(RunRequest{
-				TaskID:      taskID,
-				Repo:        ev.Repository.FullName,
-				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
-				Trigger:     runtrigger.NameIssueEdited,
-				IssueNumber: ev.Issue.Number,
-				Context:     fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number),
-				Debug:       boolPtr(true),
+			agentRuntime, err := s.runtimeFromIssueLabels(ctx, ev.Repository.FullName, ev.Issue.Number, ev.Issue.Labels)
+			if err != nil {
+				return err
+			}
+			_, err = s.CreateAndQueueRun(RunRequest{
+				TaskID:       taskID,
+				Repo:         ev.Repository.FullName,
+				Instruction:  ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				AgentRuntime: agentRuntime,
+				Trigger:      runtrigger.NameIssueEdited,
+				IssueNumber:  ev.Issue.Number,
+				Context:      fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number),
+				Debug:        boolPtr(true),
 				ResponseTarget: &RunResponseTarget{
 					Repo:        ev.Repository.FullName,
 					IssueNumber: ev.Issue.Number,
@@ -150,7 +171,7 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 			}
 			return err
 		case "closed":
-			if !ghapi.IssueHasLabel(ev.Issue.Labels, "rascal") {
+			if !ghapi.IssueHasRascalLabel(ev.Issue.Labels) {
 				return nil
 			}
 			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
@@ -170,7 +191,7 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 			s.cancelRunningTaskRuns(taskID, "issue closed", state.RunStatusReasonIssueClosed)
 			return nil
 		case "reopened":
-			if !ghapi.IssueHasLabel(ev.Issue.Labels, "rascal") {
+			if !ghapi.IssueHasRascalLabel(ev.Issue.Labels) {
 				return nil
 			}
 			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
@@ -184,15 +205,20 @@ func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payl
 			if err := s.Store.MarkTaskOpen(taskID); err != nil {
 				return fmt.Errorf("mark task open for reopened issue: %w", err)
 			}
-			_, err := s.CreateAndQueueRun(RunRequest{
-				TaskID:      taskID,
-				Repo:        ev.Repository.FullName,
-				Instruction: ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
-				Trigger:     runtrigger.NameIssueReopened,
-				IssueNumber: ev.Issue.Number,
-				PRStatus:    state.PRStatusNone,
-				Context:     fmt.Sprintf("Triggered by issue reopen on issue #%d", ev.Issue.Number),
-				Debug:       boolPtr(true),
+			agentRuntime, err := s.runtimeFromIssueLabels(ctx, ev.Repository.FullName, ev.Issue.Number, ev.Issue.Labels)
+			if err != nil {
+				return err
+			}
+			_, err = s.CreateAndQueueRun(RunRequest{
+				TaskID:       taskID,
+				Repo:         ev.Repository.FullName,
+				Instruction:  ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
+				AgentRuntime: agentRuntime,
+				Trigger:      runtrigger.NameIssueReopened,
+				IssueNumber:  ev.Issue.Number,
+				PRStatus:     state.PRStatusNone,
+				Context:      fmt.Sprintf("Triggered by issue reopen on issue #%d", ev.Issue.Number),
+				Debug:        boolPtr(true),
 				ResponseTarget: &RunResponseTarget{
 					Repo:        ev.Repository.FullName,
 					IssueNumber: ev.Issue.Number,
@@ -465,6 +491,25 @@ Inline comment location: %s`, contextText, location)
 func isOpenGitHubState(raw string) bool {
 	raw = strings.ToLower(strings.TrimSpace(raw))
 	return raw == "" || raw == "open"
+}
+
+// runtimeFromIssueLabels resolves the agent runtime from issue labels.
+// Returns nil (use server default) if no runtime label is present.
+// Posts a comment and returns an error if a label has an unrecognized runtime suffix.
+func (s *Server) runtimeFromIssueLabels(ctx context.Context, repo string, issueNumber int, labels []ghapi.Label) (*runtime.Runtime, error) {
+	names := ghapi.LabelNames(labels)
+	rt, ok, err := runtime.RuntimeFromLabels(names)
+	if err != nil {
+		msg := fmt.Sprintf("Unknown agent runtime in label. %s\n\nPlease use a valid runtime label (e.g. `rascal:claude`, `rascal:codex`, `rascal:goose-codex`, `rascal:goose-claude`).", err)
+		if commentErr := s.GitHub.CreateIssueComment(ctx, repo, issueNumber, msg); commentErr != nil {
+			log.Printf("failed to post unknown runtime comment on %s#%d: %v", repo, issueNumber, commentErr)
+		}
+		return nil, fmt.Errorf("unknown runtime label on %s#%d: %w", repo, issueNumber, err)
+	}
+	if !ok {
+		return nil, nil
+	}
+	return &rt, nil
 }
 
 func (s *Server) isBotActor(login string) bool {
