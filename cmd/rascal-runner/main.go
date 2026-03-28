@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -37,5 +38,8 @@ func runWithArgs(ex commandExecutor, args []string) error {
 	if len(args) > 0 {
 		return runCapabilityCommand(ex, args)
 	}
-	return worker.RunWithExecutor(ex)
+	if err := worker.RunWithExecutor(ex); err != nil {
+		return fmt.Errorf("run worker executor: %w", err)
+	}
+	return nil
 }
