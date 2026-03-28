@@ -26,6 +26,10 @@ CREATE TABLE runs (
   debug BOOLEAN NOT NULL DEFAULT 1,
   status TEXT NOT NULL,
   run_dir TEXT NOT NULL,
+  execution_profile TEXT NOT NULL DEFAULT 'default',
+  admission_decision TEXT NOT NULL DEFAULT 'allow',
+  admission_reason TEXT NOT NULL DEFAULT '',
+  admission_next_eligible_at INTEGER,
   issue_number INTEGER NOT NULL DEFAULT 0,
   pr_number INTEGER NOT NULL DEFAULT 0,
   created_by_user_id TEXT NOT NULL DEFAULT '',
@@ -46,6 +50,7 @@ CREATE INDEX idx_runs_status_seq ON runs (status, seq DESC);
 CREATE INDEX idx_runs_task_seq ON runs (task_id, seq DESC);
 CREATE INDEX idx_runs_created_by ON runs (created_by_user_id, seq DESC);
 CREATE INDEX idx_runs_credential_id ON runs (credential_id, seq DESC);
+CREATE INDEX idx_runs_admission_next_eligible ON runs (status, admission_next_eligible_at ASC, seq ASC);
 
 CREATE TABLE task_sessions (
   task_id TEXT PRIMARY KEY,

@@ -194,18 +194,66 @@ func ParseTaskStatus(raw string) (TaskStatus, bool) {
 	}
 }
 
+type ExecutionProfile string
+
+const (
+	ExecutionProfileDefault  ExecutionProfile = "default"
+	ExecutionProfileCheap    ExecutionProfile = "cheap"
+	ExecutionProfilePriority ExecutionProfile = "priority"
+)
+
+func NormalizeExecutionProfile(raw string) ExecutionProfile {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(ExecutionProfileCheap):
+		return ExecutionProfileCheap
+	case string(ExecutionProfilePriority):
+		return ExecutionProfilePriority
+	default:
+		return ExecutionProfileDefault
+	}
+}
+
+type AdmissionDecision string
+
+const (
+	AdmissionDecisionAllow  AdmissionDecision = "allow"
+	AdmissionDecisionWarn   AdmissionDecision = "warn"
+	AdmissionDecisionDefer  AdmissionDecision = "defer"
+	AdmissionDecisionReject AdmissionDecision = "reject"
+)
+
+func NormalizeAdmissionDecision(raw string) AdmissionDecision {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(AdmissionDecisionWarn):
+		return AdmissionDecisionWarn
+	case string(AdmissionDecisionDefer):
+		return AdmissionDecisionDefer
+	case string(AdmissionDecisionReject):
+		return AdmissionDecisionReject
+	default:
+		return AdmissionDecisionAllow
+	}
+}
+
 type Run struct {
-	ID           string          `json:"id"`
-	TaskID       string          `json:"task_id"`
-	Repo         string          `json:"repo"`
-	Instruction  string          `json:"instruction"`
-	AgentRuntime runtime.Runtime `json:"agent_runtime"`
-	BaseBranch   string          `json:"base_branch"`
-	HeadBranch   string          `json:"head_branch"`
-	Trigger      runtrigger.Name `json:"trigger"`
-	Debug        bool            `json:"debug"`
-	Status       RunStatus       `json:"status"`
-	RunDir       string          `json:"run_dir"`
+	ID                    string            `json:"id"`
+	TaskID                string            `json:"task_id"`
+	Repo                  string            `json:"repo"`
+	Instruction           string            `json:"instruction"`
+	Task                  string            `json:"task,omitempty"`
+	AgentRuntime          runtime.Runtime   `json:"agent_runtime"`
+	BaseBranch            string            `json:"base_branch"`
+	HeadBranch            string            `json:"head_branch"`
+	Trigger               runtrigger.Name   `json:"trigger"`
+	Debug                 bool              `json:"debug"`
+	Status                RunStatus         `json:"status"`
+	RunDir                string            `json:"run_dir"`
+	ExecutionProfile      ExecutionProfile  `json:"execution_profile,omitempty"`
+	AdmissionDecision     AdmissionDecision `json:"admission_decision,omitempty"`
+	AdmissionReason       string            `json:"admission_reason,omitempty"`
+	AdmissionNextEligible *time.Time        `json:"admission_next_eligible_at,omitempty"`
+	TokenUsage            *RunTokenUsage    `json:"token_usage,omitempty"`
+	TokenSummary          string            `json:"token_summary,omitempty"`
 
 	IssueNumber  int             `json:"issue_number,omitempty"`
 	PRNumber     int             `json:"pr_number,omitempty"`
@@ -322,6 +370,7 @@ type RunExecution struct {
 
 type RunTokenUsage struct {
 	RunID                 string          `json:"run_id"`
+	Backend               runtime.Runtime `json:"backend,omitempty"`
 	AgentRuntime          runtime.Runtime `json:"agent_runtime"`
 	Provider              string          `json:"provider,omitempty"`
 	Model                 string          `json:"model,omitempty"`
@@ -371,20 +420,66 @@ func ParseDeliveryStatus(raw string) (DeliveryStatus, bool) {
 }
 
 type CreateRunInput struct {
-	ID           string
-	TaskID       string
-	Repo         string
-	Instruction  string
-	AgentRuntime runtime.Runtime
-	BaseBranch   string
-	HeadBranch   string
-	Trigger      runtrigger.Name
-	Debug        *bool
-	RunDir       string
-	IssueNumber  int
-	PRNumber     int
-	PRStatus     PRStatus
-	Context      string
+	ID               string
+	TaskID           string
+	Repo             string
+	Instruction      string
+	Task             string
+	AgentRuntime     runtime.Runtime
+	BaseBranch       string
+	HeadBranch       string
+	Trigger          runtrigger.Name
+	Debug            *bool
+	RunDir           string
+	IssueNumber      int
+	PRNumber         int
+	PRStatus         PRStatus
+	Context          string
+	ExecutionProfile ExecutionProfile
+}
+
+type RunUsageFilter struct {
+	Repo     string
+	Backend  string
+	Provider string
+	Model    string
+	Status   RunStatus
+	Trigger  string
+	Since    time.Time
+	Until    time.Time
+	Limit    int
+}
+
+type RunUsageRecord struct {
+	RunID                 string           `json:"run_id"`
+	Repo                  string           `json:"repo"`
+	Backend               string           `json:"backend"`
+	Provider              string           `json:"provider,omitempty"`
+	Model                 string           `json:"model,omitempty"`
+	Status                RunStatus        `json:"status"`
+	ExecutionProfile      ExecutionProfile `json:"execution_profile,omitempty"`
+	TotalTokens           int64            `json:"total_tokens"`
+	InputTokens           *int64           `json:"input_tokens,omitempty"`
+	OutputTokens          *int64           `json:"output_tokens,omitempty"`
+	CachedInputTokens     *int64           `json:"cached_input_tokens,omitempty"`
+	ReasoningOutputTokens *int64           `json:"reasoning_output_tokens,omitempty"`
+	CreatedAt             time.Time        `json:"created_at"`
+	CompletedAt           *time.Time       `json:"completed_at,omitempty"`
+	CapturedAt            time.Time        `json:"captured_at"`
+}
+
+type RunUsageSummary struct {
+	Repo                  string           `json:"repo,omitempty"`
+	Backend               string           `json:"backend,omitempty"`
+	Provider              string           `json:"provider,omitempty"`
+	Model                 string           `json:"model,omitempty"`
+	ExecutionProfile      ExecutionProfile `json:"execution_profile,omitempty"`
+	RunCount              int64            `json:"run_count"`
+	TotalTokens           int64            `json:"total_tokens"`
+	InputTokens           int64            `json:"input_tokens"`
+	OutputTokens          int64            `json:"output_tokens"`
+	CachedInputTokens     int64            `json:"cached_input_tokens"`
+	ReasoningOutputTokens int64            `json:"reasoning_output_tokens"`
 }
 
 type UpsertTaskInput struct {

@@ -628,6 +628,7 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 			log.Printf("run %s persist token usage failed: %v", updated.ID, err)
 		}
 	}
+	s.writeRunCostSummaryBestEffort(updated)
 
 	s.notifyRunTerminalGitHubBestEffort(updated)
 	if updated.PRNumber > 0 {

@@ -464,6 +464,95 @@ func TestStoreUpdateRunDoesNotInferPRStatusFromRunStatus(t *testing.T) {
 	}
 }
 
+func TestStoreAggregatesRunUsage(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-usage-1", Repo: "owner/repo"}); err != nil {
+		t.Fatalf("upsert task 1: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-usage-2", Repo: "owner/repo"}); err != nil {
+		t.Fatalf("upsert task 2: %v", err)
+	}
+	run1, err := store.AddRun(CreateRunInput{
+		ID:               "run_usage_1",
+		TaskID:           "task-usage-1",
+		Repo:             "owner/repo",
+		Task:             "usage 1",
+		BaseBranch:       "main",
+		RunDir:           "/tmp/run_usage_1",
+		ExecutionProfile: ExecutionProfileCheap,
+	})
+	if err != nil {
+		t.Fatalf("add run 1: %v", err)
+	}
+	run2, err := store.AddRun(CreateRunInput{
+		ID:               "run_usage_2",
+		TaskID:           "task-usage-2",
+		Repo:             "owner/repo",
+		Task:             "usage 2",
+		BaseBranch:       "main",
+		RunDir:           "/tmp/run_usage_2",
+		ExecutionProfile: ExecutionProfilePriority,
+	})
+	if err != nil {
+		t.Fatalf("add run 2: %v", err)
+	}
+	for _, runID := range []string{run1.ID, run2.ID} {
+		if _, err := store.SetRunStatus(runID, StatusRunning, ""); err != nil {
+			t.Fatalf("set run %s running: %v", runID, err)
+		}
+		if _, err := store.SetRunStatus(runID, StatusSucceeded, ""); err != nil {
+			t.Fatalf("set run %s succeeded: %v", runID, err)
+		}
+	}
+	if _, err := store.UpsertRunTokenUsage(RunTokenUsage{RunID: run1.ID, Backend: "codex", Provider: "openai", Model: "gpt-5-mini", TotalTokens: 120, CapturedAt: time.Date(2026, 3, 14, 10, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatalf("upsert usage 1: %v", err)
+	}
+	if _, err := store.UpsertRunTokenUsage(RunTokenUsage{RunID: run2.ID, Backend: "codex", Provider: "openai", Model: "gpt-5", TotalTokens: 80, CapturedAt: time.Date(2026, 3, 14, 11, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatalf("upsert usage 2: %v", err)
+	}
+
+	records, err := store.ListRunUsage(RunUsageFilter{
+		Repo:  "owner/repo",
+		Since: time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC),
+		Until: time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC),
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListRunUsage: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("len(records) = %d, want 2", len(records))
+	}
+
+	summaries, err := store.SummarizeRunUsage(RunUsageFilter{
+		Repo:  "owner/repo",
+		Since: time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC),
+		Until: time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("SummarizeRunUsage: %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("len(summaries) = %d, want 2", len(summaries))
+	}
+	total, err := store.SumRunTokenUsage(RunUsageFilter{
+		Repo:  "owner/repo",
+		Since: time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC),
+		Until: time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("SumRunTokenUsage: %v", err)
+	}
+	if total != 200 {
+		t.Fatalf("total = %d, want 200", total)
+	}
+}
+
 func TestStoreSeenDelivery(t *testing.T) {
 	t.Parallel()
 

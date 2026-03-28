@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rtzll/rascal/internal/cost"
 	"github.com/rtzll/rascal/internal/state"
 )
 
@@ -37,14 +38,31 @@ func (s *Server) ScheduleRuns(preferredTaskID string) {
 			return
 		}
 
-		run, claimed, err := s.Store.ClaimNextQueuedRun(preferredTaskID)
+		run, claimed, err := s.Store.PeekNextQueuedRun(preferredTaskID, time.Now().UTC())
 		preferredTaskID = ""
 		if err != nil {
-			log.Printf("failed to claim next queued run: %v", err)
+			log.Printf("failed to peek next queued run: %v", err)
 			return
 		}
 		if !claimed {
 			return
+		}
+		decision, err := s.evaluateAdmission(run, time.Now().UTC())
+		if err != nil {
+			log.Printf("run %s cost admission failed: %v", run.ID, err)
+			return
+		}
+		run, proceed := s.applyAdmissionDecision(run, decision)
+		if !proceed {
+			continue
+		}
+		run, claimed, err = s.Store.ClaimRunStart(run.ID)
+		if err != nil {
+			log.Printf("failed to claim run %s start: %v", run.ID, err)
+			continue
+		}
+		if !claimed {
+			continue
 		}
 
 		if reason, statusReason, ok := s.pendingRunCancelStatus(run.ID); ok {
@@ -70,6 +88,111 @@ func (s *Server) ScheduleRuns(preferredTaskID string) {
 
 		go s.ExecuteRun(run.ID)
 	}
+}
+
+func (s *Server) evaluateAdmission(run state.Run, now time.Time) (cost.Decision, error) {
+	if s.CostEvaluator == nil {
+		return cost.Decision{Action: cost.ActionAllow}, nil
+	}
+	decision, err := s.CostEvaluator.Evaluate(now, cost.RunContext{
+		Repo:             run.Repo,
+		Trigger:          run.Trigger.String(),
+		ExecutionProfile: run.ExecutionProfile,
+	})
+	if err != nil {
+		return cost.Decision{}, fmt.Errorf("evaluate cost policy: %w", err)
+	}
+	return decision, nil
+}
+
+func (s *Server) applyAdmissionDecision(run state.Run, decision cost.Decision) (state.Run, bool) {
+	switch decision.Action {
+	case cost.ActionDefer:
+		updated := s.updateRunAdmission(run, state.AdmissionDecisionDefer, decision.Reason, decision.NextEligibleAt, false)
+		log.Printf("run %s deferred by budget policy: %s", updated.ID, decision.Reason)
+		s.ensureBudgetTimer(decision.NextEligibleAt)
+		return updated, false
+	case cost.ActionReject:
+		updated := s.updateRunAdmission(run, state.AdmissionDecisionReject, decision.Reason, nil, true)
+		log.Printf("run %s rejected by budget policy: %s", updated.ID, decision.Reason)
+		return updated, false
+	case cost.ActionWarn:
+		updated := s.updateRunAdmission(run, state.AdmissionDecisionWarn, decision.Reason, nil, false)
+		log.Printf("run %s admitted with budget warning: %s", updated.ID, decision.Reason)
+		return updated, true
+	default:
+		return s.updateRunAdmission(run, state.AdmissionDecisionAllow, "", nil, false), true
+	}
+}
+
+func (s *Server) updateRunAdmission(run state.Run, decision state.AdmissionDecision, reason string, nextEligible *time.Time, reject bool) state.Run {
+	updated, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
+		r.AdmissionDecision = decision
+		r.AdmissionReason = strings.TrimSpace(reason)
+		r.AdmissionNextEligible = nextEligible
+		if reject {
+			now := time.Now().UTC()
+			r.Status = state.StatusCanceled
+			r.Error = strings.TrimSpace(reason)
+			r.CompletedAt = &now
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("run %s update admission decision failed: %v", run.ID, err)
+		run.AdmissionDecision = decision
+		run.AdmissionReason = strings.TrimSpace(reason)
+		run.AdmissionNextEligible = nextEligible
+		if reject {
+			now := time.Now().UTC()
+			run.Status = state.StatusCanceled
+			run.Error = strings.TrimSpace(reason)
+			run.CompletedAt = &now
+		}
+		updated = run
+	}
+	s.writeRunCostSummaryBestEffort(updated)
+	return updated
+}
+
+func (s *Server) ensureBudgetTimer(until *time.Time) {
+	if until == nil || until.IsZero() {
+		return
+	}
+	at := until.UTC()
+	delay := time.Until(at)
+	if delay < 0 {
+		delay = 0
+	}
+	s.mu.Lock()
+	if s.draining {
+		s.mu.Unlock()
+		return
+	}
+	if !s.budgetAt.IsZero() && s.budgetAt.Equal(at) {
+		s.mu.Unlock()
+		return
+	}
+	if s.budgetTimer != nil {
+		s.budgetTimer.Stop()
+	}
+	s.budgetAt = at
+	s.budgetTimer = time.AfterFunc(delay, func() {
+		s.mu.Lock()
+		if !s.budgetAt.Equal(at) {
+			s.mu.Unlock()
+			return
+		}
+		s.budgetAt = time.Time{}
+		s.budgetTimer = nil
+		draining := s.draining
+		s.mu.Unlock()
+		if draining {
+			return
+		}
+		s.ScheduleRuns("")
+	})
+	s.mu.Unlock()
 }
 
 func (s *Server) reconcileClosedPRRuns(repo string, prNumber int, merged bool) {

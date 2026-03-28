@@ -49,6 +49,8 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/readyz", s.HandleReady)
 	mux.HandleFunc("/v1/runs", s.WithAuth(s.HandleListRuns))
 	mux.HandleFunc("/v1/runs/", s.WithAuth(s.HandleRunSubresources))
+	mux.HandleFunc("/v1/usage/runs", s.WithAuth(s.HandleUsageRuns))
+	mux.HandleFunc("/v1/usage/summary", s.WithAuth(s.HandleUsageSummary))
 	mux.HandleFunc("/v1/tasks", s.WithAuth(s.HandleCreateTask))
 	mux.HandleFunc("/v1/tasks/", s.WithAuth(s.HandleTaskSubresources))
 	mux.HandleFunc("/v1/tasks/issue", s.WithAuth(s.HandleCreateIssueTask))
@@ -215,7 +217,43 @@ func (s *Server) HandleListRuns(w http.ResponseWriter, r *http.Request) {
 		limit = 0
 	}
 
-	writeJSON(w, http.StatusOK, api.RunsResponse{Runs: s.Store.ListRuns(limit)})
+	writeJSON(w, http.StatusOK, api.RunsResponse{Runs: s.enrichRuns(s.Store.ListRuns(limit))})
+}
+
+func (s *Server) HandleUsageRuns(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	filter, err := parseRunUsageFilter(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	runs, err := s.Store.ListRunUsage(filter)
+	if err != nil {
+		http.Error(w, "failed to load usage: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, api.RunUsageRunsResponse{Runs: runs})
+}
+
+func (s *Server) HandleUsageSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	filter, err := parseRunUsageFilter(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	summaries, err := s.Store.SummarizeRunUsage(filter)
+	if err != nil {
+		http.Error(w, "failed to summarize usage: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, api.RunUsageSummaryResponse{Summaries: summaries})
 }
 
 func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +275,7 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	req.Repo = strings.TrimSpace(req.Repo)
 	req.Instruction = strings.TrimSpace(req.Instruction)
 	req.BaseBranch = strings.TrimSpace(req.BaseBranch)
+	req.ExecutionProfile = strings.TrimSpace(req.ExecutionProfile)
 	if req.Repo == "" || req.Instruction == "" {
 		http.Error(w, "repo and task are required", http.StatusBadRequest)
 		return
@@ -254,6 +293,7 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		AgentRuntime:    req.AgentRuntime,
 		BaseBranch:      req.BaseBranch,
 		Trigger:         trigger,
+		ExecutionProfile: state.NormalizeExecutionProfile(req.ExecutionProfile),
 		Debug:           req.Debug,
 		CreatedByUserID: requesterUserID(r.Context()),
 	})
@@ -289,6 +329,7 @@ func (s *Server) HandleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Repo = state.NormalizeRepo(req.Repo)
+	req.ExecutionProfile = strings.TrimSpace(req.ExecutionProfile)
 
 	taskID := repoIssueTaskID(req.Repo, req.IssueNumber)
 	taskText := fmt.Sprintf("Work on issue #%d in %s", req.IssueNumber, req.Repo)
@@ -315,6 +356,7 @@ func (s *Server) HandleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
 		Trigger:         runtrigger.NameIssueAPI,
 		IssueNumber:     req.IssueNumber,
 		Context:         ctxText,
+		ExecutionProfile: state.NormalizeExecutionProfile(req.ExecutionProfile),
 		Debug:           req.Debug,
 		CreatedByUserID: requesterUserID(r.Context()),
 		ResponseTarget: &RunResponseTarget{
@@ -631,7 +673,7 @@ func (s *Server) HandleGetRun(w http.ResponseWriter, runID string) {
 		http.Error(w, "run not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, api.RunResponse{Run: run})
+	writeJSON(w, http.StatusOK, api.RunResponse{Run: s.enrichRun(run)})
 }
 
 func (s *Server) HandleCancelRun(w http.ResponseWriter, runID string) {
@@ -739,6 +781,71 @@ func (s *Server) handleRunLogs(w http.ResponseWriter, r *http.Request, runID str
 
 func runStatusIsDone(status state.RunStatus) bool {
 	return status == state.StatusSucceeded || status == state.StatusFailed || status == state.StatusCanceled || status == state.StatusReview
+}
+
+func (s *Server) enrichRuns(runs []state.Run) []state.Run {
+	out := make([]state.Run, 0, len(runs))
+	for _, run := range runs {
+		out = append(out, s.enrichRun(run))
+	}
+	return out
+}
+
+func (s *Server) enrichRun(run state.Run) state.Run {
+	if usage, ok := s.Store.GetRunTokenUsage(run.ID); ok {
+		run.TokenUsage = &usage
+		run.TokenSummary = tokenSummary(usage.TotalTokens)
+	}
+	return run
+}
+
+func parseRunUsageFilter(r *http.Request) (state.RunUsageFilter, error) {
+	filter := state.RunUsageFilter{
+		Repo:     strings.TrimSpace(r.URL.Query().Get("repo")),
+		Backend:  strings.TrimSpace(r.URL.Query().Get("backend")),
+		Provider: strings.TrimSpace(r.URL.Query().Get("provider")),
+		Model:    strings.TrimSpace(r.URL.Query().Get("model")),
+		Trigger:  strings.TrimSpace(r.URL.Query().Get("trigger")),
+		Limit:    50,
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("status")); raw != "" {
+		filter.Status = state.RunStatus(strings.ToLower(raw))
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			return state.RunUsageFilter{}, fmt.Errorf("invalid limit")
+		}
+		filter.Limit = n
+	}
+	var err error
+	if raw := strings.TrimSpace(r.URL.Query().Get("since")); raw != "" {
+		filter.Since, err = time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return state.RunUsageFilter{}, fmt.Errorf("invalid since")
+		}
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("until")); raw != "" {
+		filter.Until, err = time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return state.RunUsageFilter{}, fmt.Errorf("invalid until")
+		}
+	}
+	return filter, nil
+}
+
+func tokenSummary(total int64) string {
+	if total <= 0 {
+		return ""
+	}
+	switch {
+	case total >= 1_000_000:
+		return fmt.Sprintf("%.2fM", float64(total)/1_000_000)
+	case total >= 1_000:
+		return fmt.Sprintf("%dK", total/1_000)
+	default:
+		return strconv.FormatInt(total, 10)
+	}
 }
 
 func writeJSON[T any](w http.ResponseWriter, status int, v T) {

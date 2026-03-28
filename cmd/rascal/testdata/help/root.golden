@@ -18,6 +18,7 @@ Runs:
   retry       Create a new run from an existing run
   run         Start a run
   task        Show task status/details
+  usage       Inspect persisted token usage
 
 Logs:
   logs        Fetch run/service logs
