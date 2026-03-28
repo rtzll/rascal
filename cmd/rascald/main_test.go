@@ -531,13 +531,17 @@ func newTestServerWithPaths(t *testing.T, launcher runner.Runner, dataDir, state
 	if err != nil {
 		t.Fatalf("new state store: %v", err)
 	}
+	cipher, err := credentials.NewAESCipher("test-secret")
+	if err != nil {
+		t.Fatalf("new cipher: %v", err)
+	}
 	s := orchestrator.NewServer(
 		cfg,
 		store,
 		launcher,
 		ghapi.NewAPIClient(""),
 		nil,
-		nil,
+		cipher,
 		strings.TrimSpace(instanceID),
 	)
 	s.MaxConcurrent = runtime.NumCPU()

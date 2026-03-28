@@ -54,7 +54,10 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/tasks/issue", s.WithAuth(s.HandleCreateIssueTask))
 	mux.HandleFunc("/v1/credentials", s.WithAuth(s.HandleCredentials))
 	mux.HandleFunc("/v1/credentials/", s.WithAuth(s.HandleCredentialSubresources))
+	mux.HandleFunc("/v1/repositories", s.WithAuth(s.HandleRepositories))
+	mux.HandleFunc("/v1/repositories/", s.WithAuth(s.HandleRepositorySubresources))
 	mux.HandleFunc("/v1/webhooks/github", s.HandleWebhook)
+	mux.HandleFunc("/v1/webhooks/github/", s.HandleWebhookScoped)
 }
 
 func (s *Server) WithAuth(next http.HandlerFunc) http.HandlerFunc {
