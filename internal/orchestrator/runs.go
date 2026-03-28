@@ -385,23 +385,3 @@ func maxInt(a, b int) int {
 func boolPtr(v bool) *bool {
 	return &v
 }
-
-func isCredentialAuthFailure(errText string) bool {
-	text := strings.ToLower(strings.TrimSpace(errText))
-	if text == "" {
-		return false
-	}
-	for _, marker := range []string{
-		"unauthorized",
-		"invalid api key",
-		"invalid token",
-		"authentication failed",
-		"forbidden",
-		"permission denied",
-	} {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
-}

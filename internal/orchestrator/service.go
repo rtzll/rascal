@@ -67,13 +67,14 @@ type GitHubClient interface {
 }
 
 type Server struct {
-	Config config.ServerConfig
-	Store  *state.Store
-	Runner runner.Runner
-	GitHub GitHubClient
-	Broker credentials.CredentialBroker
-	Cipher credentials.Cipher
-	SM     *RunStateMachine
+	Config            config.ServerConfig
+	Store             *state.Store
+	Runner            runner.Runner
+	GitHub            GitHubClient
+	Broker            credentials.CredentialBroker
+	Cipher            credentials.Cipher
+	CredentialManager *credentials.CredentialManager
+	SM                *RunStateMachine
 
 	mu            sync.Mutex
 	runCancels    map[string]context.CancelFunc
@@ -151,6 +152,13 @@ func NewServer(cfg config.ServerConfig, store *state.Store, r runner.Runner, gh 
 		MaxConcurrent: defaultMaxConcurrent(),
 		InstanceID:    instanceID,
 	}
+}
+
+func (s *Server) credentialManager() *credentials.CredentialManager {
+	if s.CredentialManager != nil {
+		return s.CredentialManager
+	}
+	return credentials.NewCredentialManager(s.Store, s.Broker)
 }
 
 func (s *Server) RecoverQueuedCancels() {

@@ -60,12 +60,16 @@ func (s *Server) RecoverRunningRuns() {
 
 func (s *Server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 	handle := runExecutionHandle(execRec)
+	credentialHandle, _, credentialErr := s.credentialManager().ActiveHandleForRun(run.ID, run.RunDir, run.AgentRuntime)
+	if credentialErr != nil {
+		log.Printf("recover run %s lookup credential handle failed: %v", run.ID, credentialErr)
+	}
 	inspectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	execState, err := s.Runner.Inspect(inspectCtx, handle)
 	switch {
 	case errors.Is(err, runner.ErrExecutionNotFound):
-		s.failRunForMissingExecution(run, "detached container missing during adoption")
+		s.failRunForMissingExecution(run, "detached container missing during adoption", credentialHandle)
 		return
 	case err != nil:
 		log.Printf("recover run %s inspect failed, adopting with retry loop: %v", run.ID, err)
@@ -73,7 +77,7 @@ func (s *Server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 			log.Printf("recover run %s claim run lease failed: %v", run.ID, err)
 			return
 		}
-		go s.superviseDetachedRunLoop(run.ID, execRec, s.activeCredentialLeaseIDForRun(run.ID))
+		go s.superviseDetachedRunLoop(run.ID, execRec, credentialHandle)
 		return
 	}
 
@@ -85,7 +89,7 @@ func (s *Server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 			log.Printf("recover run %s claim run lease failed: %v", run.ID, err)
 			return
 		}
-		go s.superviseDetachedRunLoop(run.ID, execRec, s.activeCredentialLeaseIDForRun(run.ID))
+		go s.superviseDetachedRunLoop(run.ID, execRec, credentialHandle)
 		return
 	}
 
@@ -96,10 +100,10 @@ func (s *Server) recoverDetachedRun(run state.Run, execRec state.RunExecution) {
 	if _, err := s.Store.UpdateRunExecutionState(run.ID, state.RunExecutionStatusExited, exitCode, time.Now().UTC()); err != nil {
 		log.Printf("recover run %s update execution exited state failed: %v", run.ID, err)
 	}
-	s.finalizeDetachedRun(run.ID, execRec, exitCode)
+	s.finalizeDetachedRun(run.ID, execRec, exitCode, credentialHandle)
 }
 
-func (s *Server) failRunForMissingExecution(run state.Run, reason string) {
+func (s *Server) failRunForMissingExecution(run state.Run, reason string, credentialHandle *credentials.CredentialHandle) {
 	updated, err := s.SM.Transition(run.ID, state.StatusFailed, WithError(reason))
 	if err != nil {
 		log.Printf("run %s fail for missing execution failed: %v", run.ID, err)
@@ -112,120 +116,12 @@ func (s *Server) failRunForMissingExecution(run state.Run, reason string) {
 	}
 	s.deleteRunExecutionBestEffort(run.ID)
 	s.deleteRunLeaseBestEffort(run.ID)
+	if credentialHandle != nil {
+		if err := credentialHandle.Release(context.Background()); err != nil {
+			log.Printf("run %s release credential after missing execution failed: %v", run.ID, err)
+		}
+	}
 	s.finishRun(updated)
-}
-
-func credentialAuthPath(runDir string, rt runtime.Runtime) (dir, file string) {
-	switch runtime.NormalizeRuntime(string(rt)) {
-	case runtime.RuntimeClaude, runtime.RuntimeGooseClaude:
-		dir = filepath.Join(runDir, "claude")
-		file = filepath.Join(dir, "oauth_token")
-	default:
-		dir = filepath.Join(runDir, "codex")
-		file = filepath.Join(dir, "auth.json")
-	}
-	return dir, file
-}
-
-func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string, rt runtime.Runtime) (string, error) {
-	requesterUserID = strings.TrimSpace(requesterUserID)
-	if requesterUserID == "" {
-		requesterUserID = "system"
-	}
-	authDir, authPath := credentialAuthPath(runDir, rt)
-	if err := os.MkdirAll(authDir, 0o755); err != nil {
-		return "", fmt.Errorf("create auth dir: %w", err)
-	}
-
-	if s.Broker != nil {
-		lease, err := s.Broker.Acquire(context.Background(), credentials.AcquireRequest{
-			RunID:    runID,
-			UserID:   requesterUserID,
-			Provider: string(rt.Provider()),
-		})
-		if err == nil {
-			tmpFile, err := os.CreateTemp(authDir, "auth-*.tmp")
-			if err != nil {
-				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
-					log.Printf("release credential lease %s after temp auth file create failure failed: %v", lease.ID, releaseErr)
-				}
-				return "", fmt.Errorf("create temp auth file: %w", err)
-			}
-			tmpPath := tmpFile.Name()
-			cleanupTemp := func() {
-				if removeErr := os.Remove(tmpPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-					log.Printf("remove temp auth file %s failed: %v", tmpPath, removeErr)
-				}
-			}
-			if _, err := tmpFile.Write(lease.AuthBlob); err != nil {
-				if closeErr := tmpFile.Close(); closeErr != nil {
-					log.Printf("close temp auth file %s after write failure failed: %v", tmpPath, closeErr)
-				}
-				cleanupTemp()
-				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
-					log.Printf("release credential lease %s after auth write failure failed: %v", lease.ID, releaseErr)
-				}
-				return "", fmt.Errorf("write broker auth file: %w", err)
-			}
-			if err := tmpFile.Chmod(0o600); err != nil {
-				if closeErr := tmpFile.Close(); closeErr != nil {
-					log.Printf("close temp auth file %s after chmod failure failed: %v", tmpPath, closeErr)
-				}
-				cleanupTemp()
-				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
-					log.Printf("release credential lease %s after auth chmod failure failed: %v", lease.ID, releaseErr)
-				}
-				return "", fmt.Errorf("chmod broker auth file: %w", err)
-			}
-			if err := tmpFile.Close(); err != nil {
-				cleanupTemp()
-				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
-					log.Printf("release credential lease %s after auth close failure failed: %v", lease.ID, releaseErr)
-				}
-				return "", fmt.Errorf("close broker auth file: %w", err)
-			}
-			if err := os.Rename(tmpPath, authPath); err != nil {
-				cleanupTemp()
-				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
-					log.Printf("release credential lease %s after auth rename failure failed: %v", lease.ID, releaseErr)
-				}
-				return "", fmt.Errorf("publish broker auth file: %w", err)
-			}
-			if err := os.Chmod(authPath, 0o600); err != nil {
-				if releaseErr := s.Broker.Release(context.Background(), lease.ID); releaseErr != nil {
-					log.Printf("release credential lease %s after auth final chmod failure failed: %v", lease.ID, releaseErr)
-				}
-				return "", fmt.Errorf("chmod published broker auth file: %w", err)
-			}
-			log.Printf("audit event=credential_lease_acquired run_id=%s credential_id=%s user_id=%s lease_id=%s strategy=%s", runID, lease.CredentialID, requesterUserID, lease.ID, lease.Strategy)
-			return lease.ID, nil
-		}
-		if !errors.Is(err, credentials.ErrNoCredentialAvailable) {
-			return "", fmt.Errorf("acquire broker credential: %w", err)
-		}
-		return "", credentials.ErrNoCredentialAvailable
-	}
-	return "", nil
-}
-
-func (s *Server) cleanupRunCredentialAuth(runDir, credentialLeaseID string, rt runtime.Runtime) {
-	if strings.TrimSpace(credentialLeaseID) != "" && s.Broker != nil {
-		if err := s.Broker.Release(context.Background(), credentialLeaseID); err != nil {
-			log.Printf("release credential lease %s failed: %v", credentialLeaseID, err)
-		}
-	}
-	_, authPath := credentialAuthPath(runDir, rt)
-	if err := os.Remove(authPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		log.Printf("remove ephemeral auth file %s failed: %v", authPath, err)
-	}
-}
-
-func (s *Server) activeCredentialLeaseIDForRun(runID string) string {
-	lease, ok, err := s.Store.GetActiveCredentialLeaseByRunID(runID)
-	if err != nil || !ok {
-		return ""
-	}
-	return lease.ID
 }
 
 func (s *Server) ExecuteRun(runID string) {
@@ -287,17 +183,30 @@ func (s *Server) ExecuteRun(runID string) {
 	if requesterID == "" {
 		requesterID = "system"
 	}
-	credentialLeaseID, err := s.prepareRunCredentialAuth(run.ID, run.RunDir, requesterID, run.AgentRuntime)
+	credentialHandle, err := s.credentialManager().PrepareCredential(context.Background(), credentials.CredentialRequest{
+		RunID:   run.ID,
+		RunDir:  run.RunDir,
+		UserID:  requesterID,
+		Runtime: run.AgentRuntime,
+	})
 	if err != nil {
-		updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("acquire credential lease: %v", err)))
+		errText := fmt.Sprintf("acquire credential lease: %v", err)
+		if errors.Is(err, credentials.ErrNoCredentialAvailable) {
+			errText = "acquire credential lease: no credentials available"
+		}
+		updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(errText))
 		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
 	}
-	defer s.cleanupRunCredentialAuth(run.RunDir, credentialLeaseID, run.AgentRuntime)
 
 	if reason, statusReason, ok := s.pendingRunCancelStatus(runID); ok {
 		updated := s.transitionOrGetRun(run, state.StatusCanceled, WithError(reason), WithReason(statusReason))
+		if credentialHandle != nil {
+			if err := credentialHandle.Release(context.Background()); err != nil {
+				log.Printf("run %s release credential after cancel failed: %v", run.ID, err)
+			}
+		}
 		s.notifyRunTerminalGitHubBestEffort(updated)
 		s.finishRun(updated)
 		return
@@ -331,6 +240,11 @@ func (s *Server) ExecuteRun(runID string) {
 		}
 		if err := os.MkdirAll(sessionTaskDir, 0o755); err != nil {
 			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("create agent session dir: %v", err)))
+			if credentialHandle != nil {
+				if err := credentialHandle.Release(context.Background()); err != nil {
+					log.Printf("run %s release credential after session dir failure failed: %v", run.ID, err)
+				}
+			}
 			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
@@ -344,6 +258,11 @@ func (s *Server) ExecuteRun(runID string) {
 			LastRunID:        run.ID,
 		}); err != nil {
 			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("persist agent session: %v", err)))
+			if credentialHandle != nil {
+				if err := credentialHandle.Release(context.Background()); err != nil {
+					log.Printf("run %s release credential after session persist failure failed: %v", run.ID, err)
+				}
+			}
 			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
 			return
@@ -387,6 +306,11 @@ func (s *Server) ExecuteRun(runID string) {
 			Status:        state.RunExecutionStatusCreated,
 			ExitCode:      0,
 		}); err != nil {
+			if credentialHandle != nil {
+				if err := credentialHandle.Release(context.Background()); err != nil {
+					log.Printf("run %s release credential after persist execution failure failed: %v", run.ID, err)
+				}
+			}
 			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("persist run execution: %v", err)))
 			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
@@ -396,6 +320,11 @@ func (s *Server) ExecuteRun(runID string) {
 		handle, err := s.startDetachedWithRetry(context.Background(), spec)
 		if err != nil {
 			s.deleteRunExecutionBestEffort(run.ID)
+			if credentialHandle != nil {
+				if releaseErr := credentialHandle.Release(context.Background()); releaseErr != nil {
+					log.Printf("run %s release credential after start failure failed: %v", run.ID, releaseErr)
+				}
+			}
 			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(err.Error()))
 			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
@@ -414,6 +343,11 @@ func (s *Server) ExecuteRun(runID string) {
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
 			s.removeRunExecutionBestEffort(stopCtx, handle, run.ID, "cleanup failed persisted execution")
 			stopCancel()
+			if credentialHandle != nil {
+				if releaseErr := credentialHandle.Release(context.Background()); releaseErr != nil {
+					log.Printf("run %s release credential after execution persist cleanup failed: %v", run.ID, releaseErr)
+				}
+			}
 			updated := s.transitionOrGetRun(run, state.StatusFailed, WithError(fmt.Sprintf("persist run execution: %v", err)))
 			s.notifyRunTerminalGitHubBestEffort(updated)
 			s.finishRun(updated)
@@ -425,10 +359,10 @@ func (s *Server) ExecuteRun(runID string) {
 		s.BeforeSupervise(run.ID)
 	}
 	s.PostRunStartCommentBestEffort(run, sessionMode, sessionResume)
-	s.superviseDetachedRunLoop(run.ID, execRec, credentialLeaseID)
+	s.superviseDetachedRunLoop(run.ID, execRec, credentialHandle)
 }
 
-func (s *Server) superviseDetachedRunLoop(runID string, execRec state.RunExecution, credentialLeaseID string) {
+func (s *Server) superviseDetachedRunLoop(runID string, execRec state.RunExecution, credentialHandle *credentials.CredentialHandle) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
 	if s.StopSupervisors {
@@ -453,17 +387,17 @@ func (s *Server) superviseDetachedRunLoop(runID string, execRec state.RunExecuti
 		if s.AfterRunCleanup != nil {
 			s.AfterRunCleanup(runID)
 		}
-		if credentialLeaseID != "" {
-			if err := s.Broker.Release(context.Background(), credentialLeaseID); err != nil {
+		if credentialHandle != nil {
+			if err := credentialHandle.Release(context.Background()); err != nil {
 				log.Printf("failed to release credential lease for %s: %v", runID, err)
 			}
 		}
 	}()
 
-	s.superviseRun(ctx, runID, execRec, credentialLeaseID)
+	s.superviseRun(ctx, runID, execRec, credentialHandle)
 }
 
-func (s *Server) superviseRun(ctx context.Context, runID string, execRec state.RunExecution, credentialLeaseID string) {
+func (s *Server) superviseRun(ctx context.Context, runID string, execRec state.RunExecution, credentialHandle *credentials.CredentialHandle) {
 	interval := s.supervisorTick()
 	if interval <= 0 {
 		interval = time.Second
@@ -502,8 +436,8 @@ func (s *Server) superviseRun(ctx context.Context, runID string, execRec state.R
 				}
 				nextRenewAt = time.Now().UTC().Add(renewEvery)
 			}
-			if credentialLeaseID != "" && !time.Now().UTC().Before(nextCredentialRenewAt) {
-				if err := s.Broker.Renew(ctx, credentialLeaseID); err != nil {
+			if credentialHandle != nil && !time.Now().UTC().Before(nextCredentialRenewAt) {
+				if err := credentialHandle.Renew(ctx); err != nil {
 					log.Printf("run %s credential lease renew failed: %v", runID, err)
 					if cancelErr := s.Store.RequestRunCancel(runID, "credential lease lost", "broker"); cancelErr != nil {
 						log.Printf("run %s request cancel after credential lease loss failed: %v", runID, cancelErr)
@@ -526,7 +460,7 @@ func (s *Server) superviseRun(ctx context.Context, runID string, execRec state.R
 			if errors.Is(err, runner.ErrExecutionNotFound) {
 				run, ok := s.Store.GetRun(runID)
 				if ok {
-					s.failRunForMissingExecution(run, "detached container missing during adoption")
+					s.failRunForMissingExecution(run, "detached container missing during adoption", credentialHandle)
 				}
 				return
 			}
@@ -565,13 +499,13 @@ func (s *Server) superviseRun(ctx context.Context, runID string, execRec state.R
 			if _, err := s.Store.UpdateRunExecutionState(runID, state.RunExecutionStatusExited, exitCode, now); err != nil {
 				log.Printf("run %s update execution exited state failed: %v", runID, err)
 			}
-			s.finalizeDetachedRun(runID, execRec, exitCode)
+			s.finalizeDetachedRun(runID, execRec, exitCode, credentialHandle)
 			return
 		}
 	}
 }
 
-func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, observedExitCode int) {
+func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, observedExitCode int, credentialHandle *credentials.CredentialHandle) {
 	run, ok := s.Store.GetRun(runID)
 	if !ok {
 		s.cleanupDetachedExecution(runID, execRec)
@@ -699,15 +633,11 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	if updated.PRNumber > 0 {
 		s.setTaskPRBestEffort(updated.TaskID, updated.Repo, updated.PRNumber)
 	}
-	if updated.Status == state.StatusFailed {
-		info, ok := s.Store.GetRunCredentialInfo(updated.ID)
-		if ok && strings.TrimSpace(info.CredentialID) != "" && isCredentialAuthFailure(updated.Error) {
-			until := time.Now().UTC().Add(5 * time.Minute)
-			if err := s.Store.SetCredentialStatus(info.CredentialID, state.CredentialStatusCooldown, &until, updated.Error); err != nil {
-				log.Printf("run %s set credential cooldown failed: %v", updated.ID, err)
-			} else {
-				log.Printf("audit event=credential_cooldown run_id=%s credential_id=%s until=%s", updated.ID, info.CredentialID, until.Format(time.RFC3339))
-			}
+	if updated.Status == state.StatusFailed && credentialHandle != nil {
+		if err := credentialHandle.MarkAuthFailure(context.Background(), updated.Error, 5*time.Minute); err != nil {
+			log.Printf("run %s set credential cooldown failed: %v", updated.ID, err)
+		} else if credentials.IsAuthFailure(updated.Error) && strings.TrimSpace(credentialHandle.CredentialID) != "" {
+			log.Printf("audit event=credential_cooldown run_id=%s credential_id=%s", updated.ID, credentialHandle.CredentialID)
 		}
 	}
 	s.cleanupDetachedExecution(runID, execRec)
@@ -728,7 +658,7 @@ func (s *Server) cleanupDetachedExecution(runID string, execRec state.RunExecuti
 		log.Printf("run %s clear run lease failed: %v", runID, err)
 	}
 	if run, ok := s.Store.GetRun(runID); ok {
-		_, authPath := credentialAuthPath(run.RunDir, run.AgentRuntime)
+		_, authPath := credentials.AuthPath(run.RunDir, run.AgentRuntime)
 		if err := os.Remove(authPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("run %s remove auth file failed: %v", runID, err)
 		}
