@@ -17,6 +17,7 @@ import (
 	"github.com/rtzll/rascal/internal/credentials"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/runner"
+	rt "github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -93,6 +94,7 @@ type RunRequest struct {
 	TaskID          string
 	Repo            string
 	Instruction     string
+	AgentRuntime    *rt.Runtime // optional per-request override; nil = server default
 	BaseBranch      string
 	HeadBranch      string
 	Trigger         runtrigger.Name

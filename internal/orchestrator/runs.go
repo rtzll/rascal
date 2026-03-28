@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -59,7 +60,12 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 	if s.Store.IsTaskCompleted(req.TaskID) {
 		return state.Run{}, errTaskCompleted
 	}
-	if existingTask, ok := s.Store.GetTask(req.TaskID); ok && existingTask.AgentRuntime != s.Config.AgentRuntime {
+	effectiveRuntime := s.Config.AgentRuntime
+	if req.AgentRuntime != nil {
+		effectiveRuntime = runtime.NormalizeRuntime(string(*req.AgentRuntime))
+	}
+
+	if existingTask, ok := s.Store.GetTask(req.TaskID); ok && existingTask.AgentRuntime != effectiveRuntime {
 		if err := s.Store.DeleteTaskSession(req.TaskID); err != nil {
 			return state.Run{}, fmt.Errorf("clear stale task session for backend migration: %w", err)
 		}
@@ -86,7 +92,7 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 	_, err = s.Store.UpsertTask(state.UpsertTaskInput{
 		ID:           req.TaskID,
 		Repo:         req.Repo,
-		AgentRuntime: s.Config.AgentRuntime,
+		AgentRuntime: effectiveRuntime,
 		IssueNumber:  req.IssueNumber,
 		PRNumber:     req.PRNumber,
 	})
@@ -102,7 +108,7 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 		TaskID:       req.TaskID,
 		Repo:         req.Repo,
 		Instruction:  req.Instruction,
-		AgentRuntime: s.Config.AgentRuntime,
+		AgentRuntime: effectiveRuntime,
 		BaseBranch:   req.BaseBranch,
 		HeadBranch:   req.HeadBranch,
 		Trigger:      req.Trigger,
