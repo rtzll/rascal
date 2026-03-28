@@ -13,8 +13,11 @@ and ship PRs.
 
 ## Mental Model
 
-`rascal` (CLI) -> `rascald` (orchestrator API) -> runner container -> branch +
-PR on GitHub.
+`rascal` (CLI) -> `rascald` (orchestrator API) -> runner container.
+
+Rascal owns environment setup and permission boundaries. The agent owns local
+workflow decisions, and uses runner capability commands when it chooses to
+publish a branch, mutate PR state, or post a GitHub comment.
 
 ## Quickstart
 

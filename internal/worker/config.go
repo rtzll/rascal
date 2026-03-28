@@ -21,6 +21,7 @@ type Config struct {
 	BaseBranch  string
 	HeadBranch  string
 	IssueNumber int
+	PRNumber    int
 	Trigger     runtrigger.Name
 	GitHubToken string
 
@@ -77,6 +78,14 @@ func LoadConfig() (Config, error) {
 			return Config{}, fmt.Errorf("invalid RASCAL_ISSUE_NUMBER: %w", err)
 		}
 		issueNumber = n
+	}
+	prNumber := 0
+	if raw := strings.TrimSpace(os.Getenv("RASCAL_PR_NUMBER")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid RASCAL_PR_NUMBER: %w", err)
+		}
+		prNumber = n
 	}
 
 	trigger, err := runtrigger.ParseOrDefault(os.Getenv("RASCAL_TRIGGER"), runtrigger.NameCLI)
@@ -137,6 +146,7 @@ func LoadConfig() (Config, error) {
 		BaseBranch:                 baseBranch,
 		HeadBranch:                 headBranch,
 		IssueNumber:                issueNumber,
+		PRNumber:                   prNumber,
 		Trigger:                    trigger,
 		GitHubToken:                ghToken,
 		MetaDir:                    metaDir,

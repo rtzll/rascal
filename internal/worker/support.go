@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -147,22 +146,6 @@ func loadPRView(ex CommandExecutor, cfg Config) (prView, bool, error) {
 		return prView{}, false, fmt.Errorf("decode gh pr view output: %w", err)
 	}
 	return view, true, nil
-}
-
-func branchAheadOfBase(ex CommandExecutor, cfg Config) (bool, error) {
-	out, err := runCommand(ex, cfg.RepoDir, nil, "git", "rev-list", "--left-right", "--count", "origin/"+cfg.BaseBranch+"...HEAD")
-	if err != nil {
-		return false, fmt.Errorf("compare branch with origin/%s: %w", cfg.BaseBranch, err)
-	}
-	parts := strings.Fields(out)
-	if len(parts) != 2 {
-		return false, fmt.Errorf("unexpected git rev-list output: %q", strings.TrimSpace(out))
-	}
-	ahead, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return false, fmt.Errorf("parse ahead count %q: %w", parts[1], err)
-	}
-	return ahead > 0, nil
 }
 
 func RunStage(name string, fn func() error) error {

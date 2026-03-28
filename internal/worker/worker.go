@@ -8,12 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rtzll/rascal/internal/runner"
-	"github.com/rtzll/rascal/internal/runsummary"
 )
 
 const (
@@ -27,7 +24,6 @@ const (
 	defaultCommitMsgFile              = "commit_message.txt"
 	defaultAgentOutputFile            = "agent_output.txt"
 	defaultPRBodyFile                 = "pr_body.md"
-	defaultPRLabel                    = "rascal"
 	defaultCodexAuthFile              = "auth.json"
 	defaultCodexSessionDir            = "sessions"
 	defaultClaudeOAuthFile            = "oauth_token"
@@ -35,7 +31,6 @@ const (
 
 var (
 	convCommitPattern = regexp.MustCompile(`^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?(!)?:[[:space:]].+`)
-	prURLPattern      = regexp.MustCompile(`https://github\.com/[^[:space:]]+/pull/[0-9]+`)
 
 	BuildVersion = "dev"
 	BuildCommit  = "unknown"
@@ -109,7 +104,6 @@ func RunWithExecutor(ex CommandExecutor) error {
 	if err != nil {
 		return fmt.Errorf("load Config: %w", err)
 	}
-	started := time.Now().UTC()
 
 	meta := runner.Meta{
 		RunID:       cfg.RunID,
@@ -171,22 +165,25 @@ func RunWithExecutor(ex CommandExecutor) error {
 		return fail(err)
 	}
 
-	var authorName string
-	var authorEmail string
-	if err := RunStage("resolve_identity", func() error {
-		var err error
-		authorName, authorEmail, err = resolveGitIdentity(ex)
-		if err != nil {
-			return fmt.Errorf("resolve git identity: %w", err)
-		}
-		return nil
+	if err := RunStage("checkout_repo", func() error {
+		return checkoutRepo(ex, cfg)
 	}); err != nil {
 		return fail(err)
 	}
-	log.Printf("[%s] using commit identity: %s <%s>", nowUTC(), authorName, authorEmail)
 
-	if err := RunStage("checkout_repo", func() error {
-		return checkoutRepo(ex, cfg)
+	if err := RunStage("configure_git_identity", func() error {
+		authorName, authorEmail, err := resolveGitIdentity(ex)
+		if err != nil {
+			return fmt.Errorf("resolve git identity: %w", err)
+		}
+		if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "config", "user.name", authorName); err != nil {
+			return fmt.Errorf("git config user.name: %w", err)
+		}
+		if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "config", "user.email", authorEmail); err != nil {
+			return fmt.Errorf("git config user.email: %w", err)
+		}
+		log.Printf("[%s] configured local git identity: %s <%s>", nowUTC(), authorName, authorEmail)
+		return nil
 	}); err != nil {
 		return fail(err)
 	}
@@ -216,138 +213,13 @@ func RunWithExecutor(ex CommandExecutor) error {
 		}
 	}
 
-	commitTitle := fmt.Sprintf("chore(rascal): %s", TaskSubject(cfg.Instruction, cfg.TaskID))
-	commitBody := ""
-	if err := RunStage("prepare_commit", func() error {
+	if err := RunStage("normalize_artifacts", func() error {
 		if err := NormalizeRepoLocalMetaArtifacts(cfg); err != nil {
 			return fmt.Errorf("normalize repo-local meta artifacts: %w", err)
 		}
-		if title, body, msgErr := LoadAgentCommitMessage(cfg.CommitMsgPath); msgErr != nil {
-			return fmt.Errorf("load agent commit message: %w", msgErr)
-		} else {
-			commitBody = body
-			if title != "" {
-				if IsConventionalTitle(title) {
-					commitTitle = title
-				} else {
-					log.Printf("[%s] agent commit title is not conventional; using fallback title", nowUTC())
-				}
-			}
-		}
-
-		statusOut, err := runCommand(ex, cfg.RepoDir, nil, "git", "status", "--porcelain")
-		if err != nil {
-			return fmt.Errorf("git status --porcelain: %w", err)
-		}
-		if strings.TrimSpace(statusOut) != "" {
-			if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "add", "-A"); err != nil {
-				return fmt.Errorf("git add -A: %w", err)
-			}
-			finalBody := strings.TrimSpace(commitBody)
-			if finalBody != "" {
-				finalBody += "\n\n"
-			}
-			finalBody += "Run: " + cfg.RunID
-
-			commitEnv := []string{
-				"GIT_AUTHOR_NAME=" + authorName,
-				"GIT_AUTHOR_EMAIL=" + authorEmail,
-				"GIT_COMMITTER_NAME=" + authorName,
-				"GIT_COMMITTER_EMAIL=" + authorEmail,
-			}
-			if _, err := runCommand(ex, cfg.RepoDir, commitEnv, "git", "commit", "-m", commitTitle, "-m", finalBody); err != nil {
-				return fmt.Errorf("git commit: %w", err)
-			}
-		}
 		return nil
 	}); err != nil {
 		return fail(err)
-	}
-
-	if err := RunStage("check_branch_diff", func() error {
-		ahead, err := branchAheadOfBase(ex, cfg)
-		if err != nil {
-			return err
-		}
-		if !ahead {
-			return fmt.Errorf("agent produced no commits ahead of %s; skipping branch push and pull request creation", cfg.BaseBranch)
-		}
-		return nil
-	}); err != nil {
-		return fail(err)
-	}
-
-	if err := RunStage("push_branch", func() error {
-		log.Printf("[%s] pushing branch", nowUTC())
-		if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "push", "-u", "origin", cfg.HeadBranch); err != nil {
-			return fmt.Errorf("git push failed: %w", err)
-		}
-		return nil
-	}); err != nil {
-		return fail(err)
-	}
-
-	var view prView
-	var found bool
-	if err := RunStage("load_pr", func() error {
-		var err error
-		view, found, err = loadPRView(ex, cfg)
-		if err != nil {
-			return fmt.Errorf("load pull request view: %w", err)
-		}
-		return nil
-	}); err != nil {
-		return fail(err)
-	}
-
-	if !found {
-		if err := RunStage("pr_create", func() error {
-			log.Printf("[%s] creating pull request", nowUTC())
-			closesSection := ""
-			if cfg.IssueNumber > 0 {
-				closesSection = fmt.Sprintf("\n\nCloses #%d", cfg.IssueNumber)
-			}
-			runDuration := runsummary.FormatDuration(int64(time.Since(started).Seconds()))
-			var totalTokens *int64
-			if usage, ok, err := runsummary.ReadRecordedTokenUsage(filepath.Join(cfg.MetaDir, runsummary.RecordedTokenUsageFile)); err != nil {
-				log.Printf("[%s] recorded token usage warning: %v", nowUTC(), err)
-			} else if ok && usage.TotalTokens > 0 {
-				totalTokens = &usage.TotalTokens
-			}
-			body := runsummary.BuildPRBody(cfg.RunID, commitBody, agentOutput, runDuration, closesSection, totalTokens)
-			if err := os.WriteFile(cfg.PRBodyPath, []byte(body), 0o644); err != nil {
-				return fmt.Errorf("write pr body: %w", err)
-			}
-
-			out, err := runCommand(ex, cfg.RepoDir, nil, "gh", "pr", "create",
-				"--repo", cfg.Repo,
-				"--base", cfg.BaseBranch,
-				"--head", cfg.HeadBranch,
-				"--label", defaultPRLabel,
-				"--title", commitTitle,
-				"--body-file", cfg.PRBodyPath,
-			)
-			if err != nil {
-				return fmt.Errorf("gh pr create failed: %w", err)
-			}
-
-			if latest, ok, err := loadPRView(ex, cfg); err == nil && ok {
-				view = latest
-				found = true
-			} else {
-				if m := prURLPattern.FindString(out); m != "" {
-					view.URL = m
-					if i := strings.LastIndex(m, "/"); i >= 0 && i+1 < len(m) {
-						if n, convErr := strconv.Atoi(m[i+1:]); convErr == nil {
-							view.Number = n
-						}
-					}
-				}
-			}
-			return nil
-		}); err != nil {
-			return fail(err)
-		}
 	}
 
 	if err := RunStage("finalize_meta", func() error {
@@ -356,8 +228,17 @@ func RunWithExecutor(ex CommandExecutor) error {
 			return fmt.Errorf("git rev-parse HEAD: %w", err)
 		}
 		meta.HeadSHA = strings.TrimSpace(headSHA)
-		meta.PRNumber = view.Number
-		meta.PRURL = strings.TrimSpace(view.URL)
+		view, found, err := loadPRView(ex, cfg)
+		if err != nil {
+			return fmt.Errorf("load pull request view: %w", err)
+		}
+		if found {
+			meta.PRNumber = view.Number
+			meta.PRURL = strings.TrimSpace(view.URL)
+		}
+		if strings.TrimSpace(agentOutput) != "" {
+			log.Printf("[%s] captured agent output bytes=%d", nowUTC(), len(agentOutput))
+		}
 		return nil
 	}); err != nil {
 		return fail(err)

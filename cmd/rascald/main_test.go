@@ -35,7 +35,7 @@ func int64Ptr(v int64) *int64 {
 	return &v
 }
 
-func TestInstructionTextPRGitContext(t *testing.T) {
+func TestInstructionTextPRCapabilities(t *testing.T) {
 	run := state.Run{
 		ID:          "run_abc123",
 		TaskID:      "task_xyz789",
@@ -49,18 +49,28 @@ func TestInstructionTextPRGitContext(t *testing.T) {
 		Context:     "Please rebase this on main and fix the conflicts.",
 	}
 
-	got := orchestrator.InstructionText(run)
+	target := &orchestrator.RunResponseTarget{
+		Repo:           "acme/widgets",
+		IssueNumber:    137,
+		Trigger:        runtrigger.NamePRReviewThread,
+		ReviewThreadID: 99,
+	}
+	got := orchestrator.InstructionText(run, target)
 
 	for _, want := range []string{
-		"## Git Context",
-		"- Remote: `origin`",
+		"## Execution Context",
+		"- Trigger: `pr_comment`",
 		"- Base branch: `main`",
 		"- Head branch: `rascal/task-xyz789`",
-		"- You may use `git` and `gh` directly.",
-		"- Push only to `origin` branch `rascal/task-xyz789`.",
-		"`git push --force-with-lease origin HEAD:rascal/task-xyz789`",
-		"`git push origin HEAD:rascal/task-xyz789`",
-		"do not rely on the harness to publish those changes for you",
+		"- Allowed publish ref: `origin/rascal/task-xyz789`",
+		"- GitHub replies expected: `yes`",
+		"## Capabilities",
+		"`rascal-runner capability publish`",
+		"`rascal-runner capability publish --force-with-lease`",
+		"`rascal-runner capability pr --title ... --body-file ...`",
+		"`rascal-runner capability comment --body-file ...`",
+		"`acme/widgets#137`",
+		"it does not commit, publish, create PRs, or reply on GitHub for you",
 		"## Additional Context",
 		"Please rebase this on main and fix the conflicts.",
 	} {
@@ -70,7 +80,7 @@ func TestInstructionTextPRGitContext(t *testing.T) {
 	}
 }
 
-func TestInstructionTextNonPRRunOmitsGitContext(t *testing.T) {
+func TestInstructionTextIssueRunShowsUnavailableCommentCapability(t *testing.T) {
 	run := state.Run{
 		ID:          "run_abc123",
 		TaskID:      "task_xyz789",
@@ -81,9 +91,17 @@ func TestInstructionTextNonPRRunOmitsGitContext(t *testing.T) {
 		Trigger:     "issue",
 	}
 
-	got := orchestrator.InstructionText(run)
-	if strings.Contains(got, "## Git Context") {
-		t.Fatalf("orchestrator.InstructionText() unexpectedly included Git Context\nfull text:\n%s", got)
+	got := orchestrator.InstructionText(run, nil)
+	for _, want := range []string{
+		"## Execution Context",
+		"- GitHub replies expected: `no`",
+		"`rascal-runner capability publish`",
+		"`rascal-runner capability pr --title ... --body-file ...`",
+		"`comment`: unavailable for this run.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("instructionText() missing %q\nfull text:\n%s", want, got)
+		}
 	}
 }
 
@@ -111,6 +129,8 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 		TaskID:      "task_xyz789",
 		Repo:        "acme/widgets",
 		Instruction: "Address PR feedback",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/task-xyz789",
 		Trigger:     "pr_comment",
 		IssueNumber: 42,
 		PRNumber:    137,
@@ -119,7 +139,14 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 		RunDir:      runDir,
 	}
 
-	if err := s.WriteRunFiles(run); err != nil {
+	target := &orchestrator.RunResponseTarget{
+		Repo:           "acme/widgets",
+		IssueNumber:    137,
+		Trigger:        runtrigger.NamePRReviewThread,
+		ReviewThreadID: 99,
+	}
+
+	if err := s.WriteRunFiles(run, target); err != nil {
 		t.Fatalf("writeRunFiles() error = %v", err)
 	}
 
@@ -134,15 +161,45 @@ func TestWriteRunFilesWritesTypedContextJSON(t *testing.T) {
 	}
 
 	want := orchestrator.RunContextFile{
-		RunID:       run.ID,
-		TaskID:      run.TaskID,
-		Repo:        run.Repo,
-		Instruction: run.Instruction,
-		Trigger:     run.Trigger.String(),
-		IssueNumber: run.IssueNumber,
-		PRNumber:    run.PRNumber,
-		Context:     run.Context,
-		Debug:       run.Debug,
+		RunID:                 run.ID,
+		TaskID:                run.TaskID,
+		Repo:                  run.Repo,
+		Instruction:           run.Instruction,
+		Trigger:               run.Trigger.String(),
+		BaseBranch:            run.BaseBranch,
+		HeadBranch:            run.HeadBranch,
+		IssueNumber:           run.IssueNumber,
+		PRNumber:              run.PRNumber,
+		Context:               run.Context,
+		Debug:                 run.Debug,
+		GitHubRepliesExpected: true,
+		Capabilities: orchestrator.RunContextCapability{
+			Publish: orchestrator.RunPublishCapability{
+				Available:  true,
+				Command:    "rascal-runner capability publish",
+				Remote:     "origin",
+				AllowedRef: run.HeadBranch,
+			},
+			PullRequest: orchestrator.RunPRCapability{
+				Available:     true,
+				Command:       "rascal-runner capability pr --title ... --body-file ...",
+				Repo:          run.Repo,
+				BaseBranch:    run.BaseBranch,
+				HeadBranch:    run.HeadBranch,
+				ExistingPR:    run.PRNumber,
+				DefaultLabel:  "rascal",
+				GitHubReplies: true,
+			},
+			GitHubComment: orchestrator.RunCommentCapability{
+				Available:        true,
+				Command:          "rascal-runner capability comment --body-file ...",
+				Repo:             run.Repo,
+				IssueNumber:      run.PRNumber,
+				ReviewThreadID:   99,
+				ReplyExpected:    true,
+				RequestedTrigger: runtrigger.NamePRReviewThread.String(),
+			},
+		},
 	}
 	if got != want {
 		t.Fatalf("context.json mismatch: got %#v want %#v", got, want)
