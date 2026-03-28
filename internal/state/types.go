@@ -199,7 +199,7 @@ type Run struct {
 	TaskID       string          `json:"task_id"`
 	Repo         string          `json:"repo"`
 	Instruction  string          `json:"instruction"`
-	AgentRuntime runtime.Runtime   `json:"agent_runtime"`
+	AgentRuntime runtime.Runtime `json:"agent_runtime"`
 	BaseBranch   string          `json:"base_branch"`
 	HeadBranch   string          `json:"head_branch"`
 	Trigger      runtrigger.Name `json:"trigger"`
@@ -223,12 +223,12 @@ type Run struct {
 }
 
 type Task struct {
-	ID           string        `json:"id"`
-	Repo         string        `json:"repo"`
+	ID           string          `json:"id"`
+	Repo         string          `json:"repo"`
 	AgentRuntime runtime.Runtime `json:"agent_runtime"`
-	IssueNumber  int           `json:"issue_number,omitempty"`
-	PRNumber     int           `json:"pr_number,omitempty"`
-	Status       TaskStatus    `json:"status"`
+	IssueNumber  int             `json:"issue_number,omitempty"`
+	PRNumber     int             `json:"pr_number,omitempty"`
+	Status       TaskStatus      `json:"status"`
 	// PendingInput is derived at read time from whether the task has queued runs.
 	PendingInput bool   `json:"pending_input"`
 	LastRunID    string `json:"last_run_id,omitempty"`
@@ -321,19 +321,19 @@ type RunExecution struct {
 }
 
 type RunTokenUsage struct {
-	RunID                 string        `json:"run_id"`
+	RunID                 string          `json:"run_id"`
 	AgentRuntime          runtime.Runtime `json:"agent_runtime"`
-	Provider              string        `json:"provider,omitempty"`
-	Model                 string        `json:"model,omitempty"`
-	TotalTokens           int64         `json:"total_tokens"`
-	InputTokens           *int64        `json:"input_tokens,omitempty"`
-	OutputTokens          *int64        `json:"output_tokens,omitempty"`
-	CachedInputTokens     *int64        `json:"cached_input_tokens,omitempty"`
-	ReasoningOutputTokens *int64        `json:"reasoning_output_tokens,omitempty"`
-	RawUsageJSON          string        `json:"raw_usage_json,omitempty"`
-	CapturedAt            time.Time     `json:"captured_at"`
-	CreatedAt             time.Time     `json:"created_at"`
-	UpdatedAt             time.Time     `json:"updated_at"`
+	Provider              string          `json:"provider,omitempty"`
+	Model                 string          `json:"model,omitempty"`
+	TotalTokens           int64           `json:"total_tokens"`
+	InputTokens           *int64          `json:"input_tokens,omitempty"`
+	OutputTokens          *int64          `json:"output_tokens,omitempty"`
+	CachedInputTokens     *int64          `json:"cached_input_tokens,omitempty"`
+	ReasoningOutputTokens *int64          `json:"reasoning_output_tokens,omitempty"`
+	RawUsageJSON          string          `json:"raw_usage_json,omitempty"`
+	CapturedAt            time.Time       `json:"captured_at"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 type RunCancelRequest struct {
@@ -396,14 +396,14 @@ type UpsertTaskInput struct {
 }
 
 type TaskSession struct {
-	TaskID           string        `json:"task_id"`
+	TaskID           string          `json:"task_id"`
 	AgentRuntime     runtime.Runtime `json:"agent_runtime"`
-	RuntimeSessionID string        `json:"runtime_session_id,omitempty"`
-	SessionKey       string        `json:"session_key,omitempty"`
-	SessionRoot      string        `json:"session_root,omitempty"`
-	LastRunID        string        `json:"last_run_id,omitempty"`
-	CreatedAt        time.Time     `json:"created_at"`
-	UpdatedAt        time.Time     `json:"updated_at"`
+	RuntimeSessionID string          `json:"runtime_session_id,omitempty"`
+	SessionKey       string          `json:"session_key,omitempty"`
+	SessionRoot      string          `json:"session_root,omitempty"`
+	LastRunID        string          `json:"last_run_id,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
 type UpsertTaskSessionInput struct {
@@ -414,4 +414,3 @@ type UpsertTaskSessionInput struct {
 	SessionRoot      string
 	LastRunID        string
 }
-

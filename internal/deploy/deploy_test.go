@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/defaults"
+	"github.com/rtzll/rascal/internal/runtime"
 )
 
 func TestGoarchFromUnameMachine(t *testing.T) {

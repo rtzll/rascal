@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runner"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 )
 

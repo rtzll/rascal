@@ -20,12 +20,12 @@ import (
 	"testing"
 	"time"
 
-	agentrt "github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/config"
 	"github.com/rtzll/rascal/internal/credentials"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/orchestrator"
 	"github.com/rtzll/rascal/internal/runner"
+	agentrt "github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/defaults"
 	"github.com/rtzll/rascal/internal/runner"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/spf13/viper"
 )
 

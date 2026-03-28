@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
-	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/defaults"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/spf13/cobra"
 )
 

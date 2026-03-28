@@ -260,6 +260,19 @@ func RunWithExecutor(ex CommandExecutor) error {
 		return fail(err)
 	}
 
+	if err := RunStage("check_branch_diff", func() error {
+		ahead, err := branchAheadOfBase(ex, cfg)
+		if err != nil {
+			return err
+		}
+		if !ahead {
+			return fmt.Errorf("agent produced no commits ahead of %s; skipping branch push and pull request creation", cfg.BaseBranch)
+		}
+		return nil
+	}); err != nil {
+		return fail(err)
+	}
+
 	if err := RunStage("push_branch", func() error {
 		log.Printf("[%s] pushing branch", nowUTC())
 		if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "push", "-u", "origin", cfg.HeadBranch); err != nil {

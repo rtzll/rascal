@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/defaults"
 	"github.com/rtzll/rascal/internal/remote"
 	"github.com/rtzll/rascal/internal/runner"
+	"github.com/rtzll/rascal/internal/runtime"
 )
 
 const (

@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/defaults"
 	ghapi "github.com/rtzll/rascal/internal/github"
 	"github.com/rtzll/rascal/internal/logs"
 	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runsummary"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
 )

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runner"
+	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/worker"
 )
@@ -809,10 +809,13 @@ func TestRunCodexFreshSession(t *testing.T) {
 		t.Fatalf("codex stdin = %q, want %q", gotInput, "do thing")
 	}
 	argsText := strings.Join(gotArgs, " ")
-	for _, want := range []string{"exec", "--json", "--full-auto", "--skip-git-repo-check", "-s", "workspace-write", "-"} {
+	for _, want := range []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "-"} {
 		if !strings.Contains(argsText, want) {
 			t.Fatalf("expected %q in args, got %q", want, argsText)
 		}
+	}
+	if strings.Contains(argsText, "workspace-write") {
+		t.Fatalf("did not expect codex workspace sandbox args, got %q", argsText)
 	}
 	if strings.Contains(argsText, " resume ") {
 		t.Fatalf("did not expect resume args in fresh codex run, got %q", argsText)
@@ -881,7 +884,7 @@ func TestRunCodexResumeSession(t *testing.T) {
 		t.Fatalf("sessionID = %q, want session-abc", sessionID)
 	}
 	argsText := strings.Join(gotArgs, " ")
-	for _, want := range []string{"exec", "resume", "--json", "--full-auto", "--skip-git-repo-check", "session-abc", "-"} {
+	for _, want := range []string{"exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "session-abc", "-"} {
 		if !strings.Contains(argsText, want) {
 			t.Fatalf("expected %q in args, got %q", want, argsText)
 		}
@@ -1260,6 +1263,13 @@ case "$cmd" in
     fi
     exit 0
     ;;
+  rev-list)
+    if [ "$#" -ge 3 ] && [ "$1" = "--left-right" ] && [ "$2" = "--count" ]; then
+      printf '0 1\n'
+      exit 0
+    fi
+    exit 1
+    ;;
   ls-remote)
     exit 1
     ;;
@@ -1422,6 +1432,8 @@ func TestRunWithExecutorUsesCodexBackend(t *testing.T) {
 				return `{"number":88,"url":"https://github.com/owner/repo/pull/88"}`, nil
 			case name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain":
 				return " M changed.txt\n", nil
+			case name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--left-right" && args[2] == "--count":
+				return "0 1", nil
 			case name == "git" && len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
 				return "0123456789abcdef0123456789abcdef01234567", nil
 			default:
@@ -1590,6 +1602,9 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 			if name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain" {
 				return " M changed.txt\n", nil
 			}
+			if name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--left-right" && args[2] == "--count" {
+				return "0 1", nil
+			}
 			return "", nil
 		},
 		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, _ ...string) error {
@@ -1623,6 +1638,77 @@ func TestRunWithExecutorSetsMetaErrorOnPRCreateFailure(t *testing.T) {
 	}
 	if !strings.Contains(meta.Error, "stage pr_create: gh pr create failed") {
 		t.Fatalf("expected gh pr create failure in meta error, got %q", meta.Error)
+	}
+}
+
+func TestRunWithExecutorFailsWhenAgentProducesNoCommitsAheadOfBase(t *testing.T) {
+	metaDir := filepath.Join(t.TempDir(), "meta")
+	workRoot := filepath.Join(t.TempDir(), "work")
+	repoDir := filepath.Join(workRoot, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir repo git dir: %v", err)
+	}
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatalf("mkdir meta dir: %v", err)
+	}
+
+	t.Setenv("RASCAL_RUN_ID", "run_no_branch_diff")
+	t.Setenv("RASCAL_TASK_ID", "task_no_branch_diff")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "token")
+	t.Setenv("RASCAL_INSTRUCTION", "Address PR feedback")
+	t.Setenv("RASCAL_AGENT_RUNTIME", "goose")
+	t.Setenv("RASCAL_META_DIR", metaDir)
+	t.Setenv("RASCAL_WORK_ROOT", workRoot)
+	t.Setenv("RASCAL_REPO_DIR", repoDir)
+
+	ex := fakeExecutor{
+		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
+			if name == "gh" && len(args) >= 2 && args[0] == "api" && args[1] == "user" {
+				return `{"login":"rascalbot"}`, nil
+			}
+			if name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "view" {
+				return "", errors.New("not found")
+			}
+			if name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain" {
+				return "", nil
+			}
+			if name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--left-right" && args[2] == "--count" {
+				return "0 0", nil
+			}
+			return "", nil
+		},
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, _ ...string) error {
+			if name == "goose" {
+				if _, err := io.WriteString(stdout, `{"event":"message","usage":{"total_tokens":7}}`+"\n"); err != nil {
+					return fmt.Errorf("write fake goose output: %w", err)
+				}
+			}
+			return nil
+		},
+	}
+
+	err := worker.RunWithExecutor(ex)
+	if err == nil || !strings.Contains(err.Error(), "stage check_branch_diff: agent produced no commits ahead of main") {
+		t.Fatalf("expected no-branch-diff failure, got: %v", err)
+	}
+
+	metaData, readErr := os.ReadFile(filepath.Join(metaDir, "meta.json"))
+	if readErr != nil {
+		t.Fatalf("read meta.json: %v", readErr)
+	}
+	var meta struct {
+		ExitCode int    `json:"exit_code"`
+		Error    string `json:"error"`
+	}
+	if err := json.Unmarshal(metaData, &meta); err != nil {
+		t.Fatalf("decode meta: %v", err)
+	}
+	if meta.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit code in meta, got %d", meta.ExitCode)
+	}
+	if !strings.Contains(meta.Error, "stage check_branch_diff: agent produced no commits ahead of main") {
+		t.Fatalf("expected branch diff failure in meta error, got %q", meta.Error)
 	}
 }
 

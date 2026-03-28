@@ -67,13 +67,13 @@ type GitHubClient interface {
 }
 
 type Server struct {
-	Config   config.ServerConfig
-	Store    *state.Store
+	Config config.ServerConfig
+	Store  *state.Store
 	Runner runner.Runner
-	GitHub   GitHubClient
-	Broker   credentials.CredentialBroker
-	Cipher   credentials.Cipher
-	SM       *RunStateMachine
+	GitHub GitHubClient
+	Broker credentials.CredentialBroker
+	Cipher credentials.Cipher
+	SM     *RunStateMachine
 
 	mu            sync.Mutex
 	runCancels    map[string]context.CancelFunc
