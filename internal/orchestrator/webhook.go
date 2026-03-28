@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
@@ -500,10 +499,8 @@ func (s *Server) runtimeFromIssueLabels(ctx context.Context, repo string, issueN
 	names := ghapi.LabelNames(labels)
 	rt, ok, err := runtime.RuntimeFromLabels(names)
 	if err != nil {
-		msg := fmt.Sprintf("Unknown agent runtime in label. %s\n\nPlease use a valid runtime label (e.g. `rascal:claude`, `rascal:codex`, `rascal:goose-codex`, `rascal:goose-claude`).", err)
-		if commentErr := s.GitHub.CreateIssueComment(ctx, repo, issueNumber, msg); commentErr != nil {
-			log.Printf("failed to post unknown runtime comment on %s#%d: %v", repo, issueNumber, commentErr)
-		}
+		_ = ctx
+		s.notifier().NotifyInvalidRuntimeLabel(repo, issueNumber, err)
 		return nil, fmt.Errorf("unknown runtime label on %s#%d: %w", repo, issueNumber, err)
 	}
 	if !ok {

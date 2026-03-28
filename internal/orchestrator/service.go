@@ -66,11 +66,25 @@ type GitHubClient interface {
 	CreateIssueComment(ctx context.Context, repo string, issueNumber int, body string) error
 }
 
+type RunNotifier interface {
+	NotifyRunStarted(run state.Run, sessionMode rt.SessionMode, sessionResume bool)
+	NotifyRunCompleted(run state.Run)
+	NotifyRunFailed(run state.Run)
+	NotifyRunTerminal(run state.Run)
+	NotifyInvalidRuntimeLabel(repo string, issueNumber int, err error)
+	ReactToIssue(repo string, issueNumber int, reaction string)
+	ClearIssueReactions(repo string, issueNumber int)
+	ReactToIssueComment(repo string, commentID int64, reaction string)
+	ReactToPullRequestReview(repo string, pullNumber int, reviewID int64, reaction string)
+	ReactToPullRequestReviewComment(repo string, commentID int64, reaction string)
+}
+
 type Server struct {
 	Config            config.ServerConfig
 	Store             *state.Store
 	Runner            runner.Runner
 	GitHub            GitHubClient
+	Notifier          RunNotifier
 	Broker            credentials.CredentialBroker
 	Cipher            credentials.Cipher
 	CredentialManager *credentials.CredentialManager
@@ -159,6 +173,13 @@ func (s *Server) credentialManager() *credentials.CredentialManager {
 		return s.CredentialManager
 	}
 	return credentials.NewCredentialManager(s.Store, s.Broker)
+}
+
+func (s *Server) notifier() RunNotifier {
+	if s.Notifier != nil {
+		return s.Notifier
+	}
+	return NewGitHubRunNotifier(s.Config, s.Store, s.GitHub)
 }
 
 func (s *Server) RecoverQueuedCancels() {

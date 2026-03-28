@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -270,157 +269,19 @@ func requesterForRun(run state.Run, target RunResponseTarget, requesterUserID st
 }
 
 func (s *Server) PostRunStartCommentBestEffort(run state.Run, sessionMode runtime.SessionMode, sessionResume bool) {
-	if strings.TrimSpace(s.Config.GitHubToken) == "" || s.GitHub == nil {
-		return
-	}
-
-	target, ok, err := LoadRunResponseTarget(run.RunDir)
-	if err != nil {
-		log.Printf("failed to load run response target for %s: %v", run.ID, err)
-	}
-	if !ok {
-		target = RunResponseTarget{}
-	}
-	if markerExists, err := runStartCommentMarkerExists(run.RunDir); err != nil {
-		log.Printf("failed to check start comment marker for run %s: %v", run.ID, err)
-		return
-	} else if markerExists {
-		return
-	}
-
-	repo, issueNumber := resolveRunCommentTarget(run, target)
-	if repo == "" || issueNumber <= 0 {
-		return
-	}
-
-	runCredentialInfo, _ := s.Store.GetRunCredentialInfo(run.ID)
-	body := buildRunStartComment(run, target, requesterForRun(run, target, runCredentialInfo.CreatedByUserID), sessionMode, sessionResume)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := s.GitHub.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
-		log.Printf("failed to post start comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
-		return
-	}
-	if err := writeRunStartCommentMarker(run, repo, issueNumber); err != nil {
-		log.Printf("failed to persist start comment marker for run %s: %v", run.ID, err)
-	}
+	s.notifier().NotifyRunStarted(run, sessionMode, sessionResume)
 }
 
 func (s *Server) PostRunCompletionCommentBestEffort(run state.Run) {
-	if !isCommentTriggeredRun(run.Trigger) {
-		return
-	}
-	if strings.TrimSpace(s.Config.GitHubToken) == "" || s.GitHub == nil {
-		return
-	}
-
-	target, ok, err := LoadRunResponseTarget(run.RunDir)
-	if err != nil {
-		log.Printf("failed to load run response target for %s: %v", run.ID, err)
-		return
-	}
-	if !ok {
-		return
-	}
-	if markerExists, err := runCompletionCommentMarkerExists(run.RunDir); err != nil {
-		log.Printf("failed to check completion comment marker for run %s: %v", run.ID, err)
-		return
-	} else if markerExists {
-		return
-	}
-	// TODO: This per-run JSON marker deduplicates within a shared run directory.
-	// Revisit a SQLite-backed guard if we need cross-instance/global dedupe guarantees.
-
-	repo := strings.TrimSpace(target.Repo)
-	if repo == "" {
-		repo = strings.TrimSpace(run.Repo)
-	}
-	issueNumber := target.IssueNumber
-	if issueNumber <= 0 {
-		issueNumber = run.PRNumber
-	}
-	if repo == "" || issueNumber <= 0 {
-		return
-	}
-
-	var totalTokens *int64
-	if usage, ok := s.Store.GetRunTokenUsage(run.ID); ok && usage.TotalTokens > 0 {
-		totalTokens = &usage.TotalTokens
-	}
-
-	body, err := buildRunCompletionComment(run, target, repo, totalTokens)
-	if err != nil {
-		log.Printf("failed to build completion comment for %s: %v", run.ID, err)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := s.GitHub.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
-		log.Printf("failed to post completion comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
-		return
-	}
-	if err := writeRunCompletionCommentMarker(run, repo, issueNumber); err != nil {
-		log.Printf("failed to persist completion comment marker for run %s: %v", run.ID, err)
-	}
+	s.notifier().NotifyRunCompleted(run)
 }
 
 func (s *Server) PostRunFailureCommentBestEffort(run state.Run) {
-	if strings.TrimSpace(s.Config.GitHubToken) == "" || s.GitHub == nil {
-		return
-	}
-
-	target, ok, err := LoadRunResponseTarget(run.RunDir)
-	if err != nil {
-		log.Printf("failed to load run response target for %s: %v", run.ID, err)
-	}
-	if !ok {
-		target = RunResponseTarget{}
-	}
-	if markerExists, err := runFailureCommentMarkerExists(run.RunDir); err != nil {
-		log.Printf("failed to check failure comment marker for run %s: %v", run.ID, err)
-		return
-	} else if markerExists {
-		return
-	}
-
-	repo, issueNumber := resolveRunCommentTarget(run, target)
-	if repo == "" || issueNumber <= 0 {
-		return
-	}
-
-	body, err := buildRunFailureComment(run, target)
-	if err != nil {
-		log.Printf("failed to build failure comment for %s: %v", run.ID, err)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := s.GitHub.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
-		log.Printf("failed to post failure comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
-		return
-	}
-	if err := writeRunFailureCommentMarker(run, repo, issueNumber); err != nil {
-		log.Printf("failed to persist failure comment marker for run %s: %v", run.ID, err)
-	}
+	s.notifier().NotifyRunFailed(run)
 }
 
 func (s *Server) notifyRunTerminalGitHubBestEffort(run state.Run) {
-	switch run.Status {
-	case state.StatusSucceeded:
-		s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionRocket)
-		s.PostRunCompletionCommentBestEffort(run)
-	case state.StatusReview:
-		s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionHooray)
-		s.PostRunCompletionCommentBestEffort(run)
-	case state.StatusFailed:
-		s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionConfused)
-		s.PostRunFailureCommentBestEffort(run)
-	case state.StatusCanceled:
-		s.addIssueReactionBestEffort(run.Repo, run.IssueNumber, ghapi.ReactionMinusOne)
-	}
+	s.notifier().NotifyRunTerminal(run)
 }
 
 func resolveRunCommentTarget(run state.Run, target RunResponseTarget) (string, int) {
@@ -923,71 +784,21 @@ func (s *Server) ensureResumeTimer(until time.Time) {
 }
 
 func (s *Server) addIssueReactionBestEffort(repo string, issueNumber int, reaction string) {
-	if issueNumber <= 0 || strings.TrimSpace(repo) == "" {
-		return
-	}
-	if strings.TrimSpace(s.Config.GitHubToken) == "" || s.GitHub == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := s.GitHub.AddIssueReaction(ctx, repo, issueNumber, reaction); err != nil {
-		log.Printf("failed to add %q reaction for %s#%d: %v", reaction, repo, issueNumber, err)
-	}
+	s.notifier().ReactToIssue(repo, issueNumber, reaction)
 }
 
 func (s *Server) removeIssueReactionsBestEffort(repo string, issueNumber int) {
-	if issueNumber <= 0 || strings.TrimSpace(repo) == "" {
-		return
-	}
-	if strings.TrimSpace(s.Config.GitHubToken) == "" || s.GitHub == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := s.GitHub.RemoveIssueReactions(ctx, repo, issueNumber); err != nil {
-		log.Printf("failed to remove reactions for %s#%d: %v", repo, issueNumber, err)
-	}
+	s.notifier().ClearIssueReactions(repo, issueNumber)
 }
 
 func (s *Server) addIssueCommentReactionBestEffort(repo string, commentID int64, reaction string) {
-	if commentID <= 0 || strings.TrimSpace(repo) == "" {
-		return
-	}
-	if strings.TrimSpace(s.Config.GitHubToken) == "" || s.GitHub == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := s.GitHub.AddIssueCommentReaction(ctx, repo, commentID, reaction); err != nil {
-		log.Printf("failed to add %q reaction for issue comment %d in %s: %v", reaction, commentID, repo, err)
-	}
+	s.notifier().ReactToIssueComment(repo, commentID, reaction)
 }
 
 func (s *Server) addPullRequestReviewReactionBestEffort(repo string, pullNumber int, reviewID int64, reaction string) {
-	if reviewID <= 0 || pullNumber <= 0 || strings.TrimSpace(repo) == "" {
-		return
-	}
-	if strings.TrimSpace(s.Config.GitHubToken) == "" || s.GitHub == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := s.GitHub.AddPullRequestReviewReaction(ctx, repo, pullNumber, reviewID, reaction); err != nil {
-		log.Printf("failed to add %q reaction for PR review %d on %s#%d: %v", reaction, reviewID, repo, pullNumber, err)
-	}
+	s.notifier().ReactToPullRequestReview(repo, pullNumber, reviewID, reaction)
 }
 
 func (s *Server) addPullRequestReviewCommentReactionBestEffort(repo string, commentID int64, reaction string) {
-	if commentID <= 0 || strings.TrimSpace(repo) == "" {
-		return
-	}
-	if strings.TrimSpace(s.Config.GitHubToken) == "" || s.GitHub == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := s.GitHub.AddPullRequestReviewCommentReaction(ctx, repo, commentID, reaction); err != nil {
-		log.Printf("failed to add %q reaction for PR review comment %d in %s: %v", reaction, commentID, repo, err)
-	}
+	s.notifier().ReactToPullRequestReviewComment(repo, commentID, reaction)
 }
