@@ -167,6 +167,28 @@ const (
 	PRStatusClosedUnmerged PRStatus = "closed_unmerged"
 )
 
+type PublishScope string
+
+const (
+	PublishScopeBranchScoped   PublishScope = "branch_scoped"
+	PublishScopeTaskScoped     PublishScope = "task_scoped"
+	PublishScopeRepoMaintainer PublishScope = "repo_maintainer"
+	PublishScopeUnrestricted   PublishScope = "unrestricted"
+)
+
+func NormalizePublishScope(in PublishScope) PublishScope {
+	switch PublishScope(strings.TrimSpace(string(in))) {
+	case PublishScopeTaskScoped:
+		return PublishScopeTaskScoped
+	case PublishScopeRepoMaintainer:
+		return PublishScopeRepoMaintainer
+	case PublishScopeUnrestricted:
+		return PublishScopeUnrestricted
+	default:
+		return PublishScopeBranchScoped
+	}
+}
+
 type TaskStatus string
 
 const (
@@ -207,14 +229,16 @@ type Run struct {
 	Status       RunStatus       `json:"status"`
 	RunDir       string          `json:"run_dir"`
 
-	IssueNumber  int             `json:"issue_number,omitempty"`
-	PRNumber     int             `json:"pr_number,omitempty"`
-	PRURL        string          `json:"pr_url,omitempty"`
-	PRStatus     PRStatus        `json:"pr_status"`
-	HeadSHA      string          `json:"head_sha,omitempty"`
-	Context      string          `json:"context,omitempty"`
-	Error        string          `json:"error,omitempty"`
-	StatusReason RunStatusReason `json:"status_reason,omitempty"`
+	IssueNumber     int             `json:"issue_number,omitempty"`
+	PRNumber        int             `json:"pr_number,omitempty"`
+	PRURL           string          `json:"pr_url,omitempty"`
+	PRStatus        PRStatus        `json:"pr_status"`
+	HeadSHA         string          `json:"head_sha,omitempty"`
+	PublishScope    PublishScope    `json:"publish_scope"`
+	PublishBranches []string        `json:"publish_branches,omitempty"`
+	Context         string          `json:"context,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	StatusReason    RunStatusReason `json:"status_reason,omitempty"`
 
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
@@ -371,20 +395,22 @@ func ParseDeliveryStatus(raw string) (DeliveryStatus, bool) {
 }
 
 type CreateRunInput struct {
-	ID           string
-	TaskID       string
-	Repo         string
-	Instruction  string
-	AgentRuntime runtime.Runtime
-	BaseBranch   string
-	HeadBranch   string
-	Trigger      runtrigger.Name
-	Debug        *bool
-	RunDir       string
-	IssueNumber  int
-	PRNumber     int
-	PRStatus     PRStatus
-	Context      string
+	ID              string
+	TaskID          string
+	Repo            string
+	Instruction     string
+	AgentRuntime    runtime.Runtime
+	BaseBranch      string
+	HeadBranch      string
+	Trigger         runtrigger.Name
+	Debug           *bool
+	RunDir          string
+	IssueNumber     int
+	PRNumber        int
+	PRStatus        PRStatus
+	PublishScope    PublishScope
+	PublishBranches []string
+	Context         string
 }
 
 type UpsertTaskInput struct {

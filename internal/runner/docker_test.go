@@ -209,9 +209,13 @@ exit 0
 		Instruction:  "task",
 		BaseBranch:   "main",
 		HeadBranch:   "rascal/task-1",
-		Trigger:      "pr_comment",
-		Debug:        true,
-		RunDir:       runDir,
+		PublishScope: "branch_scoped",
+		PublishBranches: []string{
+			"rascal/task-1",
+		},
+		Trigger: "pr_comment",
+		Debug:   true,
+		RunDir:  runDir,
 		TaskSession: TaskSessionSpec{
 			Mode:             runtime.SessionModePROnly,
 			Resume:           true,
@@ -240,6 +244,12 @@ exit 0
 	}
 	if !strings.Contains(call, "-e RASCAL_TASK_SESSION_RESUME=true") {
 		t.Fatalf("expected resume env, got:\n%s", call)
+	}
+	if !strings.Contains(call, "-e RASCAL_PUBLISH_SCOPE=branch_scoped") {
+		t.Fatalf("expected publish scope env, got:\n%s", call)
+	}
+	if !strings.Contains(call, "-e RASCAL_PUBLISH_BRANCHES=rascal/task-1") {
+		t.Fatalf("expected publish branches env, got:\n%s", call)
 	}
 	if !strings.Contains(call, sessionDir+":/rascal-goose-session") {
 		t.Fatalf("expected task session mount, got:\n%s", call)

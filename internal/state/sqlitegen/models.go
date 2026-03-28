@@ -81,6 +81,8 @@ type Run struct {
 	PrUrl           string        `json:"pr_url"`
 	PrStatus        string        `json:"pr_status"`
 	HeadSha         string        `json:"head_sha"`
+	PublishScope    string        `json:"publish_scope"`
+	PublishBranches string        `json:"publish_branches"`
 	Context         string        `json:"context"`
 	Error           string        `json:"error"`
 	StatusReason    string        `json:"status_reason"`

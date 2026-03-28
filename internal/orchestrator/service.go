@@ -113,6 +113,8 @@ type RunRequest struct {
 	AgentRuntime    *rt.Runtime // optional per-request override; nil = server default
 	BaseBranch      string
 	HeadBranch      string
+	PublishScope    state.PublishScope
+	PublishBranches []string
 	Trigger         runtrigger.Name
 	IssueNumber     int
 	PRNumber        int

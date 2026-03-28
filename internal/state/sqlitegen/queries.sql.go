@@ -11,7 +11,7 @@ import (
 )
 
 const activeRunForTask = `-- name: ActiveRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, publish_scope, publish_branches, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ? AND status IN ('queued', 'running')
 ORDER BY seq DESC
@@ -19,30 +19,32 @@ LIMIT 1
 `
 
 type ActiveRunForTaskRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq             int64         `json:"seq"`
+	ID              string        `json:"id"`
+	TaskID          string        `json:"task_id"`
+	Repo            string        `json:"repo"`
+	Task            string        `json:"task"`
+	AgentRuntime    string        `json:"agent_runtime"`
+	BaseBranch      string        `json:"base_branch"`
+	HeadBranch      string        `json:"head_branch"`
+	Trigger         string        `json:"trigger"`
+	Debug           bool          `json:"debug"`
+	Status          string        `json:"status"`
+	RunDir          string        `json:"run_dir"`
+	IssueNumber     int64         `json:"issue_number"`
+	PrNumber        int64         `json:"pr_number"`
+	PrUrl           string        `json:"pr_url"`
+	PrStatus        string        `json:"pr_status"`
+	HeadSha         string        `json:"head_sha"`
+	PublishScope    string        `json:"publish_scope"`
+	PublishBranches string        `json:"publish_branches"`
+	Context         string        `json:"context"`
+	Error           string        `json:"error"`
+	StatusReason    string        `json:"status_reason"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	StartedAt       sql.NullInt64 `json:"started_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (ActiveRunForTaskRow, error) {
@@ -66,6 +68,8 @@ func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (ActiveRu
 		&i.PrUrl,
 		&i.PrStatus,
 		&i.HeadSha,
+		&i.PublishScope,
+		&i.PublishBranches,
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
@@ -225,6 +229,8 @@ RETURNING
   pr_url,
   pr_status,
   head_sha,
+  publish_scope,
+  publish_branches,
   context,
   error,
   status_reason,
@@ -240,30 +246,32 @@ type ClaimNextQueuedRunParams struct {
 }
 
 type ClaimNextQueuedRunRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq             int64         `json:"seq"`
+	ID              string        `json:"id"`
+	TaskID          string        `json:"task_id"`
+	Repo            string        `json:"repo"`
+	Task            string        `json:"task"`
+	AgentRuntime    string        `json:"agent_runtime"`
+	BaseBranch      string        `json:"base_branch"`
+	HeadBranch      string        `json:"head_branch"`
+	Trigger         string        `json:"trigger"`
+	Debug           bool          `json:"debug"`
+	Status          string        `json:"status"`
+	RunDir          string        `json:"run_dir"`
+	IssueNumber     int64         `json:"issue_number"`
+	PrNumber        int64         `json:"pr_number"`
+	PrUrl           string        `json:"pr_url"`
+	PrStatus        string        `json:"pr_status"`
+	HeadSha         string        `json:"head_sha"`
+	PublishScope    string        `json:"publish_scope"`
+	PublishBranches string        `json:"publish_branches"`
+	Context         string        `json:"context"`
+	Error           string        `json:"error"`
+	StatusReason    string        `json:"status_reason"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	StartedAt       sql.NullInt64 `json:"started_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRunParams) (ClaimNextQueuedRunRow, error) {
@@ -287,6 +295,8 @@ func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRun
 		&i.PrUrl,
 		&i.PrStatus,
 		&i.HeadSha,
+		&i.PublishScope,
+		&i.PublishBranches,
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
@@ -346,6 +356,8 @@ RETURNING
   pr_url,
   pr_status,
   head_sha,
+  publish_scope,
+  publish_branches,
   context,
   error,
   status_reason,
@@ -362,30 +374,32 @@ type ClaimNextQueuedRunForTaskParams struct {
 }
 
 type ClaimNextQueuedRunForTaskRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq             int64         `json:"seq"`
+	ID              string        `json:"id"`
+	TaskID          string        `json:"task_id"`
+	Repo            string        `json:"repo"`
+	Task            string        `json:"task"`
+	AgentRuntime    string        `json:"agent_runtime"`
+	BaseBranch      string        `json:"base_branch"`
+	HeadBranch      string        `json:"head_branch"`
+	Trigger         string        `json:"trigger"`
+	Debug           bool          `json:"debug"`
+	Status          string        `json:"status"`
+	RunDir          string        `json:"run_dir"`
+	IssueNumber     int64         `json:"issue_number"`
+	PrNumber        int64         `json:"pr_number"`
+	PrUrl           string        `json:"pr_url"`
+	PrStatus        string        `json:"pr_status"`
+	HeadSha         string        `json:"head_sha"`
+	PublishScope    string        `json:"publish_scope"`
+	PublishBranches string        `json:"publish_branches"`
+	Context         string        `json:"context"`
+	Error           string        `json:"error"`
+	StatusReason    string        `json:"status_reason"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	StartedAt       sql.NullInt64 `json:"started_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQueuedRunForTaskParams) (ClaimNextQueuedRunForTaskRow, error) {
@@ -409,6 +423,8 @@ func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQu
 		&i.PrUrl,
 		&i.PrStatus,
 		&i.HeadSha,
+		&i.PublishScope,
+		&i.PublishBranches,
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
@@ -852,36 +868,38 @@ func (q *Queries) GetCredentialLease(ctx context.Context, id string) (Credential
 }
 
 const getRun = `-- name: GetRun :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, publish_scope, publish_branches, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?
 `
 
 type GetRunRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq             int64         `json:"seq"`
+	ID              string        `json:"id"`
+	TaskID          string        `json:"task_id"`
+	Repo            string        `json:"repo"`
+	Task            string        `json:"task"`
+	AgentRuntime    string        `json:"agent_runtime"`
+	BaseBranch      string        `json:"base_branch"`
+	HeadBranch      string        `json:"head_branch"`
+	Trigger         string        `json:"trigger"`
+	Debug           bool          `json:"debug"`
+	Status          string        `json:"status"`
+	RunDir          string        `json:"run_dir"`
+	IssueNumber     int64         `json:"issue_number"`
+	PrNumber        int64         `json:"pr_number"`
+	PrUrl           string        `json:"pr_url"`
+	PrStatus        string        `json:"pr_status"`
+	HeadSha         string        `json:"head_sha"`
+	PublishScope    string        `json:"publish_scope"`
+	PublishBranches string        `json:"publish_branches"`
+	Context         string        `json:"context"`
+	Error           string        `json:"error"`
+	StatusReason    string        `json:"status_reason"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	StartedAt       sql.NullInt64 `json:"started_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) GetRun(ctx context.Context, id string) (GetRunRow, error) {
@@ -905,6 +923,8 @@ func (q *Queries) GetRun(ctx context.Context, id string) (GetRunRow, error) {
 		&i.PrUrl,
 		&i.PrStatus,
 		&i.HeadSha,
+		&i.PublishScope,
+		&i.PublishBranches,
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
@@ -1172,6 +1192,8 @@ INSERT INTO runs (
   pr_url,
   pr_status,
   head_sha,
+  publish_scope,
+  publish_branches,
   context,
   error,
   status_reason,
@@ -1180,61 +1202,65 @@ INSERT INTO runs (
   started_at,
   completed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, publish_scope, publish_branches, context, error, status_reason, created_at, updated_at, started_at, completed_at
 `
 
 type InsertRunParams struct {
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	ID              string        `json:"id"`
+	TaskID          string        `json:"task_id"`
+	Repo            string        `json:"repo"`
+	Task            string        `json:"task"`
+	AgentRuntime    string        `json:"agent_runtime"`
+	BaseBranch      string        `json:"base_branch"`
+	HeadBranch      string        `json:"head_branch"`
+	Trigger         string        `json:"trigger"`
+	Debug           bool          `json:"debug"`
+	Status          string        `json:"status"`
+	RunDir          string        `json:"run_dir"`
+	IssueNumber     int64         `json:"issue_number"`
+	PrNumber        int64         `json:"pr_number"`
+	PrUrl           string        `json:"pr_url"`
+	PrStatus        string        `json:"pr_status"`
+	HeadSha         string        `json:"head_sha"`
+	PublishScope    string        `json:"publish_scope"`
+	PublishBranches string        `json:"publish_branches"`
+	Context         string        `json:"context"`
+	Error           string        `json:"error"`
+	StatusReason    string        `json:"status_reason"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	StartedAt       sql.NullInt64 `json:"started_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
 }
 
 type InsertRunRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq             int64         `json:"seq"`
+	ID              string        `json:"id"`
+	TaskID          string        `json:"task_id"`
+	Repo            string        `json:"repo"`
+	Task            string        `json:"task"`
+	AgentRuntime    string        `json:"agent_runtime"`
+	BaseBranch      string        `json:"base_branch"`
+	HeadBranch      string        `json:"head_branch"`
+	Trigger         string        `json:"trigger"`
+	Debug           bool          `json:"debug"`
+	Status          string        `json:"status"`
+	RunDir          string        `json:"run_dir"`
+	IssueNumber     int64         `json:"issue_number"`
+	PrNumber        int64         `json:"pr_number"`
+	PrUrl           string        `json:"pr_url"`
+	PrStatus        string        `json:"pr_status"`
+	HeadSha         string        `json:"head_sha"`
+	PublishScope    string        `json:"publish_scope"`
+	PublishBranches string        `json:"publish_branches"`
+	Context         string        `json:"context"`
+	Error           string        `json:"error"`
+	StatusReason    string        `json:"status_reason"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	StartedAt       sql.NullInt64 `json:"started_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRunRow, error) {
@@ -1255,6 +1281,8 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRun
 		arg.PrUrl,
 		arg.PrStatus,
 		arg.HeadSha,
+		arg.PublishScope,
+		arg.PublishBranches,
 		arg.Context,
 		arg.Error,
 		arg.StatusReason,
@@ -1282,6 +1310,8 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRun
 		&i.PrUrl,
 		&i.PrStatus,
 		&i.HeadSha,
+		&i.PublishScope,
+		&i.PublishBranches,
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
@@ -1307,7 +1337,7 @@ func (q *Queries) IsTaskCompleted(ctx context.Context, id string) (bool, error) 
 }
 
 const lastRunForTask = `-- name: LastRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, publish_scope, publish_branches, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ?
 ORDER BY seq DESC
@@ -1315,30 +1345,32 @@ LIMIT 1
 `
 
 type LastRunForTaskRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq             int64         `json:"seq"`
+	ID              string        `json:"id"`
+	TaskID          string        `json:"task_id"`
+	Repo            string        `json:"repo"`
+	Task            string        `json:"task"`
+	AgentRuntime    string        `json:"agent_runtime"`
+	BaseBranch      string        `json:"base_branch"`
+	HeadBranch      string        `json:"head_branch"`
+	Trigger         string        `json:"trigger"`
+	Debug           bool          `json:"debug"`
+	Status          string        `json:"status"`
+	RunDir          string        `json:"run_dir"`
+	IssueNumber     int64         `json:"issue_number"`
+	PrNumber        int64         `json:"pr_number"`
+	PrUrl           string        `json:"pr_url"`
+	PrStatus        string        `json:"pr_status"`
+	HeadSha         string        `json:"head_sha"`
+	PublishScope    string        `json:"publish_scope"`
+	PublishBranches string        `json:"publish_branches"`
+	Context         string        `json:"context"`
+	Error           string        `json:"error"`
+	StatusReason    string        `json:"status_reason"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	StartedAt       sql.NullInt64 `json:"started_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (LastRunForTaskRow, error) {
@@ -1362,6 +1394,8 @@ func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (LastRunFor
 		&i.PrUrl,
 		&i.PrStatus,
 		&i.HeadSha,
+		&i.PublishScope,
+		&i.PublishBranches,
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
@@ -1583,37 +1617,39 @@ func (q *Queries) ListCredentialsByOwner(ctx context.Context, ownerUserID sql.Nu
 }
 
 const listRunningRuns = `-- name: ListRunningRuns :many
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, publish_scope, publish_branches, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE status = 'running'
 ORDER BY seq DESC
 `
 
 type ListRunningRunsRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq             int64         `json:"seq"`
+	ID              string        `json:"id"`
+	TaskID          string        `json:"task_id"`
+	Repo            string        `json:"repo"`
+	Task            string        `json:"task"`
+	AgentRuntime    string        `json:"agent_runtime"`
+	BaseBranch      string        `json:"base_branch"`
+	HeadBranch      string        `json:"head_branch"`
+	Trigger         string        `json:"trigger"`
+	Debug           bool          `json:"debug"`
+	Status          string        `json:"status"`
+	RunDir          string        `json:"run_dir"`
+	IssueNumber     int64         `json:"issue_number"`
+	PrNumber        int64         `json:"pr_number"`
+	PrUrl           string        `json:"pr_url"`
+	PrStatus        string        `json:"pr_status"`
+	HeadSha         string        `json:"head_sha"`
+	PublishScope    string        `json:"publish_scope"`
+	PublishBranches string        `json:"publish_branches"`
+	Context         string        `json:"context"`
+	Error           string        `json:"error"`
+	StatusReason    string        `json:"status_reason"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	StartedAt       sql.NullInt64 `json:"started_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) ListRunningRuns(ctx context.Context) ([]ListRunningRunsRow, error) {
@@ -1643,6 +1679,8 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]ListRunningRunsRow, er
 			&i.PrUrl,
 			&i.PrStatus,
 			&i.HeadSha,
+			&i.PublishScope,
+			&i.PublishBranches,
 			&i.Context,
 			&i.Error,
 			&i.StatusReason,
@@ -1665,37 +1703,39 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]ListRunningRunsRow, er
 }
 
 const listRuns = `-- name: ListRuns :many
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, publish_scope, publish_branches, context, error, status_reason, created_at, updated_at, started_at, completed_at
 FROM runs
 ORDER BY seq DESC
 LIMIT ?
 `
 
 type ListRunsRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq             int64         `json:"seq"`
+	ID              string        `json:"id"`
+	TaskID          string        `json:"task_id"`
+	Repo            string        `json:"repo"`
+	Task            string        `json:"task"`
+	AgentRuntime    string        `json:"agent_runtime"`
+	BaseBranch      string        `json:"base_branch"`
+	HeadBranch      string        `json:"head_branch"`
+	Trigger         string        `json:"trigger"`
+	Debug           bool          `json:"debug"`
+	Status          string        `json:"status"`
+	RunDir          string        `json:"run_dir"`
+	IssueNumber     int64         `json:"issue_number"`
+	PrNumber        int64         `json:"pr_number"`
+	PrUrl           string        `json:"pr_url"`
+	PrStatus        string        `json:"pr_status"`
+	HeadSha         string        `json:"head_sha"`
+	PublishScope    string        `json:"publish_scope"`
+	PublishBranches string        `json:"publish_branches"`
+	Context         string        `json:"context"`
+	Error           string        `json:"error"`
+	StatusReason    string        `json:"status_reason"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	StartedAt       sql.NullInt64 `json:"started_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]ListRunsRow, error) {
@@ -1725,6 +1765,8 @@ func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]ListRunsRow, err
 			&i.PrUrl,
 			&i.PrStatus,
 			&i.HeadSha,
+			&i.PublishScope,
+			&i.PublishBranches,
 			&i.Context,
 			&i.Error,
 			&i.StatusReason,
@@ -2310,6 +2352,8 @@ SET
   pr_url = ?,
   pr_status = ?,
   head_sha = ?,
+  publish_scope = ?,
+  publish_branches = ?,
   context = ?,
   error = ?,
   status_reason = ?,
@@ -2321,29 +2365,31 @@ WHERE id = ?
 `
 
 type UpdateRunParams struct {
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
-	ID           string        `json:"id"`
+	TaskID          string        `json:"task_id"`
+	Repo            string        `json:"repo"`
+	Task            string        `json:"task"`
+	AgentRuntime    string        `json:"agent_runtime"`
+	BaseBranch      string        `json:"base_branch"`
+	HeadBranch      string        `json:"head_branch"`
+	Trigger         string        `json:"trigger"`
+	Debug           bool          `json:"debug"`
+	Status          string        `json:"status"`
+	RunDir          string        `json:"run_dir"`
+	IssueNumber     int64         `json:"issue_number"`
+	PrNumber        int64         `json:"pr_number"`
+	PrUrl           string        `json:"pr_url"`
+	PrStatus        string        `json:"pr_status"`
+	HeadSha         string        `json:"head_sha"`
+	PublishScope    string        `json:"publish_scope"`
+	PublishBranches string        `json:"publish_branches"`
+	Context         string        `json:"context"`
+	Error           string        `json:"error"`
+	StatusReason    string        `json:"status_reason"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	StartedAt       sql.NullInt64 `json:"started_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
+	ID              string        `json:"id"`
 }
 
 func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (int64, error) {
@@ -2363,6 +2409,8 @@ func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (int64, er
 		arg.PrUrl,
 		arg.PrStatus,
 		arg.HeadSha,
+		arg.PublishScope,
+		arg.PublishBranches,
 		arg.Context,
 		arg.Error,
 		arg.StatusReason,

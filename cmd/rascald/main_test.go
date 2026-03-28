@@ -37,16 +37,18 @@ func int64Ptr(v int64) *int64 {
 
 func TestInstructionTextPRGitContext(t *testing.T) {
 	run := state.Run{
-		ID:          "run_abc123",
-		TaskID:      "task_xyz789",
-		Repo:        "acme/widgets",
-		Instruction: "Address PR #137 feedback",
-		BaseBranch:  "main",
-		HeadBranch:  "rascal/task-xyz789",
-		Trigger:     "pr_comment",
-		IssueNumber: 42,
-		PRNumber:    137,
-		Context:     "Please rebase this on main and fix the conflicts.",
+		ID:              "run_abc123",
+		TaskID:          "task_xyz789",
+		Repo:            "acme/widgets",
+		Instruction:     "Address PR #137 feedback",
+		BaseBranch:      "main",
+		HeadBranch:      "rascal/task-xyz789",
+		PublishScope:    state.PublishScopeBranchScoped,
+		PublishBranches: []string{"rascal/task-xyz789"},
+		Trigger:         "pr_comment",
+		IssueNumber:     42,
+		PRNumber:        137,
+		Context:         "Please rebase this on main and fix the conflicts.",
 	}
 
 	got := orchestrator.InstructionText(run)
@@ -56,11 +58,11 @@ func TestInstructionTextPRGitContext(t *testing.T) {
 		"- Remote: `origin`",
 		"- Base branch: `main`",
 		"- Head branch: `rascal/task-xyz789`",
-		"- You may use `git` and `gh` directly.",
-		"- Push only to `origin` branch `rascal/task-xyz789`.",
-		"`git push --force-with-lease origin HEAD:rascal/task-xyz789`",
-		"`git push origin HEAD:rascal/task-xyz789`",
-		"do not rely on the harness to publish those changes for you",
+		"- Publish scope: `branch_scoped`",
+		"- Allowed publish branches: `rascal/task-xyz789`",
+		"`rascal-publish push --branch rascal/task-xyz789`",
+		"`rascal-publish push --force-with-lease --branch rascal/task-xyz789`",
+		"Rascal will not auto-commit, auto-push, or auto-create a PR",
 		"## Additional Context",
 		"Please rebase this on main and fix the conflicts.",
 	} {
@@ -70,20 +72,22 @@ func TestInstructionTextPRGitContext(t *testing.T) {
 	}
 }
 
-func TestInstructionTextNonPRRunOmitsGitContext(t *testing.T) {
+func TestInstructionTextNonPRRunIncludesGitContext(t *testing.T) {
 	run := state.Run{
-		ID:          "run_abc123",
-		TaskID:      "task_xyz789",
-		Repo:        "acme/widgets",
-		Instruction: "Fix flaky test",
-		BaseBranch:  "main",
-		HeadBranch:  "rascal/fix-flaky-test",
-		Trigger:     "issue",
+		ID:              "run_abc123",
+		TaskID:          "task_xyz789",
+		Repo:            "acme/widgets",
+		Instruction:     "Fix flaky test",
+		BaseBranch:      "main",
+		HeadBranch:      "rascal/fix-flaky-test",
+		PublishScope:    state.PublishScopeBranchScoped,
+		PublishBranches: []string{"rascal/fix-flaky-test"},
+		Trigger:         "issue",
 	}
 
 	got := orchestrator.InstructionText(run)
-	if strings.Contains(got, "## Git Context") {
-		t.Fatalf("orchestrator.InstructionText() unexpectedly included Git Context\nfull text:\n%s", got)
+	if !strings.Contains(got, "## Git Context") {
+		t.Fatalf("orchestrator.InstructionText() missing Git Context\nfull text:\n%s", got)
 	}
 }
 
@@ -2856,6 +2860,12 @@ func TestExecuteRunSetsAgentSessionSpecForPROnlyCommentTrigger(t *testing.T) {
 	}
 	if !strings.HasPrefix(spec.TaskSession.TaskDir, sessionRoot+string(os.PathSeparator)) {
 		t.Fatalf("unexpected TaskSession.TaskDir %q (root %q)", spec.TaskSession.TaskDir, sessionRoot)
+	}
+	if spec.PublishScope != "branch_scoped" {
+		t.Fatalf("unexpected PublishScope %q", spec.PublishScope)
+	}
+	if len(spec.PublishBranches) != 1 || spec.PublishBranches[0] != run.HeadBranch {
+		t.Fatalf("unexpected PublishBranches %#v", spec.PublishBranches)
 	}
 }
 

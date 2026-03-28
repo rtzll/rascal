@@ -79,8 +79,9 @@ ENV PATH=/usr/local/go/bin:$PATH \
 WORKDIR /work
 ARG CACHE_BUST
 COPY rascal-runner /usr/local/bin/rascal-runner
+COPY rascal-publish /usr/local/bin/rascal-publish
 COPY entrypoint.sh /usr/local/bin/rascal-entrypoint
-RUN chmod +x /usr/local/bin/rascal-runner /usr/local/bin/rascal-entrypoint
+RUN chmod +x /usr/local/bin/rascal-runner /usr/local/bin/rascal-publish /usr/local/bin/rascal-entrypoint
 RUN groupadd --system --gid "${RUNTIME_GID}" rascal \
     && useradd --system --uid "${RUNTIME_UID}" --gid "${RUNTIME_GID}" --create-home --home-dir /home/rascal --shell /usr/sbin/nologin rascal \
     && install -d -m 0755 -o rascal -g rascal /work /rascal-meta

@@ -14,15 +14,17 @@ import (
 )
 
 type Config struct {
-	RunID       string
-	TaskID      string
-	Instruction string
-	Repo        string
-	BaseBranch  string
-	HeadBranch  string
-	IssueNumber int
-	Trigger     runtrigger.Name
-	GitHubToken string
+	RunID           string
+	TaskID          string
+	Instruction     string
+	Repo            string
+	BaseBranch      string
+	HeadBranch      string
+	PublishScope    string
+	PublishBranches []string
+	IssueNumber     int
+	Trigger         runtrigger.Name
+	GitHubToken     string
 
 	MetaDir                    string
 	WorkRoot                   string
@@ -61,6 +63,11 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	publishScope := strings.TrimSpace(os.Getenv("RASCAL_PUBLISH_SCOPE"))
+	if publishScope == "" {
+		publishScope = "branch_scoped"
+	}
+	publishBranches := parseCSVEnv(os.Getenv("RASCAL_PUBLISH_BRANCHES"))
 
 	baseBranch := strings.TrimSpace(os.Getenv("RASCAL_BASE_BRANCH"))
 	if baseBranch == "" {
@@ -69,6 +76,9 @@ func LoadConfig() (Config, error) {
 	headBranch := strings.TrimSpace(os.Getenv("RASCAL_HEAD_BRANCH"))
 	if headBranch == "" {
 		headBranch = "rascal/" + runID
+	}
+	if len(publishBranches) == 0 && (publishScope == "branch_scoped" || publishScope == "task_scoped") {
+		publishBranches = []string{headBranch}
 	}
 	issueNumber := 0
 	if raw := strings.TrimSpace(os.Getenv("RASCAL_ISSUE_NUMBER")); raw != "" {
@@ -136,6 +146,8 @@ func LoadConfig() (Config, error) {
 		Repo:                       repo,
 		BaseBranch:                 baseBranch,
 		HeadBranch:                 headBranch,
+		PublishScope:               publishScope,
+		PublishBranches:            publishBranches,
 		IssueNumber:                issueNumber,
 		Trigger:                    trigger,
 		GitHubToken:                ghToken,
@@ -170,6 +182,31 @@ func firstNonEmptyValue(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseCSVEnv(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		out = append(out, part)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func parseBoolEnv(raw string, fallback bool) bool {

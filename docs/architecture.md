@@ -88,7 +88,8 @@ rascal (CLI) or GitHub webhook
 - Clones the repository and checks out the target branches.
 - Executes the selected runtime (`goose-codex`, `codex`, `claude`, or
   `goose-claude`).
-- Commits changes, pushes the head branch, and creates or reuses a PR.
+- Preconfigures git, exposes scope-checked `rascal-publish`, and leaves commit
+  and publish decisions to the agent.
 - Writes canonical artifacts into mounted `/rascal-meta`.
 - Runtime logic lives in Go in `cmd/rascal-runner`.
 - `runner/entrypoint.sh` is a thin shim that only executes

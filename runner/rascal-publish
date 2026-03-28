@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF' >&2
+Usage:
+  rascal-publish push [--branch BRANCH] [--source REF] [--force-with-lease]
+EOF
+  exit 2
+}
+
+if [ "${1:-}" != "push" ]; then
+  usage
+fi
+shift
+
+branch="${RASCAL_HEAD_BRANCH:-}"
+source_ref="HEAD"
+force_with_lease=false
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --branch)
+      [ "$#" -ge 2 ] || usage
+      branch="$2"
+      shift 2
+      ;;
+    --source)
+      [ "$#" -ge 2 ] || usage
+      source_ref="$2"
+      shift 2
+      ;;
+    --force-with-lease)
+      force_with_lease=true
+      shift
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+
+endpoint="${RASCAL_PUBLISH_ENDPOINT:-}"
+auth_token="${RASCAL_PUBLISH_AUTH_TOKEN:-}"
+if [ -z "$endpoint" ] || [ -z "$auth_token" ]; then
+  echo "rascal-publish is unavailable in this run" >&2
+  exit 1
+fi
+if [ -z "$branch" ]; then
+  echo "publish branch is required" >&2
+  exit 1
+fi
+
+payload=$(jq -cn \
+  --arg source "$source_ref" \
+  --arg branch "$branch" \
+  --argjson force_with_lease "$force_with_lease" \
+  '{source: $source, branch: $branch, force_with_lease: $force_with_lease}')
+
+curl --silent --show-error --fail \
+  -H "Authorization: Bearer ${auth_token}" \
+  -H "Content-Type: application/json" \
+  -d "$payload" \
+  "${endpoint}/publish"
