@@ -3,7 +3,28 @@ package github
 import (
 	"fmt"
 	"strings"
+
+	"github.com/rtzll/rascal/internal/runtime"
 )
+
+// IssueHasRascalLabel returns true if any label has the "rascal" prefix.
+func IssueHasRascalLabel(labels []Label) bool {
+	for _, label := range labels {
+		if runtime.IsRascalLabel(strings.TrimSpace(label.Name)) {
+			return true
+		}
+	}
+	return false
+}
+
+// LabelNames returns the names of all labels.
+func LabelNames(labels []Label) []string {
+	names := make([]string, len(labels))
+	for i, l := range labels {
+		names[i] = l.Name
+	}
+	return names
+}
 
 func IssueHasLabel(labels []Label, name string) bool {
 	name = strings.TrimSpace(name)
