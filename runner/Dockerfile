@@ -77,6 +77,7 @@ ENV PATH=/usr/local/go/bin:$PATH \
     GIT_TERMINAL_PROMPT=0
 
 WORKDIR /work
+ARG CACHE_BUST
 COPY rascal-runner /usr/local/bin/rascal-runner
 COPY entrypoint.sh /usr/local/bin/rascal-entrypoint
 RUN chmod +x /usr/local/bin/rascal-runner /usr/local/bin/rascal-entrypoint

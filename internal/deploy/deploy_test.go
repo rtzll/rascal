@@ -186,7 +186,7 @@ func TestExecuteRollsOutRunnerBinaryBeforeImageBuild(t *testing.T) {
 	foundBuildScript := false
 	for _, script := range scripts {
 		installIdx := strings.Index(script, "install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner")
-		dockerIdx := strings.Index(script, "docker build --no-cache --target goose-codex-runner -t")
+		dockerIdx := strings.Index(script, "docker build --quiet --build-arg CACHE_BUST=")
 		if installIdx < 0 || dockerIdx < 0 {
 			continue
 		}
