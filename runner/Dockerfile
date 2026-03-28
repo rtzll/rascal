@@ -1,6 +1,7 @@
 ARG GO_VERSION=1.26.1
 ARG GOOSE_VERSION=1.28.0
 ARG GOLANGCI_LINT_VERSION=v2.11.2
+ARG PI_VERSION=0.58.1
 ARG SQLC_VERSION=v1.30.0
 
 FROM golang:${GO_VERSION}-bookworm AS go-runtime
@@ -18,6 +19,13 @@ RUN npm install -g --silent --no-progress --no-fund --no-audit @openai/codex \
     && node --version \
     && npm --version \
     && codex --version
+
+FROM node:24-bookworm-slim AS pi-runtime
+ARG PI_VERSION
+RUN npm install -g --silent --no-progress --no-fund --no-audit @mariozechner/pi-coding-agent@"${PI_VERSION}" \
+    && node --version \
+    && npm --version \
+    && pi --version
 
 FROM ubuntu:24.04 AS goose-runtime
 ARG DEBIAN_FRONTEND=noninteractive
@@ -100,6 +108,12 @@ USER rascal:rascal
 ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]
 
 FROM runner-base AS codex-runner
+USER rascal:rascal
+ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]
+
+FROM runner-base AS pi-runner
+COPY --from=pi-runtime /usr/local/ /usr/local/
+RUN pi --version
 USER rascal:rascal
 ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]
 

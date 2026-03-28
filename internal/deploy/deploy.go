@@ -39,6 +39,7 @@ type Config struct {
 	AgentRuntime           runtime.Runtime
 	RunnerImageGooseCodex  string
 	RunnerImageCodex       string
+	RunnerImagePi          string
 	RunnerImageClaude      string
 	RunnerImageGooseClaude string
 	ServerListenAddr       string
@@ -62,6 +63,7 @@ type plan struct {
 	AgentRuntime           string   `json:"agent_runtime"`
 	RunnerImageGooseCodex  string   `json:"runner_image_goose"`
 	RunnerImageCodex       string   `json:"runner_image_codex"`
+	RunnerImagePi          string   `json:"runner_image_pi"`
 	RunnerImageClaude      string   `json:"runner_image_claude"`
 	RunnerImageGooseClaude string   `json:"runner_image_goose_claude"`
 	UploadEnvFile          bool     `json:"upload_env_file"`
@@ -147,6 +149,7 @@ func Execute(cfg Config) error {
 		AgentRuntime:           firstNonEmpty(strings.TrimSpace(string(cfg.AgentRuntime)), string(runtime.RuntimeGooseCodex)),
 		RunnerImageGooseCodex:  strings.TrimSpace(cfg.RunnerImageGooseCodex),
 		RunnerImageCodex:       strings.TrimSpace(cfg.RunnerImageCodex),
+		RunnerImagePi:          strings.TrimSpace(cfg.RunnerImagePi),
 		RunnerImageClaude:      strings.TrimSpace(cfg.RunnerImageClaude),
 		RunnerImageGooseClaude: strings.TrimSpace(cfg.RunnerImageGooseClaude),
 		UploadEnvFile:          cfg.UploadEnvFile,
@@ -219,11 +222,12 @@ install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-ru
 CACHE_BUST="$(sha256sum /opt/rascal/runner/rascal-runner | cut -d' ' -f1)"
 docker build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target goose-codex-runner -t %s /opt/rascal/runner
 docker build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target codex-runner -t %s /opt/rascal/runner
+docker build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target pi-runner -t %s /opt/rascal/runner
 docker build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target claude-runner -t %s /opt/rascal/runner
 docker build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target goose-claude-runner -t %s /opt/rascal/runner
 install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald
 install -m 0644 /tmp/rascal-bootstrap/rascal@.service /etc/systemd/system/rascal@.service
-`)+"\n", shellSingleQuote(cfg.RunnerImageGooseCodex), shellSingleQuote(cfg.RunnerImageCodex), shellSingleQuote(cfg.RunnerImageClaude), shellSingleQuote(cfg.RunnerImageGooseClaude))); err != nil {
+`)+"\n", shellSingleQuote(cfg.RunnerImageGooseCodex), shellSingleQuote(cfg.RunnerImageCodex), shellSingleQuote(cfg.RunnerImagePi), shellSingleQuote(cfg.RunnerImageClaude), shellSingleQuote(cfg.RunnerImageGooseClaude))); err != nil {
 		return err
 	}
 	if cfg.UploadEnvFile {
@@ -634,6 +638,7 @@ func serverEnvFile(cfg Config) string {
 	runtime := strings.TrimSpace(string(cfg.AgentRuntime))
 	gooseImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageGooseCodex), defaults.GooseCodexRunnerImageTag)
 	codexImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageCodex), defaults.CodexRunnerImageTag)
+	piImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImagePi), defaults.PiRunnerImageTag)
 	claudeImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageClaude), defaults.ClaudeRunnerImageTag)
 	gooseClaudeImage := firstNonEmpty(strings.TrimSpace(cfg.RunnerImageGooseClaude), defaults.GooseClaudeRunnerImageTag)
 	lines := []string{
@@ -646,6 +651,7 @@ func serverEnvFile(cfg Config) string {
 		fmt.Sprintf("RASCAL_RUNNER_MODE=%s", cfg.RunnerMode),
 		fmt.Sprintf("RASCAL_RUNNER_IMAGE_GOOSE_CODEX=%s", gooseImage),
 		fmt.Sprintf("RASCAL_RUNNER_IMAGE_CODEX=%s", codexImage),
+		fmt.Sprintf("RASCAL_RUNNER_IMAGE_PI=%s", piImage),
 		fmt.Sprintf("RASCAL_RUNNER_IMAGE_CLAUDE=%s", claudeImage),
 		fmt.Sprintf("RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE=%s", gooseClaudeImage),
 		"RASCAL_RUNNER_MAX_ATTEMPTS=1",

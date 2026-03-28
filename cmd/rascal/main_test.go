@@ -293,6 +293,7 @@ func TestDoctorJSONOutputIncludesTypedRemoteStatus(t *testing.T) {
 			RunnerImagePresent:    true,
 			RunnerImageGooseCodex: "rascal-runner-goose-codex:latest",
 			RunnerImageCodex:      "rascal-runner-codex:latest",
+			RunnerImagePi:         "rascal-runner-pi:latest",
 		}, nil
 	}
 
@@ -335,6 +336,9 @@ func TestDoctorJSONOutputIncludesTypedRemoteStatus(t *testing.T) {
 	}
 	if out.Remote.RunnerImageGooseCodex != "rascal-runner-goose-codex:latest" {
 		t.Fatalf("runner_image_goose_codex = %q, want rascal-runner-goose-codex:latest", out.Remote.RunnerImageGooseCodex)
+	}
+	if out.Remote.RunnerImagePi != "rascal-runner-pi:latest" {
+		t.Fatalf("runner_image_pi = %q, want rascal-runner-pi:latest", out.Remote.RunnerImagePi)
 	}
 }
 

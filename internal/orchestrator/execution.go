@@ -117,6 +117,8 @@ func (s *Server) failRunForMissingExecution(run state.Run, reason string) {
 
 func credentialAuthPath(runDir string, rt runtime.Runtime) (dir, file string) {
 	switch runtime.NormalizeRuntime(string(rt)) {
+	case runtime.RuntimePi:
+		return "", ""
 	case runtime.RuntimeClaude, runtime.RuntimeGooseClaude:
 		dir = filepath.Join(runDir, "claude")
 		file = filepath.Join(dir, "oauth_token")
@@ -128,6 +130,9 @@ func credentialAuthPath(runDir string, rt runtime.Runtime) (dir, file string) {
 }
 
 func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string, rt runtime.Runtime) (string, error) {
+	if runtime.NormalizeRuntime(string(rt)) == runtime.RuntimePi {
+		return "", nil
+	}
 	requesterUserID = strings.TrimSpace(requesterUserID)
 	if requesterUserID == "" {
 		requesterUserID = "system"
@@ -209,6 +214,9 @@ func (s *Server) prepareRunCredentialAuth(runID, runDir, requesterUserID string,
 }
 
 func (s *Server) cleanupRunCredentialAuth(runDir, credentialLeaseID string, rt runtime.Runtime) {
+	if runtime.NormalizeRuntime(string(rt)) == runtime.RuntimePi {
+		return
+	}
 	if strings.TrimSpace(credentialLeaseID) != "" && s.Broker != nil {
 		if err := s.Broker.Release(context.Background(), credentialLeaseID); err != nil {
 			log.Printf("release credential lease %s failed: %v", credentialLeaseID, err)

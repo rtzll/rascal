@@ -37,6 +37,7 @@ type ServerConfig struct {
 	RunnerImage             string
 	RunnerImageGooseCodex   string
 	RunnerImageCodex        string
+	RunnerImagePi           string
 	RunnerImageClaude       string
 	RunnerImageGooseClaude  string
 	RunnerMaxAttempts       int
@@ -96,6 +97,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		AgentRuntime:            agentRuntime,
 		RunnerImageGooseCodex:   firstNonEmptyEnvOrDefault(defaults.GooseCodexRunnerImageTag, "RASCAL_RUNNER_IMAGE_GOOSE_CODEX", "RASCAL_RUNNER_IMAGE_GOOSE"),
 		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
+		RunnerImagePi:           envOrDefault("RASCAL_RUNNER_IMAGE_PI", defaults.PiRunnerImageTag),
 		RunnerImageClaude:       envOrDefault("RASCAL_RUNNER_IMAGE_CLAUDE", defaults.ClaudeRunnerImageTag),
 		RunnerImageGooseClaude:  envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE", defaults.GooseClaudeRunnerImageTag),
 		RunnerMaxAttempts:       envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
@@ -136,6 +138,8 @@ func (c ServerConfig) RunnerImageForRuntime(rt runtime.Runtime) string {
 	switch runtime.NormalizeRuntime(string(rt)) {
 	case runtime.RuntimeCodex:
 		return strings.TrimSpace(c.RunnerImageCodex)
+	case runtime.RuntimePi:
+		return strings.TrimSpace(c.RunnerImagePi)
 	case runtime.RuntimeClaude:
 		return strings.TrimSpace(c.RunnerImageClaude)
 	case runtime.RuntimeGooseClaude:

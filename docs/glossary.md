@@ -12,14 +12,14 @@
 - `Worker`: the in-execution component that performs a run inside the launched
   environment.
 - `Runtime`: the user-facing selection that determines both the harness and the
-  model provider. Valid runtimes are `goose-codex`, `codex`, `claude`, and
-  `goose-claude`.
+  model provider. Valid runtimes are `goose-codex`, `codex`, `pi`, `claude`,
+  and `goose-claude`.
 - `Harness`: the tool wrapper invoked by the worker, derived from the runtime.
-  `goose-codex` and `goose-claude` use the `goose` harness; `codex` and `claude`
-  use the `direct` harness.
+  `goose-codex` and `goose-claude` use the `goose` harness; `codex`, `pi`, and
+  `claude` use the `direct` harness.
 - `ModelProvider`: the underlying model/service used by a runtime. `codex` and
-  `goose-codex` runtimes use the `codex` provider; `claude` and `goose-claude`
-  runtimes use the `anthropic` provider.
+  `goose-codex` runtimes use the `codex` provider; `pi` uses the `pi`
+  provider; `claude` and `goose-claude` runtimes use the `anthropic` provider.
 - `SessionMode`: policy governing whether a task-scoped session may resume
   (`off`, `pr-only`, `all`). Defined in `internal/runtime`.
 - `TaskSession`: optional task-scoped harness state used to resume later runs.
@@ -33,7 +33,7 @@
   state, schedules runs, and supervises execution.
 - `Execution plane`: detached Docker containers started for `rascal-runner`.
 - `Runner image`: Docker image used to execute a run. Rascal maintains separate
-  images per runtime (Goose-Codex, Codex, Claude, Goose-Claude).
+  images per runtime (Goose-Codex, Codex, Pi, Claude, Goose-Claude).
 - `Active slot`: the currently live `rascald` slot in blue/green deploys. Only
   this slot should process webhook traffic.
 - `Inactive slot`: the standby slot prepared during blue/green deploys before
@@ -74,5 +74,6 @@
   use it.
 - `Credential lease`: temporary assignment of a stored credential to one run.
 - `Credential provider`: the credential family a run needs, derived from its
-  runtime. `codex` and `goose-codex` runtimes use `codex` credentials; `claude`
-  and `goose-claude` runtimes use `anthropic` credentials.
+  runtime. `codex` and `goose-codex` runtimes use `codex` credentials; `pi`
+  currently uses env/API-key auth without stored credentials; `claude` and
+  `goose-claude` runtimes use `anthropic` credentials.

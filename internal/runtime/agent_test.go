@@ -18,6 +18,7 @@ func TestNormalizeRuntime(t *testing.T) {
 		{name: "default empty", in: "", want: RuntimeGooseCodex},
 		{name: "default unknown", in: "other", want: RuntimeGooseCodex},
 		{name: "codex explicit", in: " codex ", want: RuntimeCodex},
+		{name: "pi explicit", in: " pi ", want: RuntimePi},
 		{name: "goose-codex explicit", in: "GOOSE-CODEX", want: RuntimeGooseCodex},
 		{name: "goose alias", in: "GOOSE", want: RuntimeGooseCodex},
 		{name: "claude explicit", in: " claude ", want: RuntimeClaude},
@@ -47,6 +48,7 @@ func TestParseRuntime(t *testing.T) {
 	}{
 		{name: "default empty", in: "", want: RuntimeGooseCodex},
 		{name: "codex explicit", in: " codex ", want: RuntimeCodex},
+		{name: "pi explicit", in: " pi ", want: RuntimePi},
 		{name: "goose-codex explicit", in: "GOOSE-CODEX", want: RuntimeGooseCodex},
 		{name: "goose alias", in: "GOOSE", want: RuntimeGooseCodex},
 		{name: "claude explicit", in: " claude ", want: RuntimeClaude},
@@ -180,6 +182,7 @@ func TestRuntimeHarness(t *testing.T) {
 		{name: "goose-codex is goose", runtime: RuntimeGooseCodex, want: HarnessGoose},
 		{name: "goose-claude is goose", runtime: RuntimeGooseClaude, want: HarnessGoose},
 		{name: "codex is direct", runtime: RuntimeCodex, want: HarnessDirect},
+		{name: "pi is direct", runtime: RuntimePi, want: HarnessDirect},
 		{name: "claude is direct", runtime: RuntimeClaude, want: HarnessDirect},
 		{name: "empty defaults to goose", runtime: Runtime(""), want: HarnessGoose},
 		{name: "unknown defaults to goose", runtime: Runtime("other"), want: HarnessGoose},
@@ -206,6 +209,7 @@ func TestRuntimeProvider(t *testing.T) {
 		want    ModelProvider
 	}{
 		{name: "codex maps to codex", runtime: RuntimeCodex, want: ModelProviderCodex},
+		{name: "pi maps to pi", runtime: RuntimePi, want: ModelProviderPi},
 		{name: "goose-codex maps to codex", runtime: RuntimeGooseCodex, want: ModelProviderCodex},
 		{name: "claude maps to anthropic", runtime: RuntimeClaude, want: ModelProviderAnthropic},
 		{name: "goose-claude maps to anthropic", runtime: RuntimeGooseClaude, want: ModelProviderAnthropic},

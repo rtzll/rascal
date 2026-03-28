@@ -192,6 +192,7 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 		agentRuntime           string
 		runnerImageGoose       string
 		runnerImageCodex       string
+		runnerImagePi          string
 		runnerImageClaude      string
 		runnerImageGooseClaude string
 		uploadEnv              bool
@@ -215,6 +216,7 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 				AgentRuntime:           agentRuntime,
 				RunnerImageGooseCodex:  runnerImageGoose,
 				RunnerImageCodex:       runnerImageCodex,
+				RunnerImagePi:          runnerImagePi,
 				RunnerImageClaude:      runnerImageClaude,
 				RunnerImageGooseClaude: runnerImageGooseClaude,
 				SkipEnvUpload:          !uploadEnv,
@@ -248,9 +250,10 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret")
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
-	cmd.Flags().StringVar(&agentRuntime, "agent-runtime", "", "agent runtime to use on the server (goose or codex)")
+	cmd.Flags().StringVar(&agentRuntime, "agent-runtime", "", "agent runtime to use on the server (goose-codex, codex, pi, claude, or goose-claude)")
 	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose-codex", defaults.GooseCodexRunnerImageTag, "goose-codex runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
+	cmd.Flags().StringVar(&runnerImagePi, "runner-image-pi", defaults.PiRunnerImageTag, "pi runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageClaude, "runner-image-claude", defaults.ClaudeRunnerImageTag, "claude runner docker image tag")
 	cmd.Flags().StringVar(&runnerImageGooseClaude, "runner-image-goose-claude", defaults.GooseClaudeRunnerImageTag, "goose-claude runner docker image tag")
 	cmd.Flags().BoolVar(&uploadEnv, "upload-env", false, "upload/update /etc/rascal/rascal.env on server")
@@ -272,6 +275,7 @@ type deployExistingInput struct {
 	AgentRuntime           string
 	RunnerImageGooseCodex  string
 	RunnerImageCodex       string
+	RunnerImagePi          string
 	RunnerImageClaude      string
 	RunnerImageGooseClaude string
 	SkipEnvUpload          bool
@@ -312,6 +316,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 	}
 	runnerImageGoose := firstNonEmpty(strings.TrimSpace(input.RunnerImageGooseCodex), defaults.GooseCodexRunnerImageTag)
 	runnerImageCodex := firstNonEmpty(strings.TrimSpace(input.RunnerImageCodex), defaults.CodexRunnerImageTag)
+	runnerImagePi := firstNonEmpty(strings.TrimSpace(input.RunnerImagePi), defaults.PiRunnerImageTag)
 	runnerImageClaude := firstNonEmpty(strings.TrimSpace(input.RunnerImageClaude), defaults.ClaudeRunnerImageTag)
 	runnerImageGooseClaude := firstNonEmpty(strings.TrimSpace(input.RunnerImageGooseClaude), defaults.GooseClaudeRunnerImageTag)
 	sshPort := input.SSHPort
@@ -414,6 +419,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		AgentRuntime:           agentRuntime,
 		RunnerImageGooseCodex:  runnerImageGoose,
 		RunnerImageCodex:       runnerImageCodex,
+		RunnerImagePi:          runnerImagePi,
 		RunnerImageClaude:      runnerImageClaude,
 		RunnerImageGooseClaude: runnerImageGooseClaude,
 		ServerListenAddr:       ":8080",

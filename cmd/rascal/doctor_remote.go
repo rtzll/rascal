@@ -23,8 +23,10 @@ type remoteDoctorStatus struct {
 	RunnerImagePresent      bool   `json:"runner_image_present"`
 	RunnerImageGooseCodex   string `json:"runner_image_goose,omitempty"`
 	RunnerImageCodex        string `json:"runner_image_codex,omitempty"`
+	RunnerImagePi           string `json:"runner_image_pi,omitempty"`
 	RunnerImageGooseCodexID string `json:"runner_image_goose_id,omitempty"`
 	RunnerImageCodexID      string `json:"runner_image_codex_id,omitempty"`
+	RunnerImagePiID         string `json:"runner_image_pi_id,omitempty"`
 }
 
 func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
@@ -76,14 +78,16 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		"set -eu",
 		fmt.Sprintf(`goose_image=%q`, defaults.GooseCodexRunnerImageTag),
 		fmt.Sprintf(`codex_image=%q`, defaults.CodexRunnerImageTag),
+		fmt.Sprintf(`pi_image=%q`, defaults.PiRunnerImageTag),
 		`if [ -f /etc/rascal/rascal.env ]; then`,
 		`  set -a`,
 		`  . /etc/rascal/rascal.env`,
 		`  set +a`,
 		`  if [ -n "${RASCAL_RUNNER_IMAGE_GOOSE_CODEX:-}" ]; then goose_image=$RASCAL_RUNNER_IMAGE_GOOSE_CODEX; elif [ -n "${RASCAL_RUNNER_IMAGE_GOOSE:-}" ]; then goose_image=$RASCAL_RUNNER_IMAGE_GOOSE; fi`,
 		`  if [ -n "${RASCAL_RUNNER_IMAGE_CODEX:-}" ]; then codex_image=$RASCAL_RUNNER_IMAGE_CODEX; fi`,
+		`  if [ -n "${RASCAL_RUNNER_IMAGE_PI:-}" ]; then pi_image=$RASCAL_RUNNER_IMAGE_PI; fi`,
 		`fi`,
-		`printf 'goose=%s\ncodex=%s\n' "$goose_image" "$codex_image"`,
+		`printf 'goose=%s\ncodex=%s\npi=%s\n' "$goose_image" "$codex_image" "$pi_image"`,
 	}, "\n"))...)
 	if err != nil {
 		log.Printf("resolve runner images over SSH failed: %v", err)
@@ -98,6 +102,8 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 				status.RunnerImageGooseCodex = strings.TrimSpace(value)
 			case "codex":
 				status.RunnerImageCodex = strings.TrimSpace(value)
+			case "pi":
+				status.RunnerImagePi = strings.TrimSpace(value)
 			}
 		}
 	}
@@ -109,10 +115,13 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		`set +a`,
 		`goose_image=${RASCAL_RUNNER_IMAGE_GOOSE_CODEX:-${RASCAL_RUNNER_IMAGE_GOOSE:-}}`,
 		`codex_image=${RASCAL_RUNNER_IMAGE_CODEX:-}`,
+		`pi_image=${RASCAL_RUNNER_IMAGE_PI:-}`,
 		`[ -n "$goose_image" ]`,
 		`[ -n "$codex_image" ]`,
+		`[ -n "$pi_image" ]`,
 		`printf 'goose_id=%s\n' "$(docker image inspect -f '{{.Id}}' "$goose_image")"`,
 		`printf 'codex_id=%s\n' "$(docker image inspect -f '{{.Id}}' "$codex_image")"`,
+		`printf 'pi_id=%s\n' "$(docker image inspect -f '{{.Id}}' "$pi_image")"`,
 	}, "\n"))...)
 	if err != nil {
 		log.Printf("resolve runner image IDs over SSH failed: %v", err)
@@ -127,6 +136,8 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 				status.RunnerImageGooseCodexID = strings.TrimSpace(value)
 			case "codex_id":
 				status.RunnerImageCodexID = strings.TrimSpace(value)
+			case "pi_id":
+				status.RunnerImagePiID = strings.TrimSpace(value)
 			}
 		}
 	}
@@ -138,6 +149,7 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		`set +a`,
 		`[ -n "${RASCAL_RUNNER_IMAGE_GOOSE_CODEX:-${RASCAL_RUNNER_IMAGE_GOOSE:-}}" ]`,
 		`[ -n "${RASCAL_RUNNER_IMAGE_CODEX:-}" ]`,
+		`[ -n "${RASCAL_RUNNER_IMAGE_PI:-}" ]`,
 		"echo ok",
 	}, "\n"))
 	status.RunnerImagePresent = check(fmt.Sprintf(strings.Join([]string{
@@ -150,11 +162,13 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		`  set +a`,
 		`  goose_image=${RASCAL_RUNNER_IMAGE_GOOSE_CODEX:-${RASCAL_RUNNER_IMAGE_GOOSE:-}}`,
 		`  codex_image=${RASCAL_RUNNER_IMAGE_CODEX:-}`,
+		`  pi_image=${RASCAL_RUNNER_IMAGE_PI:-}`,
 		`  [ -n "$goose_image" ]`,
 		`  [ -n "$codex_image" ]`,
+		`  [ -n "$pi_image" ]`,
 		`fi`,
-		`docker image inspect "$goose_image" "$codex_image" >/dev/null 2>&1 && echo ok`,
-	}, "\n"), defaults.GooseCodexRunnerImageTag, defaults.CodexRunnerImageTag))
+		`docker image inspect "$goose_image" "$codex_image" "$pi_image" >/dev/null 2>&1 && echo ok`,
+	}, "\n"), defaults.GooseCodexRunnerImageTag, defaults.CodexRunnerImageTag, defaults.PiRunnerImageTag))
 	return status, nil
 }
 

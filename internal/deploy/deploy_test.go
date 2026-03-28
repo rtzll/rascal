@@ -313,6 +313,13 @@ func TestServerEnvFileOmitsLegacyRunnerImageEnv(t *testing.T) {
 	}
 }
 
+func TestServerEnvFileIncludesPiRunnerImage(t *testing.T) {
+	content := serverEnvFile(testDeployConfig())
+	if !strings.Contains(content, "RASCAL_RUNNER_IMAGE_PI=rascal-runner-pi:latest") {
+		t.Fatalf("expected pi runner image env, got:\n%s", content)
+	}
+}
+
 func testDeployConfig() Config {
 	return Config{
 		Host:                  "example-host",
@@ -322,6 +329,7 @@ func testDeployConfig() Config {
 		AgentRuntime:          runtime.RuntimeCodex,
 		RunnerImageGooseCodex: defaults.GooseCodexRunnerImageTag,
 		RunnerImageCodex:      defaults.CodexRunnerImageTag,
+		RunnerImagePi:         defaults.PiRunnerImageTag,
 		ServerListenAddr:      ":8080",
 		ServerDataDir:         "/var/lib/rascal",
 		ServerStatePath:       "/var/lib/rascal/state.db",

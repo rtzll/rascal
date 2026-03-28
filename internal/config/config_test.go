@@ -191,6 +191,25 @@ func TestLoadServerConfigDefaultsAgentRuntimeToGoose(t *testing.T) {
 	}
 }
 
+func TestLoadServerConfigPiRuntimeUsesPiRunnerImage(t *testing.T) {
+	t.Setenv("RASCAL_AGENT_RUNTIME", "pi")
+	t.Setenv("RASCAL_RUNNER_IMAGE_PI", "custom-pi:latest")
+
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
+	if cfg.AgentRuntime != runtime.RuntimePi {
+		t.Fatalf("AgentRuntime = %q, want %q", cfg.AgentRuntime, runtime.RuntimePi)
+	}
+	if cfg.RunnerImagePi != "custom-pi:latest" {
+		t.Fatalf("RunnerImagePi = %q, want custom-pi:latest", cfg.RunnerImagePi)
+	}
+	if cfg.RunnerImage != "custom-pi:latest" {
+		t.Fatalf("RunnerImage = %q, want custom-pi:latest", cfg.RunnerImage)
+	}
+}
+
 func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "goose-root")
 	t.Setenv("RASCAL_TASK_SESSION_MODE", "PR-ONLY")
