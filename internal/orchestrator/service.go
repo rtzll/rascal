@@ -32,7 +32,6 @@ const runLeaseTTL = 90 * time.Second
 const runSupervisorTick = 1 * time.Second
 const RunResponseTargetFile = "response_target.json"
 const runStartCommentMarkerFile = "start_comment_posted.json"
-const runCompletionCommentMarkerFile = "completion_comment_posted.json"
 const runFailureCommentMarkerFile = "failure_comment_posted.json"
 const runStartCommentBodyMarker = "<!-- rascal:start-comment -->"
 const runCompletionCommentBodyMarker = "<!-- rascal:completion-comment -->"
@@ -64,6 +63,7 @@ type GitHubClient interface {
 	AddPullRequestReviewReaction(ctx context.Context, repo string, pullNumber int, reviewID int64, content string) error
 	AddPullRequestReviewCommentReaction(ctx context.Context, repo string, commentID int64, content string) error
 	CreateIssueComment(ctx context.Context, repo string, issueNumber int, body string) error
+	ListIssueComments(ctx context.Context, repo string, issueNumber int) ([]ghapi.Comment, error)
 }
 
 type RunNotifier interface {

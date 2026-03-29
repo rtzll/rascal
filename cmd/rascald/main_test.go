@@ -255,10 +255,11 @@ type fakeGitHubClient struct {
 	pullRequestReviewReactions        []postedPullRequestReviewReaction
 	pullRequestReviewCommentReactions []postedPullRequestReviewCommentReaction
 
-	issueComments            []postedIssueComment
-	createIssueCommentErr    error
-	createIssueCommentErrSeq []error
-	createIssueCommentCalls  int
+	issueComments                     []postedIssueComment
+	createIssueCommentErr             error
+	createIssueCommentErrSeq          []error
+	createIssueCommentPostsOnErrorSeq []bool
+	createIssueCommentCalls           int
 }
 
 func (f *fakeRunner) StartDetached(_ context.Context, spec runner.Spec) (runner.ExecutionHandle, error) {
@@ -550,10 +551,14 @@ func (f *fakeGitHubClient) CreateIssueComment(_ context.Context, repo string, is
 	callIdx := f.createIssueCommentCalls
 	f.createIssueCommentCalls++
 	err := f.createIssueCommentErr
+	postOnError := false
 	if callIdx < len(f.createIssueCommentErrSeq) {
 		err = f.createIssueCommentErrSeq[callIdx]
 	}
-	if err != nil {
+	if callIdx < len(f.createIssueCommentPostsOnErrorSeq) {
+		postOnError = f.createIssueCommentPostsOnErrorSeq[callIdx]
+	}
+	if err != nil && !postOnError {
 		return err
 	}
 	f.issueComments = append(f.issueComments, postedIssueComment{
@@ -561,7 +566,23 @@ func (f *fakeGitHubClient) CreateIssueComment(_ context.Context, repo string, is
 		issueNumber: issueNumber,
 		body:        body,
 	})
+	if err != nil {
+		return err
+	}
 	return nil
+}
+
+func (f *fakeGitHubClient) ListIssueComments(_ context.Context, repo string, issueNumber int) ([]ghapi.Comment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	comments := make([]ghapi.Comment, 0, len(f.issueComments))
+	for _, comment := range f.issueComments {
+		if comment.repo != repo || comment.issueNumber != issueNumber {
+			continue
+		}
+		comments = append(comments, ghapi.Comment{Body: comment.body})
+	}
+	return comments, nil
 }
 
 func (f *fakeGitHubClient) postedComments() []postedIssueComment {
@@ -3807,17 +3828,18 @@ func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	if len(comments) != 1 {
 		t.Fatalf("expected one posted comment, got %d", len(comments))
 	}
-	markerPath := orchestrator.RunCompletionCommentMarkerPath(run.RunDir)
-	markerData, err := os.ReadFile(markerPath)
-	if err != nil {
-		t.Fatalf("read completion marker: %v", err)
+	if !strings.Contains(comments[0].body, "<!-- rascal:run_id="+run.ID+" -->") {
+		t.Fatalf("completion comment missing run token:\n%s", comments[0].body)
 	}
-	var marker orchestrator.RunCommentMarker
-	if err := json.Unmarshal(markerData, &marker); err != nil {
-		t.Fatalf("decode completion marker: %v", err)
+	persisted, ok := s.Store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("store.GetRun(%q) not found", run.ID)
 	}
-	if marker.RunID != run.ID {
-		t.Fatalf("marker run_id = %q, want %q", marker.RunID, run.ID)
+	if persisted.CompletionCommentState != state.CompletionCommentStatePosted {
+		t.Fatalf("completion comment state = %q, want %q", persisted.CompletionCommentState, state.CompletionCommentStatePosted)
+	}
+	if persisted.CompletionCommentPostedAt == nil {
+		t.Fatalf("completion comment posted_at not recorded")
 	}
 }
 
@@ -3866,8 +3888,12 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 0 {
 		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
 	}
-	if _, err := os.Stat(orchestrator.RunCompletionCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
-		t.Fatalf("expected marker to be absent after failed post, stat err=%v", err)
+	persisted, ok := s.Store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("store.GetRun(%q) not found", run.ID)
+	}
+	if persisted.CompletionCommentState != state.CompletionCommentStateFailed {
+		t.Fatalf("completion comment state after failure = %q, want %q", persisted.CompletionCommentState, state.CompletionCommentStateFailed)
 	}
 
 	s.PostRunCompletionCommentBestEffort(run)
@@ -3878,8 +3904,69 @@ func TestPostRunCompletionCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 1 {
 		t.Fatalf("expected one posted comment after retry, got %d", len(comments))
 	}
-	if _, err := os.Stat(orchestrator.RunCompletionCommentMarkerPath(run.RunDir)); err != nil {
-		t.Fatalf("expected marker after successful retry: %v", err)
+	persisted, ok = s.Store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("store.GetRun(%q) not found", run.ID)
+	}
+	if persisted.CompletionCommentState != state.CompletionCommentStatePosted {
+		t.Fatalf("completion comment state after retry = %q, want %q", persisted.CompletionCommentState, state.CompletionCommentStatePosted)
+	}
+}
+
+func TestPostRunCompletionCommentAmbiguousFailureUsesTokenReconciliation(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+
+	fakeGH := &fakeGitHubClient{
+		createIssueCommentErrSeq:          []error{errors.New("timeout after post")},
+		createIssueCommentPostsOnErrorSeq: []bool{true},
+	}
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
+
+	run, err := s.Store.AddRun(state.CreateRunInput{
+		ID:          "run_comment_ambiguous",
+		TaskID:      "owner/repo#91",
+		Repo:        "owner/repo",
+		Instruction: "Address PR #91 feedback",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/pr-91",
+		Trigger:     "pr_comment",
+		RunDir:      t.TempDir(),
+		PRNumber:    91,
+	})
+	if err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	if err := s.WriteRunResponseTarget(run, &orchestrator.RunResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 91,
+		RequestedBy: "alice",
+		Trigger:     "pr_comment",
+	}); err != nil {
+		t.Fatalf("write response target: %v", err)
+	}
+
+	s.PostRunCompletionCommentBestEffort(run)
+	s.PostRunCompletionCommentBestEffort(run)
+
+	if calls := fakeGH.createCommentCalls(); calls != 1 {
+		t.Fatalf("expected a single github comment call after ambiguous failure reconciliation, got %d", calls)
+	}
+	comments := fakeGH.postedComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted comment after ambiguous failure, got %d", len(comments))
+	}
+	if !strings.Contains(comments[0].body, "<!-- rascal:run_id="+run.ID+" -->") {
+		t.Fatalf("completion comment missing run token:\n%s", comments[0].body)
+	}
+	persisted, ok := s.Store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("store.GetRun(%q) not found", run.ID)
+	}
+	if persisted.CompletionCommentState != state.CompletionCommentStatePosted {
+		t.Fatalf("completion comment state = %q, want %q", persisted.CompletionCommentState, state.CompletionCommentStatePosted)
 	}
 }
 

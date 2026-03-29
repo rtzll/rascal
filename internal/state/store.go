@@ -351,29 +351,34 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 	}
 
 	row, err := qtx.InsertRun(context.Background(), sqlitegen.InsertRunParams{
-		ID:           in.ID,
-		TaskID:       in.TaskID,
-		Repo:         in.Repo,
-		Task:         in.Instruction, // DB column "task" maps to domain "Instruction"
-		AgentRuntime: in.AgentRuntime.String(),
-		BaseBranch:   baseBranch,
-		HeadBranch:   in.HeadBranch,
-		Trigger:      trigger.String(),
-		Debug:        debugEnabled,
-		Status:       string(StatusQueued),
-		RunDir:       in.RunDir,
-		IssueNumber:  int64(in.IssueNumber),
-		PrNumber:     int64(in.PRNumber),
-		PrUrl:        "",
-		PrStatus:     string(prStatus),
-		HeadSha:      "",
-		Context:      in.Context,
-		Error:        "",
-		StatusReason: string(RunStatusReasonNone),
-		CreatedAt:    now.UnixNano(),
-		UpdatedAt:    now.UnixNano(),
-		StartedAt:    sql.NullInt64{},
-		CompletedAt:  sql.NullInt64{},
+		ID:                         in.ID,
+		TaskID:                     in.TaskID,
+		Repo:                       in.Repo,
+		Task:                       in.Instruction, // DB column "task" maps to domain "Instruction"
+		AgentRuntime:               in.AgentRuntime.String(),
+		BaseBranch:                 baseBranch,
+		HeadBranch:                 in.HeadBranch,
+		Trigger:                    trigger.String(),
+		Debug:                      debugEnabled,
+		Status:                     string(StatusQueued),
+		RunDir:                     in.RunDir,
+		IssueNumber:                int64(in.IssueNumber),
+		PrNumber:                   int64(in.PRNumber),
+		PrUrl:                      "",
+		PrStatus:                   string(prStatus),
+		HeadSha:                    "",
+		Context:                    in.Context,
+		Error:                      "",
+		StatusReason:               string(RunStatusReasonNone),
+		CompletionCommentState:     string(CompletionCommentStatePending),
+		CompletionCommentClaimedBy: "",
+		CompletionCommentClaimedAt: sql.NullInt64{},
+		CompletionCommentPostedAt:  sql.NullInt64{},
+		CompletionCommentError:     "",
+		CreatedAt:                  now.UnixNano(),
+		UpdatedAt:                  now.UnixNano(),
+		StartedAt:                  sql.NullInt64{},
+		CompletedAt:                sql.NullInt64{},
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: runs.id") {
@@ -516,6 +521,67 @@ func (s *Store) UpdateRun(id string, fn func(*Run) error) (Run, error) {
 
 func (s *Store) SetRunStatus(runID string, status RunStatus, errText string) (Run, error) {
 	return s.SetRunStatusWithReason(runID, status, errText, RunStatusReasonNone)
+}
+
+func (s *Store) ClaimRunCompletionComment(runID, claimedBy string, staleBefore time.Time) (Run, bool, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return Run{}, false, fmt.Errorf("run id is required")
+	}
+	now := time.Now().UTC()
+	row, err := s.q.ClaimRunCompletionComment(context.Background(), sqlitegen.ClaimRunCompletionCommentParams{
+		RunID:       runID,
+		ClaimedBy:   strings.TrimSpace(claimedBy),
+		ClaimedAt:   sql.NullInt64{Int64: now.UnixNano(), Valid: true},
+		UpdatedAt:   now.UnixNano(),
+		StaleBefore: sql.NullInt64{Int64: staleBefore.UTC().UnixNano(), Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Run{}, false, nil
+		}
+		return Run{}, false, fmt.Errorf("claim completion comment for run %q: %w", runID, err)
+	}
+	return fromDBClaimRunCompletionCommentRow(row), true, nil
+}
+
+func (s *Store) MarkRunCompletionCommentPosted(runID string, postedAt time.Time) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id is required")
+	}
+	now := time.Now().UTC()
+	rows, err := s.q.MarkRunCompletionCommentPosted(context.Background(), sqlitegen.MarkRunCompletionCommentPostedParams{
+		RunID:     runID,
+		PostedAt:  sql.NullInt64{Int64: postedAt.UTC().UnixNano(), Valid: true},
+		UpdatedAt: now.UnixNano(),
+	})
+	if err != nil {
+		return fmt.Errorf("mark completion comment posted for run %q: %w", runID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("run %q not found", runID)
+	}
+	return nil
+}
+
+func (s *Store) MarkRunCompletionCommentFailed(runID, errText string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id is required")
+	}
+	rows, err := s.q.MarkRunCompletionCommentFailed(context.Background(), sqlitegen.MarkRunCompletionCommentFailedParams{
+		RunID:                  runID,
+		CompletionCommentError: strings.TrimSpace(errText),
+		UpdatedAt:              time.Now().UTC().UnixNano(),
+	})
+	if err != nil {
+		return fmt.Errorf("mark completion comment failed for run %q: %w", runID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("run %q not found", runID)
+	}
+	return nil
 }
 
 func (s *Store) SetRunStatusWithReason(runID string, status RunStatus, errText string, statusReason RunStatusReason) (Run, error) {
@@ -1119,29 +1185,32 @@ func fromDBFindTaskByPRRow(t sqlitegen.FindTaskByPRRow) Task {
 	return fromDBTaskParts(t.ID, t.Repo, t.AgentRuntime, t.IssueNumber, t.PrNumber, t.Status, t.PendingInput, t.LastRunID, t.CreatedAt, t.UpdatedAt)
 }
 
-func fromDBRunParts(id, taskID, repo, task, agentRuntime, baseBranch, headBranch, trigger string, debug bool, status, runDir string, issueNumber, prNumber int64, prURL, prStatus, headSHA, contextValue, errText, statusReason string, createdAt, updatedAt int64, startedAt, completedAt sql.NullInt64) Run {
+func fromDBRunParts(id, taskID, repo, task, agentRuntime, baseBranch, headBranch, trigger string, debug bool, status, runDir string, issueNumber, prNumber int64, prURL, prStatus, headSHA, contextValue, errText, statusReason, completionCommentState, completionCommentClaimedBy, completionCommentError string, completionCommentClaimedAt, completionCommentPostedAt sql.NullInt64, createdAt, updatedAt int64, startedAt, completedAt sql.NullInt64) Run {
 	out := Run{
-		ID:           id,
-		TaskID:       taskID,
-		Repo:         repo,
-		Instruction:  task,
-		AgentRuntime: runtime.NormalizeRuntime(agentRuntime),
-		BaseBranch:   baseBranch,
-		HeadBranch:   headBranch,
-		Trigger:      runtrigger.Normalize(trigger),
-		Debug:        debug,
-		Status:       NormalizeRunStatus(RunStatus(status)),
-		RunDir:       runDir,
-		IssueNumber:  int(issueNumber),
-		PRNumber:     int(prNumber),
-		PRURL:        prURL,
-		PRStatus:     normalizePRStatus(PRStatus(prStatus)),
-		HeadSHA:      headSHA,
-		Context:      contextValue,
-		Error:        errText,
-		StatusReason: NormalizeRunStatusReason(RunStatusReason(statusReason)),
-		CreatedAt:    time.Unix(0, createdAt).UTC(),
-		UpdatedAt:    time.Unix(0, updatedAt).UTC(),
+		ID:                         id,
+		TaskID:                     taskID,
+		Repo:                       repo,
+		Instruction:                task,
+		AgentRuntime:               runtime.NormalizeRuntime(agentRuntime),
+		BaseBranch:                 baseBranch,
+		HeadBranch:                 headBranch,
+		Trigger:                    runtrigger.Normalize(trigger),
+		Debug:                      debug,
+		Status:                     NormalizeRunStatus(RunStatus(status)),
+		RunDir:                     runDir,
+		IssueNumber:                int(issueNumber),
+		PRNumber:                   int(prNumber),
+		PRURL:                      prURL,
+		PRStatus:                   normalizePRStatus(PRStatus(prStatus)),
+		HeadSHA:                    headSHA,
+		Context:                    contextValue,
+		Error:                      errText,
+		StatusReason:               NormalizeRunStatusReason(RunStatusReason(statusReason)),
+		CompletionCommentState:     NormalizeCompletionCommentState(CompletionCommentState(completionCommentState)),
+		CompletionCommentClaimedBy: completionCommentClaimedBy,
+		CompletionCommentError:     completionCommentError,
+		CreatedAt:                  time.Unix(0, createdAt).UTC(),
+		UpdatedAt:                  time.Unix(0, updatedAt).UTC(),
 	}
 	if startedAt.Valid {
 		t := time.Unix(0, startedAt.Int64).UTC()
@@ -1151,39 +1220,51 @@ func fromDBRunParts(id, taskID, repo, task, agentRuntime, baseBranch, headBranch
 		t := time.Unix(0, completedAt.Int64).UTC()
 		out.CompletedAt = &t
 	}
+	if completionCommentClaimedAt.Valid {
+		t := time.Unix(0, completionCommentClaimedAt.Int64).UTC()
+		out.CompletionCommentClaimedAt = &t
+	}
+	if completionCommentPostedAt.Valid {
+		t := time.Unix(0, completionCommentPostedAt.Int64).UTC()
+		out.CompletionCommentPostedAt = &t
+	}
 	return out
 }
 
 func fromDBInsertRunRow(r sqlitegen.InsertRunRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBGetRunRow(r sqlitegen.GetRunRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBListRunsRow(r sqlitegen.ListRunsRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBListRunningRunsRow(r sqlitegen.ListRunningRunsRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBLastRunForTaskRow(r sqlitegen.LastRunForTaskRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBActiveRunForTaskRow(r sqlitegen.ActiveRunForTaskRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBClaimNextQueuedRunRow(r sqlitegen.ClaimNextQueuedRunRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBClaimNextQueuedRunForTaskRow(r sqlitegen.ClaimNextQueuedRunForTaskRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+}
+
+func fromDBClaimRunCompletionCommentRow(r sqlitegen.ClaimRunCompletionCommentRow) Run {
+	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
 func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {

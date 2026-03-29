@@ -19,6 +19,8 @@ type GitHubRunNotifier struct {
 	GitHub GitHubClient
 }
 
+const completionCommentClaimTimeout = 5 * time.Minute
+
 func NewGitHubRunNotifier(cfg config.ServerConfig, store *state.Store, gh GitHubClient) *GitHubRunNotifier {
 	return &GitHubRunNotifier{
 		Config: cfg,
@@ -78,12 +80,6 @@ func (n *GitHubRunNotifier) NotifyRunCompleted(run state.Run) {
 	if !ok {
 		return
 	}
-	if markerExists, err := runCompletionCommentMarkerExists(run.RunDir); err != nil {
-		log.Printf("failed to check completion comment marker for run %s: %v", run.ID, err)
-		return
-	} else if markerExists {
-		return
-	}
 
 	repo := strings.TrimSpace(target.Repo)
 	if repo == "" {
@@ -97,6 +93,33 @@ func (n *GitHubRunNotifier) NotifyRunCompleted(run state.Run) {
 		return
 	}
 
+	claimedRun, claimed, err := n.Store.ClaimRunCompletionComment(run.ID, n.completionCommentClaimOwner(), time.Now().UTC().Add(-completionCommentClaimTimeout))
+	if err != nil {
+		log.Printf("failed to claim completion comment for run %s: %v", run.ID, err)
+		return
+	}
+	if !claimed {
+		return
+	}
+	run = claimedRun
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	posted, err := n.completionCommentAlreadyPosted(ctx, repo, issueNumber, run.ID)
+	if err != nil {
+		if markErr := n.Store.MarkRunCompletionCommentFailed(run.ID, err.Error()); markErr != nil {
+			log.Printf("failed to mark completion comment failure for run %s: %v", run.ID, markErr)
+		}
+		log.Printf("failed to check completion comment token for run %s: %v", run.ID, err)
+		return
+	}
+	if posted {
+		if err := n.Store.MarkRunCompletionCommentPosted(run.ID, time.Now().UTC()); err != nil {
+			log.Printf("failed to mark completion comment posted for run %s: %v", run.ID, err)
+		}
+		return
+	}
+
 	var totalTokens *int64
 	if usage, ok := n.Store.GetRunTokenUsage(run.ID); ok && usage.TotalTokens > 0 {
 		totalTokens = &usage.TotalTokens
@@ -104,18 +127,32 @@ func (n *GitHubRunNotifier) NotifyRunCompleted(run state.Run) {
 
 	body, err := buildRunCompletionComment(run, target, repo, totalTokens)
 	if err != nil {
+		if markErr := n.Store.MarkRunCompletionCommentFailed(run.ID, err.Error()); markErr != nil {
+			log.Printf("failed to mark completion comment failure for run %s: %v", run.ID, markErr)
+		}
 		log.Printf("failed to build completion comment for %s: %v", run.ID, err)
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
 	if err := n.GitHub.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
+		posted, postedErr := n.completionCommentAlreadyPosted(ctx, repo, issueNumber, run.ID)
+		if postedErr == nil && posted {
+			if markErr := n.Store.MarkRunCompletionCommentPosted(run.ID, time.Now().UTC()); markErr != nil {
+				log.Printf("failed to mark completion comment posted for run %s after ambiguous post: %v", run.ID, markErr)
+			}
+			return
+		}
+		if postedErr != nil {
+			log.Printf("failed to reconcile ambiguous completion comment post for run %s: %v", run.ID, postedErr)
+		}
+		if markErr := n.Store.MarkRunCompletionCommentFailed(run.ID, err.Error()); markErr != nil {
+			log.Printf("failed to mark completion comment failure for run %s: %v", run.ID, markErr)
+		}
 		log.Printf("failed to post completion comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
 		return
 	}
-	if err := writeRunCompletionCommentMarker(run, repo, issueNumber); err != nil {
-		log.Printf("failed to persist completion comment marker for run %s: %v", run.ID, err)
+	if err := n.Store.MarkRunCompletionCommentPosted(run.ID, time.Now().UTC()); err != nil {
+		log.Printf("failed to mark completion comment posted for run %s: %v", run.ID, err)
 	}
 }
 
@@ -245,4 +282,24 @@ func (n *GitHubRunNotifier) ReactToPullRequestReviewComment(repo string, comment
 
 func (n *GitHubRunNotifier) enabled() bool {
 	return strings.TrimSpace(n.Config.GitHubToken) != "" && n.GitHub != nil && n.Store != nil
+}
+
+func (n *GitHubRunNotifier) completionCommentAlreadyPosted(ctx context.Context, repo string, issueNumber int, runID string) (bool, error) {
+	comments, err := n.GitHub.ListIssueComments(ctx, repo, issueNumber)
+	if err != nil {
+		return false, fmt.Errorf("list issue comments for %s#%d: %w", repo, issueNumber, err)
+	}
+	for _, comment := range comments {
+		if hasRunCompletionCommentToken(comment.Body, runID) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (n *GitHubRunNotifier) completionCommentClaimOwner() string {
+	if slot := strings.TrimSpace(n.Config.Slot); slot != "" {
+		return slot
+	}
+	return "rascald"
 }

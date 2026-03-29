@@ -95,6 +95,17 @@ func (r *recordingGitHubClient) CreateIssueComment(_ context.Context, repo strin
 	return nil
 }
 
+func (r *recordingGitHubClient) ListIssueComments(_ context.Context, repo string, issueNumber int) ([]ghapi.Comment, error) {
+	comments := make([]ghapi.Comment, 0, len(r.issueComments))
+	for _, comment := range r.issueComments {
+		if comment.repo != repo || comment.issueNumber != issueNumber {
+			continue
+		}
+		comments = append(comments, ghapi.Comment{Body: comment.body})
+	}
+	return comments, nil
+}
+
 func TestGitHubRunNotifierNotifyRunStartedIdempotent(t *testing.T) {
 	store := newNotifierTestStore(t)
 	gh := &recordingGitHubClient{}
@@ -146,15 +157,19 @@ func TestGitHubRunNotifierNotifyRunCompletedIdempotent(t *testing.T) {
 		t.Fatalf("write agent log: %v", err)
 	}
 
-	run := state.Run{
+	run, err := store.AddRun(state.CreateRunInput{
 		ID:           "run_complete",
+		TaskID:       "owner/repo#55",
 		Repo:         "owner/repo",
+		Instruction:  "Address PR #77 feedback",
+		AgentRuntime: runtime.RuntimeGooseCodex,
+		Trigger:      runtrigger.NamePRComment,
 		RunDir:       runDir,
 		IssueNumber:  55,
 		PRNumber:     77,
-		Trigger:      runtrigger.NamePRComment,
-		AgentRuntime: runtime.RuntimeGooseCodex,
-		CreatedAt:    time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("store.AddRun: %v", err)
 	}
 
 	notifier.NotifyRunCompleted(run)
@@ -166,11 +181,18 @@ func TestGitHubRunNotifierNotifyRunCompletedIdempotent(t *testing.T) {
 	if got := gh.issueComments[0]; got.repo != "owner/repo" || got.issueNumber != 77 {
 		t.Fatalf("comment target = %#v, want owner/repo#77", got)
 	}
-	if body := gh.issueComments[0].body; !containsAll(body, runCompletionCommentBodyMarker, "run_complete", "implemented the requested change") {
+	if body := gh.issueComments[0].body; !containsAll(body, runCompletionCommentBodyMarker, runCompletionCommentToken(run.ID), "run_complete", "implemented the requested change") {
 		t.Fatalf("completion comment body missing expected content: %q", body)
 	}
-	if _, err := os.Stat(RunCompletionCommentMarkerPath(runDir)); err != nil {
-		t.Fatalf("completion comment marker missing: %v", err)
+	persisted, ok := store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("store.GetRun(%q) not found", run.ID)
+	}
+	if persisted.CompletionCommentState != state.CompletionCommentStatePosted {
+		t.Fatalf("completion comment state = %q, want %q", persisted.CompletionCommentState, state.CompletionCommentStatePosted)
+	}
+	if persisted.CompletionCommentPostedAt == nil {
+		t.Fatalf("completion comment posted_at not recorded")
 	}
 }
 

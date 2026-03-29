@@ -345,6 +345,42 @@ func (c *APIClient) CreateIssueComment(ctx context.Context, repo string, issueNu
 	return nil
 }
 
+func (c *APIClient) ListIssueComments(ctx context.Context, repo string, issueNumber int) ([]Comment, error) {
+	if issueNumber <= 0 {
+		return nil, fmt.Errorf("issue number must be positive")
+	}
+	owner, repoName, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+
+	comments := make([]Comment, 0, 16)
+	for page := 1; ; page++ {
+		path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments?per_page=100&page=%d", owner, repoName, issueNumber, page)
+		resp, err := c.do(ctx, http.MethodGet, path)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode >= 300 {
+			body := readResponseBody(resp.Body)
+			closeResponseBody(resp)
+			return nil, fmt.Errorf("github list issue comments failed (%d): %s", resp.StatusCode, body)
+		}
+
+		var pageComments []Comment
+		if err := json.NewDecoder(resp.Body).Decode(&pageComments); err != nil {
+			closeResponseBody(resp)
+			return nil, fmt.Errorf("decode issue comments: %w", err)
+		}
+		closeResponseBody(resp)
+		comments = append(comments, pageComments...)
+		if len(pageComments) < 100 {
+			break
+		}
+	}
+	return comments, nil
+}
+
 func (c *APIClient) AddPullRequestReviewReaction(ctx context.Context, repo string, pullNumber int, reviewID int64, content string) error {
 	if pullNumber <= 0 {
 		return fmt.Errorf("pull number must be positive")

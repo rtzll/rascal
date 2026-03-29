@@ -154,10 +154,6 @@ func RunStartCommentMarkerPath(runDir string) string {
 	return RunCommentMarkerPath(runDir, runStartCommentMarkerFile)
 }
 
-func RunCompletionCommentMarkerPath(runDir string) string {
-	return RunCommentMarkerPath(runDir, runCompletionCommentMarkerFile)
-}
-
 func RunFailureCommentMarkerPath(runDir string) string {
 	return RunCommentMarkerPath(runDir, runFailureCommentMarkerFile)
 }
@@ -179,10 +175,6 @@ func RunCommentMarkerExists(runDir, markerFile, markerKind string) (bool, error)
 
 func runStartCommentMarkerExists(runDir string) (bool, error) {
 	return RunCommentMarkerExists(runDir, runStartCommentMarkerFile, "start comment")
-}
-
-func runCompletionCommentMarkerExists(runDir string) (bool, error) {
-	return RunCommentMarkerExists(runDir, runCompletionCommentMarkerFile, "completion comment")
 }
 
 func runFailureCommentMarkerExists(runDir string) (bool, error) {
@@ -209,10 +201,6 @@ func writeRunCommentMarker(run state.Run, repo string, issueNumber int, markerFi
 
 func writeRunStartCommentMarker(run state.Run, repo string, issueNumber int) error {
 	return writeRunCommentMarker(run, repo, issueNumber, runStartCommentMarkerFile, "start comment")
-}
-
-func writeRunCompletionCommentMarker(run state.Run, repo string, issueNumber int) error {
-	return writeRunCommentMarker(run, repo, issueNumber, runCompletionCommentMarkerFile, "completion comment")
 }
 
 func writeRunFailureCommentMarker(run state.Run, repo string, issueNumber int) error {
@@ -387,7 +375,20 @@ func buildRunCompletionComment(run state.Run, target RunResponseTarget, repo str
 	if err != nil {
 		return "", fmt.Errorf("render completion comment: %w", err)
 	}
-	return body, nil
+	return ghapi.PrefixMarker(runCompletionCommentToken(run.ID), body), nil
+}
+
+func runCompletionCommentToken(runID string) string {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return ""
+	}
+	return fmt.Sprintf("<!-- rascal:run_id=%s -->", runID)
+}
+
+func hasRunCompletionCommentToken(body, runID string) bool {
+	token := runCompletionCommentToken(runID)
+	return token != "" && strings.Contains(body, token)
 }
 
 func loadRunTokenUsage(run state.Run) (state.RunTokenUsage, bool, error) {

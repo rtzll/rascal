@@ -11,7 +11,7 @@ import (
 )
 
 const activeRunForTask = `-- name: ActiveRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ? AND status IN ('queued', 'running')
 ORDER BY seq DESC
@@ -19,30 +19,35 @@ LIMIT 1
 `
 
 type ActiveRunForTaskRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq                        int64         `json:"seq"`
+	ID                         string        `json:"id"`
+	TaskID                     string        `json:"task_id"`
+	Repo                       string        `json:"repo"`
+	Task                       string        `json:"task"`
+	AgentRuntime               string        `json:"agent_runtime"`
+	BaseBranch                 string        `json:"base_branch"`
+	HeadBranch                 string        `json:"head_branch"`
+	Trigger                    string        `json:"trigger"`
+	Debug                      bool          `json:"debug"`
+	Status                     string        `json:"status"`
+	RunDir                     string        `json:"run_dir"`
+	IssueNumber                int64         `json:"issue_number"`
+	PrNumber                   int64         `json:"pr_number"`
+	PrUrl                      string        `json:"pr_url"`
+	PrStatus                   string        `json:"pr_status"`
+	HeadSha                    string        `json:"head_sha"`
+	Context                    string        `json:"context"`
+	Error                      string        `json:"error"`
+	StatusReason               string        `json:"status_reason"`
+	CompletionCommentState     string        `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string        `json:"completion_comment_claimed_by"`
+	CompletionCommentClaimedAt sql.NullInt64 `json:"completion_comment_claimed_at"`
+	CompletionCommentPostedAt  sql.NullInt64 `json:"completion_comment_posted_at"`
+	CompletionCommentError     string        `json:"completion_comment_error"`
+	CreatedAt                  int64         `json:"created_at"`
+	UpdatedAt                  int64         `json:"updated_at"`
+	StartedAt                  sql.NullInt64 `json:"started_at"`
+	CompletedAt                sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (ActiveRunForTaskRow, error) {
@@ -69,6 +74,11 @@ func (q *Queries) ActiveRunForTask(ctx context.Context, taskID string) (ActiveRu
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
+		&i.CompletionCommentState,
+		&i.CompletionCommentClaimedBy,
+		&i.CompletionCommentClaimedAt,
+		&i.CompletionCommentPostedAt,
+		&i.CompletionCommentError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -228,6 +238,11 @@ RETURNING
   context,
   error,
   status_reason,
+  completion_comment_state,
+  completion_comment_claimed_by,
+  completion_comment_claimed_at,
+  completion_comment_posted_at,
+  completion_comment_error,
   created_at,
   updated_at,
   started_at,
@@ -240,30 +255,35 @@ type ClaimNextQueuedRunParams struct {
 }
 
 type ClaimNextQueuedRunRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq                        int64         `json:"seq"`
+	ID                         string        `json:"id"`
+	TaskID                     string        `json:"task_id"`
+	Repo                       string        `json:"repo"`
+	Task                       string        `json:"task"`
+	AgentRuntime               string        `json:"agent_runtime"`
+	BaseBranch                 string        `json:"base_branch"`
+	HeadBranch                 string        `json:"head_branch"`
+	Trigger                    string        `json:"trigger"`
+	Debug                      bool          `json:"debug"`
+	Status                     string        `json:"status"`
+	RunDir                     string        `json:"run_dir"`
+	IssueNumber                int64         `json:"issue_number"`
+	PrNumber                   int64         `json:"pr_number"`
+	PrUrl                      string        `json:"pr_url"`
+	PrStatus                   string        `json:"pr_status"`
+	HeadSha                    string        `json:"head_sha"`
+	Context                    string        `json:"context"`
+	Error                      string        `json:"error"`
+	StatusReason               string        `json:"status_reason"`
+	CompletionCommentState     string        `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string        `json:"completion_comment_claimed_by"`
+	CompletionCommentClaimedAt sql.NullInt64 `json:"completion_comment_claimed_at"`
+	CompletionCommentPostedAt  sql.NullInt64 `json:"completion_comment_posted_at"`
+	CompletionCommentError     string        `json:"completion_comment_error"`
+	CreatedAt                  int64         `json:"created_at"`
+	UpdatedAt                  int64         `json:"updated_at"`
+	StartedAt                  sql.NullInt64 `json:"started_at"`
+	CompletedAt                sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRunParams) (ClaimNextQueuedRunRow, error) {
@@ -290,6 +310,11 @@ func (q *Queries) ClaimNextQueuedRun(ctx context.Context, arg ClaimNextQueuedRun
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
+		&i.CompletionCommentState,
+		&i.CompletionCommentClaimedBy,
+		&i.CompletionCommentClaimedAt,
+		&i.CompletionCommentPostedAt,
+		&i.CompletionCommentError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -349,6 +374,11 @@ RETURNING
   context,
   error,
   status_reason,
+  completion_comment_state,
+  completion_comment_claimed_by,
+  completion_comment_claimed_at,
+  completion_comment_posted_at,
+  completion_comment_error,
   created_at,
   updated_at,
   started_at,
@@ -362,30 +392,35 @@ type ClaimNextQueuedRunForTaskParams struct {
 }
 
 type ClaimNextQueuedRunForTaskRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq                        int64         `json:"seq"`
+	ID                         string        `json:"id"`
+	TaskID                     string        `json:"task_id"`
+	Repo                       string        `json:"repo"`
+	Task                       string        `json:"task"`
+	AgentRuntime               string        `json:"agent_runtime"`
+	BaseBranch                 string        `json:"base_branch"`
+	HeadBranch                 string        `json:"head_branch"`
+	Trigger                    string        `json:"trigger"`
+	Debug                      bool          `json:"debug"`
+	Status                     string        `json:"status"`
+	RunDir                     string        `json:"run_dir"`
+	IssueNumber                int64         `json:"issue_number"`
+	PrNumber                   int64         `json:"pr_number"`
+	PrUrl                      string        `json:"pr_url"`
+	PrStatus                   string        `json:"pr_status"`
+	HeadSha                    string        `json:"head_sha"`
+	Context                    string        `json:"context"`
+	Error                      string        `json:"error"`
+	StatusReason               string        `json:"status_reason"`
+	CompletionCommentState     string        `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string        `json:"completion_comment_claimed_by"`
+	CompletionCommentClaimedAt sql.NullInt64 `json:"completion_comment_claimed_at"`
+	CompletionCommentPostedAt  sql.NullInt64 `json:"completion_comment_posted_at"`
+	CompletionCommentError     string        `json:"completion_comment_error"`
+	CreatedAt                  int64         `json:"created_at"`
+	UpdatedAt                  int64         `json:"updated_at"`
+	StartedAt                  sql.NullInt64 `json:"started_at"`
+	CompletedAt                sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQueuedRunForTaskParams) (ClaimNextQueuedRunForTaskRow, error) {
@@ -412,6 +447,115 @@ func (q *Queries) ClaimNextQueuedRunForTask(ctx context.Context, arg ClaimNextQu
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
+		&i.CompletionCommentState,
+		&i.CompletionCommentClaimedBy,
+		&i.CompletionCommentClaimedAt,
+		&i.CompletionCommentPostedAt,
+		&i.CompletionCommentError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const claimRunCompletionComment = `-- name: ClaimRunCompletionComment :one
+UPDATE runs
+SET
+  completion_comment_state = 'posting',
+  completion_comment_claimed_by = ?1,
+  completion_comment_claimed_at = ?2,
+  completion_comment_error = '',
+  updated_at = ?3
+WHERE id = ?4
+  AND (
+    completion_comment_state IN ('pending', 'failed')
+    OR (
+      completion_comment_state = 'posting'
+      AND completion_comment_claimed_at IS NOT NULL
+      AND completion_comment_claimed_at < ?5
+    )
+  )
+RETURNING
+  seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
+`
+
+type ClaimRunCompletionCommentParams struct {
+	ClaimedBy   string        `json:"claimed_by"`
+	ClaimedAt   sql.NullInt64 `json:"claimed_at"`
+	UpdatedAt   int64         `json:"updated_at"`
+	RunID       string        `json:"run_id"`
+	StaleBefore sql.NullInt64 `json:"stale_before"`
+}
+
+type ClaimRunCompletionCommentRow struct {
+	Seq                        int64         `json:"seq"`
+	ID                         string        `json:"id"`
+	TaskID                     string        `json:"task_id"`
+	Repo                       string        `json:"repo"`
+	Task                       string        `json:"task"`
+	AgentRuntime               string        `json:"agent_runtime"`
+	BaseBranch                 string        `json:"base_branch"`
+	HeadBranch                 string        `json:"head_branch"`
+	Trigger                    string        `json:"trigger"`
+	Debug                      bool          `json:"debug"`
+	Status                     string        `json:"status"`
+	RunDir                     string        `json:"run_dir"`
+	IssueNumber                int64         `json:"issue_number"`
+	PrNumber                   int64         `json:"pr_number"`
+	PrUrl                      string        `json:"pr_url"`
+	PrStatus                   string        `json:"pr_status"`
+	HeadSha                    string        `json:"head_sha"`
+	Context                    string        `json:"context"`
+	Error                      string        `json:"error"`
+	StatusReason               string        `json:"status_reason"`
+	CompletionCommentState     string        `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string        `json:"completion_comment_claimed_by"`
+	CompletionCommentClaimedAt sql.NullInt64 `json:"completion_comment_claimed_at"`
+	CompletionCommentPostedAt  sql.NullInt64 `json:"completion_comment_posted_at"`
+	CompletionCommentError     string        `json:"completion_comment_error"`
+	CreatedAt                  int64         `json:"created_at"`
+	UpdatedAt                  int64         `json:"updated_at"`
+	StartedAt                  sql.NullInt64 `json:"started_at"`
+	CompletedAt                sql.NullInt64 `json:"completed_at"`
+}
+
+func (q *Queries) ClaimRunCompletionComment(ctx context.Context, arg ClaimRunCompletionCommentParams) (ClaimRunCompletionCommentRow, error) {
+	row := q.db.QueryRowContext(ctx, claimRunCompletionComment,
+		arg.ClaimedBy,
+		arg.ClaimedAt,
+		arg.UpdatedAt,
+		arg.RunID,
+		arg.StaleBefore,
+	)
+	var i ClaimRunCompletionCommentRow
+	err := row.Scan(
+		&i.Seq,
+		&i.ID,
+		&i.TaskID,
+		&i.Repo,
+		&i.Task,
+		&i.AgentRuntime,
+		&i.BaseBranch,
+		&i.HeadBranch,
+		&i.Trigger,
+		&i.Debug,
+		&i.Status,
+		&i.RunDir,
+		&i.IssueNumber,
+		&i.PrNumber,
+		&i.PrUrl,
+		&i.PrStatus,
+		&i.HeadSha,
+		&i.Context,
+		&i.Error,
+		&i.StatusReason,
+		&i.CompletionCommentState,
+		&i.CompletionCommentClaimedBy,
+		&i.CompletionCommentClaimedAt,
+		&i.CompletionCommentPostedAt,
+		&i.CompletionCommentError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -852,36 +996,41 @@ func (q *Queries) GetCredentialLease(ctx context.Context, id string) (Credential
 }
 
 const getRun = `-- name: GetRun :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?
 `
 
 type GetRunRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq                        int64         `json:"seq"`
+	ID                         string        `json:"id"`
+	TaskID                     string        `json:"task_id"`
+	Repo                       string        `json:"repo"`
+	Task                       string        `json:"task"`
+	AgentRuntime               string        `json:"agent_runtime"`
+	BaseBranch                 string        `json:"base_branch"`
+	HeadBranch                 string        `json:"head_branch"`
+	Trigger                    string        `json:"trigger"`
+	Debug                      bool          `json:"debug"`
+	Status                     string        `json:"status"`
+	RunDir                     string        `json:"run_dir"`
+	IssueNumber                int64         `json:"issue_number"`
+	PrNumber                   int64         `json:"pr_number"`
+	PrUrl                      string        `json:"pr_url"`
+	PrStatus                   string        `json:"pr_status"`
+	HeadSha                    string        `json:"head_sha"`
+	Context                    string        `json:"context"`
+	Error                      string        `json:"error"`
+	StatusReason               string        `json:"status_reason"`
+	CompletionCommentState     string        `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string        `json:"completion_comment_claimed_by"`
+	CompletionCommentClaimedAt sql.NullInt64 `json:"completion_comment_claimed_at"`
+	CompletionCommentPostedAt  sql.NullInt64 `json:"completion_comment_posted_at"`
+	CompletionCommentError     string        `json:"completion_comment_error"`
+	CreatedAt                  int64         `json:"created_at"`
+	UpdatedAt                  int64         `json:"updated_at"`
+	StartedAt                  sql.NullInt64 `json:"started_at"`
+	CompletedAt                sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) GetRun(ctx context.Context, id string) (GetRunRow, error) {
@@ -908,6 +1057,11 @@ func (q *Queries) GetRun(ctx context.Context, id string) (GetRunRow, error) {
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
+		&i.CompletionCommentState,
+		&i.CompletionCommentClaimedBy,
+		&i.CompletionCommentClaimedAt,
+		&i.CompletionCommentPostedAt,
+		&i.CompletionCommentError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -1175,66 +1329,81 @@ INSERT INTO runs (
   context,
   error,
   status_reason,
+  completion_comment_state,
+  completion_comment_claimed_by,
+  completion_comment_claimed_at,
+  completion_comment_posted_at,
+  completion_comment_error,
   created_at,
   updated_at,
   started_at,
   completed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
 `
 
 type InsertRunParams struct {
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	ID                         string        `json:"id"`
+	TaskID                     string        `json:"task_id"`
+	Repo                       string        `json:"repo"`
+	Task                       string        `json:"task"`
+	AgentRuntime               string        `json:"agent_runtime"`
+	BaseBranch                 string        `json:"base_branch"`
+	HeadBranch                 string        `json:"head_branch"`
+	Trigger                    string        `json:"trigger"`
+	Debug                      bool          `json:"debug"`
+	Status                     string        `json:"status"`
+	RunDir                     string        `json:"run_dir"`
+	IssueNumber                int64         `json:"issue_number"`
+	PrNumber                   int64         `json:"pr_number"`
+	PrUrl                      string        `json:"pr_url"`
+	PrStatus                   string        `json:"pr_status"`
+	HeadSha                    string        `json:"head_sha"`
+	Context                    string        `json:"context"`
+	Error                      string        `json:"error"`
+	StatusReason               string        `json:"status_reason"`
+	CompletionCommentState     string        `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string        `json:"completion_comment_claimed_by"`
+	CompletionCommentClaimedAt sql.NullInt64 `json:"completion_comment_claimed_at"`
+	CompletionCommentPostedAt  sql.NullInt64 `json:"completion_comment_posted_at"`
+	CompletionCommentError     string        `json:"completion_comment_error"`
+	CreatedAt                  int64         `json:"created_at"`
+	UpdatedAt                  int64         `json:"updated_at"`
+	StartedAt                  sql.NullInt64 `json:"started_at"`
+	CompletedAt                sql.NullInt64 `json:"completed_at"`
 }
 
 type InsertRunRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq                        int64         `json:"seq"`
+	ID                         string        `json:"id"`
+	TaskID                     string        `json:"task_id"`
+	Repo                       string        `json:"repo"`
+	Task                       string        `json:"task"`
+	AgentRuntime               string        `json:"agent_runtime"`
+	BaseBranch                 string        `json:"base_branch"`
+	HeadBranch                 string        `json:"head_branch"`
+	Trigger                    string        `json:"trigger"`
+	Debug                      bool          `json:"debug"`
+	Status                     string        `json:"status"`
+	RunDir                     string        `json:"run_dir"`
+	IssueNumber                int64         `json:"issue_number"`
+	PrNumber                   int64         `json:"pr_number"`
+	PrUrl                      string        `json:"pr_url"`
+	PrStatus                   string        `json:"pr_status"`
+	HeadSha                    string        `json:"head_sha"`
+	Context                    string        `json:"context"`
+	Error                      string        `json:"error"`
+	StatusReason               string        `json:"status_reason"`
+	CompletionCommentState     string        `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string        `json:"completion_comment_claimed_by"`
+	CompletionCommentClaimedAt sql.NullInt64 `json:"completion_comment_claimed_at"`
+	CompletionCommentPostedAt  sql.NullInt64 `json:"completion_comment_posted_at"`
+	CompletionCommentError     string        `json:"completion_comment_error"`
+	CreatedAt                  int64         `json:"created_at"`
+	UpdatedAt                  int64         `json:"updated_at"`
+	StartedAt                  sql.NullInt64 `json:"started_at"`
+	CompletedAt                sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRunRow, error) {
@@ -1258,6 +1427,11 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRun
 		arg.Context,
 		arg.Error,
 		arg.StatusReason,
+		arg.CompletionCommentState,
+		arg.CompletionCommentClaimedBy,
+		arg.CompletionCommentClaimedAt,
+		arg.CompletionCommentPostedAt,
+		arg.CompletionCommentError,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.StartedAt,
@@ -1285,6 +1459,11 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (InsertRun
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
+		&i.CompletionCommentState,
+		&i.CompletionCommentClaimedBy,
+		&i.CompletionCommentClaimedAt,
+		&i.CompletionCommentPostedAt,
+		&i.CompletionCommentError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -1307,7 +1486,7 @@ func (q *Queries) IsTaskCompleted(ctx context.Context, id string) (bool, error) 
 }
 
 const lastRunForTask = `-- name: LastRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ?
 ORDER BY seq DESC
@@ -1315,30 +1494,35 @@ LIMIT 1
 `
 
 type LastRunForTaskRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq                        int64         `json:"seq"`
+	ID                         string        `json:"id"`
+	TaskID                     string        `json:"task_id"`
+	Repo                       string        `json:"repo"`
+	Task                       string        `json:"task"`
+	AgentRuntime               string        `json:"agent_runtime"`
+	BaseBranch                 string        `json:"base_branch"`
+	HeadBranch                 string        `json:"head_branch"`
+	Trigger                    string        `json:"trigger"`
+	Debug                      bool          `json:"debug"`
+	Status                     string        `json:"status"`
+	RunDir                     string        `json:"run_dir"`
+	IssueNumber                int64         `json:"issue_number"`
+	PrNumber                   int64         `json:"pr_number"`
+	PrUrl                      string        `json:"pr_url"`
+	PrStatus                   string        `json:"pr_status"`
+	HeadSha                    string        `json:"head_sha"`
+	Context                    string        `json:"context"`
+	Error                      string        `json:"error"`
+	StatusReason               string        `json:"status_reason"`
+	CompletionCommentState     string        `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string        `json:"completion_comment_claimed_by"`
+	CompletionCommentClaimedAt sql.NullInt64 `json:"completion_comment_claimed_at"`
+	CompletionCommentPostedAt  sql.NullInt64 `json:"completion_comment_posted_at"`
+	CompletionCommentError     string        `json:"completion_comment_error"`
+	CreatedAt                  int64         `json:"created_at"`
+	UpdatedAt                  int64         `json:"updated_at"`
+	StartedAt                  sql.NullInt64 `json:"started_at"`
+	CompletedAt                sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (LastRunForTaskRow, error) {
@@ -1365,6 +1549,11 @@ func (q *Queries) LastRunForTask(ctx context.Context, taskID string) (LastRunFor
 		&i.Context,
 		&i.Error,
 		&i.StatusReason,
+		&i.CompletionCommentState,
+		&i.CompletionCommentClaimedBy,
+		&i.CompletionCommentClaimedAt,
+		&i.CompletionCommentPostedAt,
+		&i.CompletionCommentError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.StartedAt,
@@ -1583,37 +1772,42 @@ func (q *Queries) ListCredentialsByOwner(ctx context.Context, ownerUserID sql.Nu
 }
 
 const listRunningRuns = `-- name: ListRunningRuns :many
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE status = 'running'
 ORDER BY seq DESC
 `
 
 type ListRunningRunsRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq                        int64         `json:"seq"`
+	ID                         string        `json:"id"`
+	TaskID                     string        `json:"task_id"`
+	Repo                       string        `json:"repo"`
+	Task                       string        `json:"task"`
+	AgentRuntime               string        `json:"agent_runtime"`
+	BaseBranch                 string        `json:"base_branch"`
+	HeadBranch                 string        `json:"head_branch"`
+	Trigger                    string        `json:"trigger"`
+	Debug                      bool          `json:"debug"`
+	Status                     string        `json:"status"`
+	RunDir                     string        `json:"run_dir"`
+	IssueNumber                int64         `json:"issue_number"`
+	PrNumber                   int64         `json:"pr_number"`
+	PrUrl                      string        `json:"pr_url"`
+	PrStatus                   string        `json:"pr_status"`
+	HeadSha                    string        `json:"head_sha"`
+	Context                    string        `json:"context"`
+	Error                      string        `json:"error"`
+	StatusReason               string        `json:"status_reason"`
+	CompletionCommentState     string        `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string        `json:"completion_comment_claimed_by"`
+	CompletionCommentClaimedAt sql.NullInt64 `json:"completion_comment_claimed_at"`
+	CompletionCommentPostedAt  sql.NullInt64 `json:"completion_comment_posted_at"`
+	CompletionCommentError     string        `json:"completion_comment_error"`
+	CreatedAt                  int64         `json:"created_at"`
+	UpdatedAt                  int64         `json:"updated_at"`
+	StartedAt                  sql.NullInt64 `json:"started_at"`
+	CompletedAt                sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) ListRunningRuns(ctx context.Context) ([]ListRunningRunsRow, error) {
@@ -1646,6 +1840,11 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]ListRunningRunsRow, er
 			&i.Context,
 			&i.Error,
 			&i.StatusReason,
+			&i.CompletionCommentState,
+			&i.CompletionCommentClaimedBy,
+			&i.CompletionCommentClaimedAt,
+			&i.CompletionCommentPostedAt,
+			&i.CompletionCommentError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.StartedAt,
@@ -1665,37 +1864,42 @@ func (q *Queries) ListRunningRuns(ctx context.Context) ([]ListRunningRunsRow, er
 }
 
 const listRuns = `-- name: ListRuns :many
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
 FROM runs
 ORDER BY seq DESC
 LIMIT ?
 `
 
 type ListRunsRow struct {
-	Seq          int64         `json:"seq"`
-	ID           string        `json:"id"`
-	TaskID       string        `json:"task_id"`
-	Repo         string        `json:"repo"`
-	Task         string        `json:"task"`
-	AgentRuntime string        `json:"agent_runtime"`
-	BaseBranch   string        `json:"base_branch"`
-	HeadBranch   string        `json:"head_branch"`
-	Trigger      string        `json:"trigger"`
-	Debug        bool          `json:"debug"`
-	Status       string        `json:"status"`
-	RunDir       string        `json:"run_dir"`
-	IssueNumber  int64         `json:"issue_number"`
-	PrNumber     int64         `json:"pr_number"`
-	PrUrl        string        `json:"pr_url"`
-	PrStatus     string        `json:"pr_status"`
-	HeadSha      string        `json:"head_sha"`
-	Context      string        `json:"context"`
-	Error        string        `json:"error"`
-	StatusReason string        `json:"status_reason"`
-	CreatedAt    int64         `json:"created_at"`
-	UpdatedAt    int64         `json:"updated_at"`
-	StartedAt    sql.NullInt64 `json:"started_at"`
-	CompletedAt  sql.NullInt64 `json:"completed_at"`
+	Seq                        int64         `json:"seq"`
+	ID                         string        `json:"id"`
+	TaskID                     string        `json:"task_id"`
+	Repo                       string        `json:"repo"`
+	Task                       string        `json:"task"`
+	AgentRuntime               string        `json:"agent_runtime"`
+	BaseBranch                 string        `json:"base_branch"`
+	HeadBranch                 string        `json:"head_branch"`
+	Trigger                    string        `json:"trigger"`
+	Debug                      bool          `json:"debug"`
+	Status                     string        `json:"status"`
+	RunDir                     string        `json:"run_dir"`
+	IssueNumber                int64         `json:"issue_number"`
+	PrNumber                   int64         `json:"pr_number"`
+	PrUrl                      string        `json:"pr_url"`
+	PrStatus                   string        `json:"pr_status"`
+	HeadSha                    string        `json:"head_sha"`
+	Context                    string        `json:"context"`
+	Error                      string        `json:"error"`
+	StatusReason               string        `json:"status_reason"`
+	CompletionCommentState     string        `json:"completion_comment_state"`
+	CompletionCommentClaimedBy string        `json:"completion_comment_claimed_by"`
+	CompletionCommentClaimedAt sql.NullInt64 `json:"completion_comment_claimed_at"`
+	CompletionCommentPostedAt  sql.NullInt64 `json:"completion_comment_posted_at"`
+	CompletionCommentError     string        `json:"completion_comment_error"`
+	CreatedAt                  int64         `json:"created_at"`
+	UpdatedAt                  int64         `json:"updated_at"`
+	StartedAt                  sql.NullInt64 `json:"started_at"`
+	CompletedAt                sql.NullInt64 `json:"completed_at"`
 }
 
 func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]ListRunsRow, error) {
@@ -1728,6 +1932,11 @@ func (q *Queries) ListRuns(ctx context.Context, limit int64) ([]ListRunsRow, err
 			&i.Context,
 			&i.Error,
 			&i.StatusReason,
+			&i.CompletionCommentState,
+			&i.CompletionCommentClaimedBy,
+			&i.CompletionCommentClaimedAt,
+			&i.CompletionCommentPostedAt,
+			&i.CompletionCommentError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.StartedAt,
@@ -1797,6 +2006,57 @@ func (q *Queries) ListSharedCredentials(ctx context.Context) ([]Credential, erro
 		return nil, err
 	}
 	return items, nil
+}
+
+const markRunCompletionCommentFailed = `-- name: MarkRunCompletionCommentFailed :execrows
+UPDATE runs
+SET
+  completion_comment_state = 'failed',
+  completion_comment_claimed_by = '',
+  completion_comment_claimed_at = NULL,
+  completion_comment_error = ?1,
+  updated_at = ?2
+WHERE id = ?3
+`
+
+type MarkRunCompletionCommentFailedParams struct {
+	CompletionCommentError string `json:"completion_comment_error"`
+	UpdatedAt              int64  `json:"updated_at"`
+	RunID                  string `json:"run_id"`
+}
+
+func (q *Queries) MarkRunCompletionCommentFailed(ctx context.Context, arg MarkRunCompletionCommentFailedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markRunCompletionCommentFailed, arg.CompletionCommentError, arg.UpdatedAt, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const markRunCompletionCommentPosted = `-- name: MarkRunCompletionCommentPosted :execrows
+UPDATE runs
+SET
+  completion_comment_state = 'posted',
+  completion_comment_claimed_by = '',
+  completion_comment_claimed_at = NULL,
+  completion_comment_posted_at = ?1,
+  completion_comment_error = '',
+  updated_at = ?2
+WHERE id = ?3
+`
+
+type MarkRunCompletionCommentPostedParams struct {
+	PostedAt  sql.NullInt64 `json:"posted_at"`
+	UpdatedAt int64         `json:"updated_at"`
+	RunID     string        `json:"run_id"`
+}
+
+func (q *Queries) MarkRunCompletionCommentPosted(ctx context.Context, arg MarkRunCompletionCommentPostedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markRunCompletionCommentPosted, arg.PostedAt, arg.UpdatedAt, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const markTaskCompleted = `-- name: MarkTaskCompleted :execrows

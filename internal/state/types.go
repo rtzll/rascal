@@ -220,6 +220,34 @@ type Run struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+
+	CompletionCommentState     CompletionCommentState `json:"completion_comment_state,omitempty"`
+	CompletionCommentClaimedBy string                 `json:"completion_comment_claimed_by,omitempty"`
+	CompletionCommentClaimedAt *time.Time             `json:"completion_comment_claimed_at,omitempty"`
+	CompletionCommentPostedAt  *time.Time             `json:"completion_comment_posted_at,omitempty"`
+	CompletionCommentError     string                 `json:"completion_comment_error,omitempty"`
+}
+
+type CompletionCommentState string
+
+const (
+	CompletionCommentStatePending CompletionCommentState = "pending"
+	CompletionCommentStatePosting CompletionCommentState = "posting"
+	CompletionCommentStatePosted  CompletionCommentState = "posted"
+	CompletionCommentStateFailed  CompletionCommentState = "failed"
+)
+
+func NormalizeCompletionCommentState(raw CompletionCommentState) CompletionCommentState {
+	switch strings.ToLower(strings.TrimSpace(string(raw))) {
+	case string(CompletionCommentStatePosting):
+		return CompletionCommentStatePosting
+	case string(CompletionCommentStatePosted):
+		return CompletionCommentStatePosted
+	case string(CompletionCommentStateFailed):
+		return CompletionCommentStateFailed
+	default:
+		return CompletionCommentStatePending
+	}
 }
 
 type Task struct {

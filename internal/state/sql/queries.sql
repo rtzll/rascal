@@ -108,40 +108,45 @@ INSERT INTO runs (
   context,
   error,
   status_reason,
+  completion_comment_state,
+  completion_comment_claimed_by,
+  completion_comment_claimed_at,
+  completion_comment_posted_at,
+  completion_comment_error,
   created_at,
   updated_at,
   started_at,
   completed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at;
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at;
 
 -- name: GetRun :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE id = ?;
 
 -- name: ListRuns :many
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
 FROM runs
 ORDER BY seq DESC
 LIMIT ?;
 
 -- name: ListRunningRuns :many
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE status = 'running'
 ORDER BY seq DESC;
 
 -- name: LastRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ?
 ORDER BY seq DESC
 LIMIT 1;
 
 -- name: ActiveRunForTask :one
-SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, created_at, updated_at, started_at, completed_at
+SELECT seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
 FROM runs
 WHERE task_id = ? AND status IN ('queued', 'running')
 ORDER BY seq DESC
@@ -173,6 +178,47 @@ SET
   started_at = ?,
   completed_at = ?
 WHERE id = ?;
+
+-- name: ClaimRunCompletionComment :one
+UPDATE runs
+SET
+  completion_comment_state = 'posting',
+  completion_comment_claimed_by = sqlc.arg(claimed_by),
+  completion_comment_claimed_at = sqlc.arg(claimed_at),
+  completion_comment_error = '',
+  updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(run_id)
+  AND (
+    completion_comment_state IN ('pending', 'failed')
+    OR (
+      completion_comment_state = 'posting'
+      AND completion_comment_claimed_at IS NOT NULL
+      AND completion_comment_claimed_at < sqlc.arg(stale_before)
+    )
+  )
+RETURNING
+  seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at;
+
+-- name: MarkRunCompletionCommentPosted :execrows
+UPDATE runs
+SET
+  completion_comment_state = 'posted',
+  completion_comment_claimed_by = '',
+  completion_comment_claimed_at = NULL,
+  completion_comment_posted_at = sqlc.arg(posted_at),
+  completion_comment_error = '',
+  updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(run_id);
+
+-- name: MarkRunCompletionCommentFailed :execrows
+UPDATE runs
+SET
+  completion_comment_state = 'failed',
+  completion_comment_claimed_by = '',
+  completion_comment_claimed_at = NULL,
+  completion_comment_error = sqlc.arg(completion_comment_error),
+  updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(run_id);
 
 -- name: CancelQueuedRuns :exec
 UPDATE runs
@@ -243,6 +289,11 @@ RETURNING
   context,
   error,
   status_reason,
+  completion_comment_state,
+  completion_comment_claimed_by,
+  completion_comment_claimed_at,
+  completion_comment_posted_at,
+  completion_comment_error,
   created_at,
   updated_at,
   started_at,
@@ -298,6 +349,11 @@ RETURNING
   context,
   error,
   status_reason,
+  completion_comment_state,
+  completion_comment_claimed_by,
+  completion_comment_claimed_at,
+  completion_comment_posted_at,
+  completion_comment_error,
   created_at,
   updated_at,
   started_at,
