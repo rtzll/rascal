@@ -430,17 +430,29 @@ INSERT INTO run_executions (
   container_id,
   status,
   exit_code,
+  error_text,
+  pr_number,
+  pr_url,
+  head_sha,
+  task_session_id,
+  reported_at,
   created_at,
   updated_at,
   last_observed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(run_id) DO UPDATE SET
   backend = excluded.backend,
   container_name = excluded.container_name,
   container_id = excluded.container_id,
   status = excluded.status,
   exit_code = excluded.exit_code,
+  error_text = excluded.error_text,
+  pr_number = excluded.pr_number,
+  pr_url = excluded.pr_url,
+  head_sha = excluded.head_sha,
+  task_session_id = excluded.task_session_id,
+  reported_at = excluded.reported_at,
   updated_at = excluded.updated_at,
   last_observed_at = excluded.last_observed_at;
 
@@ -453,8 +465,21 @@ SET
   last_observed_at = ?
 WHERE run_id = ?;
 
+-- name: UpdateRunExecutionResult :execrows
+UPDATE run_executions
+SET
+  exit_code = ?,
+  error_text = ?,
+  pr_number = ?,
+  pr_url = ?,
+  head_sha = ?,
+  task_session_id = ?,
+  reported_at = ?,
+  updated_at = ?
+WHERE run_id = ?;
+
 -- name: GetRunExecution :one
-SELECT run_id, backend, container_name, container_id, status, exit_code, created_at, updated_at, last_observed_at
+SELECT run_id, backend, container_name, container_id, status, exit_code, error_text, pr_number, pr_url, head_sha, task_session_id, reported_at, created_at, updated_at, last_observed_at
 FROM run_executions
 WHERE run_id = ?;
 

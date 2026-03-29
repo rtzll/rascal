@@ -371,9 +371,25 @@ type RunExecution struct {
 	ContainerID    string              `json:"container_id"`
 	Status         RunExecutionStatus  `json:"status"`
 	ExitCode       int                 `json:"exit_code"`
+	ErrorText      string              `json:"error_text,omitempty"`
+	PRNumber       int                 `json:"pr_number,omitempty"`
+	PRURL          string              `json:"pr_url,omitempty"`
+	HeadSHA        string              `json:"head_sha,omitempty"`
+	TaskSessionID  string              `json:"task_session_id,omitempty"`
+	ReportedAt     *time.Time          `json:"reported_at,omitempty"`
 	CreatedAt      time.Time           `json:"created_at"`
 	UpdatedAt      time.Time           `json:"updated_at"`
 	LastObservedAt time.Time           `json:"last_observed_at"`
+}
+
+type RunExecutionResult struct {
+	RunID         string `json:"run_id"`
+	ExitCode      int    `json:"exit_code"`
+	ErrorText     string `json:"error_text,omitempty"`
+	PRNumber      int    `json:"pr_number,omitempty"`
+	PRURL         string `json:"pr_url,omitempty"`
+	HeadSHA       string `json:"head_sha,omitempty"`
+	TaskSessionID string `json:"task_session_id,omitempty"`
 }
 
 type RunTokenUsage struct {

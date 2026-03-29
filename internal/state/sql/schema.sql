@@ -158,6 +158,12 @@ CREATE TABLE run_executions (
   container_id TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'created',
   exit_code INTEGER NOT NULL DEFAULT 0,
+  error_text TEXT NOT NULL DEFAULT '',
+  pr_number INTEGER NOT NULL DEFAULT 0,
+  pr_url TEXT NOT NULL DEFAULT '',
+  head_sha TEXT NOT NULL DEFAULT '',
+  task_session_id TEXT NOT NULL DEFAULT '',
+  reported_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   last_observed_at INTEGER NOT NULL

@@ -464,6 +464,9 @@ func writeFakeMeta(spec runner.Spec, res fakeRunResult) error {
 	if err := runner.WriteMeta(filepath.Join(spec.RunDir, "meta.json"), meta); err != nil {
 		return fmt.Errorf("write fake run metadata: %w", err)
 	}
+	if err := runner.ReportRunResult(spec.ResultReportSocketPath, meta.RunResult()); err != nil {
+		return fmt.Errorf("report fake run result: %w", err)
+	}
 	return nil
 }
 
@@ -657,7 +660,15 @@ func (f *fakeRunner) Calls() int {
 func newTestServer(t *testing.T, launcher runner.Runner) *orchestrator.Server {
 	t.Helper()
 
-	dataDir := t.TempDir()
+	dataDir, err := os.MkdirTemp("/tmp", "rascald-test-")
+	if err != nil {
+		t.Fatalf("create short test data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if removeErr := os.RemoveAll(dataDir); removeErr != nil {
+			t.Fatalf("remove short test data dir: %v", removeErr)
+		}
+	})
 	return newTestServerWithPaths(t, launcher, dataDir, filepath.Join(dataDir, "state.db"), "test-instance")
 }
 
@@ -692,6 +703,14 @@ func newTestServerWithPaths(t *testing.T, launcher runner.Runner, dataDir, state
 	s.RetryBackoff = func(_ int) time.Duration {
 		return 10 * time.Millisecond
 	}
+	if err := s.StartRunResultReporter(); err != nil {
+		t.Fatalf("start run result reporter: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.StopRunResultReporter(); err != nil {
+			t.Fatalf("stop run result reporter: %v", err)
+		}
+	})
 	return s
 }
 

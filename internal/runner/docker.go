@@ -39,6 +39,7 @@ const (
 	containerClaudeSessionDir = "/rascal-claude-session"
 	containerContextJSONPath  = "/rascal-meta/context.json"
 	containerGooseMOIMPath    = "/rascal-meta/persistent_instructions.md"
+	containerControlDir       = "/rascal-control"
 )
 
 type dockerRuntimeLayout struct {
@@ -117,6 +118,9 @@ func (b dockerContainerEnvBuilder) Build() map[string]string {
 		"CODEX_HOME":                 b.layout.codexHome,
 		"GH_PROMPT_DISABLED":         "1",
 		"GIT_TERMINAL_PROMPT":        "0",
+	}
+	if strings.TrimSpace(b.spec.ResultReportSocketPath) != "" {
+		envPairs["RASCAL_RUN_RESULT_SOCKET"] = filepath.Join(containerControlDir, filepath.Base(strings.TrimSpace(b.spec.ResultReportSocketPath)))
 	}
 	if b.agentRuntime.Harness() == runtime.HarnessGoose {
 		envPairs["GOOSE_PATH_ROOT"] = b.layout.goosePathRoot
@@ -216,6 +220,9 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		"-v", fmt.Sprintf("%s:%s", spec.RunDir, containerMetaDir),
 		"-v", fmt.Sprintf("%s:%s", workspaceDir, containerWorkDir),
 	)
+	if socketPath := strings.TrimSpace(spec.ResultReportSocketPath); socketPath != "" {
+		args = append(args, "-v", fmt.Sprintf("%s:%s", filepath.Dir(socketPath), containerControlDir))
+	}
 	if sessionMountTarget != "" {
 		args = append(args, "-v", fmt.Sprintf("%s:%s", sessionDir, sessionMountTarget))
 	}

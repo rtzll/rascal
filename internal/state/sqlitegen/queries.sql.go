@@ -1108,7 +1108,7 @@ func (q *Queries) GetRunCredentialInfo(ctx context.Context, id string) (GetRunCr
 }
 
 const getRunExecution = `-- name: GetRunExecution :one
-SELECT run_id, backend, container_name, container_id, status, exit_code, created_at, updated_at, last_observed_at
+SELECT run_id, backend, container_name, container_id, status, exit_code, error_text, pr_number, pr_url, head_sha, task_session_id, reported_at, created_at, updated_at, last_observed_at
 FROM run_executions
 WHERE run_id = ?
 `
@@ -1123,6 +1123,12 @@ func (q *Queries) GetRunExecution(ctx context.Context, runID string) (RunExecuti
 		&i.ContainerID,
 		&i.Status,
 		&i.ExitCode,
+		&i.ErrorText,
+		&i.PrNumber,
+		&i.PrUrl,
+		&i.HeadSha,
+		&i.TaskSessionID,
+		&i.ReportedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastObservedAt,
@@ -2663,6 +2669,50 @@ func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (int64, er
 	return result.RowsAffected()
 }
 
+const updateRunExecutionResult = `-- name: UpdateRunExecutionResult :execrows
+UPDATE run_executions
+SET
+  exit_code = ?,
+  error_text = ?,
+  pr_number = ?,
+  pr_url = ?,
+  head_sha = ?,
+  task_session_id = ?,
+  reported_at = ?,
+  updated_at = ?
+WHERE run_id = ?
+`
+
+type UpdateRunExecutionResultParams struct {
+	ExitCode      int64         `json:"exit_code"`
+	ErrorText     string        `json:"error_text"`
+	PrNumber      int64         `json:"pr_number"`
+	PrUrl         string        `json:"pr_url"`
+	HeadSha       string        `json:"head_sha"`
+	TaskSessionID string        `json:"task_session_id"`
+	ReportedAt    sql.NullInt64 `json:"reported_at"`
+	UpdatedAt     int64         `json:"updated_at"`
+	RunID         string        `json:"run_id"`
+}
+
+func (q *Queries) UpdateRunExecutionResult(ctx context.Context, arg UpdateRunExecutionResultParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateRunExecutionResult,
+		arg.ExitCode,
+		arg.ErrorText,
+		arg.PrNumber,
+		arg.PrUrl,
+		arg.HeadSha,
+		arg.TaskSessionID,
+		arg.ReportedAt,
+		arg.UpdatedAt,
+		arg.RunID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateRunExecutionState = `-- name: UpdateRunExecutionState :execrows
 UPDATE run_executions
 SET
@@ -2799,31 +2849,49 @@ INSERT INTO run_executions (
   container_id,
   status,
   exit_code,
+  error_text,
+  pr_number,
+  pr_url,
+  head_sha,
+  task_session_id,
+  reported_at,
   created_at,
   updated_at,
   last_observed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(run_id) DO UPDATE SET
   backend = excluded.backend,
   container_name = excluded.container_name,
   container_id = excluded.container_id,
   status = excluded.status,
   exit_code = excluded.exit_code,
+  error_text = excluded.error_text,
+  pr_number = excluded.pr_number,
+  pr_url = excluded.pr_url,
+  head_sha = excluded.head_sha,
+  task_session_id = excluded.task_session_id,
+  reported_at = excluded.reported_at,
   updated_at = excluded.updated_at,
   last_observed_at = excluded.last_observed_at
 `
 
 type UpsertRunExecutionParams struct {
-	RunID          string `json:"run_id"`
-	Backend        string `json:"backend"`
-	ContainerName  string `json:"container_name"`
-	ContainerID    string `json:"container_id"`
-	Status         string `json:"status"`
-	ExitCode       int64  `json:"exit_code"`
-	CreatedAt      int64  `json:"created_at"`
-	UpdatedAt      int64  `json:"updated_at"`
-	LastObservedAt int64  `json:"last_observed_at"`
+	RunID          string        `json:"run_id"`
+	Backend        string        `json:"backend"`
+	ContainerName  string        `json:"container_name"`
+	ContainerID    string        `json:"container_id"`
+	Status         string        `json:"status"`
+	ExitCode       int64         `json:"exit_code"`
+	ErrorText      string        `json:"error_text"`
+	PrNumber       int64         `json:"pr_number"`
+	PrUrl          string        `json:"pr_url"`
+	HeadSha        string        `json:"head_sha"`
+	TaskSessionID  string        `json:"task_session_id"`
+	ReportedAt     sql.NullInt64 `json:"reported_at"`
+	CreatedAt      int64         `json:"created_at"`
+	UpdatedAt      int64         `json:"updated_at"`
+	LastObservedAt int64         `json:"last_observed_at"`
 }
 
 func (q *Queries) UpsertRunExecution(ctx context.Context, arg UpsertRunExecutionParams) error {
@@ -2834,6 +2902,12 @@ func (q *Queries) UpsertRunExecution(ctx context.Context, arg UpsertRunExecution
 		arg.ContainerID,
 		arg.Status,
 		arg.ExitCode,
+		arg.ErrorText,
+		arg.PrNumber,
+		arg.PrUrl,
+		arg.HeadSha,
+		arg.TaskSessionID,
+		arg.ReportedAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.LastObservedAt,

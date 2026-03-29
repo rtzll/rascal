@@ -45,6 +45,9 @@ func (NoopRunner) StartDetached(_ context.Context, spec Spec) (handle ExecutionH
 	if err := WriteMeta(filepath.Join(spec.RunDir, "meta.json"), meta); err != nil {
 		return ExecutionHandle{}, err
 	}
+	if err := ReportRunResult(spec.ResultReportSocketPath, meta.RunResult()); err != nil {
+		return ExecutionHandle{}, fmt.Errorf("report run result: %w", err)
+	}
 
 	return ExecutionHandle{
 		Backend: ExecutionBackendNoop,

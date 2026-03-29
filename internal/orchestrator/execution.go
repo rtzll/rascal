@@ -270,20 +270,21 @@ func (s *Server) ExecuteRun(runID string) {
 	}
 
 	spec := runner.Spec{
-		RunID:        run.ID,
-		TaskID:       run.TaskID,
-		Repo:         run.Repo,
-		Instruction:  run.Instruction,
-		AgentRuntime: run.AgentRuntime,
-		RunnerImage:  s.Config.RunnerImageForRuntime(run.AgentRuntime),
-		BaseBranch:   run.BaseBranch,
-		HeadBranch:   run.HeadBranch,
-		Trigger:      runtrigger.Normalize(run.Trigger.String()),
-		RunDir:       run.RunDir,
-		IssueNumber:  run.IssueNumber,
-		PRNumber:     run.PRNumber,
-		Context:      run.Context,
-		Debug:        run.Debug,
+		RunID:                  run.ID,
+		TaskID:                 run.TaskID,
+		Repo:                   run.Repo,
+		Instruction:            run.Instruction,
+		AgentRuntime:           run.AgentRuntime,
+		RunnerImage:            s.Config.RunnerImageForRuntime(run.AgentRuntime),
+		BaseBranch:             run.BaseBranch,
+		HeadBranch:             run.HeadBranch,
+		Trigger:                runtrigger.Normalize(run.Trigger.String()),
+		RunDir:                 run.RunDir,
+		IssueNumber:            run.IssueNumber,
+		PRNumber:               run.PRNumber,
+		Context:                run.Context,
+		Debug:                  run.Debug,
+		ResultReportSocketPath: s.RunResultSocketPath(),
 		TaskSession: runner.TaskSessionSpec{
 			Mode:             sessionMode,
 			Resume:           sessionResume,
@@ -518,25 +519,15 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		return
 	}
 
-	metaPath := filepath.Join(run.RunDir, "meta.json")
-	meta, metaErr := runner.ReadMeta(metaPath)
-	if metaErr != nil {
-		meta = runner.Meta{
-			RunID:      run.ID,
-			TaskID:     run.TaskID,
-			Repo:       run.Repo,
-			BaseBranch: run.BaseBranch,
-			HeadBranch: run.HeadBranch,
-			ExitCode:   observedExitCode,
-		}
-		if observedExitCode != 0 {
-			meta.Error = fmt.Sprintf("docker runner failed with exit code %d", observedExitCode)
-		}
-		if writeErr := runner.WriteMeta(metaPath, meta); writeErr != nil {
-			log.Printf("run %s write fallback meta failed: %v", run.ID, writeErr)
-		}
+	if latestExec, ok := s.Store.GetRunExecution(runID); ok {
+		execRec = latestExec
 	}
-	if meta.ExitCode == 0 && observedExitCode != 0 {
+
+	metaPath := filepath.Join(run.RunDir, "meta.json")
+	meta, metaErr := loadDetachedRunMeta(execRec, run, observedExitCode, metaPath)
+	if metaErr != nil {
+		log.Printf("run %s using fallback detached run metadata: %v", run.ID, metaErr)
+	} else if meta.ExitCode == 0 && observedExitCode != 0 && execRec.ReportedAt == nil {
 		meta.ExitCode = observedExitCode
 	}
 	if strings.TrimSpace(meta.TaskSessionID) != "" {
@@ -642,6 +633,43 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 	}
 	s.cleanupDetachedExecution(runID, execRec)
 	s.finishRun(updated)
+}
+
+func loadDetachedRunMeta(execRec state.RunExecution, run state.Run, observedExitCode int, metaPath string) (runner.Meta, error) {
+	if execRec.ReportedAt != nil {
+		return runner.Meta{
+			RunID:         run.ID,
+			TaskID:        run.TaskID,
+			Repo:          run.Repo,
+			BaseBranch:    run.BaseBranch,
+			HeadBranch:    run.HeadBranch,
+			PRNumber:      execRec.PRNumber,
+			PRURL:         execRec.PRURL,
+			HeadSHA:       execRec.HeadSHA,
+			TaskSessionID: execRec.TaskSessionID,
+			ExitCode:      execRec.ExitCode,
+			Error:         execRec.ErrorText,
+		}, nil
+	}
+	meta, err := runner.ReadMeta(metaPath)
+	if err == nil {
+		return meta, nil
+	}
+	fallback := runner.Meta{
+		RunID:      run.ID,
+		TaskID:     run.TaskID,
+		Repo:       run.Repo,
+		BaseBranch: run.BaseBranch,
+		HeadBranch: run.HeadBranch,
+		ExitCode:   observedExitCode,
+	}
+	if observedExitCode != 0 {
+		fallback.Error = fmt.Sprintf("docker runner failed with exit code %d", observedExitCode)
+	}
+	if writeErr := runner.WriteMeta(metaPath, fallback); writeErr != nil {
+		log.Printf("run %s write fallback meta failed: %v", run.ID, writeErr)
+	}
+	return fallback, fmt.Errorf("read detached run meta %s: %w", metaPath, err)
 }
 
 func (s *Server) cleanupDetachedExecution(runID string, execRec state.RunExecution) {

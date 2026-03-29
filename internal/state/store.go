@@ -825,6 +825,12 @@ func (s *Store) UpsertRunExecution(exec RunExecution) (RunExecution, error) {
 		ContainerID:    exec.ContainerID,
 		Status:         string(exec.Status),
 		ExitCode:       int64(exec.ExitCode),
+		ErrorText:      strings.TrimSpace(exec.ErrorText),
+		PrNumber:       int64(exec.PRNumber),
+		PrUrl:          strings.TrimSpace(exec.PRURL),
+		HeadSha:        strings.TrimSpace(exec.HeadSHA),
+		TaskSessionID:  strings.TrimSpace(exec.TaskSessionID),
+		ReportedAt:     toNullInt64(exec.ReportedAt),
 		CreatedAt:      now.UnixNano(),
 		UpdatedAt:      now.UnixNano(),
 		LastObservedAt: now.UnixNano(),
@@ -834,6 +840,36 @@ func (s *Store) UpsertRunExecution(exec RunExecution) (RunExecution, error) {
 	row, err := s.q.GetRunExecution(context.Background(), exec.RunID)
 	if err != nil {
 		return RunExecution{}, fmt.Errorf("load run execution for run %q: %w", exec.RunID, err)
+	}
+	return fromDBRunExecution(row), nil
+}
+
+func (s *Store) ReportRunExecutionResult(result RunExecutionResult) (RunExecution, error) {
+	result.RunID = strings.TrimSpace(result.RunID)
+	if result.RunID == "" {
+		return RunExecution{}, fmt.Errorf("run id is required")
+	}
+	now := time.Now().UTC()
+	rows, err := s.q.UpdateRunExecutionResult(context.Background(), sqlitegen.UpdateRunExecutionResultParams{
+		ExitCode:      int64(result.ExitCode),
+		ErrorText:     strings.TrimSpace(result.ErrorText),
+		PrNumber:      int64(result.PRNumber),
+		PrUrl:         strings.TrimSpace(result.PRURL),
+		HeadSha:       strings.TrimSpace(result.HeadSHA),
+		TaskSessionID: strings.TrimSpace(result.TaskSessionID),
+		ReportedAt:    sql.NullInt64{Int64: now.UnixNano(), Valid: true},
+		UpdatedAt:     now.UnixNano(),
+		RunID:         result.RunID,
+	})
+	if err != nil {
+		return RunExecution{}, fmt.Errorf("report run execution result for run %q: %w", result.RunID, err)
+	}
+	if rows == 0 {
+		return RunExecution{}, fmt.Errorf("run execution for run %q not found", result.RunID)
+	}
+	row, err := s.q.GetRunExecution(context.Background(), result.RunID)
+	if err != nil {
+		return RunExecution{}, fmt.Errorf("load run execution for run %q after result report: %w", result.RunID, err)
 	}
 	return fromDBRunExecution(row), nil
 }
@@ -1318,17 +1354,27 @@ func fromDBRunNotification(r sqlitegen.RunNotification) RunNotification {
 }
 
 func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {
-	return RunExecution{
+	exec := RunExecution{
 		RunID:          r.RunID,
 		Backend:        NormalizeRunExecutionBackend(RunExecutionBackend(r.Backend)),
 		ContainerName:  r.ContainerName,
 		ContainerID:    r.ContainerID,
 		Status:         NormalizeRunExecutionStatus(RunExecutionStatus(r.Status)),
 		ExitCode:       int(r.ExitCode),
+		ErrorText:      strings.TrimSpace(r.ErrorText),
+		PRNumber:       int(r.PrNumber),
+		PRURL:          strings.TrimSpace(r.PrUrl),
+		HeadSHA:        strings.TrimSpace(r.HeadSha),
+		TaskSessionID:  strings.TrimSpace(r.TaskSessionID),
 		CreatedAt:      time.Unix(0, r.CreatedAt).UTC(),
 		UpdatedAt:      time.Unix(0, r.UpdatedAt).UTC(),
 		LastObservedAt: time.Unix(0, r.LastObservedAt).UTC(),
 	}
+	if r.ReportedAt.Valid {
+		reportedAt := time.Unix(0, r.ReportedAt.Int64).UTC()
+		exec.ReportedAt = &reportedAt
+	}
+	return exec
 }
 
 func fromDBTaskSession(s sqlitegen.TaskSession) TaskSession {

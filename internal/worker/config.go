@@ -34,6 +34,7 @@ type Config struct {
 	CommitMsgPath              string
 	AgentOutputPath            string
 	PRBodyPath                 string
+	ResultReportSocketPath     string
 
 	GooseDebug   bool
 	AgentRuntime runtime.Runtime
@@ -149,6 +150,7 @@ func LoadConfig() (Config, error) {
 		CommitMsgPath:              filepath.Join(metaDir, defaultCommitMsgFile),
 		AgentOutputPath:            filepath.Join(metaDir, defaultAgentOutputFile),
 		PRBodyPath:                 filepath.Join(metaDir, defaultPRBodyFile),
+		ResultReportSocketPath:     strings.TrimSpace(os.Getenv("RASCAL_RUN_RESULT_SOCKET")),
 		GooseDebug:                 debug,
 		AgentRuntime:               agentRuntime,
 		GoosePathRoot:              goosePathRoot,

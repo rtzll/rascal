@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"regexp"
 	"runtime"
@@ -104,6 +105,9 @@ type Server struct {
 	StopSupervisors    bool
 	BeforeSupervise    func(runID string)
 	AfterRunCleanup    func(runID string)
+
+	runResultListener net.Listener
+	runResultWG       sync.WaitGroup
 }
 
 type RunRequest struct {

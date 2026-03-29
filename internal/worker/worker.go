@@ -127,6 +127,9 @@ func RunWithExecutor(ex CommandExecutor) error {
 		if err := runner.WriteMeta(cfg.MetaPath, meta); err != nil {
 			log.Printf("[%s] failed to write meta: %v", nowUTC(), err)
 		}
+		if err := runner.ReportRunResultWithRetry(cfg.ResultReportSocketPath, meta.RunResult(), 20, 500*time.Millisecond); err != nil {
+			log.Printf("[%s] failed to report run result: %v", nowUTC(), err)
+		}
 	}()
 
 	fail := func(err error) error {

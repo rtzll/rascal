@@ -103,15 +103,21 @@ type RunCancel struct {
 }
 
 type RunExecution struct {
-	RunID          string `json:"run_id"`
-	Backend        string `json:"backend"`
-	ContainerName  string `json:"container_name"`
-	ContainerID    string `json:"container_id"`
-	Status         string `json:"status"`
-	ExitCode       int64  `json:"exit_code"`
-	CreatedAt      int64  `json:"created_at"`
-	UpdatedAt      int64  `json:"updated_at"`
-	LastObservedAt int64  `json:"last_observed_at"`
+	RunID          string        `json:"run_id"`
+	Backend        string        `json:"backend"`
+	ContainerName  string        `json:"container_name"`
+	ContainerID    string        `json:"container_id"`
+	Status         string        `json:"status"`
+	ExitCode       int64         `json:"exit_code"`
+	ErrorText      string        `json:"error_text"`
+	PrNumber       int64         `json:"pr_number"`
+	PrUrl          string        `json:"pr_url"`
+	HeadSha        string        `json:"head_sha"`
+	TaskSessionID  string        `json:"task_session_id"`
+	ReportedAt     sql.NullInt64 `json:"reported_at"`
+	CreatedAt      int64         `json:"created_at"`
+	UpdatedAt      int64         `json:"updated_at"`
+	LastObservedAt int64         `json:"last_observed_at"`
 }
 
 type RunLease struct {

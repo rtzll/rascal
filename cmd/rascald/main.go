@@ -55,6 +55,14 @@ func main() {
 	if err := s.BootstrapAuth(); err != nil {
 		log.Fatalf("auth bootstrap: %v", err)
 	}
+	if err := s.StartRunResultReporter(); err != nil {
+		log.Fatalf("run result reporter: %v", err)
+	}
+	defer func() {
+		if err := s.StopRunResultReporter(); err != nil {
+			log.Printf("run result reporter shutdown warning: %v", err)
+		}
+	}()
 	s.RecoverQueuedCancels()
 	s.RecoverRunningRuns()
 	s.ScheduleRuns("")

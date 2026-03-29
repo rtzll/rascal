@@ -22,6 +22,21 @@ type Meta struct {
 	Error         string `json:"error,omitempty"`
 }
 
+type RunResult struct {
+	RunID         string `json:"run_id"`
+	PRNumber      int    `json:"pr_number"`
+	PRURL         string `json:"pr_url,omitempty"`
+	HeadSHA       string `json:"head_sha,omitempty"`
+	TaskSessionID string `json:"task_session_id,omitempty"`
+	ExitCode      int    `json:"exit_code"`
+	Error         string `json:"error,omitempty"`
+}
+
+type RunResultReportResponse struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
 func (m *Meta) UnmarshalJSON(data []byte) error {
 	type meta Meta
 	aux := struct {
@@ -48,6 +63,18 @@ func ReadMeta(path string) (Meta, error) {
 		return Meta{}, fmt.Errorf("decode meta file: %w", err)
 	}
 	return m, nil
+}
+
+func (m Meta) RunResult() RunResult {
+	return RunResult{
+		RunID:         m.RunID,
+		PRNumber:      m.PRNumber,
+		PRURL:         m.PRURL,
+		HeadSHA:       m.HeadSHA,
+		TaskSessionID: m.TaskSessionID,
+		ExitCode:      m.ExitCode,
+		Error:         m.Error,
+	}
 }
 
 func WriteMeta(path string, m Meta) error {
