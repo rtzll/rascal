@@ -224,6 +224,56 @@ func TestLoadServerConfigNormalizesRunnerMode(t *testing.T) {
 	}
 }
 
+func TestLoadServerConfigDefaultsDockerSecurityToBaseline(t *testing.T) {
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
+	if cfg.RunnerSecurity.Mode != runner.DockerSecurityBaseline {
+		t.Fatalf("RunnerSecurity.Mode = %q, want baseline", cfg.RunnerSecurity.Mode)
+	}
+	if cfg.RunnerSecurity.CPUs != "2" {
+		t.Fatalf("RunnerSecurity.CPUs = %q, want 2", cfg.RunnerSecurity.CPUs)
+	}
+	if cfg.RunnerSecurity.Memory != "4g" {
+		t.Fatalf("RunnerSecurity.Memory = %q, want 4g", cfg.RunnerSecurity.Memory)
+	}
+	if cfg.RunnerSecurity.PidsLimit != 256 {
+		t.Fatalf("RunnerSecurity.PidsLimit = %d, want 256", cfg.RunnerSecurity.PidsLimit)
+	}
+	if cfg.RunnerSecurity.TmpfsTmpSize != "512m" {
+		t.Fatalf("RunnerSecurity.TmpfsTmpSize = %q, want 512m", cfg.RunnerSecurity.TmpfsTmpSize)
+	}
+}
+
+func TestLoadServerConfigDockerSecurityOverrides(t *testing.T) {
+	t.Setenv("RASCAL_RUNNER_DOCKER_SECURITY_MODE", "strict")
+	t.Setenv("RASCAL_RUNNER_DOCKER_CPUS", "3.5")
+	t.Setenv("RASCAL_RUNNER_DOCKER_MEMORY", "6g")
+	t.Setenv("RASCAL_RUNNER_DOCKER_PIDS_LIMIT", "384")
+	t.Setenv("RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE", "768m")
+
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
+	if cfg.RunnerSecurity.Mode != runner.DockerSecurityStrict {
+		t.Fatalf("RunnerSecurity.Mode = %q, want strict", cfg.RunnerSecurity.Mode)
+	}
+	if cfg.RunnerSecurity.CPUs != "3.5" {
+		t.Fatalf("RunnerSecurity.CPUs = %q, want 3.5", cfg.RunnerSecurity.CPUs)
+	}
+	if cfg.RunnerSecurity.Memory != "6g" {
+		t.Fatalf("RunnerSecurity.Memory = %q, want 6g", cfg.RunnerSecurity.Memory)
+	}
+	if cfg.RunnerSecurity.PidsLimit != 384 {
+		t.Fatalf("RunnerSecurity.PidsLimit = %d, want 384", cfg.RunnerSecurity.PidsLimit)
+	}
+	if cfg.RunnerSecurity.TmpfsTmpSize != "768m" {
+		t.Fatalf("RunnerSecurity.TmpfsTmpSize = %q, want 768m", cfg.RunnerSecurity.TmpfsTmpSize)
+	}
+}
+
 func TestLoadServerConfigCredentialEncryptionKeyFallback(t *testing.T) {
 	t.Setenv("RASCAL_CREDENTIAL_ENCRYPTION_KEY", "")
 	t.Setenv("RASCAL_API_TOKEN", "api-token-fallback")
@@ -254,6 +304,7 @@ func TestLoadServerConfigRejectsInvalidEnumEnv(t *testing.T) {
 		needle string
 	}{
 		{name: "runner mode", key: "RASCAL_RUNNER_MODE", value: "podman", needle: "unknown runner mode"},
+		{name: "docker security mode", key: "RASCAL_RUNNER_DOCKER_SECURITY_MODE", value: "paranoid", needle: "unknown docker security mode"},
 		{name: "agent runtime", key: "RASCAL_AGENT_RUNTIME", value: "unknown-agent", needle: "unknown agent runtime"},
 		{name: "credential strategy", key: "RASCAL_CREDENTIAL_STRATEGY", value: "weighted", needle: "unknown credential strategy"},
 		{name: "task session mode", key: "RASCAL_TASK_SESSION_MODE", value: "sometimes", needle: "unknown agent session mode"},

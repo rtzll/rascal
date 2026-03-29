@@ -40,6 +40,7 @@ type ServerConfig struct {
 	RunnerImageClaude       string
 	RunnerImageGooseClaude  string
 	RunnerMaxAttempts       int
+	RunnerSecurity          runner.DockerSecurityConfig
 	CredentialStrategy      credentialstrategy.Name
 	CredentialLeaseTTL      time.Duration
 	CredentialRenewEvery    time.Duration
@@ -69,6 +70,10 @@ func LoadServerConfig() (ServerConfig, error) {
 	if err != nil {
 		return ServerConfig{}, fmt.Errorf("parse RASCAL_RUNNER_MODE: %w", err)
 	}
+	runnerSecurityMode, err := runner.ParseDockerSecurityMode(envOrDefault("RASCAL_RUNNER_DOCKER_SECURITY_MODE", string(runner.DockerSecurityBaseline)))
+	if err != nil {
+		return ServerConfig{}, fmt.Errorf("parse RASCAL_RUNNER_DOCKER_SECURITY_MODE: %w", err)
+	}
 	agentRuntime, err := loadAgentRuntime()
 	if err != nil {
 		return ServerConfig{}, err
@@ -83,22 +88,29 @@ func LoadServerConfig() (ServerConfig, error) {
 	}
 
 	cfg := ServerConfig{
-		ListenAddr:              envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
-		DataDir:                 dataDir,
-		StatePath:               statePath,
-		Slot:                    strings.TrimSpace(os.Getenv("RASCAL_SLOT")),
-		ActiveSlotPath:          envOrDefault("RASCAL_ACTIVE_SLOT_PATH", "/etc/rascal/active_slot"),
-		APIToken:                strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")),
-		GitHubToken:             strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")),
-		GitHubWebhookSecret:     strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
-		BotLogin:                strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
-		RunnerMode:              runnerMode,
-		AgentRuntime:            agentRuntime,
-		RunnerImageGooseCodex:   firstNonEmptyEnvOrDefault(defaults.GooseCodexRunnerImageTag, "RASCAL_RUNNER_IMAGE_GOOSE_CODEX", "RASCAL_RUNNER_IMAGE_GOOSE"),
-		RunnerImageCodex:        envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
-		RunnerImageClaude:       envOrDefault("RASCAL_RUNNER_IMAGE_CLAUDE", defaults.ClaudeRunnerImageTag),
-		RunnerImageGooseClaude:  envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE", defaults.GooseClaudeRunnerImageTag),
-		RunnerMaxAttempts:       envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
+		ListenAddr:             envOrDefault("RASCAL_LISTEN_ADDR", ":8080"),
+		DataDir:                dataDir,
+		StatePath:              statePath,
+		Slot:                   strings.TrimSpace(os.Getenv("RASCAL_SLOT")),
+		ActiveSlotPath:         envOrDefault("RASCAL_ACTIVE_SLOT_PATH", "/etc/rascal/active_slot"),
+		APIToken:               strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")),
+		GitHubToken:            strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")),
+		GitHubWebhookSecret:    strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
+		BotLogin:               strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
+		RunnerMode:             runnerMode,
+		AgentRuntime:           agentRuntime,
+		RunnerImageGooseCodex:  firstNonEmptyEnvOrDefault(defaults.GooseCodexRunnerImageTag, "RASCAL_RUNNER_IMAGE_GOOSE_CODEX", "RASCAL_RUNNER_IMAGE_GOOSE"),
+		RunnerImageCodex:       envOrDefault("RASCAL_RUNNER_IMAGE_CODEX", defaults.CodexRunnerImageTag),
+		RunnerImageClaude:      envOrDefault("RASCAL_RUNNER_IMAGE_CLAUDE", defaults.ClaudeRunnerImageTag),
+		RunnerImageGooseClaude: envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE", defaults.GooseClaudeRunnerImageTag),
+		RunnerMaxAttempts:      envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
+		RunnerSecurity: runner.DockerSecurityConfig{
+			Mode:         runnerSecurityMode,
+			CPUs:         strings.TrimSpace(os.Getenv("RASCAL_RUNNER_DOCKER_CPUS")),
+			Memory:       strings.TrimSpace(os.Getenv("RASCAL_RUNNER_DOCKER_MEMORY")),
+			PidsLimit:    envIntOrDefault("RASCAL_RUNNER_DOCKER_PIDS_LIMIT", 256),
+			TmpfsTmpSize: envOrDefault("RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE", "512m"),
+		}.Normalize(),
 		CredentialStrategy:      credentialStrategy,
 		CredentialLeaseTTL:      envDurationOrDefault("RASCAL_CREDENTIAL_LEASE_TTL", 90*time.Second),
 		CredentialRenewEvery:    envDurationOrDefault("RASCAL_CREDENTIAL_RENEW_INTERVAL", 30*time.Second),
@@ -107,6 +119,12 @@ func LoadServerConfig() (ServerConfig, error) {
 		MaxRuns:                 200,
 	}
 	cfg.RunnerImage = cfg.RunnerImageForRuntime(cfg.AgentRuntime)
+	if cfg.RunnerSecurity.CPUs == "" {
+		cfg.RunnerSecurity.CPUs = "2"
+	}
+	if cfg.RunnerSecurity.Memory == "" {
+		cfg.RunnerSecurity.Memory = "4g"
+	}
 	return cfg, nil
 }
 

@@ -60,6 +60,13 @@ default):
 - `RASCAL_RUNNER_IMAGE_GOOSE_CODEX`, `RASCAL_RUNNER_IMAGE_CODEX`,
   `RASCAL_RUNNER_IMAGE_CLAUDE`, and `RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE` set the
   runtime-specific runner images
+- Docker runner hardening defaults to `baseline` with:
+  `RASCAL_RUNNER_DOCKER_SECURITY_MODE=baseline`,
+  `RASCAL_RUNNER_DOCKER_CPUS=2`,
+  `RASCAL_RUNNER_DOCKER_MEMORY=4g`,
+  `RASCAL_RUNNER_DOCKER_PIDS_LIMIT=256`
+- `strict` currently adds a size-bounded `/tmp` mount via
+  `RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE`
 - `RASCAL_AGENT_RUNTIME` is optional and overrides the default runtime when set
 
 ## Blue/Green Sequence

@@ -22,6 +22,7 @@ type DockerRunner struct {
 	DefaultImage string
 	Image        string
 	GitHubToken  string
+	Security     DockerSecurityConfig
 }
 
 const (
@@ -194,6 +195,9 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 	if _, err := fmt.Fprintf(logFile, "[%s] starting docker runner image=%s agent_runtime=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), image, agentRuntime, spec.RunID); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("write runner log header: %w", err)
 	}
+	if _, err := fmt.Fprintf(logFile, "[%s] docker security %s\n", time.Now().UTC().Format(time.RFC3339), l.Security.Normalize().Summary()); err != nil {
+		return ExecutionHandle{}, fmt.Errorf("write runner security log: %w", err)
+	}
 
 	layout := newDockerRuntimeLayout(agentRuntime, spec.TaskSession)
 	sessionMountTarget := layout.sessionTarget
@@ -216,7 +220,9 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, envPairs[k]))
 	}
 	args = append(args,
-		"--security-opt", "no-new-privileges:true",
+		l.Security.Normalize().dockerRunArgs()...,
+	)
+	args = append(args,
 		"-v", fmt.Sprintf("%s:%s", spec.RunDir, containerMetaDir),
 		"-v", fmt.Sprintf("%s:%s", workspaceDir, containerWorkDir),
 	)
@@ -262,6 +268,32 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		ID:      containerID,
 		Name:    containerName,
 	}, nil
+}
+
+func (c DockerSecurityConfig) dockerRunArgs() []string {
+	c = c.Normalize()
+	args := []string{"--security-opt", "no-new-privileges:true"}
+	switch c.Mode {
+	case DockerSecurityOpen:
+		return args
+	case DockerSecurityStrict, DockerSecurityBaseline:
+		args = append(args, "--cap-drop", "ALL", "--init")
+		if c.CPUs != "" {
+			args = append(args, "--cpus", c.CPUs)
+		}
+		if c.Memory != "" {
+			args = append(args, "--memory", c.Memory)
+		}
+		if c.PidsLimit > 0 {
+			args = append(args, "--pids-limit", strconv.Itoa(c.PidsLimit))
+		}
+		if c.Mode == DockerSecurityStrict && c.TmpfsTmpSize != "" {
+			args = append(args, "--tmpfs", fmt.Sprintf("/tmp:rw,nosuid,size=%s", c.TmpfsTmpSize))
+		}
+		return args
+	default:
+		return args
+	}
 }
 
 func (l DockerRunner) Inspect(ctx context.Context, handle ExecutionHandle) (ExecutionState, error) {

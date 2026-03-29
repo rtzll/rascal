@@ -48,7 +48,7 @@ func main() {
 	s := orchestrator.NewServer(
 		cfg,
 		store,
-		runner.NewRunner(cfg.RunnerMode, cfg.RunnerImageForRuntime(cfg.AgentRuntime), cfg.GitHubToken),
+		runner.NewRunner(cfg.RunnerMode, cfg.RunnerImageForRuntime(cfg.AgentRuntime), cfg.GitHubToken, cfg.RunnerSecurity),
 		ghapi.NewAPIClient(cfg.GitHubToken),
 		credentials.NewBroker(store, allocStrategy, cipher, cfg.CredentialLeaseTTL),
 		cipher,
@@ -78,7 +78,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("rascald listening on %s (runner=%s runtime=%s)", cfg.ListenAddr, cfg.RunnerMode, cfg.AgentRuntime)
+	log.Printf("rascald listening on %s (runner=%s runtime=%s docker_security=%s)", cfg.ListenAddr, cfg.RunnerMode, cfg.AgentRuntime, cfg.RunnerSecurity.Summary())
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- httpServer.ListenAndServe()

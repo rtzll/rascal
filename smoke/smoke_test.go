@@ -73,7 +73,7 @@ func TestSmokeDocker(t *testing.T) {
 		t.Fatalf("run pr url empty for review run\nserver output:\n%s", server.output.String())
 	}
 	logs := fetchRunLogs(t, server, run.ID)
-	for _, want := range []string{"starting docker runner", "smoke codex ran"} {
+	for _, want := range []string{"starting docker runner", "docker security mode=baseline", "smoke codex ran"} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("logs missing %q:\n%s", want, logs)
 		}

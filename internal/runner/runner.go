@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +40,22 @@ const (
 	ModeNoop   Mode = "noop"
 	ModeDocker Mode = "docker"
 )
+
+type DockerSecurityMode string
+
+const (
+	DockerSecurityOpen     DockerSecurityMode = "open"
+	DockerSecurityBaseline DockerSecurityMode = "baseline"
+	DockerSecurityStrict   DockerSecurityMode = "strict"
+)
+
+type DockerSecurityConfig struct {
+	Mode         DockerSecurityMode
+	CPUs         string
+	Memory       string
+	PidsLimit    int
+	TmpfsTmpSize string
+}
 
 type ExecutionBackend string
 
@@ -94,6 +111,69 @@ func ParseMode(raw string) (Mode, error) {
 	}
 }
 
+func NormalizeDockerSecurityMode(raw string) DockerSecurityMode {
+	mode, err := ParseDockerSecurityMode(raw)
+	if err != nil {
+		return DockerSecurityBaseline
+	}
+	return mode
+}
+
+func ParseDockerSecurityMode(raw string) (DockerSecurityMode, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(DockerSecurityBaseline):
+		return DockerSecurityBaseline, nil
+	case string(DockerSecurityOpen):
+		return DockerSecurityOpen, nil
+	case string(DockerSecurityStrict):
+		return DockerSecurityStrict, nil
+	default:
+		return "", fmt.Errorf("unknown docker security mode %q", raw)
+	}
+}
+
+func (c DockerSecurityConfig) Normalize() DockerSecurityConfig {
+	c.Mode = NormalizeDockerSecurityMode(string(c.Mode))
+	c.CPUs = strings.TrimSpace(c.CPUs)
+	c.Memory = strings.TrimSpace(c.Memory)
+	c.TmpfsTmpSize = strings.TrimSpace(c.TmpfsTmpSize)
+	if c.PidsLimit < 0 {
+		c.PidsLimit = 0
+	}
+	return c
+}
+
+func (c DockerSecurityConfig) Summary() string {
+	c = c.Normalize()
+	parts := []string{fmt.Sprintf("mode=%s", c.Mode)}
+	if c.Mode != DockerSecurityOpen {
+		parts = append(parts,
+			fmt.Sprintf("cpus=%s", defaultSummaryValue(c.CPUs)),
+			fmt.Sprintf("memory=%s", defaultSummaryValue(c.Memory)),
+			fmt.Sprintf("pids=%s", defaultSummaryInt(c.PidsLimit)),
+		)
+	}
+	if c.Mode == DockerSecurityStrict {
+		parts = append(parts, fmt.Sprintf("tmpfs_tmp=%s", defaultSummaryValue(c.TmpfsTmpSize)))
+	}
+	return strings.Join(parts, " ")
+}
+
+func defaultSummaryValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "off"
+	}
+	return value
+}
+
+func defaultSummaryInt(value int) string {
+	if value <= 0 {
+		return "off"
+	}
+	return strconv.Itoa(value)
+}
+
 // Runner starts a run inside an execution environment (Docker in v1).
 type Runner interface {
 	StartDetached(ctx context.Context, spec Spec) (ExecutionHandle, error)
@@ -102,10 +182,10 @@ type Runner interface {
 	Remove(ctx context.Context, handle ExecutionHandle) error
 }
 
-func NewRunner(mode Mode, image, githubToken string) Runner {
+func NewRunner(mode Mode, image, githubToken string, security DockerSecurityConfig) Runner {
 	switch NormalizeMode(string(mode)) {
 	case ModeDocker:
-		return DockerRunner{DefaultImage: image, GitHubToken: githubToken}
+		return DockerRunner{DefaultImage: image, GitHubToken: githubToken, Security: security.Normalize()}
 	default:
 		return NoopRunner{}
 	}

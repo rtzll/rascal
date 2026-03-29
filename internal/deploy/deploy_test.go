@@ -378,6 +378,21 @@ func TestServerEnvFileEnablesAgentSessionsByDefault(t *testing.T) {
 	}
 }
 
+func TestServerEnvFileIncludesDockerHardeningDefaults(t *testing.T) {
+	content := serverEnvFile(testDeployConfig())
+	for _, want := range []string{
+		"RASCAL_RUNNER_DOCKER_SECURITY_MODE=baseline",
+		"RASCAL_RUNNER_DOCKER_CPUS=2",
+		"RASCAL_RUNNER_DOCKER_MEMORY=4g",
+		"RASCAL_RUNNER_DOCKER_PIDS_LIMIT=256",
+		"RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE=512m",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected server env file to include %q, got:\n%s", want, content)
+		}
+	}
+}
+
 func TestServerEnvFileOmitsLegacyRunnerImageEnv(t *testing.T) {
 	content := serverEnvFile(testDeployConfig())
 	if strings.Contains(content, "RASCAL_RUNNER_IMAGE=") {

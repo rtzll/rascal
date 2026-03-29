@@ -611,3 +611,128 @@ exit 0
 		t.Fatalf("expected no-new-privileges:true in docker args, got: %s", string(logData))
 	}
 }
+
+func TestDockerSecurityConfigDockerRunArgsByMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  DockerSecurityConfig
+		want []string
+	}{
+		{
+			name: "open",
+			cfg: DockerSecurityConfig{
+				Mode: DockerSecurityOpen,
+			},
+			want: []string{"--security-opt", "no-new-privileges:true"},
+		},
+		{
+			name: "baseline",
+			cfg: DockerSecurityConfig{
+				Mode:      DockerSecurityBaseline,
+				CPUs:      "2",
+				Memory:    "4g",
+				PidsLimit: 256,
+			},
+			want: []string{
+				"--security-opt", "no-new-privileges:true",
+				"--cap-drop", "ALL",
+				"--init",
+				"--cpus", "2",
+				"--memory", "4g",
+				"--pids-limit", "256",
+			},
+		},
+		{
+			name: "strict",
+			cfg: DockerSecurityConfig{
+				Mode:         DockerSecurityStrict,
+				CPUs:         "2",
+				Memory:       "4g",
+				PidsLimit:    256,
+				TmpfsTmpSize: "512m",
+			},
+			want: []string{
+				"--security-opt", "no-new-privileges:true",
+				"--cap-drop", "ALL",
+				"--init",
+				"--cpus", "2",
+				"--memory", "4g",
+				"--pids-limit", "256",
+				"--tmpfs", "/tmp:rw,nosuid,size=512m",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.cfg.dockerRunArgs()
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("dockerRunArgs() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDockerRunnerLogsSecuritySummary(t *testing.T) {
+	tmp := t.TempDir()
+	fakeDocker := filepath.Join(tmp, "docker")
+	script := `#!/bin/sh
+set -eu
+if [ "${1:-}" = "run" ]; then
+  echo "container-security-log"
+fi
+exit 0
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	runDir := filepath.Join(tmp, "run")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("create run dir: %v", err)
+	}
+
+	launcher := DockerRunner{
+		Image: "rascal-runner:latest",
+		Security: DockerSecurityConfig{
+			Mode:      DockerSecurityBaseline,
+			CPUs:      "2",
+			Memory:    "4g",
+			PidsLimit: 256,
+		},
+	}
+	_, err := launcher.StartDetached(context.Background(), Spec{
+		RunID:       "run_security_log",
+		TaskID:      "task_security_log",
+		Repo:        "owner/repo",
+		Instruction: "security log",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/task-security-log",
+		Trigger:     "cli",
+		Debug:       true,
+		RunDir:      runDir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected start error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(runDir, "runner.log"))
+	if err != nil {
+		t.Fatalf("read runner log: %v", err)
+	}
+	logText := string(data)
+	for _, want := range []string{
+		"docker security mode=baseline",
+		"cpus=2",
+		"memory=4g",
+		"pids=256",
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("expected %q in runner log:\n%s", want, logText)
+		}
+	}
+}
