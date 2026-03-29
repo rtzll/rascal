@@ -15,6 +15,14 @@ import (
 	"github.com/rtzll/rascal/internal/state"
 )
 
+func (s *Server) prFollowupAuthorized(login string) bool {
+	owner := strings.TrimSpace(s.Config.GitHubOwnerLogin)
+	if owner == "" {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(login), owner)
+}
+
 func (s *Server) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -172,6 +180,9 @@ func (s *Server) executeWebhookAction(ctx context.Context, action WebhookAction)
 		if !ok {
 			return nil
 		}
+		if !s.prFollowupAuthorized(action.RequestedBy) {
+			return nil
+		}
 		s.notifier().ReactToIssueComment(action.Repo, action.CommentID, ghapi.ReactionEyes)
 		baseBranch, headBranch := s.resolvePRBranches(ctx, action.Repo, action.PRNumber, action.BaseBranch, action.HeadBranch)
 		_, err := s.CreateAndQueueRun(RunRequest{
@@ -200,6 +211,9 @@ func (s *Server) executeWebhookAction(ctx context.Context, action WebhookAction)
 	case WebhookActionCreatePRReviewRun:
 		task, ok := s.activeTaskForPR(action.Repo, action.PRNumber)
 		if !ok {
+			return nil
+		}
+		if !s.prFollowupAuthorized(action.RequestedBy) {
 			return nil
 		}
 		s.notifier().ReactToPullRequestReview(action.Repo, action.PRNumber, action.ReviewID, ghapi.ReactionEyes)
@@ -232,6 +246,9 @@ func (s *Server) executeWebhookAction(ctx context.Context, action WebhookAction)
 		if !ok {
 			return nil
 		}
+		if !s.prFollowupAuthorized(action.RequestedBy) {
+			return nil
+		}
 		s.notifier().ReactToPullRequestReviewComment(action.Repo, action.CommentID, ghapi.ReactionEyes)
 		baseBranch, headBranch := s.resolvePRBranches(ctx, action.Repo, action.PRNumber, action.BaseBranch, action.HeadBranch)
 		_, err := s.CreateAndQueueRun(RunRequest{
@@ -260,6 +277,9 @@ func (s *Server) executeWebhookAction(ctx context.Context, action WebhookAction)
 	case WebhookActionCreatePRThreadRun:
 		task, ok := s.activeTaskForPR(action.Repo, action.PRNumber)
 		if !ok {
+			return nil
+		}
+		if !s.prFollowupAuthorized(action.RequestedBy) {
 			return nil
 		}
 		baseBranch, headBranch := s.resolvePRBranches(ctx, action.Repo, action.PRNumber, action.BaseBranch, action.HeadBranch)

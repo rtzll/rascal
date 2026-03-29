@@ -2191,6 +2191,180 @@ func TestHandleWebhookIssueCommentIgnoresRascalAutomationComment(t *testing.T) {
 	}
 }
 
+func TestHandleWebhookIssueCommentIgnoresNonOwnerPRFollowup(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+	s.Config.GitHubOwnerLogin = "owner"
+	fakeGH := &fakeGitHubClient{}
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
+
+	taskID := "owner/repo#44"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", IssueNumber: 44, PRNumber: 44}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	payload := issueCommentEventPayload(t, "created", "owner/repo", "alice",
+		testIssue(44, "", "", nil, true),
+		ghapi.Comment{ID: 901, Body: "please fix this", User: ghapi.User{Login: "alice"}},
+		"",
+	)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-non-owner", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	for _, run := range s.Store.ListRuns(10) {
+		if run.Trigger == runtrigger.NamePRComment {
+			t.Fatalf("expected no pr_comment run for non-owner")
+		}
+	}
+	if got := fakeGH.postedIssueCommentReactions(); len(got) != 0 {
+		t.Fatalf("expected no issue comment reactions for non-owner, got %+v", got)
+	}
+}
+
+func TestHandleWebhookIssueCommentAllowsOwnerPRFollowup(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+	s.Config.GitHubOwnerLogin = "owner"
+
+	taskID := "owner/repo#45"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", IssueNumber: 45, PRNumber: 45}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	payload := issueCommentEventPayload(t, "created", "owner/repo", "owner",
+		testIssue(45, "", "", nil, true),
+		ghapi.Comment{ID: 902, Body: "please fix this", User: ghapi.User{Login: "owner"}},
+		"",
+	)
+	req := webhookRequest(t, payload, "issue_comment", "delivery-comment-owner", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	waitFor(t, time.Second, func() bool {
+		for _, run := range s.Store.ListRuns(10) {
+			if run.Trigger == runtrigger.NamePRComment {
+				return true
+			}
+		}
+		return false
+	}, "pr_comment run created for owner")
+}
+
+func TestHandleWebhookPullRequestReviewIgnoresNonOwnerPRFollowup(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+	s.Config.GitHubOwnerLogin = "owner"
+	fakeGH := &fakeGitHubClient{}
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
+
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: "owner/repo#46", Repo: "owner/repo", IssueNumber: 46, PRNumber: 46}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	payload := pullRequestReviewEventPayload(t, "submitted", "owner/repo", "alice",
+		ghapi.Review{ID: 903, Body: "needs changes", State: "changes_requested", User: ghapi.User{Login: "alice"}},
+		testPullRequest(46, false, "", ""),
+	)
+	req := webhookRequest(t, payload, "pull_request_review", "delivery-review-non-owner", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	for _, run := range s.Store.ListRuns(10) {
+		if run.Trigger == runtrigger.NamePRReview {
+			t.Fatalf("expected no pr_review run for non-owner")
+		}
+	}
+	if got := fakeGH.postedPullRequestReviewReactions(); len(got) != 0 {
+		t.Fatalf("expected no review reactions for non-owner, got %+v", got)
+	}
+}
+
+func TestHandleWebhookPullRequestReviewCommentIgnoresNonOwnerPRFollowup(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+	s.Config.GitHubOwnerLogin = "owner"
+	fakeGH := &fakeGitHubClient{}
+	s.GitHub = fakeGH
+	s.Config.GitHubToken = "token"
+
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: "owner/repo#47", Repo: "owner/repo", IssueNumber: 47, PRNumber: 47}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	line515 := 515
+	payload := pullRequestReviewCommentEventPayload(t, "created", "owner/repo", "alice",
+		ghapi.ReviewComment{ID: 904, Body: "Please rename this helper", Path: "cmd/rascald/main.go", Line: &line515, User: ghapi.User{Login: "alice"}},
+		testPullRequest(47, false, "", ""),
+		"",
+	)
+	req := webhookRequest(t, payload, "pull_request_review_comment", "delivery-review-comment-non-owner", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	for _, run := range s.Store.ListRuns(10) {
+		if run.Trigger == runtrigger.NamePRReviewComment {
+			t.Fatalf("expected no pr_review_comment run for non-owner")
+		}
+	}
+	if got := fakeGH.postedPullRequestReviewCommentReactions(); len(got) != 0 {
+		t.Fatalf("expected no review comment reactions for non-owner, got %+v", got)
+	}
+}
+
+func TestHandleWebhookPullRequestReviewThreadIgnoresNonOwnerPRFollowup(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+	s.Config.GitHubOwnerLogin = "owner"
+
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: "owner/repo#48", Repo: "owner/repo", IssueNumber: 48, PRNumber: 48}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	line777 := 777
+	startLine775 := 775
+	payload := pullRequestReviewThreadEventPayload(t, "unresolved", "owner/repo", "alice",
+		ghapi.ReviewThread{
+			ID:        905,
+			Path:      "cmd/rascald/main.go",
+			Line:      &line777,
+			StartLine: &startLine775,
+			Comments:  []ghapi.ReviewComment{{ID: 1, Body: "Please split this logic", User: ghapi.User{Login: "alice"}}},
+		},
+		testPullRequest(48, false, "", ""),
+	)
+	req := webhookRequest(t, payload, "pull_request_review_thread", "delivery-review-thread-non-owner", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	for _, run := range s.Store.ListRuns(10) {
+		if run.Trigger == runtrigger.NamePRReviewThread {
+			t.Fatalf("expected no pr_review_thread run for non-owner")
+		}
+	}
+}
 func TestMergedPRMarksTaskCompleteAndCancelsQueuedRuns(t *testing.T) {
 	t.Parallel()
 	waitCh := make(chan struct{})

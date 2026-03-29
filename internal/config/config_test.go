@@ -212,6 +212,18 @@ func TestLoadServerConfigGooseSessionOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadServerConfigGitHubOwnerLogin(t *testing.T) {
+	t.Setenv("RASCAL_GITHUB_OWNER_LOGIN", "  rtzll  ")
+
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
+	if cfg.GitHubOwnerLogin != "rtzll" {
+		t.Fatalf("GitHubOwnerLogin = %q, want rtzll", cfg.GitHubOwnerLogin)
+	}
+}
+
 func TestLoadServerConfigNormalizesRunnerMode(t *testing.T) {
 	t.Setenv("RASCAL_RUNNER_MODE", "DOCKER")
 

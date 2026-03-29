@@ -31,6 +31,7 @@ type ServerConfig struct {
 	APIToken                string
 	GitHubToken             string
 	GitHubWebhookSecret     string
+	GitHubOwnerLogin        string
 	BotLogin                string
 	RunnerMode              runner.Mode
 	AgentRuntime            runtime.Runtime
@@ -96,6 +97,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		APIToken:               strings.TrimSpace(os.Getenv("RASCAL_API_TOKEN")),
 		GitHubToken:            strings.TrimSpace(os.Getenv("RASCAL_GITHUB_TOKEN")),
 		GitHubWebhookSecret:    strings.TrimSpace(os.Getenv("RASCAL_GITHUB_WEBHOOK_SECRET")),
+		GitHubOwnerLogin:       strings.TrimSpace(os.Getenv("RASCAL_GITHUB_OWNER_LOGIN")),
 		BotLogin:               strings.TrimSpace(os.Getenv("RASCAL_BOT_LOGIN")),
 		RunnerMode:             runnerMode,
 		AgentRuntime:           agentRuntime,
