@@ -5,41 +5,68 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/api"
+	"github.com/rtzll/rascal/internal/state"
 )
 
-func TestRunLogsFollowRendererAppendsOnlyDiff(t *testing.T) {
-	t.Parallel()
-
-	renderer := newRunLogsFollowRenderer(0, time.Now)
-	if got := renderer.Render(api.RunLogsResponse{Logs: "alpha\n"}); got != "alpha\n" {
-		t.Fatalf("first render = %q, want %q", got, "alpha\n")
+func TestStreamRunLogsFollowAppendsOnlyDiff(t *testing.T) {
+	responses := []api.RunLogsResponse{
+		{Logs: "alpha\n", RunStatus: state.StatusRunning, Done: false},
+		{Logs: "alpha\nbeta\n", RunStatus: state.StatusRunning, Done: false},
+		{Logs: "alpha\nbeta\ngamma\n", RunStatus: state.StatusSucceeded, Done: true},
 	}
-	if got := renderer.Render(api.RunLogsResponse{Logs: "alpha\nbeta\n"}); got != "beta\n" {
-		t.Fatalf("second render = %q, want %q", got, "beta\n")
-	}
-	if got := renderer.Render(api.RunLogsResponse{Logs: "alpha\nbeta\ngamma\n"}); got != "gamma\n" {
-		t.Fatalf("third render = %q, want %q", got, "gamma\n")
-	}
-}
 
-func TestRunLogsFollowRendererPrintsFullBodyOnReset(t *testing.T) {
-	t.Parallel()
+	a, closeServer, _ := newFollowLogsTestApp(t, responses)
+	defer closeServer()
 
-	renderer := newRunLogsFollowRenderer(0, time.Now)
-	_ = renderer.Render(api.RunLogsResponse{Logs: "one\ntwo\n"})
-	if got := renderer.Render(api.RunLogsResponse{Logs: "reset\n"}); got != "reset\n" {
-		t.Fatalf("reset render = %q, want %q", got, "reset\n")
+	out, err := captureStdout(func() error {
+		return a.streamRunLogs("run_abc123", true, 1*time.Millisecond, 0, 200)
+	})
+	if err != nil {
+		t.Fatalf("streamRunLogs follow: %v", err)
+	}
+	if out != "alpha\nbeta\ngamma\n" {
+		t.Fatalf("unexpected follow output:\n--- got ---\n%s\n--- want ---\n%s", out, "alpha\nbeta\ngamma\n")
 	}
 }
 
-func TestRunLogsFollowRendererAppliesSinceFilter(t *testing.T) {
-	t.Parallel()
+func TestStreamRunLogsFollowPrintsFullBodyOnReset(t *testing.T) {
+	responses := []api.RunLogsResponse{
+		{Logs: "one\ntwo\n", RunStatus: state.StatusRunning, Done: false},
+		{Logs: "reset\n", RunStatus: state.StatusRunning, Done: true},
+	}
 
-	now := time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC)
-	renderer := newRunLogsFollowRenderer(1*time.Hour, func() time.Time { return now })
+	a, closeServer, _ := newFollowLogsTestApp(t, responses)
+	defer closeServer()
 
-	logs := "[2026-03-29T10:30:00Z] skipped\n[2026-03-29T11:15:00Z] kept\n"
-	if got := renderer.Render(api.RunLogsResponse{Logs: logs}); got != "[2026-03-29T11:15:00Z] kept\n" {
-		t.Fatalf("since-filtered render = %q", got)
+	out, err := captureStdout(func() error {
+		return a.streamRunLogs("run_reset", true, 1*time.Millisecond, 0, 200)
+	})
+	if err != nil {
+		t.Fatalf("streamRunLogs follow: %v", err)
+	}
+	if out != "one\ntwo\nreset\n" {
+		t.Fatalf("unexpected follow output on reset:\n--- got ---\n%s\n--- want ---\n%s", out, "one\ntwo\nreset\n")
+	}
+}
+
+func TestStreamRunLogsFollowStopsAfterDone(t *testing.T) {
+	responses := []api.RunLogsResponse{
+		{Logs: "done-now\n", RunStatus: state.StatusFailed, Done: true},
+	}
+
+	a, closeServer, requestCount := newFollowLogsTestApp(t, responses)
+	defer closeServer()
+
+	out, err := captureStdout(func() error {
+		return a.streamRunLogs("run_done", true, 5*time.Millisecond, 0, 200)
+	})
+	if err != nil {
+		t.Fatalf("streamRunLogs follow: %v", err)
+	}
+	if out != "done-now\n" {
+		t.Fatalf("unexpected output:\n--- got ---\n%s\n--- want ---\n%s", out, "done-now\n")
+	}
+	if got := requestCount(); got != 1 {
+		t.Fatalf("expected exactly one follow request when done=true, got %d", got)
 	}
 }
