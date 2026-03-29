@@ -6,7 +6,7 @@ GOLANGCI_LINT ?= $(or $(shell command -v golangci-lint 2>/dev/null),$(CURDIR)/bi
 GOLANGCI_LINT_CACHE := $(CURDIR)/tmp/golangci-lint-cache
 SQLC ?= $(or $(shell command -v sqlc 2>/dev/null),$(CURDIR)/bin/sqlc)
 
-.PHONY: test test-fast build build-cli build-daemon run-daemon run-cli fmt lint codegen
+.PHONY: test test-fast build build-cli build-daemon run-daemon run-cli fmt lint codegen verify verify-generated
 
 test: codegen
 	go test ./...
@@ -20,6 +20,25 @@ fmt:
 lint: codegen $(GOLANGCI_LINT)
 	mkdir -p "$(GOLANGCI_LINT_CACHE)"
 	GOLANGCI_LINT_CACHE="$(GOLANGCI_LINT_CACHE)" $(GOLANGCI_LINT) run
+
+verify:
+	@before="$$(git status --porcelain)"; \
+	$(MAKE) lint; \
+	$(MAKE) test; \
+	VERIFY_GIT_STATUS_BEFORE="$$before" $(MAKE) verify-generated
+
+verify-generated:
+	@before="$${VERIFY_GIT_STATUS_BEFORE-}"; \
+	after="$$(git status --porcelain)"; \
+	if [ -z "$$before" ]; then \
+		git diff --exit-code; \
+		exit $$?; \
+	fi; \
+	if [ "$$before" = "$$after" ]; then \
+		exit 0; \
+	fi; \
+	echo "verification changed the working tree; commit generated or derived files" >&2; \
+	git diff --exit-code
 
 build: build-cli build-daemon
 

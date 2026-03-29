@@ -13,13 +13,15 @@ version with `go run`.
 
 ## Local workflow
 
-Run these commands from the repository root:
+Run this command from the repository root:
 
 ```bash
-make lint
-make test
+make verify
 ```
 
+- `make verify` mirrors CI: it runs `make lint`, `make test`, and then
+  checks whether verification changed the working tree, so local edits do not
+  fail verification unless lint/test/code generation introduce extra diffs.
 - `make lint` runs SQLC code generation first, then runs `golangci-lint`.
 - `make test` runs SQLC code generation first, then runs `go test ./...`.
 - `make test-fast` skips code generation and runs `go test ./...` directly. Use
