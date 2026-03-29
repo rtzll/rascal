@@ -111,3 +111,14 @@ You can run Rascal over host IP without a domain.
 rascal doctor --host YOUR_SERVER_IP
 rascal config view
 ```
+
+## Local Verification
+
+Before relying on a new setup, run the local smoke checks:
+
+```bash
+make smoke
+```
+
+This runs both smoke checks: `smoke-noop` and `smoke-docker`.
+The Docker-backed smoke check requires a working local Docker daemon.
