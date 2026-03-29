@@ -121,6 +121,7 @@ RUN chmod +x /usr/local/bin/codex /usr/local/bin/gh /usr/local/bin/git \
     && git -C /tmp/rascal-smoke-worktree branch -M main \
     && git -C /tmp/rascal-smoke-worktree remote add origin file:///opt/rascal-smoke/remote.git \
     && git -C /tmp/rascal-smoke-worktree push origin main \
+    && chown -R rascal:rascal /opt/rascal-smoke \
     && rm -rf /tmp/rascal-smoke-seed /tmp/rascal-smoke-worktree
 USER rascal:rascal
 ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]
