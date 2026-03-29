@@ -45,6 +45,11 @@ func runGoose(ex CommandExecutor, cfg Config, rt runtime.Runtime) (string, strin
 	sessionKey := configuredSessionKey(cfg)
 	resume := configuredSessionResume(cfg)
 	label := gooseRuntimeLabel(rt)
+	if rt.Provider() == runtime.ModelProviderCodex {
+		if err := ensureCodexHome(cfg); err != nil {
+			return "", "", fmt.Errorf("ensure codex home: %w", err)
+		}
+	}
 	env, err := gooseRuntimeEnv(cfg, rt)
 	if err != nil {
 		return "", "", err
@@ -322,6 +327,9 @@ func gooseRuntimeLabel(rt runtime.Runtime) string {
 }
 
 func ensureCodexHome(cfg Config) error {
+	if strings.TrimSpace(cfg.CodexHome) == "" {
+		return nil
+	}
 	if err := os.MkdirAll(cfg.CodexHome, 0o755); err != nil {
 		return fmt.Errorf("create codex home: %w", err)
 	}

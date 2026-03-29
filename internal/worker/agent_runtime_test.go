@@ -278,6 +278,59 @@ func TestRunClaudeFreshSession(t *testing.T) {
 	}
 }
 
+func TestRunGooseCodexEnsuresCodexHome(t *testing.T) {
+	root := t.TempDir()
+	authFile := filepath.Join(root, "secrets", "codex_auth.json")
+	if err := os.MkdirAll(filepath.Dir(authFile), 0o755); err != nil {
+		t.Fatalf("MkdirAll() auth dir error = %v", err)
+	}
+	if err := os.WriteFile(authFile, []byte(`{"token":"goose-codex-auth"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() auth error = %v", err)
+	}
+
+	cfg := Config{
+		RepoDir:          root,
+		MetaDir:          root,
+		InstructionsPath: filepath.Join(root, "instructions.md"),
+		GooseLogPath:     filepath.Join(root, "agent.ndjson"),
+		CodexHome:        filepath.Join(root, "codex-home"),
+		CodexAuthFile:    authFile,
+	}
+	if err := os.WriteFile(cfg.InstructionsPath, []byte("do goose thing"), 0o644); err != nil {
+		t.Fatalf("WriteFile() instructions error = %v", err)
+	}
+
+	ex := fakeExecutor{
+		runFn: func(_ string, _ []string, stdout, _ io.Writer, name string, args ...string) error {
+			if name != "goose" {
+				t.Fatalf("command = %q, want goose", name)
+			}
+			data, err := os.ReadFile(filepath.Join(cfg.CodexHome, "auth.json"))
+			if err != nil {
+				t.Fatalf("ReadFile() codex auth error = %v", err)
+			}
+			if string(data) != `{"token":"goose-codex-auth"}` {
+				t.Fatalf("codex auth = %q, want copied auth", string(data))
+			}
+			if _, err := io.WriteString(stdout, `{"type":"message"}`+"\n"); err != nil {
+				return fmt.Errorf("write fake goose output: %w", err)
+			}
+			return nil
+		},
+	}
+
+	output, sessionID, err := RunGooseCodex(ex, cfg)
+	if err != nil {
+		t.Fatalf("RunGooseCodex() error = %v", err)
+	}
+	if strings.TrimSpace(output) != `{"type":"message"}` {
+		t.Fatalf("output = %q, want fake goose output", output)
+	}
+	if sessionID != "" {
+		t.Fatalf("sessionID = %q, want empty", sessionID)
+	}
+}
+
 func TestEnsureCodexHomeUsesConfiguredAuthFile(t *testing.T) {
 	root := t.TempDir()
 	authFile := filepath.Join(root, "secrets", "codex_auth.json")
