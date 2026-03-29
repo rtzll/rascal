@@ -103,6 +103,28 @@ FROM runner-base AS codex-runner
 USER rascal:rascal
 ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]
 
+FROM codex-runner AS smoke-codex-runner
+USER root
+COPY smoke/codex /usr/local/bin/codex
+COPY smoke/gh /usr/local/bin/gh
+COPY smoke/git /usr/local/bin/git
+COPY smoke/seed-repo /tmp/rascal-smoke-seed
+RUN chmod +x /usr/local/bin/codex /usr/local/bin/gh /usr/local/bin/git \
+    && install -d -m 0755 /opt/rascal-smoke \
+    && git init --bare /opt/rascal-smoke/remote.git \
+    && git init /tmp/rascal-smoke-worktree \
+    && git -C /tmp/rascal-smoke-worktree config user.name "smoke-bot" \
+    && git -C /tmp/rascal-smoke-worktree config user.email "smoke-bot@example.com" \
+    && cp -R /tmp/rascal-smoke-seed/. /tmp/rascal-smoke-worktree/ \
+    && git -C /tmp/rascal-smoke-worktree add -A \
+    && git -C /tmp/rascal-smoke-worktree commit -m "chore(smoke): seed repository" \
+    && git -C /tmp/rascal-smoke-worktree branch -M main \
+    && git -C /tmp/rascal-smoke-worktree remote add origin file:///opt/rascal-smoke/remote.git \
+    && git -C /tmp/rascal-smoke-worktree push origin main \
+    && rm -rf /tmp/rascal-smoke-seed /tmp/rascal-smoke-worktree
+USER rascal:rascal
+ENTRYPOINT ["/usr/local/bin/rascal-entrypoint"]
+
 FROM runner-base AS claude-runner
 COPY --from=claude-runtime /root/.local/bin/claude /usr/local/bin/claude
 COPY --from=claude-runtime /root/.local/share/claude /usr/local/share/claude

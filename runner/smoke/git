@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "clone" && "${2:-}" == https://x-access-token:*@github.com/* ]]; then
+  remote_url="file:///opt/rascal-smoke/remote.git"
+  target_dir="${3:-}"
+  if [[ -z "$target_dir" ]]; then
+    printf 'missing clone target dir\n' >&2
+    exit 1
+  fi
+  exec /usr/bin/git clone "$remote_url" "$target_dir"
+fi
+
+exec /usr/bin/git "$@"

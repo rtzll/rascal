@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then
+  printf '{"login":"smoke-bot"}\n'
+  exit 0
+fi
+
+if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
+  printf 'pull request not found\n' >&2
+  exit 1
+fi
+
+if [[ "${1:-}" == "pr" && "${2:-}" == "create" ]]; then
+  repo="smoke/example"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo)
+        shift
+        repo="${1:-$repo}"
+        ;;
+    esac
+    shift || true
+  done
+  printf 'https://github.com/%s/pull/1\n' "$repo"
+  exit 0
+fi
+
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'gh smoke shim\n'
+  exit 0
+fi
+
+exec /usr/bin/gh "$@"
