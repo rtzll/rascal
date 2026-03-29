@@ -79,8 +79,8 @@ rascal (CLI) or GitHub webhook
 - Schedules runs serially per task and concurrently across different tasks.
 - Starts detached runner containers and supervises them via persisted execution
   handles.
-- Supports blue/green slot handoff by letting a new slot adopt detached
-  execution supervision.
+- Supports blue/green slot handoff by letting the previous slot drain for one
+  generation and reclaiming the oldest drainer on the next deploy when needed.
 - Lives in `cmd/rascald`.
 
 3. Runner container (`rascal-runner`)
@@ -190,11 +190,12 @@ Deploy and recovery lifecycle:
 ```text
 active slot A running
     |
+    +--> if slot B is still draining from an earlier deploy, reclaim B
     +--> deploy prepares slot B
     +--> slot B passes readiness
     +--> traffic flips to B
-    +--> slot A drains and releases supervision
-    +--> slot B adopts detached executions
+    +--> slot A enters deploy-drain and may keep supervising active runs
+    +--> later deploy or restart may reclaim/adopt remaining executions
 ```
 
 ## System Invariants

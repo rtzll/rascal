@@ -20,6 +20,8 @@ import (
 	"github.com/rtzll/rascal/internal/state"
 )
 
+const deployReclaimCancelReason = "superseded by newer deploy while draining"
+
 func main() {
 	cfg, err := config.LoadServerConfig()
 	if err != nil {
@@ -82,29 +84,92 @@ func main() {
 		serverErr <- httpServer.ListenAndServe()
 	}()
 
-	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	sigCh := make(chan os.Signal, 4)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1, syscall.SIGUSR2)
+	defer signal.Stop(sigCh)
 
-	select {
-	case err := <-serverErr:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("server stopped: %v", err)
+	var deployDrainDone <-chan struct{}
+	for {
+		select {
+		case err := <-serverErr:
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("server stopped: %v", err)
+			}
+			return
+		case <-deployDrainDone:
+			log.Printf("deploy drain complete; shutting down slot")
+			s.StopRunSupervisors()
+			return
+		case sig := <-sigCh:
+			switch sig {
+			case syscall.SIGUSR1:
+				if deployDrainDone == nil {
+					log.Printf("deploy drain signal received; stopping http listeners and waiting for active runs to finish")
+					deployDrainDone = beginDeployDrain(httpServer, s)
+				}
+			case syscall.SIGUSR2:
+				log.Printf("deploy reclaim signal received; canceling active runs before shutdown")
+				reclaimForDeploy(httpServer, s, 15*time.Second)
+				return
+			case os.Interrupt, syscall.SIGTERM:
+				log.Printf("shutdown signal received; entering drain mode")
+				genericShutdown(httpServer, s, 10*time.Second)
+				return
+			}
 		}
-		return
-	case <-sigCtx.Done():
 	}
+}
 
-	log.Printf("shutdown signal received; entering drain mode")
+func beginDeployDrain(httpServer *http.Server, s *orchestrator.Server) <-chan struct{} {
 	s.BeginDrain()
+	shutdownHTTPServer(httpServer, 15*time.Second)
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	done := make(chan struct{})
+	go func() {
+		waitForActiveRunsToFinish(s)
+		close(done)
+	}()
+	return done
+}
+
+func reclaimForDeploy(httpServer *http.Server, s *orchestrator.Server, timeout time.Duration) {
+	s.BeginDrain()
+	shutdownHTTPServer(httpServer, 15*time.Second)
+	s.CancelActiveRunsWithReason(deployReclaimCancelReason, state.RunStatusReasonDeployReclaimed)
+	if err := s.WaitForNoActiveRuns(timeout); err != nil {
+		log.Printf("deploy reclaim exiting with active detached runs still executing: %v", err)
+	}
+	s.StopRunSupervisors()
+}
+
+func genericShutdown(httpServer *http.Server, s *orchestrator.Server, timeout time.Duration) {
+	s.BeginDrain()
+	shutdownHTTPServer(httpServer, 15*time.Second)
+	s.StopRunSupervisors()
+	if err := s.WaitForNoActiveRuns(timeout); err != nil {
+		log.Printf("shutdown exiting with active detached runs still executing: %v", err)
+	}
+}
+
+func shutdownHTTPServer(httpServer *http.Server, timeout time.Duration) {
+	if httpServer == nil {
+		return
+	}
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if err := httpServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := httpServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, http.ErrServerClosed) {
 		log.Printf("http shutdown warning: %v", err)
 	}
+}
 
-	s.StopRunSupervisors()
-	if err := s.WaitForNoActiveRuns(10 * time.Second); err != nil {
-		log.Printf("shutdown exiting with active detached runs still executing: %v", err)
+func waitForActiveRunsToFinish(s *orchestrator.Server) {
+	for {
+		if s.ActiveRunCount() == 0 {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }

@@ -404,6 +404,8 @@ func statusReasonFromCancelSource(source string) state.RunStatusReason {
 		return state.RunStatusReasonReviewThreadResolved
 	case "shutdown":
 		return state.RunStatusReasonShutdown
+	case string(state.RunStatusReasonDeployReclaimed):
+		return state.RunStatusReasonDeployReclaimed
 	case "broker":
 		return state.RunStatusReasonCredentialLeaseLost
 	default:

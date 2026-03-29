@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -246,6 +247,53 @@ func TestExecuteBootstrapInstallsRipgrepWithCaddyPackages(t *testing.T) {
 	}
 }
 
+func TestExecuteReclaimsInactiveDrainingSlotBeforeRestart(t *testing.T) {
+	logDir := setupFakeDeployCommands(t, "")
+
+	if err := Execute(testDeployConfig()); err != nil {
+		t.Fatalf("execute deploy: %v", err)
+	}
+
+	scripts := readCapturedSSHScripts(t, logDir)
+	reclaimIdx := scriptIndexContaining(scripts, `systemctl kill -s SIGUSR2 "rascal@green"`)
+	restartIdx := scriptIndexContaining(scripts, `systemctl restart 'rascal@green'`)
+	if reclaimIdx < 0 {
+		t.Fatalf("expected reclaim script for inactive green slot, got %d scripts", len(scripts))
+	}
+	if restartIdx < 0 {
+		t.Fatalf("expected restart script for inactive green slot, got %d scripts", len(scripts))
+	}
+	if reclaimIdx >= restartIdx {
+		t.Fatalf("expected reclaim before restart, got reclaim=%d restart=%d", reclaimIdx, restartIdx)
+	}
+}
+
+func TestExecuteDrainsPreviousSlotInsteadOfStoppingItImmediately(t *testing.T) {
+	logDir := setupFakeDeployCommands(t, "")
+
+	if err := Execute(testDeployConfig()); err != nil {
+		t.Fatalf("execute deploy: %v", err)
+	}
+
+	scripts := readCapturedSSHScripts(t, logDir)
+	cutoverIdx := scriptIndexContaining(scripts, `echo 'green' >/etc/rascal/active_slot`)
+	if cutoverIdx < 0 {
+		t.Fatalf("expected cutover script, got %d scripts", len(scripts))
+	}
+	cutoverScript := scripts[cutoverIdx]
+	if !strings.Contains(cutoverScript, `systemctl kill -s SIGUSR1 "rascal@blue"`) {
+		t.Fatalf("expected cutover to signal old blue slot into drain mode:\n%s", cutoverScript)
+	}
+	for _, forbidden := range []string{
+		`systemctl stop --no-block "rascal@blue"`,
+		`systemctl disable "rascal@blue"`,
+	} {
+		if strings.Contains(cutoverScript, forbidden) {
+			t.Fatalf("cutover script should not stop old slot immediately (%s):\n%s", forbidden, cutoverScript)
+		}
+	}
+}
+
 func TestResolveRunnerBuildInfoUsesEnv(t *testing.T) {
 	t.Setenv("RASCAL_BUILD_VERSION", "v1.2.3")
 	t.Setenv("RASCAL_BUILD_COMMIT", "abc1234")
@@ -436,7 +484,9 @@ func readCapturedSSHScripts(t *testing.T, logDir string) []string {
 	if err != nil {
 		t.Fatalf("glob scripts: %v", err)
 	}
-	sort.Strings(files)
+	sort.Slice(files, func(i, j int) bool {
+		return scriptSequenceNumber(files[i]) < scriptSequenceNumber(files[j])
+	})
 	out := make([]string, 0, len(files))
 	for _, f := range files {
 		b, err := os.ReadFile(f)
@@ -455,6 +505,15 @@ func containsScript(scripts []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func scriptIndexContaining(scripts []string, needle string) int {
+	for i, script := range scripts {
+		if strings.Contains(script, needle) {
+			return i
+		}
+	}
+	return -1
 }
 
 func readCapturedCommandLines(t *testing.T, path string) []string {
@@ -491,4 +550,15 @@ func firstLineContaining(lines []string, needle string) string {
 func containsLegacySingleUnitCommand(script string) bool {
 	legacyPattern := regexp.MustCompile(`\bsystemctl\s+(?:is-active --quiet|stop|disable)\s+rascal(?:\s|;|$)`)
 	return legacyPattern.MatchString(script)
+}
+
+func scriptSequenceNumber(path string) int {
+	base := filepath.Base(path)
+	base = strings.TrimPrefix(base, "ssh_script_")
+	base = strings.TrimSuffix(base, ".sh")
+	n, err := strconv.Atoi(base)
+	if err != nil {
+		return 0
+	}
+	return n
 }

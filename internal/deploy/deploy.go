@@ -261,6 +261,25 @@ systemctl daemon-reload
 	if err := runRemoteScript(cfg, fmt.Sprintf("set -eu\nif ! systemctl is-active --quiet 'rascal@%s'; then systemctl enable 'rascal@%s' >/dev/null 2>&1 || true; systemctl restart 'rascal@%s'; fi\n", activeSlot, activeSlot, activeSlot)); err != nil {
 		return err
 	}
+	if err := runRemoteScript(cfg, fmt.Sprintf(strings.TrimSpace(`
+set -eu
+if systemctl is-active --quiet "rascal@%s"; then
+  systemctl kill -s SIGUSR2 "rascal@%s" || true
+  reclaimed=0
+  for _ in $(seq 1 30); do
+    if ! systemctl is-active --quiet "rascal@%s"; then
+      reclaimed=1
+      break
+    fi
+    sleep 1
+  done
+  if [ "$reclaimed" -ne 1 ]; then
+    systemctl stop "rascal@%s" || true
+  fi
+fi
+`)+"\n", inactiveSlot, inactiveSlot, inactiveSlot, inactiveSlot)); err != nil {
+		return err
+	}
 	if err := runRemoteScript(cfg, fmt.Sprintf("set -eu\nsystemctl enable 'rascal@%s' >/dev/null 2>&1 || true\nsystemctl restart 'rascal@%s'\n", inactiveSlot, inactiveSlot)); err != nil {
 		return err
 	}
@@ -327,8 +346,9 @@ echo %s >/etc/rascal/active_slot
 sync
 sleep 3
 if [ %s != %s ]; then
-  systemctl stop --no-block "rascal@%s" || true
-  systemctl disable "rascal@%s" >/dev/null 2>&1 || true
+  if systemctl is-active --quiet "rascal@%s"; then
+    systemctl kill -s SIGUSR1 "rascal@%s" || true
+  fi
 fi
 systemctl enable "rascal@%s" >/dev/null 2>&1 || true
 systemctl is-active --quiet "rascal@%s"

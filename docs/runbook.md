@@ -166,6 +166,11 @@ rascal logs rascald --host "$HOST" --lines 300
 rascal logs run RUN_ID --lines 300
 ```
 
+If a recent deploy is involved, remember the two-slot interim policy:
+
+- the immediately previous slot may still be draining old work
+- the next deploy will reclaim that oldest draining slot if it needs to reuse it
+
 ## 5) Manual Rollback (Blue/Green)
 
 Use only if automatic rollback did not recover service.
@@ -189,7 +194,9 @@ EOF
 systemctl reload caddy || systemctl restart caddy
 echo blue >/etc/rascal/active_slot
 systemctl restart rascal@blue
-systemctl stop --no-block rascal@green || true"
+if systemctl is-active --quiet rascal@green; then
+  systemctl kill -s SIGUSR1 rascal@green || true
+fi"
 ```
 
 3. Verify recovery:

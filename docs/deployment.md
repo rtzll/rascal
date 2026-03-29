@@ -59,13 +59,15 @@ Given active slot `A` and inactive slot `B`, deploy does:
 4. Install uploaded `rascal-runner` into `/opt/rascal/runner/rascal-runner`.
 5. Build/update runner images on host.
 6. Install/update systemd unit and env files.
-7. Start/restart slot `B`.
-8. Wait for slot `B` readiness (`/readyz` on `B` port).
-9. Update Caddy upstream to slot `B` and reload Caddy.
-10. Verify proxy readiness via Caddy.
-11. Write `/etc/rascal/active_slot = B`.
-12. Stop old slot `A` with `systemctl stop --no-block` (non-blocking).
-13. Disable old slot unit; keep new slot unit enabled/active.
+7. If slot `B` is still draining from the previous deploy, reclaim it first:
+   cancel its remaining active runs, allow a short cleanup window, and stop it.
+8. Start/restart slot `B`.
+9. Wait for slot `B` readiness (`/readyz` on `B` port).
+10. Update Caddy upstream to slot `B` and reload Caddy.
+11. Verify proxy readiness via Caddy.
+12. Write `/etc/rascal/active_slot = B`.
+13. Signal old slot `A` into deploy-drain mode.
+14. Keep new slot unit enabled/active.
 
 Important: deploy success is no longer coupled to waiting for old-slot run
 completion.
@@ -80,15 +82,29 @@ task execution during deploy. Its remaining value is:
 
 ## Drain Behavior
 
-When old slot gets `SIGTERM`:
+Deploy cutover uses an explicit two-slot policy:
+
+- The immediately previous slot is allowed to drain indefinitely.
+- The next deploy may reclaim that draining slot if it is needed again.
+
+Deploy drain (`SIGUSR1`) does this:
 
 1. Enters draining mode.
-2. Stops accepting new work.
-3. Stops local run supervision goroutines.
-4. Releases run leases quickly.
-5. Exits without canceling active detached run containers.
+2. Stops accepting new work and shuts down HTTP listeners.
+3. Keeps supervising any active runs already assigned to that slot.
+4. Uses no fixed timeout cancellation.
+5. Exits only after those active runs finish, unless a later deploy reclaims it.
 
-This allows fast cutover while the next slot adopts supervision.
+Deploy reclaim (`SIGUSR2`) is used only when the inactive slot is still
+draining during the next deploy:
+
+1. Enter drain mode and stop HTTP listeners.
+2. Cancel that slot's remaining active runs with a deploy-specific reason.
+3. Allow a short bounded cleanup window.
+4. Stop the slot so deploy can reuse it.
+
+Generic host/service shutdown is separate from deploy drain and may still use a
+bounded wait on exit.
 
 ## Runner Entrypoint
 
@@ -148,8 +164,9 @@ Example: `blue` is active and running a job, deploy is triggered.
 1. Deploy prepares `green` and passes `green` readiness.
 2. Caddy upstream switches to `green`.
 3. `active_slot` flips to `green`.
-4. `blue` gets stop request with `--no-block`; deploy returns success quickly.
-5. `blue` relinquishes supervision and exits; detached run container keeps
-   executing.
-6. `green` adopts supervision using persisted execution handle state.
-7. On terminal completion, `green` finalizes run state and removes container.
+4. `blue` gets a deploy-drain signal and stops accepting new work.
+5. `blue` keeps supervising its active run until that run finishes.
+6. Deploy returns success without waiting for `blue` to finish.
+7. If another deploy happens before `blue` is done, deploy reclaims `blue`,
+   cancels its remaining work, and reuses that slot.
+8. Otherwise `blue` exits naturally after its active work completes.

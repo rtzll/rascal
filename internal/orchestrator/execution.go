@@ -788,12 +788,16 @@ func (s *Server) cancelRunningTaskRuns(taskID, reason string, statusReason state
 }
 
 func (s *Server) CancelActiveRuns(reason string) {
+	s.CancelActiveRunsWithReason(reason, state.RunStatusReasonShutdown)
+}
+
+func (s *Server) CancelActiveRunsWithReason(reason string, statusReason state.RunStatusReason) {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		reason = "canceled"
 	}
 	for _, run := range s.Store.ListRunningRuns() {
-		s.requestRunCancelBestEffort(run.ID, reason, "shutdown")
-		s.stopRunExecutionBestEffort(run.ID, "shutdown cancellation")
+		s.requestRunCancelBestEffort(run.ID, reason, string(state.NormalizeRunStatusReason(statusReason)))
+		s.stopRunExecutionBestEffort(run.ID, string(state.NormalizeRunStatusReason(statusReason))+" cancellation")
 	}
 }

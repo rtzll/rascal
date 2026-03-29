@@ -2945,7 +2945,7 @@ func TestReadyForReviewResumesQueuedDraftPRRuns(t *testing.T) {
 
 	waitFor(t, 3*time.Second, func() bool {
 		updated, ok := s.Store.GetRun(run.ID)
-		return ok && updated.Status != state.StatusQueued
+		return ok && updated.Status != state.StatusQueued && launcher.Calls() == 1
 	}, "draft pr queued run resumed after ready_for_review")
 	task, ok := s.Store.FindTaskByPR("owner/repo", 1300)
 	if !ok {
@@ -4815,6 +4815,65 @@ func TestCancelActiveRunsUsesDrainReason(t *testing.T) {
 		current, ok := s.Store.GetRun(run.ID)
 		return ok && current.Status == state.StatusCanceled && strings.Contains(current.Error, "drain timeout")
 	}, "run canceled with drain reason")
+}
+
+func TestBeginDeployDrainWaitsForActiveRunsWithoutCanceling(t *testing.T) {
+	t.Parallel()
+	waitCh := make(chan struct{})
+	launcher := &fakeRunner{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "deploy-drain", Repo: "owner/repo", Instruction: "let it finish"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_ = waitForRunExecution(t, s, run.ID)
+
+	done := beginDeployDrain(nil, s)
+
+	select {
+	case <-done:
+		t.Fatal("deploy drain should wait for the active run to finish")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	close(waitCh)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deploy drain did not finish after active run completed")
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		current, ok := s.Store.GetRun(run.ID)
+		return ok && current.Status == state.StatusSucceeded
+	}, "run succeeded after deploy drain")
+}
+
+func TestReclaimForDeployCancelsActiveRunsWithDeployReason(t *testing.T) {
+	t.Parallel()
+	waitCh := make(chan struct{})
+	launcher := &fakeRunner{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{TaskID: "deploy-reclaim", Repo: "owner/repo", Instruction: "reclaim it"})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_ = waitForRunExecution(t, s, run.ID)
+
+	reclaimForDeploy(nil, s, 2*time.Second)
+
+	waitFor(t, 2*time.Second, func() bool {
+		current, ok := s.Store.GetRun(run.ID)
+		return ok &&
+			current.Status == state.StatusCanceled &&
+			current.StatusReason == state.RunStatusReasonDeployReclaimed &&
+			strings.Contains(current.Error, deployReclaimCancelReason)
+	}, "run canceled with deploy reclaim reason")
 }
 
 func TestExecuteRunHonorsPersistedCancelBeforeStart(t *testing.T) {

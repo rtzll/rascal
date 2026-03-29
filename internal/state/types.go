@@ -33,6 +33,7 @@ const (
 	RunStatusReasonReviewThreadResolved RunStatusReason = "review_thread_resolved"
 	RunStatusReasonTaskCompleted        RunStatusReason = "task_completed"
 	RunStatusReasonShutdown             RunStatusReason = "shutdown"
+	RunStatusReasonDeployReclaimed      RunStatusReason = "deploy_reclaimed"
 	RunStatusReasonCredentialLeaseLost  RunStatusReason = "credential_lease_lost"
 )
 
@@ -56,6 +57,8 @@ func NormalizeRunStatusReason(reason RunStatusReason) RunStatusReason {
 		return RunStatusReasonTaskCompleted
 	case string(RunStatusReasonShutdown):
 		return RunStatusReasonShutdown
+	case string(RunStatusReasonDeployReclaimed):
+		return RunStatusReasonDeployReclaimed
 	case string(RunStatusReasonCredentialLeaseLost):
 		return RunStatusReasonCredentialLeaseLost
 	default:
