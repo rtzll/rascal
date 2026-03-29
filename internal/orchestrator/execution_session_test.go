@@ -35,6 +35,7 @@ type executionFakeRunner struct {
 	specs  []runner.Spec
 	errSeq []error
 	resSeq []executionFakeRunResult
+	waitCh <-chan struct{}
 	execs  map[string]*executionFakeExecution
 	nextID int
 }
@@ -42,8 +43,10 @@ type executionFakeRunner struct {
 type executionFakeExecution struct {
 	handle    runner.ExecutionHandle
 	spec      runner.Spec
+	waitCh    <-chan struct{}
 	result    executionFakeRunResult
 	finalized bool
+	stopped   bool
 }
 
 func (f *executionFakeRunner) StartDetached(_ context.Context, spec runner.Spec) (runner.ExecutionHandle, error) {
@@ -74,6 +77,7 @@ func (f *executionFakeRunner) StartDetached(_ context.Context, spec runner.Spec)
 	execRec := &executionFakeExecution{
 		handle: handle,
 		spec:   spec,
+		waitCh: f.waitCh,
 		result: result,
 	}
 	f.execs[handle.ID] = execRec
@@ -92,6 +96,22 @@ func (f *executionFakeRunner) Inspect(_ context.Context, handle runner.Execution
 	if !ok {
 		return runner.ExecutionState{}, runner.ErrExecutionNotFound
 	}
+	running := false
+	if !execRec.stopped {
+		if execRec.waitCh == nil {
+			running = false
+		} else {
+			select {
+			case <-execRec.waitCh:
+				running = false
+			default:
+				running = true
+			}
+		}
+	}
+	if running {
+		return runner.ExecutionState{Running: true}, nil
+	}
 	if !execRec.finalized {
 		if err := writeExecutionFakeMeta(execRec.spec, execRec.result); err != nil {
 			return runner.ExecutionState{}, err
@@ -105,10 +125,24 @@ func (f *executionFakeRunner) Inspect(_ context.Context, handle runner.Execution
 func (f *executionFakeRunner) Stop(_ context.Context, handle runner.ExecutionHandle, _ time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, ok := f.execs[handle.ID]; ok {
+	if execRec, ok := f.execs[handle.ID]; ok {
+		execRec.stopped = true
+		if execRec.result.ExitCode == 0 {
+			execRec.result.ExitCode = 137
+		}
+		if execRec.result.Error == "" {
+			execRec.result.Error = "canceled"
+		}
 		return nil
 	}
-	if _, ok := f.execs[handle.Name]; ok {
+	if execRec, ok := f.execs[handle.Name]; ok {
+		execRec.stopped = true
+		if execRec.result.ExitCode == 0 {
+			execRec.result.ExitCode = 137
+		}
+		if execRec.result.Error == "" {
+			execRec.result.Error = "canceled"
+		}
 		return nil
 	}
 	return runner.ErrExecutionNotFound
@@ -162,9 +196,15 @@ func newExecutionTestServer(t *testing.T, launcher runner.Runner) *Server {
 
 	dataDir := t.TempDir()
 	statePath := filepath.Join(dataDir, "state.db")
-	store, err := state.New(statePath, 200)
+	return newExecutionTestServerWithPaths(t, launcher, dataDir, statePath, "execution-test-instance")
+}
+
+func newExecutionTestServerWithPaths(t *testing.T, launcher runner.Runner, dataDir, statePath, instanceID string) *Server {
+	t.Helper()
+
+	store, err := openExecutionTestStore(statePath)
 	if err != nil {
-		t.Fatalf("new state store: %v", err)
+		t.Fatalf("open state store: %v", err)
 	}
 
 	cipher, err := credentials.NewAESCipher("execution-test-secret")
@@ -191,7 +231,7 @@ func newExecutionTestServer(t *testing.T, launcher runner.Runner) *Server {
 		ghapi.NewAPIClient(""),
 		broker,
 		cipher,
-		"execution-test-instance",
+		strings.TrimSpace(instanceID),
 	)
 	s.SupervisorInterval = 10 * time.Millisecond
 	s.RetryBackoff = func(_ int) time.Duration {
@@ -217,6 +257,30 @@ func newExecutionTestServer(t *testing.T, launcher runner.Runner) *Server {
 	return s
 }
 
+func openExecutionTestStore(statePath string) (*state.Store, error) {
+	statePath = strings.TrimSpace(statePath)
+	if statePath == "" {
+		return nil, fmt.Errorf("state path is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		return nil, fmt.Errorf("create state dir: %w", err)
+	}
+	if _, err := os.Stat(statePath); err == nil {
+		store, err := state.NewWithoutMigrate(statePath, 200)
+		if err != nil {
+			return nil, fmt.Errorf("open existing state store: %w", err)
+		}
+		return store, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("stat state path %s: %w", statePath, err)
+	}
+	store, err := state.New(statePath, 200)
+	if err != nil {
+		return nil, fmt.Errorf("create state store: %w", err)
+	}
+	return store, nil
+}
+
 func seedExecutionSharedCredential(t *testing.T, store *state.Store, cipher credentials.Cipher) {
 	t.Helper()
 	blob, err := cipher.Encrypt([]byte(`{"token":"test"}`))
@@ -230,7 +294,7 @@ func seedExecutionSharedCredential(t *testing.T, store *state.Store, cipher cred
 		EncryptedAuthBlob: blob,
 		Weight:            1,
 		Status:            state.CredentialStatusActive,
-	}); err != nil && !strings.Contains(err.Error(), "already exists") {
+	}); err != nil && !strings.Contains(err.Error(), "already exists") && !strings.Contains(err.Error(), "UNIQUE constraint failed: credentials.id") {
 		t.Fatalf("create shared credential: %v", err)
 	}
 }
@@ -252,6 +316,20 @@ func waitForExecutionServerIdle(t *testing.T, s *Server) {
 	waitForExecutionCondition(t, 2*time.Second, func() bool {
 		return s.ActiveRunCount() == 0
 	}, "server idle")
+}
+
+func waitForExecutionRunExecution(t *testing.T, s *Server, runID string) state.RunExecution {
+	t.Helper()
+	var execRec state.RunExecution
+	waitForExecutionCondition(t, 2*time.Second, func() bool {
+		rec, ok := s.Store.GetRunExecution(runID)
+		if !ok || rec.Status != state.RunExecutionStatusRunning {
+			return false
+		}
+		execRec = rec
+		return true
+	}, "run execution persisted")
+	return execRec
 }
 
 func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
