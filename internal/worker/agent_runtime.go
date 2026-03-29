@@ -26,31 +26,43 @@ func runAgent(ex CommandExecutor, cfg Config) (string, string, error) {
 		return RunCodex(ex, cfg)
 	case runtime.RuntimeClaude:
 		return RunClaude(ex, cfg)
-	case runtime.RuntimeGooseClaude:
-		return RunGooseClaude(ex, cfg)
 	default:
-		return RunGooseCodex(ex, cfg)
+		return runGoose(ex, cfg, configuredAgentRuntime(cfg))
 	}
 }
 
 func RunGooseCodex(ex CommandExecutor, cfg Config) (string, string, error) {
+	return runGoose(ex, cfg, runtime.RuntimeGooseCodex)
+}
+
+func RunGooseClaude(ex CommandExecutor, cfg Config) (string, string, error) {
+	return runGoose(ex, cfg, runtime.RuntimeGooseClaude)
+}
+
+func runGoose(ex CommandExecutor, cfg Config, rt runtime.Runtime) (string, string, error) {
 	sessionID := configuredRuntimeSessionID(cfg)
 	sessionMode := configuredSessionMode(cfg)
 	sessionKey := configuredSessionKey(cfg)
 	resume := configuredSessionResume(cfg)
+	label := gooseRuntimeLabel(rt)
+	env, err := gooseRuntimeEnv(cfg, rt)
+	if err != nil {
+		return "", "", err
+	}
 	if resume && sessionID != "" {
 		exists, err := gooseSessionExists(ex, cfg, sessionID)
 		if err != nil {
-			log.Printf("[%s] goose session preflight warning: name=%s error=%v", nowUTC(), sessionID, err)
+			log.Printf("[%s] %s session preflight warning: name=%s error=%v", nowUTC(), label, sessionID, err)
 		} else if !exists {
-			log.Printf("[%s] goose session missing; starting fresh session name=%s", nowUTC(), sessionID)
+			log.Printf("[%s] %s session missing; starting fresh session name=%s", nowUTC(), label, sessionID)
 			resume = false
 		}
 	}
 
-	log.Printf("[%s] running goose (runtime=%s debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
+	log.Printf("[%s] running %s (runtime=%s debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
 		nowUTC(),
-		configuredAgentRuntime(cfg),
+		label,
+		rt,
 		cfg.GooseDebug,
 		sessionMode,
 		sessionKey,
@@ -60,33 +72,33 @@ func RunGooseCodex(ex CommandExecutor, cfg Config) (string, string, error) {
 	)
 
 	firstAttemptArgs := GooseRunArgs(cfg, resume)
-	if err := RunGooseOnce(ex, cfg, firstAttemptArgs); err != nil {
+	if err := runGooseOnce(ex, cfg, firstAttemptArgs, env, label); err != nil {
 		if resume && IsSessionResumeFailure(err, cfg.GooseLogPath) {
-			log.Printf("[%s] goose session resume failed; falling back to fresh session name=%s reason=%s", nowUTC(), sessionID, strings.TrimSpace(err.Error()))
+			log.Printf("[%s] %s session resume failed; falling back to fresh session name=%s reason=%s", nowUTC(), label, sessionID, strings.TrimSpace(err.Error()))
 			if resetErr := ResetGooseSessionRoot(cfg.GoosePathRoot); resetErr != nil {
-				log.Printf("[%s] goose session reset warning: %v", nowUTC(), resetErr)
+				log.Printf("[%s] %s session reset warning: %v", nowUTC(), label, resetErr)
 			}
 			fallbackArgs := GooseRunArgs(cfg, false)
-			if retryErr := RunGooseOnce(ex, cfg, fallbackArgs); retryErr != nil {
+			if retryErr := runGooseOnce(ex, cfg, fallbackArgs, env, label); retryErr != nil {
 				if writeErr := ensureGooseLogHasError(cfg.GooseLogPath); writeErr != nil {
-					log.Printf("[%s] goose fallback log write warning: %v", nowUTC(), writeErr)
+					log.Printf("[%s] %s fallback log write warning: %v", nowUTC(), label, writeErr)
 				}
-				return "", sessionID, fmt.Errorf("goose run failed after session fallback: %w", retryErr)
+				return "", sessionID, fmt.Errorf("%s run failed after session fallback: %w", label, retryErr)
 			}
-			log.Printf("[%s] goose session fallback succeeded; started fresh session name=%s", nowUTC(), sessionID)
+			log.Printf("[%s] %s session fallback succeeded; started fresh session name=%s", nowUTC(), label, sessionID)
 		} else {
 			if writeErr := ensureGooseLogHasError(cfg.GooseLogPath); writeErr != nil {
-				log.Printf("[%s] goose log write warning: %v", nowUTC(), writeErr)
+				log.Printf("[%s] %s log write warning: %v", nowUTC(), label, writeErr)
 			}
-			return "", sessionID, fmt.Errorf("goose run failed: %w", err)
+			return "", sessionID, fmt.Errorf("%s run failed: %w", label, err)
 		}
 	}
 	data, err := os.ReadFile(cfg.GooseLogPath)
 	if err != nil {
-		return "", sessionID, fmt.Errorf("read goose log: %w", err)
+		return "", sessionID, fmt.Errorf("read %s log: %w", label, err)
 	}
 	if strings.TrimSpace(string(data)) == "" {
-		return "(no goose output captured)", sessionID, nil
+		return fmt.Sprintf("(no %s output captured)", label), sessionID, nil
 	}
 	return string(data), sessionID, nil
 }
@@ -109,22 +121,26 @@ func GooseRunArgs(cfg Config, resume bool) []string {
 }
 
 func RunGooseOnce(ex CommandExecutor, cfg Config, args []string) (err error) {
+	return runGooseOnce(ex, cfg, args, nil, gooseRuntimeLabel(runtime.RuntimeGooseCodex))
+}
+
+func runGooseOnce(ex CommandExecutor, cfg Config, args, extraEnv []string, label string) (err error) {
 	logFile, err := os.OpenFile(cfg.GooseLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
-		return fmt.Errorf("open goose log: %w", err)
+		return fmt.Errorf("open %s log: %w", label, err)
 	}
 	defer func() {
 		if closeErr := logFile.Close(); err == nil && closeErr != nil {
-			err = fmt.Errorf("close goose log: %w", closeErr)
+			err = fmt.Errorf("close %s log: %w", label, closeErr)
 		}
 	}()
 
-	env := []string{}
+	env := append([]string{}, extraEnv...)
 	if cfg.GooseDebug {
 		env = append(env, "GOOSE_CODEX_DEBUG=1")
 	}
 	if err := ex.Run(cfg.RepoDir, env, logFile, logFile, "goose", args...); err != nil {
-		return fmt.Errorf("run goose command: %w", err)
+		return fmt.Errorf("run %s command: %w", label, err)
 	}
 	return nil
 }
@@ -280,93 +296,29 @@ func loadClaudeOAuthToken(cfg Config) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
-func RunGooseClaude(ex CommandExecutor, cfg Config) (string, string, error) {
-	token, err := loadClaudeOAuthToken(cfg)
-	if err != nil {
-		return "", "", fmt.Errorf("load claude oauth token: %w", err)
-	}
-
-	sessionID := configuredRuntimeSessionID(cfg)
-	sessionMode := configuredSessionMode(cfg)
-	sessionKey := configuredSessionKey(cfg)
-	resume := configuredSessionResume(cfg)
-	if resume && sessionID != "" {
-		exists, err := gooseSessionExists(ex, cfg, sessionID)
+func gooseRuntimeEnv(cfg Config, rt runtime.Runtime) ([]string, error) {
+	switch runtime.NormalizeRuntime(string(rt)) {
+	case runtime.RuntimeGooseClaude:
+		token, err := loadClaudeOAuthToken(cfg)
 		if err != nil {
-			log.Printf("[%s] goose-claude session preflight warning: name=%s error=%v", nowUTC(), sessionID, err)
-		} else if !exists {
-			log.Printf("[%s] goose-claude session missing; starting fresh session name=%s", nowUTC(), sessionID)
-			resume = false
+			return nil, fmt.Errorf("load claude oauth token: %w", err)
 		}
-	}
-
-	log.Printf("[%s] running goose-claude (runtime=%s debug=%t session_mode=%s session_key=%s session_name=%s resume=%t path_root=%s)",
-		nowUTC(),
-		configuredAgentRuntime(cfg),
-		cfg.GooseDebug,
-		sessionMode,
-		sessionKey,
-		sessionID,
-		resume,
-		cfg.GoosePathRoot,
-	)
-
-	env := []string{}
-	if token != "" {
-		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+token)
-	}
-
-	firstAttemptArgs := GooseRunArgs(cfg, resume)
-	if err := runGooseClaudeOnce(ex, cfg, firstAttemptArgs, env); err != nil {
-		if resume && IsSessionResumeFailure(err, cfg.GooseLogPath) {
-			log.Printf("[%s] goose-claude session resume failed; falling back to fresh session name=%s reason=%s", nowUTC(), sessionID, strings.TrimSpace(err.Error()))
-			if resetErr := ResetGooseSessionRoot(cfg.GoosePathRoot); resetErr != nil {
-				log.Printf("[%s] goose-claude session reset warning: %v", nowUTC(), resetErr)
-			}
-			fallbackArgs := GooseRunArgs(cfg, false)
-			if retryErr := runGooseClaudeOnce(ex, cfg, fallbackArgs, env); retryErr != nil {
-				if writeErr := ensureGooseLogHasError(cfg.GooseLogPath); writeErr != nil {
-					log.Printf("[%s] goose-claude fallback log write warning: %v", nowUTC(), writeErr)
-				}
-				return "", sessionID, fmt.Errorf("goose-claude run failed after session fallback: %w", retryErr)
-			}
-			log.Printf("[%s] goose-claude session fallback succeeded; started fresh session name=%s", nowUTC(), sessionID)
-		} else {
-			if writeErr := ensureGooseLogHasError(cfg.GooseLogPath); writeErr != nil {
-				log.Printf("[%s] goose-claude log write warning: %v", nowUTC(), writeErr)
-			}
-			return "", sessionID, fmt.Errorf("goose-claude run failed: %w", err)
+		if token == "" {
+			return nil, nil
 		}
+		return []string{"CLAUDE_CODE_OAUTH_TOKEN=" + token}, nil
+	default:
+		return nil, nil
 	}
-	data, err := os.ReadFile(cfg.GooseLogPath)
-	if err != nil {
-		return "", sessionID, fmt.Errorf("read goose-claude log: %w", err)
-	}
-	if strings.TrimSpace(string(data)) == "" {
-		return "(no goose-claude output captured)", sessionID, nil
-	}
-	return string(data), sessionID, nil
 }
 
-func runGooseClaudeOnce(ex CommandExecutor, cfg Config, args, extraEnv []string) (err error) {
-	logFile, err := os.OpenFile(cfg.GooseLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open goose-claude log: %w", err)
+func gooseRuntimeLabel(rt runtime.Runtime) string {
+	switch runtime.NormalizeRuntime(string(rt)) {
+	case runtime.RuntimeGooseClaude:
+		return "goose-claude"
+	default:
+		return "goose"
 	}
-	defer func() {
-		if closeErr := logFile.Close(); err == nil && closeErr != nil {
-			err = fmt.Errorf("close goose-claude log: %w", closeErr)
-		}
-	}()
-
-	env := append([]string{}, extraEnv...)
-	if cfg.GooseDebug {
-		env = append(env, "GOOSE_CODEX_DEBUG=1")
-	}
-	if err := ex.Run(cfg.RepoDir, env, logFile, logFile, "goose", args...); err != nil {
-		return fmt.Errorf("run goose-claude command: %w", err)
-	}
-	return nil
 }
 
 func ensureCodexHome(cfg Config) error {
