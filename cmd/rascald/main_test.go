@@ -4468,6 +4468,173 @@ func TestHandleCreateTaskRejectsInvalidTrigger(t *testing.T) {
 	}
 }
 
+func TestHandleCreateTaskRetryHydratesIssueContextFromSourceRun(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+
+	taskID := "owner/repo#170"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
+		ID:          taskID,
+		Repo:        "owner/repo",
+		IssueNumber: 170,
+	}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	sourceRunDir := filepath.Join(s.Config.DataDir, "runs", "run_source_issue")
+	if err := os.MkdirAll(sourceRunDir, 0o755); err != nil {
+		t.Fatalf("mkdir source run dir: %v", err)
+	}
+	sourceRun, err := s.Store.AddRun(state.CreateRunInput{
+		ID:          "run_source_issue",
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Instruction: "Fix retry context",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/owner-repo-170-source",
+		Trigger:     runtrigger.NameIssueAPI,
+		RunDir:      sourceRunDir,
+		IssueNumber: 170,
+	})
+	if err != nil {
+		t.Fatalf("add source run: %v", err)
+	}
+	if err := s.WriteRunResponseTarget(sourceRun, &orchestrator.RunResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 170,
+		RequestedBy: "alice",
+		Trigger:     runtrigger.NameIssueAPI,
+	}); err != nil {
+		t.Fatalf("write source response target: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/tasks",
+		strings.NewReader(`{"task_id":"owner/repo#170","source_run_id":"run_source_issue","repo":"owner/repo","task":"Fix retry context","base_branch":"main","trigger":"retry"}`),
+	)
+	rec := httptest.NewRecorder()
+	s.HandleCreateTask(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var out struct {
+		Run state.Run `json:"run"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Run.IssueNumber != 170 {
+		t.Fatalf("issue_number = %d, want 170", out.Run.IssueNumber)
+	}
+	if out.Run.HeadBranch != "rascal/owner-repo-170-source" {
+		t.Fatalf("head_branch = %q, want rascal/owner-repo-170-source", out.Run.HeadBranch)
+	}
+	target, ok, err := orchestrator.LoadRunResponseTarget(out.Run.RunDir)
+	if err != nil {
+		t.Fatalf("load retry response target: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected retry response target")
+	}
+	if target.IssueNumber != 170 {
+		t.Fatalf("response target issue = %d, want 170", target.IssueNumber)
+	}
+	if target.Trigger != runtrigger.NameIssueAPI {
+		t.Fatalf("response target trigger = %q, want %q", target.Trigger, runtrigger.NameIssueAPI)
+	}
+}
+
+func TestHandleCreateTaskRetryHydratesPRContextFromSourceRun(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+
+	taskID := "owner/repo#170"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
+		ID:          taskID,
+		Repo:        "owner/repo",
+		IssueNumber: 170,
+		PRNumber:    88,
+	}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	sourceRunDir := filepath.Join(s.Config.DataDir, "runs", "run_source_pr")
+	if err := os.MkdirAll(sourceRunDir, 0o755); err != nil {
+		t.Fatalf("mkdir source run dir: %v", err)
+	}
+	sourceRun, err := s.Store.AddRun(state.CreateRunInput{
+		ID:          "run_source_pr",
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Instruction: "Continue existing PR",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/owner-repo-170-pr",
+		Trigger:     runtrigger.NamePRComment,
+		RunDir:      sourceRunDir,
+		IssueNumber: 170,
+		PRNumber:    88,
+		PRStatus:    state.PRStatusOpen,
+	})
+	if err != nil {
+		t.Fatalf("add source run: %v", err)
+	}
+	if err := s.WriteRunResponseTarget(sourceRun, &orchestrator.RunResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 88,
+		RequestedBy: "alice",
+		Trigger:     runtrigger.NamePRComment,
+	}); err != nil {
+		t.Fatalf("write source response target: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/tasks",
+		strings.NewReader(`{"task_id":"owner/repo#170","source_run_id":"run_source_pr","repo":"owner/repo","task":"Continue existing PR","base_branch":"main","trigger":"retry"}`),
+	)
+	rec := httptest.NewRecorder()
+	s.HandleCreateTask(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var out struct {
+		Run state.Run `json:"run"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Run.IssueNumber != 170 {
+		t.Fatalf("issue_number = %d, want 170", out.Run.IssueNumber)
+	}
+	if out.Run.PRNumber != 88 {
+		t.Fatalf("pr_number = %d, want 88", out.Run.PRNumber)
+	}
+	if out.Run.PRStatus != state.PRStatusOpen {
+		t.Fatalf("pr_status = %q, want %q", out.Run.PRStatus, state.PRStatusOpen)
+	}
+	if out.Run.HeadBranch != "rascal/owner-repo-170-pr" {
+		t.Fatalf("head_branch = %q, want rascal/owner-repo-170-pr", out.Run.HeadBranch)
+	}
+	target, ok, err := orchestrator.LoadRunResponseTarget(out.Run.RunDir)
+	if err != nil {
+		t.Fatalf("load retry response target: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected retry response target")
+	}
+	if target.IssueNumber != 88 {
+		t.Fatalf("response target issue = %d, want 88", target.IssueNumber)
+	}
+	if target.Trigger != runtrigger.NamePRComment {
+		t.Fatalf("response target trigger = %q, want %q", target.Trigger, runtrigger.NamePRComment)
+	}
+}
+
 func TestHandleCreateIssueTaskNormalizesRepositoryCase(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeRunner{})

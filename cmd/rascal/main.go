@@ -1727,6 +1727,7 @@ rascal retry run_abc123 --debug=false
 			debugValue := optionalBoolFlagValue(cmd, "debug", debug)
 			req := buildCreateTaskPayload(createTaskPayloadInput{
 				TaskID:      run.TaskID,
+				SourceRunID: run.ID,
 				Repo:        run.Repo,
 				Instruction: run.Instruction,
 				BaseBranch:  run.BaseBranch,
@@ -2785,6 +2786,7 @@ func filterLogsSince(input string, since time.Time) string {
 
 type createTaskPayloadInput struct {
 	TaskID      string
+	SourceRunID string
 	Repo        string
 	Instruction string
 	BaseBranch  string
@@ -2840,6 +2842,9 @@ func buildCreateTaskPayload(input createTaskPayloadInput) createTaskRequestPaylo
 	}
 	if strings.TrimSpace(input.TaskID) != "" {
 		payload.TaskID = input.TaskID
+	}
+	if strings.TrimSpace(input.SourceRunID) != "" {
+		payload.SourceRunID = strings.TrimSpace(input.SourceRunID)
 	}
 	if input.Trigger != "" {
 		payload.Trigger = input.Trigger

@@ -1539,6 +1539,9 @@ func TestRetryCreatesRunWithRetryTrigger(t *testing.T) {
 	if createPayload.Trigger != runtrigger.NameRetry {
 		t.Fatalf("retry payload trigger = %v, want retry", createPayload.Trigger)
 	}
+	if createPayload.SourceRunID != "run_old" {
+		t.Fatalf("retry payload source_run_id = %q, want run_old", createPayload.SourceRunID)
+	}
 }
 
 func TestRunIssueInvalidFormat(t *testing.T) {

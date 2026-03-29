@@ -18,6 +18,7 @@ type ServiceStatusResponse struct {
 
 type CreateTaskRequest struct {
 	TaskID       string           `json:"task_id,omitempty"`
+	SourceRunID  string           `json:"source_run_id,omitempty"`
 	Repo         string           `json:"repo"`
 	Instruction  string           `json:"instruction"`
 	AgentRuntime *runtime.Runtime `json:"agent_runtime,omitempty"`

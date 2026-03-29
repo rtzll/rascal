@@ -247,16 +247,13 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := s.CreateAndQueueRun(RunRequest{
-		TaskID:          req.TaskID,
-		Repo:            req.Repo,
-		Instruction:     req.Instruction,
-		AgentRuntime:    req.AgentRuntime,
-		BaseBranch:      req.BaseBranch,
-		Trigger:         trigger,
-		Debug:           req.Debug,
-		CreatedByUserID: requesterUserID(r.Context()),
-	})
+	runReq, err := s.buildCreateTaskRunRequest(req, trigger, requesterUserID(r.Context()))
+	if err != nil {
+		http.Error(w, "invalid retry source: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	run, err := s.CreateAndQueueRun(runReq)
 	if err != nil {
 		if errors.Is(err, errServerDraining) {
 			http.Error(w, "server is draining", http.StatusServiceUnavailable)
@@ -266,6 +263,113 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, api.RunResponse{Run: run})
+}
+
+func (s *Server) buildCreateTaskRunRequest(req createTaskRequest, trigger runtrigger.Name, createdByUserID string) (RunRequest, error) {
+	runReq := RunRequest{
+		TaskID:          req.TaskID,
+		Repo:            req.Repo,
+		Instruction:     req.Instruction,
+		AgentRuntime:    req.AgentRuntime,
+		BaseBranch:      req.BaseBranch,
+		Trigger:         trigger,
+		Debug:           req.Debug,
+		CreatedByUserID: createdByUserID,
+	}
+	if trigger != runtrigger.NameRetry {
+		return runReq, nil
+	}
+	return s.hydrateRetryRunRequest(runReq, strings.TrimSpace(req.SourceRunID))
+}
+
+func (s *Server) hydrateRetryRunRequest(runReq RunRequest, sourceRunID string) (RunRequest, error) {
+	var (
+		sourceRun state.Run
+		ok        bool
+	)
+	switch {
+	case sourceRunID != "":
+		sourceRun, ok = s.Store.GetRun(sourceRunID)
+		if !ok {
+			return RunRequest{}, fmt.Errorf("run %q not found", sourceRunID)
+		}
+	default:
+		sourceRun, ok = s.Store.LastRunForTask(runReq.TaskID)
+		if !ok {
+			return RunRequest{}, fmt.Errorf("no prior run found for task %q", runReq.TaskID)
+		}
+	}
+
+	if strings.TrimSpace(runReq.TaskID) != "" && strings.TrimSpace(runReq.TaskID) != strings.TrimSpace(sourceRun.TaskID) {
+		return RunRequest{}, fmt.Errorf("source run %q belongs to task %q, not %q", sourceRun.ID, sourceRun.TaskID, runReq.TaskID)
+	}
+	if strings.TrimSpace(runReq.Repo) != "" && state.NormalizeRepo(runReq.Repo) != state.NormalizeRepo(sourceRun.Repo) {
+		return RunRequest{}, fmt.Errorf("source run %q belongs to repo %q, not %q", sourceRun.ID, sourceRun.Repo, runReq.Repo)
+	}
+
+	if strings.TrimSpace(runReq.TaskID) == "" {
+		runReq.TaskID = sourceRun.TaskID
+	}
+	if strings.TrimSpace(runReq.Repo) == "" {
+		runReq.Repo = sourceRun.Repo
+	}
+	if strings.TrimSpace(runReq.Instruction) == "" {
+		runReq.Instruction = sourceRun.Instruction
+	}
+	if strings.TrimSpace(runReq.BaseBranch) == "" {
+		runReq.BaseBranch = sourceRun.BaseBranch
+	}
+	if strings.TrimSpace(runReq.HeadBranch) == "" {
+		runReq.HeadBranch = sourceRun.HeadBranch
+	}
+	if strings.TrimSpace(runReq.Context) == "" {
+		runReq.Context = sourceRun.Context
+	}
+	if runReq.IssueNumber <= 0 {
+		runReq.IssueNumber = sourceRun.IssueNumber
+	}
+	if runReq.PRNumber <= 0 {
+		runReq.PRNumber = sourceRun.PRNumber
+	}
+	if runReq.PRStatus == state.PRStatusNone {
+		runReq.PRStatus = sourceRun.PRStatus
+	}
+
+	if task, ok := s.Store.GetTask(runReq.TaskID); ok {
+		if runReq.IssueNumber <= 0 {
+			runReq.IssueNumber = task.IssueNumber
+		}
+		if runReq.PRNumber <= 0 {
+			runReq.PRNumber = task.PRNumber
+		}
+	}
+	if runReq.PRNumber > 0 && runReq.PRStatus == state.PRStatusNone {
+		runReq.PRStatus = state.PRStatusOpen
+	}
+
+	if runReq.ResponseTarget == nil {
+		target, ok, err := LoadRunResponseTarget(sourceRun.RunDir)
+		if err != nil {
+			return RunRequest{}, fmt.Errorf("load response target for run %q: %w", sourceRun.ID, err)
+		}
+		if ok {
+			runReq.ResponseTarget = &target
+		} else {
+			responseIssue := runReq.IssueNumber
+			if responseIssue <= 0 {
+				responseIssue = runReq.PRNumber
+			}
+			if responseIssue > 0 {
+				runReq.ResponseTarget = &RunResponseTarget{
+					Repo:        runReq.Repo,
+					IssueNumber: responseIssue,
+					Trigger:     sourceRun.Trigger,
+				}
+			}
+		}
+	}
+
+	return runReq, nil
 }
 
 func (s *Server) HandleCreateIssueTask(w http.ResponseWriter, r *http.Request) {
