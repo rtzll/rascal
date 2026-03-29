@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -163,4 +165,173 @@ func TestBuildHeadBranchUsesTaskIDForNamedTasks(t *testing.T) {
 	if !strings.HasSuffix(got, "-deadbeefca") {
 		t.Fatalf("expected short run-id suffix, got %q", got)
 	}
+}
+
+func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
+	t.Parallel()
+	s := newExecutionTestServer(t, &executionFakeRunner{})
+	defer waitForExecutionServerIdle(t, s)
+
+	run, err := s.CreateAndQueueRun(RunRequest{
+		TaskID:      "owner/repo#99",
+		Repo:        "owner/repo",
+		Instruction: "Address PR #99 feedback",
+		Trigger:     "pr_comment",
+		PRNumber:    99,
+		ResponseTarget: &RunResponseTarget{
+			RequestedBy: " alice ",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	target, ok, err := LoadRunResponseTarget(run.RunDir)
+	if err != nil {
+		t.Fatalf("load run response target: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected run response target file")
+	}
+	if target.Repo != "owner/repo" {
+		t.Fatalf("target repo = %q, want owner/repo", target.Repo)
+	}
+	if target.IssueNumber != 99 {
+		t.Fatalf("target issue number = %d, want 99", target.IssueNumber)
+	}
+	if target.RequestedBy != "alice" {
+		t.Fatalf("target requested_by = %q, want alice", target.RequestedBy)
+	}
+	if target.Trigger != "pr_comment" {
+		t.Fatalf("target trigger = %q, want pr_comment", target.Trigger)
+	}
+	if target.ReviewThreadID != 0 {
+		t.Fatalf("target review_thread_id = %d, want 0", target.ReviewThreadID)
+	}
+}
+
+func TestCreateAndQueueRunWritesReviewThreadResponseTarget(t *testing.T) {
+	t.Parallel()
+	s := newExecutionTestServer(t, &executionFakeRunner{})
+	defer waitForExecutionServerIdle(t, s)
+
+	run, err := s.CreateAndQueueRun(RunRequest{
+		TaskID:      "owner/repo#100",
+		Repo:        "owner/repo",
+		Instruction: "Address PR #100 unresolved review thread",
+		Trigger:     "pr_review_thread",
+		PRNumber:    100,
+		ResponseTarget: &RunResponseTarget{
+			RequestedBy:    " bob ",
+			ReviewThreadID: 42,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	target, ok, err := LoadRunResponseTarget(run.RunDir)
+	if err != nil {
+		t.Fatalf("load run response target: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected run response target file")
+	}
+	if target.ReviewThreadID != 42 {
+		t.Fatalf("target review_thread_id = %d, want 42", target.ReviewThreadID)
+	}
+	if target.RequestedBy != "bob" {
+		t.Fatalf("target requested_by = %q, want bob", target.RequestedBy)
+	}
+}
+
+func TestCreateAndQueueRunSerializesPerTask(t *testing.T) {
+	t.Parallel()
+	waitCh := make(chan struct{})
+	var closeWait sync.Once
+	stop := func() { closeWait.Do(func() { close(waitCh) }) }
+	launcher := &executionFakeRunner{waitCh: waitCh}
+	s := newExecutionTestServer(t, launcher)
+	defer func() {
+		stop()
+		waitForExecutionServerIdle(t, s)
+	}()
+
+	_, err := s.CreateAndQueueRun(RunRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
+	if err != nil {
+		t.Fatalf("create first run: %v", err)
+	}
+	second, err := s.CreateAndQueueRun(RunRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "second"})
+	if err != nil {
+		t.Fatalf("create second run: %v", err)
+	}
+
+	waitForExecutionCondition(t, time.Second, func() bool { return launcher.Calls() == 1 }, "first run to start only")
+	launcher.mu.Lock()
+	firstSpecCount := len(launcher.specs)
+	firstSpecDebug := false
+	if firstSpecCount > 0 {
+		firstSpecDebug = launcher.specs[0].Debug
+	}
+	launcher.mu.Unlock()
+	if firstSpecCount == 0 || !firstSpecDebug {
+		t.Fatalf("expected first run spec debug=true, got count=%d debug=%t", firstSpecCount, firstSpecDebug)
+	}
+	r2, ok := s.Store.GetRun(second.ID)
+	if !ok {
+		t.Fatalf("missing second run %s", second.ID)
+	}
+	if r2.Status != state.StatusQueued {
+		t.Fatalf("expected second run queued, got %s", r2.Status)
+	}
+
+	stop()
+	waitForExecutionCondition(t, 2*time.Second, func() bool {
+		return launcher.Calls() == 2
+	}, "second run to start after first completes")
+	waitForExecutionCondition(t, 2*time.Second, func() bool {
+		r, ok := s.Store.GetRun(second.ID)
+		return ok && r.Status == state.StatusSucceeded
+	}, "second run to complete")
+}
+
+func TestCreateAndQueueRunRespectsGlobalConcurrencyLimit(t *testing.T) {
+	t.Parallel()
+	waitCh := make(chan struct{})
+	var closeWait sync.Once
+	stop := func() { closeWait.Do(func() { close(waitCh) }) }
+	launcher := &executionFakeRunner{waitCh: waitCh}
+	s := newExecutionTestServer(t, launcher)
+	s.MaxConcurrent = 1
+	defer func() {
+		stop()
+		waitForExecutionServerIdle(t, s)
+	}()
+
+	_, err := s.CreateAndQueueRun(RunRequest{TaskID: "task-1", Repo: "owner/repo", Instruction: "first"})
+	if err != nil {
+		t.Fatalf("create first run: %v", err)
+	}
+	second, err := s.CreateAndQueueRun(RunRequest{TaskID: "task-2", Repo: "owner/repo", Instruction: "second"})
+	if err != nil {
+		t.Fatalf("create second run: %v", err)
+	}
+
+	waitForExecutionCondition(t, time.Second, func() bool { return launcher.Calls() == 1 }, "only one run starts while at concurrency limit")
+	r2, ok := s.Store.GetRun(second.ID)
+	if !ok {
+		t.Fatalf("missing second run %s", second.ID)
+	}
+	if r2.Status != state.StatusQueued {
+		t.Fatalf("expected second run queued, got %s", r2.Status)
+	}
+
+	stop()
+	waitForExecutionCondition(t, 2*time.Second, func() bool {
+		return launcher.Calls() == 2
+	}, "second run to start after slot is available")
+	waitForExecutionCondition(t, 2*time.Second, func() bool {
+		r, ok := s.Store.GetRun(second.ID)
+		return ok && r.Status == state.StatusSucceeded
+	}, "second run to complete")
 }

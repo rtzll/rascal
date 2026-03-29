@@ -126,6 +126,13 @@ func (f *executionFakeRunner) Stop(_ context.Context, handle runner.ExecutionHan
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if execRec, ok := f.execs[handle.ID]; ok {
+		if execRec.waitCh != nil {
+			select {
+			case <-execRec.waitCh:
+				return nil
+			default:
+			}
+		}
 		execRec.stopped = true
 		if execRec.result.ExitCode == 0 {
 			execRec.result.ExitCode = 137
@@ -136,6 +143,13 @@ func (f *executionFakeRunner) Stop(_ context.Context, handle runner.ExecutionHan
 		return nil
 	}
 	if execRec, ok := f.execs[handle.Name]; ok {
+		if execRec.waitCh != nil {
+			select {
+			case <-execRec.waitCh:
+				return nil
+			default:
+			}
+		}
 		execRec.stopped = true
 		if execRec.result.ExitCode == 0 {
 			execRec.result.ExitCode = 137
