@@ -919,14 +919,14 @@ rascal run --issue OWNER/REPO#123
 				if cmd.Flags().Changed("repo") || cmd.Flags().Changed("instruction") || cmd.Flags().Changed("base-branch") {
 					return &cliError{Code: exitInput, Message: "--issue cannot be combined with --repo, --instruction, or --base-branch"}
 				}
-				repo, issueNumber, err := parseIssueRef(issueRef)
+				ref, err := parseIssueRef(issueRef)
 				if err != nil {
 					return &cliError{Code: exitInput, Message: err.Error()}
 				}
 				debugValue := optionalBoolFlagValue(cmd, "debug", debug)
 				req := buildCreateTaskPayload(createTaskPayloadInput{
-					Repo:        repo,
-					IssueNumber: issueNumber,
+					Repo:        ref.Repo,
+					IssueNumber: ref.IssueNumber,
 					Debug:       debugValue,
 				})
 				resp, err := req.send(a.client, http.MethodPost)
@@ -1814,7 +1814,7 @@ rascal task owner/repo#123
 			if err := a.requireServerAuth(); err != nil {
 				return err
 			}
-			task, err := a.fetchTask(args[0])
+			task, err := a.fetchTask(normalizeIssueLikeTaskID(args[0]))
 			if err != nil {
 				return err
 			}
@@ -2792,22 +2792,6 @@ func filterLogsSince(input string, since time.Time) string {
 		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
-}
-
-func parseIssueRef(input string) (string, int, error) {
-	parts := strings.Split(input, "#")
-	if len(parts) != 2 {
-		return "", 0, fmt.Errorf("invalid issue ref %q, expected OWNER/REPO#123", input)
-	}
-	repo := strings.TrimSpace(parts[0])
-	var issue int
-	if _, err := fmt.Sscanf(parts[1], "%d", &issue); err != nil || issue <= 0 {
-		return "", 0, fmt.Errorf("invalid issue number in %q", input)
-	}
-	if repo == "" {
-		return "", 0, fmt.Errorf("invalid repo in %q", input)
-	}
-	return repo, issue, nil
 }
 
 type createTaskPayloadInput struct {
