@@ -35,6 +35,7 @@ type PullRequest struct {
 	Number int    `json:"number"`
 	Merged bool   `json:"merged"`
 	State  string `json:"state"`
+	Draft  bool   `json:"draft"`
 	Base   struct {
 		Ref string `json:"ref"`
 	} `json:"base"`

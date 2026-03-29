@@ -321,6 +321,28 @@ func (s *Server) executeWebhookAction(ctx context.Context, action WebhookAction)
 	case WebhookActionReopenPullRequest:
 		s.reconcileReopenedPRRuns(action.Repo, action.PRNumber)
 		return nil
+	case WebhookActionConvertPullRequestDraft:
+		task, ok := s.taskForPR(action.Repo, action.PRNumber)
+		if !ok {
+			return nil
+		}
+		if err := s.Store.SetTaskPRDraft(task.ID, true); err != nil {
+			return fmt.Errorf("mark task draft for PR: %w", err)
+		}
+		s.cancelRunningTaskRuns(task.ID, "pull request converted to draft", state.RunStatusReasonPRDraft)
+		return nil
+	case WebhookActionReadyPullRequest:
+		task, ok := s.taskForPR(action.Repo, action.PRNumber)
+		if !ok {
+			return nil
+		}
+		if err := s.Store.SetTaskPRDraft(task.ID, false); err != nil {
+			return fmt.Errorf("clear task draft for PR: %w", err)
+		}
+		if task.Status == state.TaskOpen {
+			go s.ScheduleRuns(task.ID)
+		}
+		return nil
 	default:
 		return nil
 	}

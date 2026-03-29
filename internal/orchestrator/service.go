@@ -396,6 +396,8 @@ func statusReasonFromCancelSource(source string) state.RunStatusReason {
 		return state.RunStatusReasonIssueEdited
 	case string(state.RunStatusReasonPRClosed):
 		return state.RunStatusReasonPRClosed
+	case string(state.RunStatusReasonPRDraft):
+		return state.RunStatusReasonPRDraft
 	case string(state.RunStatusReasonPRMerged):
 		return state.RunStatusReasonPRMerged
 	case string(state.RunStatusReasonReviewThreadResolved):

@@ -4,6 +4,7 @@ CREATE TABLE tasks (
   agent_runtime TEXT NOT NULL DEFAULT 'codex',
   issue_number INTEGER NOT NULL DEFAULT 0,
   pr_number INTEGER NOT NULL DEFAULT 0,
+  pr_draft BOOLEAN NOT NULL DEFAULT 0,
   created_by_user_id TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'open',
   last_run_id TEXT NOT NULL DEFAULT '',

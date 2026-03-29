@@ -163,7 +163,7 @@ func repoIssueTaskID(repo string, issueNumber int) string {
 
 func (s *Server) activeTaskForPR(repo string, prNumber int) (state.Task, bool) {
 	task, ok := s.taskForPR(repo, prNumber)
-	if !ok || task.Status != state.TaskOpen {
+	if !ok || task.Status != state.TaskOpen || task.PRDraft {
 		return state.Task{}, false
 	}
 	return task, true

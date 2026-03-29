@@ -126,49 +126,109 @@ func (s *Store) UpsertTask(in UpsertTaskInput) (Task, error) {
 		return Task{}, fmt.Errorf("task id and repo are required")
 	}
 	now := time.Now().UTC().UnixNano()
-	if err := s.q.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
-		ID:           in.ID,
-		Repo:         in.Repo,
-		AgentRuntime: in.AgentRuntime.String(),
-		IssueNumber:  int64(in.IssueNumber),
-		PrNumber:     int64(in.PRNumber),
-		Status:       string(TaskOpen),
-		LastRunID:    "",
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}); err != nil {
+	if _, err := s.db.ExecContext(context.Background(), `
+INSERT INTO tasks (
+  id,
+  repo,
+  agent_runtime,
+  issue_number,
+  pr_number,
+  pr_draft,
+  status,
+  last_run_id,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  repo = excluded.repo,
+  agent_runtime = excluded.agent_runtime,
+  issue_number = CASE WHEN excluded.issue_number > 0 THEN excluded.issue_number ELSE tasks.issue_number END,
+  pr_number = CASE WHEN excluded.pr_number > 0 THEN excluded.pr_number ELSE tasks.pr_number END,
+  updated_at = excluded.updated_at
+`, in.ID, in.Repo, in.AgentRuntime.String(), in.IssueNumber, in.PRNumber, in.PRDraft, string(TaskOpen), "", now, now); err != nil {
 		return Task{}, fmt.Errorf("upsert task %q: %w", in.ID, err)
 	}
-	row, err := s.q.GetTask(context.Background(), in.ID)
+	task, ok, err := s.getTask(in.ID)
 	if err != nil {
 		return Task{}, fmt.Errorf("load task %q after upsert: %w", in.ID, err)
 	}
-	return fromDBGetTaskRow(row), nil
+	if !ok {
+		return Task{}, fmt.Errorf("task %q not found after upsert", in.ID)
+	}
+	return task, nil
 }
 
 func (s *Store) GetTask(taskID string) (Task, bool) {
-	row, err := s.q.GetTask(context.Background(), strings.TrimSpace(taskID))
+	task, ok, err := s.getTask(taskID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Task{}, false
-		}
 		return Task{}, false
 	}
-	return fromDBGetTaskRow(row), true
+	return task, ok
+}
+
+func (s *Store) getTask(taskID string) (Task, bool, error) {
+	row := s.db.QueryRowContext(context.Background(), `
+SELECT
+  tasks.id,
+  tasks.repo,
+  tasks.agent_runtime,
+  tasks.issue_number,
+  tasks.pr_number,
+  tasks.pr_draft,
+  tasks.status,
+  EXISTS(
+    SELECT 1
+    FROM runs
+    WHERE runs.task_id = tasks.id
+      AND runs.status = 'queued'
+  ) AS pending_input,
+  tasks.last_run_id,
+  tasks.created_at,
+  tasks.updated_at
+FROM tasks
+WHERE tasks.id = ?
+`, strings.TrimSpace(taskID))
+	task, err := scanTaskRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Task{}, false, nil
+		}
+		return Task{}, false, err
+	}
+	return task, true, nil
 }
 
 func (s *Store) FindTaskByPR(repo string, prNumber int) (Task, bool) {
-	row, err := s.q.FindTaskByPR(context.Background(), sqlitegen.FindTaskByPRParams{
-		Repo:     NormalizeRepo(repo),
-		PrNumber: int64(prNumber),
-	})
+	row := s.db.QueryRowContext(context.Background(), `
+SELECT
+  tasks.id,
+  tasks.repo,
+  tasks.agent_runtime,
+  tasks.issue_number,
+  tasks.pr_number,
+  tasks.pr_draft,
+  tasks.status,
+  EXISTS(
+    SELECT 1
+    FROM runs
+    WHERE runs.task_id = tasks.id
+      AND runs.status = 'queued'
+  ) AS pending_input,
+  tasks.last_run_id,
+  tasks.created_at,
+  tasks.updated_at
+FROM tasks
+WHERE tasks.repo = ? AND tasks.pr_number = ?
+`, NormalizeRepo(repo), prNumber)
+	task, err := scanTaskRow(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Task{}, false
 		}
 		return Task{}, false
 	}
-	return fromDBFindTaskByPRRow(row), true
+	return task, true
 }
 
 func (s *Store) SetTaskPR(taskID, _ string, prNumber int) error {
@@ -222,6 +282,29 @@ func (s *Store) MarkTaskOpen(taskID string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("mark task %q open: %w", taskID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("task %q not found", taskID)
+	}
+	return nil
+}
+
+func (s *Store) SetTaskPRDraft(taskID string, draft bool) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("task id is required")
+	}
+	res, err := s.db.ExecContext(context.Background(), `
+UPDATE tasks
+SET pr_draft = ?, updated_at = ?
+WHERE id = ?
+`, draft, time.Now().UTC().UnixNano(), taskID)
+	if err != nil {
+		return fmt.Errorf("set task %q pr_draft=%t: %w", taskID, draft, err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set task %q pr_draft=%t rows affected: %w", taskID, draft, err)
 	}
 	if rows == 0 {
 		return fmt.Errorf("task %q not found", taskID)
@@ -321,17 +404,27 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		return Run{}, fmt.Errorf("load task %q before creating run: %w", in.TaskID, err)
 	}
 
-	if err := qtx.UpsertTask(context.Background(), sqlitegen.UpsertTaskParams{
-		ID:           in.TaskID,
-		Repo:         in.Repo,
-		AgentRuntime: in.AgentRuntime.String(),
-		IssueNumber:  int64(in.IssueNumber),
-		PrNumber:     int64(in.PRNumber),
-		Status:       string(TaskOpen),
-		LastRunID:    "",
-		CreatedAt:    now.UnixNano(),
-		UpdatedAt:    now.UnixNano(),
-	}); err != nil {
+	if _, err := tx.ExecContext(context.Background(), `
+INSERT INTO tasks (
+  id,
+  repo,
+  agent_runtime,
+  issue_number,
+  pr_number,
+  pr_draft,
+  status,
+  last_run_id,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  repo = excluded.repo,
+  agent_runtime = excluded.agent_runtime,
+  issue_number = CASE WHEN excluded.issue_number > 0 THEN excluded.issue_number ELSE tasks.issue_number END,
+  pr_number = CASE WHEN excluded.pr_number > 0 THEN excluded.pr_number ELSE tasks.pr_number END,
+  updated_at = excluded.updated_at
+`, in.TaskID, in.Repo, in.AgentRuntime.String(), in.IssueNumber, in.PRNumber, false, string(TaskOpen), "", now.UnixNano(), now.UnixNano()); err != nil {
 		return Run{}, fmt.Errorf("upsert task %q while creating run %q: %w", in.TaskID, in.ID, err)
 	}
 
@@ -671,30 +764,92 @@ func (s *Store) ClaimNextQueuedRun(preferredTaskID string) (Run, bool, error) {
 	now := time.Now().UTC().UnixNano()
 	preferredTaskID = strings.TrimSpace(preferredTaskID)
 	if preferredTaskID != "" {
-		row, err := s.q.ClaimNextQueuedRunForTask(context.Background(), sqlitegen.ClaimNextQueuedRunForTaskParams{
-			UpdatedAt: now,
-			StartedAt: sql.NullInt64{Int64: now, Valid: true},
-			TaskID:    preferredTaskID,
-		})
+		row := s.db.QueryRowContext(context.Background(), `
+UPDATE runs
+SET status = 'running', error = '', status_reason = '', updated_at = ?, started_at = ?
+WHERE id = (
+  SELECT r.id
+  FROM runs AS r
+  JOIN tasks AS t ON t.id = r.task_id
+  WHERE r.status = 'queued'
+    AND r.task_id = ?
+    AND (r.pr_number = 0 OR t.pr_draft = 0)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM runs AS other
+      WHERE other.task_id = r.task_id
+        AND other.status = 'running'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM run_cancels AS rc
+      WHERE rc.run_id = r.id
+    )
+  ORDER BY r.created_at ASC, r.seq ASC
+  LIMIT 1
+)
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM runs AS other
+    WHERE other.task_id = runs.task_id
+      AND other.status = 'running'
+      AND other.id <> runs.id
+  )
+RETURNING
+  seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
+`, now, sql.NullInt64{Int64: now, Valid: true}, preferredTaskID)
+		run, err := scanRunRow(row)
 		if err == nil {
-			return fromDBClaimNextQueuedRunForTaskRow(row), true, nil
+			return run, true, nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return Run{}, false, fmt.Errorf("claim next queued run for task %q: %w", preferredTaskID, err)
 		}
 	}
 
-	row, err := s.q.ClaimNextQueuedRun(context.Background(), sqlitegen.ClaimNextQueuedRunParams{
-		UpdatedAt: now,
-		StartedAt: sql.NullInt64{Int64: now, Valid: true},
-	})
+	row := s.db.QueryRowContext(context.Background(), `
+UPDATE runs
+SET status = 'running', error = '', status_reason = '', updated_at = ?, started_at = ?
+WHERE id = (
+  SELECT r.id
+  FROM runs AS r
+  JOIN tasks AS t ON t.id = r.task_id
+  WHERE r.status = 'queued'
+    AND (r.pr_number = 0 OR t.pr_draft = 0)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM runs AS other
+      WHERE other.task_id = r.task_id
+        AND other.status = 'running'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM run_cancels AS rc
+      WHERE rc.run_id = r.id
+    )
+  ORDER BY r.created_at ASC, r.seq ASC
+  LIMIT 1
+)
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM runs AS other
+    WHERE other.task_id = runs.task_id
+      AND other.status = 'running'
+      AND other.id <> runs.id
+  )
+RETURNING
+  seq, id, task_id, repo, task, agent_runtime, base_branch, head_branch, trigger, debug, status, run_dir, issue_number, pr_number, pr_url, pr_status, head_sha, context, error, status_reason, completion_comment_state, completion_comment_claimed_by, completion_comment_claimed_at, completion_comment_posted_at, completion_comment_error, created_at, updated_at, started_at, completed_at
+`, now, sql.NullInt64{Int64: now, Valid: true})
+	run, err := scanRunRow(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Run{}, false, nil
 		}
 		return Run{}, false, fmt.Errorf("claim next queued run: %w", err)
 	}
-	return fromDBClaimNextQueuedRunRow(row), true, nil
+	return run, true, nil
 }
 
 func (s *Store) UpsertRunLease(runID, ownerID string, ttl time.Duration) error {
@@ -1234,13 +1389,14 @@ func newClaimToken() (string, error) {
 	return "claim_" + hex.EncodeToString(buf), nil
 }
 
-func fromDBTaskParts(id, repo, agentRuntime string, issueNumber, prNumber int64, status string, pendingInput int64, lastRunID string, createdAt, updatedAt int64) Task {
+func fromDBTaskParts(id, repo, agentRuntime string, issueNumber, prNumber int64, prDraft bool, status string, pendingInput int64, lastRunID string, createdAt, updatedAt int64) Task {
 	return Task{
 		ID:           id,
 		Repo:         repo,
 		AgentRuntime: runtime.NormalizeRuntime(agentRuntime),
 		IssueNumber:  int(issueNumber),
 		PRNumber:     int(prNumber),
+		PRDraft:      prDraft,
 		Status:       NormalizeTaskStatus(TaskStatus(status)),
 		PendingInput: pendingInput != 0,
 		LastRunID:    lastRunID,
@@ -1249,12 +1405,24 @@ func fromDBTaskParts(id, repo, agentRuntime string, issueNumber, prNumber int64,
 	}
 }
 
-func fromDBGetTaskRow(t sqlitegen.GetTaskRow) Task {
-	return fromDBTaskParts(t.ID, t.Repo, t.AgentRuntime, t.IssueNumber, t.PrNumber, t.Status, t.PendingInput, t.LastRunID, t.CreatedAt, t.UpdatedAt)
-}
-
-func fromDBFindTaskByPRRow(t sqlitegen.FindTaskByPRRow) Task {
-	return fromDBTaskParts(t.ID, t.Repo, t.AgentRuntime, t.IssueNumber, t.PrNumber, t.Status, t.PendingInput, t.LastRunID, t.CreatedAt, t.UpdatedAt)
+func scanTaskRow(row interface{ Scan(dest ...any) error }) (Task, error) {
+	var (
+		id           string
+		repo         string
+		agentRuntime string
+		issueNumber  int64
+		prNumber     int64
+		prDraft      bool
+		status       string
+		pendingInput int64
+		lastRunID    string
+		createdAt    int64
+		updatedAt    int64
+	)
+	if err := row.Scan(&id, &repo, &agentRuntime, &issueNumber, &prNumber, &prDraft, &status, &pendingInput, &lastRunID, &createdAt, &updatedAt); err != nil {
+		return Task{}, fmt.Errorf("scan task row: %w", err)
+	}
+	return fromDBTaskParts(id, repo, agentRuntime, issueNumber, prNumber, prDraft, status, pendingInput, lastRunID, createdAt, updatedAt), nil
 }
 
 func fromDBRunParts(id, taskID, repo, task, agentRuntime, baseBranch, headBranch, trigger string, debug bool, status, runDir string, issueNumber, prNumber int64, prURL, prStatus, headSHA, contextValue, errText, statusReason, completionCommentState, completionCommentClaimedBy, completionCommentError string, completionCommentClaimedAt, completionCommentPostedAt sql.NullInt64, createdAt, updatedAt int64, startedAt, completedAt sql.NullInt64) Run {
@@ -1327,12 +1495,73 @@ func fromDBActiveRunForTaskRow(r sqlitegen.ActiveRunForTaskRow) Run {
 	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
 }
 
-func fromDBClaimNextQueuedRunRow(r sqlitegen.ClaimNextQueuedRunRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
-}
-
-func fromDBClaimNextQueuedRunForTaskRow(r sqlitegen.ClaimNextQueuedRunForTaskRow) Run {
-	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+func scanRunRow(row interface{ Scan(dest ...any) error }) (Run, error) {
+	var (
+		seq                        int64
+		id                         string
+		taskID                     string
+		repo                       string
+		task                       string
+		agentRuntime               string
+		baseBranch                 string
+		headBranch                 string
+		trigger                    string
+		debug                      bool
+		status                     string
+		runDir                     string
+		issueNumber                int64
+		prNumber                   int64
+		prURL                      string
+		prStatus                   string
+		headSHA                    string
+		contextValue               string
+		errText                    string
+		statusReason               string
+		completionCommentState     string
+		completionCommentClaimedBy string
+		completionCommentClaimedAt sql.NullInt64
+		completionCommentPostedAt  sql.NullInt64
+		completionCommentError     string
+		createdAt                  int64
+		updatedAt                  int64
+		startedAt                  sql.NullInt64
+		completedAt                sql.NullInt64
+	)
+	if err := row.Scan(
+		&seq,
+		&id,
+		&taskID,
+		&repo,
+		&task,
+		&agentRuntime,
+		&baseBranch,
+		&headBranch,
+		&trigger,
+		&debug,
+		&status,
+		&runDir,
+		&issueNumber,
+		&prNumber,
+		&prURL,
+		&prStatus,
+		&headSHA,
+		&contextValue,
+		&errText,
+		&statusReason,
+		&completionCommentState,
+		&completionCommentClaimedBy,
+		&completionCommentClaimedAt,
+		&completionCommentPostedAt,
+		&completionCommentError,
+		&createdAt,
+		&updatedAt,
+		&startedAt,
+		&completedAt,
+	); err != nil {
+		return Run{}, fmt.Errorf("scan run row: %w", err)
+	}
+	_ = seq
+	return fromDBRunParts(id, taskID, repo, task, agentRuntime, baseBranch, headBranch, trigger, debug, status, runDir, issueNumber, prNumber, prURL, prStatus, headSHA, contextValue, errText, statusReason, completionCommentState, completionCommentClaimedBy, completionCommentError, completionCommentClaimedAt, completionCommentPostedAt, createdAt, updatedAt, startedAt, completedAt), nil
 }
 
 func fromDBClaimRunCompletionCommentRow(r sqlitegen.ClaimRunCompletionCommentRow) Run {

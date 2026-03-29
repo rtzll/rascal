@@ -678,6 +678,63 @@ func TestStoreClaimNextQueuedRun(t *testing.T) {
 	}
 }
 
+func TestStoreClaimNextQueuedRunSkipsDraftPRTasks(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-draft", Repo: "owner/repo", PRNumber: 12, PRDraft: true}); err != nil {
+		t.Fatalf("upsert draft task: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task-open", Repo: "owner/repo", PRNumber: 13}); err != nil {
+		t.Fatalf("upsert open task: %v", err)
+	}
+	if _, err := store.AddRun(CreateRunInput{
+		ID:          "run_draft",
+		TaskID:      "task-draft",
+		Repo:        "owner/repo",
+		Instruction: "draft pr",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_draft",
+		PRNumber:    12,
+	}); err != nil {
+		t.Fatalf("add run_draft: %v", err)
+	}
+	if _, err := store.AddRun(CreateRunInput{
+		ID:          "run_open",
+		TaskID:      "task-open",
+		Repo:        "owner/repo",
+		Instruction: "open pr",
+		BaseBranch:  "main",
+		RunDir:      "/tmp/run_open",
+		PRNumber:    13,
+	}); err != nil {
+		t.Fatalf("add run_open: %v", err)
+	}
+
+	claimed, ok, err := store.ClaimNextQueuedRun("")
+	if err != nil {
+		t.Fatalf("claim next queued run: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected a non-draft queued run to be claimable")
+	}
+	if claimed.ID != "run_open" {
+		t.Fatalf("claimed run = %s, want run_open", claimed.ID)
+	}
+
+	draftRun, ok := store.GetRun("run_draft")
+	if !ok {
+		t.Fatal("expected run_draft to still exist")
+	}
+	if draftRun.Status != StatusQueued {
+		t.Fatalf("draft run status = %s, want queued", draftRun.Status)
+	}
+}
+
 func TestStoreRunLeaseLifecycle(t *testing.T) {
 	t.Parallel()
 

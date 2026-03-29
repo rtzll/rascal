@@ -26,6 +26,8 @@ const (
 	WebhookActionCancelPRThreadRuns       WebhookActionKind = "cancel_pr_review_thread_runs"
 	WebhookActionClosePullRequest         WebhookActionKind = "close_pull_request"
 	WebhookActionReopenPullRequest        WebhookActionKind = "reopen_pull_request"
+	WebhookActionConvertPullRequestDraft  WebhookActionKind = "convert_pull_request_draft"
+	WebhookActionReadyPullRequest         WebhookActionKind = "ready_pull_request"
 )
 
 type WebhookAction struct {
@@ -335,6 +337,18 @@ func (wi WebhookInterpreter) interpretPullRequest(payload []byte) ([]WebhookActi
 	case "reopened":
 		return []WebhookAction{{
 			Kind:     WebhookActionReopenPullRequest,
+			Repo:     ev.Repository.FullName,
+			PRNumber: ev.PullRequest.Number,
+		}}, nil
+	case "converted_to_draft":
+		return []WebhookAction{{
+			Kind:     WebhookActionConvertPullRequestDraft,
+			Repo:     ev.Repository.FullName,
+			PRNumber: ev.PullRequest.Number,
+		}}, nil
+	case "ready_for_review":
+		return []WebhookAction{{
+			Kind:     WebhookActionReadyPullRequest,
 			Repo:     ev.Repository.FullName,
 			PRNumber: ev.PullRequest.Number,
 		}}, nil

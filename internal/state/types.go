@@ -28,6 +28,7 @@ const (
 	RunStatusReasonIssueClosed          RunStatusReason = "issue_closed"
 	RunStatusReasonIssueEdited          RunStatusReason = "issue_edited"
 	RunStatusReasonPRClosed             RunStatusReason = "pr_closed"
+	RunStatusReasonPRDraft              RunStatusReason = "pr_draft"
 	RunStatusReasonPRMerged             RunStatusReason = "pr_merged"
 	RunStatusReasonReviewThreadResolved RunStatusReason = "review_thread_resolved"
 	RunStatusReasonTaskCompleted        RunStatusReason = "task_completed"
@@ -45,6 +46,8 @@ func NormalizeRunStatusReason(reason RunStatusReason) RunStatusReason {
 		return RunStatusReasonIssueEdited
 	case string(RunStatusReasonPRClosed):
 		return RunStatusReasonPRClosed
+	case string(RunStatusReasonPRDraft):
+		return RunStatusReasonPRDraft
 	case string(RunStatusReasonPRMerged):
 		return RunStatusReasonPRMerged
 	case string(RunStatusReasonReviewThreadResolved):
@@ -284,6 +287,7 @@ type Task struct {
 	AgentRuntime runtime.Runtime `json:"agent_runtime"`
 	IssueNumber  int             `json:"issue_number,omitempty"`
 	PRNumber     int             `json:"pr_number,omitempty"`
+	PRDraft      bool            `json:"pr_draft"`
 	Status       TaskStatus      `json:"status"`
 	// PendingInput is derived at read time from whether the task has queued runs.
 	PendingInput bool   `json:"pending_input"`
@@ -495,6 +499,7 @@ type UpsertTaskInput struct {
 	AgentRuntime runtime.Runtime
 	IssueNumber  int
 	PRNumber     int
+	PRDraft      bool
 }
 
 type TaskSession struct {

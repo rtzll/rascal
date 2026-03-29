@@ -65,12 +65,12 @@ func TestParseRunAndTaskStatus(t *testing.T) {
 func TestFromDBNormalizesTaskAndRunStatus(t *testing.T) {
 	t.Parallel()
 
-	task := fromDBTaskParts("task-1", "owner/repo", "codex", 0, 0, "completed ", 0, "", 0, 0)
+	task := fromDBTaskParts("task-1", "owner/repo", "codex", 0, 0, false, "completed ", 0, "", 0, 0)
 	if task.Status != TaskCompleted {
 		t.Fatalf("task status = %q, want %q", task.Status, TaskCompleted)
 	}
 
-	fallbackTask := fromDBTaskParts("task-2", "owner/repo", "codex", 0, 0, "archived", 0, "", 0, 0)
+	fallbackTask := fromDBTaskParts("task-2", "owner/repo", "codex", 0, 0, false, "archived", 0, "", 0, 0)
 	if fallbackTask.Status != TaskOpen {
 		t.Fatalf("task fallback status = %q, want %q", fallbackTask.Status, TaskOpen)
 	}

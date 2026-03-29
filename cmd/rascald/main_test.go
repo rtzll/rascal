@@ -2821,6 +2821,124 @@ func TestReopenedEventDoesNotDowngradeMergedRunState(t *testing.T) {
 	}
 }
 
+func TestConvertedToDraftCancelsRunningRunsAndMarksTaskDraft(t *testing.T) {
+	t.Parallel()
+	waitCh := make(chan struct{})
+	launcher := &fakeRunner{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer func() {
+		close(waitCh)
+		waitForServerIdle(t, s)
+	}()
+
+	taskID := "owner/repo#1200"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 1200}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Instruction: "work in progress",
+		IssueNumber: 1200,
+		PRNumber:    1200,
+		Trigger:     runtrigger.NamePRComment,
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_ = waitForRunExecution(t, s, run.ID)
+
+	payload := pullRequestEventPayload(t, "converted_to_draft", "owner/repo", "dev", testPullRequest(1200, false, "", ""))
+	req := webhookRequest(t, payload, "pull_request", "delivery-draft-running-pr", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for converted_to_draft event, got %d", rec.Code)
+	}
+
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s.Store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusCanceled
+	}, "running pr run canceled for draft conversion")
+	updated, ok := s.Store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("run %s not found", run.ID)
+	}
+	if updated.StatusReason != state.RunStatusReasonPRDraft {
+		t.Fatalf("expected status reason %q, got %q", state.RunStatusReasonPRDraft, updated.StatusReason)
+	}
+	if !strings.Contains(updated.Error, "converted to draft") {
+		t.Fatalf("expected draft cancel reason, got %q", updated.Error)
+	}
+	task, ok := s.Store.FindTaskByPR("owner/repo", 1200)
+	if !ok {
+		t.Fatal("expected task for draft PR")
+	}
+	if !task.PRDraft {
+		t.Fatal("expected task to be marked draft")
+	}
+}
+
+func TestReadyForReviewResumesQueuedDraftPRRuns(t *testing.T) {
+	t.Parallel()
+	launcher := &fakeRunner{}
+	s := newTestServer(t, launcher)
+	defer waitForServerIdle(t, s)
+
+	taskID := "owner/repo#1300"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 1300, PRDraft: true}); err != nil {
+		t.Fatalf("upsert draft task: %v", err)
+	}
+	run, err := s.Store.AddRun(state.CreateRunInput{
+		ID:          "run_draft_resume",
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Instruction: "resume when ready",
+		Trigger:     runtrigger.NamePRComment,
+		RunDir:      t.TempDir(),
+		IssueNumber: 1300,
+		PRNumber:    1300,
+	})
+	if err != nil {
+		t.Fatalf("add queued run: %v", err)
+	}
+
+	s.ScheduleRuns("")
+	queued, ok := s.Store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("run %s not found", run.ID)
+	}
+	if queued.Status != state.StatusQueued {
+		t.Fatalf("draft run status after schedule = %s, want queued", queued.Status)
+	}
+	if calls := launcher.Calls(); calls != 0 {
+		t.Fatalf("expected no launches while draft, got %d", calls)
+	}
+
+	payload := pullRequestEventPayload(t, "ready_for_review", "owner/repo", "dev", testPullRequest(1300, false, "", ""))
+	req := webhookRequest(t, payload, "pull_request", "delivery-ready-for-review", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for ready_for_review event, got %d", rec.Code)
+	}
+
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s.Store.GetRun(run.ID)
+		return ok && updated.Status != state.StatusQueued
+	}, "draft pr queued run resumed after ready_for_review")
+	task, ok := s.Store.FindTaskByPR("owner/repo", 1300)
+	if !ok {
+		t.Fatal("expected task for ready PR")
+	}
+	if task.PRDraft {
+		t.Fatal("expected task draft flag to be cleared")
+	}
+	if calls := launcher.Calls(); calls != 1 {
+		t.Fatalf("expected exactly one launch after ready_for_review, got %d", calls)
+	}
+}
+
 func TestExecuteRunRetriesLauncherFailure(t *testing.T) {
 	t.Parallel()
 	launcher := &fakeRunner{

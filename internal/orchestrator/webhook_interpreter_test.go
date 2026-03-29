@@ -212,6 +212,34 @@ func TestWebhookInterpreterPullRequestClosedMergedReconciles(t *testing.T) {
 	}
 }
 
+func TestWebhookInterpreterPullRequestConvertedToDraftPauses(t *testing.T) {
+	actions := interpretWebhookActions(t, "pull_request", ghapi.PullRequestEvent{
+		Action: "converted_to_draft",
+		PullRequest: ghapi.PullRequest{
+			Number: 88,
+		},
+		Repository: ghapi.Repository{FullName: "owner/repo"},
+	})
+
+	if got, want := actionKinds(actions), []WebhookActionKind{WebhookActionConvertPullRequestDraft}; !sameActionKinds(got, want) {
+		t.Fatalf("action kinds = %v, want %v", got, want)
+	}
+}
+
+func TestWebhookInterpreterPullRequestReadyForReviewResumes(t *testing.T) {
+	actions := interpretWebhookActions(t, "pull_request", ghapi.PullRequestEvent{
+		Action: "ready_for_review",
+		PullRequest: ghapi.PullRequest{
+			Number: 88,
+		},
+		Repository: ghapi.Repository{FullName: "owner/repo"},
+	})
+
+	if got, want := actionKinds(actions), []WebhookActionKind{WebhookActionReadyPullRequest}; !sameActionKinds(got, want) {
+		t.Fatalf("action kinds = %v, want %v", got, want)
+	}
+}
+
 func TestWebhookInterpreterUnknownEventIsIgnored(t *testing.T) {
 	interpreter := NewWebhookInterpreter("rascal-bot")
 	actions, err := interpreter.Interpret("unknown", []byte(`{}`))

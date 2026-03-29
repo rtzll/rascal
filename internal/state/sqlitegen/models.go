@@ -166,6 +166,7 @@ type Task struct {
 	AgentRuntime    string `json:"agent_runtime"`
 	IssueNumber     int64  `json:"issue_number"`
 	PrNumber        int64  `json:"pr_number"`
+	PrDraft         bool   `json:"pr_draft"`
 	CreatedByUserID string `json:"created_by_user_id"`
 	Status          string `json:"status"`
 	LastRunID       string `json:"last_run_id"`
