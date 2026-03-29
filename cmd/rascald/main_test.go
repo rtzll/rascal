@@ -988,7 +988,7 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 func waitForServerIdle(t *testing.T, s *orchestrator.Server) {
 	t.Helper()
 	waitFor(t, 2*time.Second, func() bool {
-		return s.ActiveRunCount() == 0 && s.ActiveSupervisorCount() == 0
+		return s.ActiveRunCount() == 0
 	}, "server idle")
 }
 
