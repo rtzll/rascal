@@ -292,31 +292,16 @@ func (s *Store) IsTaskCompleted(taskID string) bool {
 }
 
 func (s *Store) AddRun(in CreateRunInput) (Run, error) {
-	in.ID = strings.TrimSpace(in.ID)
-	in.TaskID = strings.TrimSpace(in.TaskID)
-	in.Repo = NormalizeRepo(in.Repo)
-	in.AgentRuntime = runtime.NormalizeRuntime(string(in.AgentRuntime))
+	var err error
+	in, err = in.WithDefaults()
+	if err != nil {
+		return Run{}, err
+	}
 	if in.ID == "" || in.TaskID == "" || in.Repo == "" {
 		return Run{}, fmt.Errorf("id, task_id and repo are required")
 	}
 
 	now := time.Now().UTC()
-	baseBranch := strings.TrimSpace(in.BaseBranch)
-	if baseBranch == "" {
-		baseBranch = "main"
-	}
-	trigger, err := runtrigger.ParseOrDefault(in.Trigger.String(), runtrigger.NameCLI)
-	if err != nil {
-		return Run{}, fmt.Errorf("invalid trigger: %w", err)
-	}
-	debugEnabled := true
-	if in.Debug != nil {
-		debugEnabled = *in.Debug
-	}
-	prStatus := normalizePRStatus(in.PRStatus)
-	if prStatus == PRStatusNone && in.PRNumber > 0 {
-		prStatus = PRStatusOpen
-	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -356,16 +341,16 @@ func (s *Store) AddRun(in CreateRunInput) (Run, error) {
 		Repo:                       in.Repo,
 		Task:                       in.Instruction, // DB column "task" maps to domain "Instruction"
 		AgentRuntime:               in.AgentRuntime.String(),
-		BaseBranch:                 baseBranch,
+		BaseBranch:                 in.BaseBranch,
 		HeadBranch:                 in.HeadBranch,
-		Trigger:                    trigger.String(),
-		Debug:                      debugEnabled,
+		Trigger:                    in.Trigger.String(),
+		Debug:                      *in.Debug,
 		Status:                     string(StatusQueued),
 		RunDir:                     in.RunDir,
 		IssueNumber:                int64(in.IssueNumber),
 		PrNumber:                   int64(in.PRNumber),
 		PrUrl:                      "",
-		PrStatus:                   string(prStatus),
+		PrStatus:                   string(in.PRStatus),
 		HeadSha:                    "",
 		Context:                    in.Context,
 		Error:                      "",

@@ -3,6 +3,9 @@ package state
 import (
 	"database/sql"
 	"testing"
+
+	"github.com/rtzll/rascal/internal/runtime"
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 func TestParseRunAndTaskStatus(t *testing.T) {
@@ -86,5 +89,60 @@ func TestFromDBNormalizesTaskAndRunStatus(t *testing.T) {
 	)
 	if fallbackRun.Status != StatusQueued {
 		t.Fatalf("run fallback status = %q, want %q", fallbackRun.Status, StatusQueued)
+	}
+}
+
+func TestCreateRunInputWithDefaults(t *testing.T) {
+	t.Parallel()
+
+	in, err := (CreateRunInput{
+		ID:           " run-1 ",
+		TaskID:       " task-1 ",
+		Repo:         "Owner/Repo",
+		Instruction:  "task",
+		AgentRuntime: runtime.Runtime(""),
+		PRNumber:     42,
+	}).WithDefaults()
+	if err != nil {
+		t.Fatalf("WithDefaults: %v", err)
+	}
+
+	if in.ID != "run-1" {
+		t.Fatalf("ID = %q, want run-1", in.ID)
+	}
+	if in.TaskID != "task-1" {
+		t.Fatalf("TaskID = %q, want task-1", in.TaskID)
+	}
+	if in.Repo != "owner/repo" {
+		t.Fatalf("Repo = %q, want owner/repo", in.Repo)
+	}
+	if in.AgentRuntime != runtime.RuntimeGooseCodex {
+		t.Fatalf("AgentRuntime = %q, want %q", in.AgentRuntime, runtime.RuntimeGooseCodex)
+	}
+	if in.BaseBranch != "main" {
+		t.Fatalf("BaseBranch = %q, want main", in.BaseBranch)
+	}
+	if in.Trigger != runtrigger.NameCLI {
+		t.Fatalf("Trigger = %q, want %q", in.Trigger, runtrigger.NameCLI)
+	}
+	if in.Debug == nil || !*in.Debug {
+		t.Fatalf("Debug = %v, want true", in.Debug)
+	}
+	if in.PRStatus != PRStatusOpen {
+		t.Fatalf("PRStatus = %q, want %q", in.PRStatus, PRStatusOpen)
+	}
+}
+
+func TestCreateRunInputWithDefaultsRejectsUnknownTrigger(t *testing.T) {
+	t.Parallel()
+
+	_, err := (CreateRunInput{
+		ID:      "run-1",
+		TaskID:  "task-1",
+		Repo:    "owner/repo",
+		Trigger: runtrigger.Name("unknown"),
+	}).WithDefaults()
+	if err == nil {
+		t.Fatal("expected invalid trigger error")
 	}
 }

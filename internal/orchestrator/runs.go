@@ -39,17 +39,6 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 			return state.Run{}, fmt.Errorf("unknown workflow trigger %q", req.Trigger)
 		}
 	}
-	if req.PRStatus == "" {
-		if req.PRNumber > 0 {
-			req.PRStatus = state.PRStatusOpen
-		} else {
-			req.PRStatus = state.PRStatusNone
-		}
-	}
-	debugEnabled := true
-	if req.Debug != nil {
-		debugEnabled = *req.Debug
-	}
 
 	runID, err := state.NewRunID()
 	if err != nil {
@@ -76,8 +65,6 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 	if req.BaseBranch == "" {
 		if hasLastRun && lastRun.BaseBranch != "" {
 			req.BaseBranch = lastRun.BaseBranch
-		} else {
-			req.BaseBranch = "main"
 		}
 	}
 	if req.HeadBranch == "" {
@@ -118,7 +105,7 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 		PRNumber:     req.PRNumber,
 		PRStatus:     req.PRStatus,
 		Context:      req.Context,
-		Debug:        boolPtr(debugEnabled),
+		Debug:        req.Debug,
 	})
 	if err != nil {
 		return state.Run{}, fmt.Errorf("persist run: %w", err)

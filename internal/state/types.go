@@ -415,6 +415,36 @@ type CreateRunInput struct {
 	Context      string
 }
 
+func (in CreateRunInput) WithDefaults() (CreateRunInput, error) {
+	in.ID = strings.TrimSpace(in.ID)
+	in.TaskID = strings.TrimSpace(in.TaskID)
+	in.Repo = NormalizeRepo(in.Repo)
+	in.AgentRuntime = runtime.NormalizeRuntime(string(in.AgentRuntime))
+	in.BaseBranch = strings.TrimSpace(in.BaseBranch)
+	if in.BaseBranch == "" {
+		in.BaseBranch = "main"
+	}
+
+	trigger, err := runtrigger.ParseOrDefault(in.Trigger.String(), runtrigger.NameCLI)
+	if err != nil {
+		return CreateRunInput{}, fmt.Errorf("invalid trigger: %w", err)
+	}
+	in.Trigger = trigger
+
+	debugEnabled := true
+	if in.Debug != nil {
+		debugEnabled = *in.Debug
+	}
+	in.Debug = &debugEnabled
+
+	in.PRStatus = normalizePRStatus(in.PRStatus)
+	if in.PRStatus == PRStatusNone && in.PRNumber > 0 {
+		in.PRStatus = PRStatusOpen
+	}
+
+	return in, nil
+}
+
 type UpsertTaskInput struct {
 	ID           string
 	Repo         string
