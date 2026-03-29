@@ -16,6 +16,7 @@ import (
 	credentialstrategies "github.com/rtzll/rascal/internal/credentials/strategies"
 	"github.com/rtzll/rascal/internal/credentialstrategy"
 	"github.com/rtzll/rascal/internal/orchestrator"
+	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/state"
 )
 
@@ -210,7 +211,7 @@ func TestSchedulerAcquiresCredentialAndCleansEphemeralAuthFile(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	authPath := filepath.Join(run.RunDir, "codex", "auth.json")
+	authPath := filepath.Join(runner.SecretsDir(run.RunDir), "codex_auth.json")
 	waitFor(t, 2*time.Second, func() bool {
 		_, err := os.Stat(authPath)
 		return err == nil
@@ -299,10 +300,10 @@ func TestSchedulerAllowsConcurrentRunsToReuseSharedCredential(t *testing.T) {
 	_ = waitForRunExecution(t, s, runB.ID)
 
 	waitFor(t, 2*time.Second, func() bool {
-		if _, err := os.Stat(filepath.Join(runA.RunDir, "codex", "auth.json")); err != nil {
+		if _, err := os.Stat(filepath.Join(runner.SecretsDir(runA.RunDir), "codex_auth.json")); err != nil {
 			return false
 		}
-		if _, err := os.Stat(filepath.Join(runB.RunDir, "codex", "auth.json")); err != nil {
+		if _, err := os.Stat(filepath.Join(runner.SecretsDir(runB.RunDir), "codex_auth.json")); err != nil {
 			return false
 		}
 		if _, ok, err := s.Store.GetActiveCredentialLeaseByRunID(runA.ID); err != nil || !ok {

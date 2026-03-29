@@ -105,11 +105,12 @@ func LoadServerConfig() (ServerConfig, error) {
 		RunnerImageGooseClaude: envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE", defaults.GooseClaudeRunnerImageTag),
 		RunnerMaxAttempts:      envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
 		RunnerSecurity: runner.DockerSecurityConfig{
-			Mode:         runnerSecurityMode,
-			CPUs:         strings.TrimSpace(os.Getenv("RASCAL_RUNNER_DOCKER_CPUS")),
-			Memory:       strings.TrimSpace(os.Getenv("RASCAL_RUNNER_DOCKER_MEMORY")),
-			PidsLimit:    envIntOrDefault("RASCAL_RUNNER_DOCKER_PIDS_LIMIT", 256),
-			TmpfsTmpSize: envOrDefault("RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE", "512m"),
+			Mode:            runnerSecurityMode,
+			CPUs:            strings.TrimSpace(os.Getenv("RASCAL_RUNNER_DOCKER_CPUS")),
+			Memory:          strings.TrimSpace(os.Getenv("RASCAL_RUNNER_DOCKER_MEMORY")),
+			PidsLimit:       envIntOrDefault("RASCAL_RUNNER_DOCKER_PIDS_LIMIT", 256),
+			TmpfsTmpSize:    envOrDefault("RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE", "512m"),
+			AllowEnvSecrets: parseBoolEnv(envOrDefault("RASCAL_RUNNER_ALLOW_ENV_SECRETS", "false"), false),
 		}.Normalize(),
 		CredentialStrategy:      credentialStrategy,
 		CredentialLeaseTTL:      envDurationOrDefault("RASCAL_CREDENTIAL_LEASE_TTL", 90*time.Second),
@@ -336,6 +337,19 @@ func envDurationOrDefault(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return out
+}
+
+func parseBoolEnv(raw string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return fallback
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func loadAgentRuntime() (runtime.Runtime, error) {

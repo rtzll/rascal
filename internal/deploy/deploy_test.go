@@ -386,6 +386,7 @@ func TestServerEnvFileIncludesDockerHardeningDefaults(t *testing.T) {
 		"RASCAL_RUNNER_DOCKER_MEMORY=4g",
 		"RASCAL_RUNNER_DOCKER_PIDS_LIMIT=256",
 		"RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE=512m",
+		"RASCAL_RUNNER_ALLOW_ENV_SECRETS=false",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("expected server env file to include %q, got:\n%s", want, content)

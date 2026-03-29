@@ -321,9 +321,12 @@ Rascal uses stored credentials tagged by provider and managed by `rascald`.
   matching the run's runtime and records the selected credential id in state.
 - The broker chooses from eligible credentials using the configured allocation
   strategy, provider compatibility filter, and tracks lease assignment per run.
-- The leased auth blob is written into the run-scoped auth path
-  (`codex/auth.json` for codex/goose runs, `claude/oauth_token` for
-  claude/goose-claude runs) and removed during run cleanup.
+- The leased auth blob is written into a per-run secrets directory outside the
+  broad `/rascal-meta` mount and then mounted read-only into the container at
+  `/run/rascal-secrets`
+  (`codex_auth.json` for codex/goose runs, `claude_oauth_token` for
+  claude/goose-claude runs). Legacy run-local auth paths remain as fallback for
+  older runs.
 - While a run is active, `rascald` renews the credential lease. If renewal is
   lost, the run is canceled.
 - Bootstrap and deploy can seed an initial shared stored credential from a local
@@ -338,7 +341,7 @@ Required:
 - `RASCAL_RUN_ID`
 - `RASCAL_TASK_ID`
 - `RASCAL_REPO`
-- `GH_TOKEN`
+- `GH_TOKEN` or `GH_TOKEN_FILE`
 
 Common optional:
 
@@ -364,6 +367,10 @@ Common optional:
 - `RASCAL_TASK_SESSION_ID` (runtime session id when known)
 - `CODEX_HOME` (run-scoped `/rascal-meta/codex` in stateless mode, or
   task-scoped mount in resume mode for Codex)
+- `CODEX_AUTH_FILE` (default secure mode path:
+  `/run/rascal-secrets/codex_auth.json`)
+- `CLAUDE_CODE_OAUTH_TOKEN_FILE` (default secure mode path:
+  `/run/rascal-secrets/claude_oauth_token`)
 - `GOOSE_PATH_ROOT` (run-scoped `/rascal-meta/goose` in stateless mode, or
   task-scoped mount in resume mode for Goose)
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/credentialstrategy"
+	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -279,6 +280,32 @@ func TestCredentialManagerPrepareCredentialClaudeRuntime(t *testing.T) {
 	}
 }
 
+func TestCredentialManagerPrepareCredentialUsesDedicatedSecretsDir(t *testing.T) {
+	broker := &fakeCredentialBroker{
+		acquireLease: Lease{
+			ID:           "lease-codex",
+			CredentialID: "cred-codex",
+			AuthBlob:     []byte(`{"token":"x"}`),
+		},
+	}
+	manager := NewCredentialManager(nil, broker)
+
+	secretsDir := filepath.Join(t.TempDir(), ".run-secrets")
+	handle, err := manager.PrepareCredential(t.Context(), CredentialRequest{
+		RunID:      "run-secrets",
+		RunDir:     t.TempDir(),
+		SecretsDir: secretsDir,
+		UserID:     "u1",
+		Runtime:    runtime.RuntimeCodex,
+	})
+	if err != nil {
+		t.Fatalf("prepare credential: %v", err)
+	}
+	if got, want := handle.AuthFilePath, filepath.Join(secretsDir, "codex_auth.json"); got != want {
+		t.Fatalf("AuthFilePath = %q, want %q", got, want)
+	}
+}
+
 func TestCredentialManagerActiveHandleForRun(t *testing.T) {
 	store := &recordingCredentialStore{
 		activeLease: state.CredentialLease{
@@ -289,7 +316,11 @@ func TestCredentialManagerActiveHandleForRun(t *testing.T) {
 	}
 	manager := NewCredentialManager(store, nil)
 
-	handle, ok, err := manager.ActiveHandleForRun("run-active", "/tmp/run-active", runtime.RuntimeCodex)
+	runDir := filepath.Join(t.TempDir(), "run-active")
+	if err := os.MkdirAll(runner.SecretsDir(runDir), 0o700); err != nil {
+		t.Fatalf("mkdir secrets dir: %v", err)
+	}
+	handle, ok, err := manager.ActiveHandleForRun("run-active", runDir, runtime.RuntimeCodex)
 	if err != nil {
 		t.Fatalf("active handle: %v", err)
 	}
@@ -298,6 +329,9 @@ func TestCredentialManagerActiveHandleForRun(t *testing.T) {
 	}
 	if handle.LeaseID != "lease-active" || handle.CredentialID != "cred-active" {
 		t.Fatalf("unexpected handle: %#v", handle)
+	}
+	if got, want := handle.AuthFilePath, filepath.Join(runner.SecretsDir(runDir), "codex_auth.json"); got != want {
+		t.Fatalf("AuthFilePath = %q, want %q", got, want)
 	}
 }
 

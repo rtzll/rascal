@@ -57,11 +57,12 @@ func TestDockerContainerEnvBuilderBuildGooseCodex(t *testing.T) {
 	}
 
 	layout := newDockerRuntimeLayout(runtime.RuntimeGooseCodex, spec.TaskSession)
-	got := newDockerContainerEnvBuilder(spec, runtime.RuntimeGooseCodex, layout, "gh-token").Build()
+	got := newDockerContainerEnvBuilder(spec, runtime.RuntimeGooseCodex, layout, "gh-token", false).Build()
 	want := map[string]string{
 		"CODEX_HOME":                   containerCodexStateDir,
+		"CODEX_AUTH_FILE":              containerCodexAuthFile,
 		"GH_PROMPT_DISABLED":           "1",
-		"GH_TOKEN":                     "gh-token",
+		"GH_TOKEN_FILE":                containerGitHubTokenFile,
 		"GIT_TERMINAL_PROMPT":          "0",
 		"GOOSE_CONTEXT_STRATEGY":       "summarize",
 		"GOOSE_DISABLE_KEYRING":        "1",
@@ -114,6 +115,7 @@ func TestDockerContainerEnvBuilderBuildDirectRuntimes(t *testing.T) {
 				RuntimeSessionID: "codex-session-id",
 			},
 			want: map[string]string{
+				"CODEX_AUTH_FILE":            containerCodexAuthFile,
 				"CODEX_HOME":                 containerCodexSessionDir,
 				"GH_PROMPT_DISABLED":         "1",
 				"GIT_TERMINAL_PROMPT":        "0",
@@ -147,27 +149,28 @@ func TestDockerContainerEnvBuilderBuildDirectRuntimes(t *testing.T) {
 				RuntimeSessionID: "claude-session-id",
 			},
 			want: map[string]string{
-				"CLAUDE_CONFIG_DIR":          containerClaudeSessionDir,
-				"CODEX_HOME":                 containerCodexStateDir,
-				"GH_PROMPT_DISABLED":         "1",
-				"GIT_TERMINAL_PROMPT":        "0",
-				"RASCAL_AGENT_RUNTIME":       runtime.RuntimeClaude.String(),
-				"RASCAL_BASE_BRANCH":         "main",
-				"RASCAL_CONTEXT":             "",
-				"RASCAL_CONTEXT_JSON":        containerContextJSONPath,
-				"RASCAL_GOOSE_DEBUG":         "false",
-				"RASCAL_HEAD_BRANCH":         "rascal/task-2",
-				"RASCAL_INSTRUCTION":         "task",
-				"RASCAL_ISSUE_NUMBER":        "0",
-				"RASCAL_PR_NUMBER":           "24",
-				"RASCAL_REPO":                "owner/repo",
-				"RASCAL_RUN_ID":              "run_2",
-				"RASCAL_TASK_ID":             "owner/repo#2",
-				"RASCAL_TASK_SESSION_ID":     "claude-session-id",
-				"RASCAL_TASK_SESSION_KEY":    "task-key-2",
-				"RASCAL_TASK_SESSION_MODE":   "pr-only",
-				"RASCAL_TASK_SESSION_RESUME": "true",
-				"RASCAL_TRIGGER":             runtrigger.NamePRComment.String(),
+				"CLAUDE_CODE_OAUTH_TOKEN_FILE": containerClaudeTokenFile,
+				"CLAUDE_CONFIG_DIR":            containerClaudeSessionDir,
+				"CODEX_HOME":                   containerCodexStateDir,
+				"GH_PROMPT_DISABLED":           "1",
+				"GIT_TERMINAL_PROMPT":          "0",
+				"RASCAL_AGENT_RUNTIME":         runtime.RuntimeClaude.String(),
+				"RASCAL_BASE_BRANCH":           "main",
+				"RASCAL_CONTEXT":               "",
+				"RASCAL_CONTEXT_JSON":          containerContextJSONPath,
+				"RASCAL_GOOSE_DEBUG":           "false",
+				"RASCAL_HEAD_BRANCH":           "rascal/task-2",
+				"RASCAL_INSTRUCTION":           "task",
+				"RASCAL_ISSUE_NUMBER":          "0",
+				"RASCAL_PR_NUMBER":             "24",
+				"RASCAL_REPO":                  "owner/repo",
+				"RASCAL_RUN_ID":                "run_2",
+				"RASCAL_TASK_ID":               "owner/repo#2",
+				"RASCAL_TASK_SESSION_ID":       "claude-session-id",
+				"RASCAL_TASK_SESSION_KEY":      "task-key-2",
+				"RASCAL_TASK_SESSION_MODE":     "pr-only",
+				"RASCAL_TASK_SESSION_RESUME":   "true",
+				"RASCAL_TRIGGER":               runtrigger.NamePRComment.String(),
 			},
 		},
 	}
@@ -190,11 +193,38 @@ func TestDockerContainerEnvBuilderBuildDirectRuntimes(t *testing.T) {
 				TaskSession:  tt.session,
 			}
 			layout := newDockerRuntimeLayout(tt.runtime, tt.session)
-			got := newDockerContainerEnvBuilder(spec, tt.runtime, layout, "").Build()
+			got := newDockerContainerEnvBuilder(spec, tt.runtime, layout, "", false).Build()
 			if !maps.Equal(got, tt.want) {
 				t.Fatalf("unexpected env map (-got +want):\n got: %#v\nwant: %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDockerContainerEnvBuilderAllowsLegacyEnvSecrets(t *testing.T) {
+	t.Parallel()
+
+	spec := Spec{
+		RunID:        "run_env_secret",
+		TaskID:       "owner/repo#3",
+		Repo:         "owner/repo",
+		Instruction:  "task",
+		AgentRuntime: runtime.RuntimeCodex,
+		BaseBranch:   "main",
+		HeadBranch:   "rascal/task-3",
+		Trigger:      runtrigger.NameCLI,
+	}
+
+	layout := newDockerRuntimeLayout(runtime.RuntimeCodex, spec.TaskSession)
+	got := newDockerContainerEnvBuilder(spec, runtime.RuntimeCodex, layout, "gh-token", true).Build()
+	if got["GH_TOKEN"] != "gh-token" {
+		t.Fatalf("GH_TOKEN = %q, want gh-token", got["GH_TOKEN"])
+	}
+	if _, ok := got["GH_TOKEN_FILE"]; ok {
+		t.Fatalf("did not expect GH_TOKEN_FILE when env secrets are enabled: %#v", got)
+	}
+	if got["CODEX_AUTH_FILE"] != containerCodexAuthFile {
+		t.Fatalf("CODEX_AUTH_FILE = %q, want %q", got["CODEX_AUTH_FILE"], containerCodexAuthFile)
 	}
 }
 
@@ -727,12 +757,75 @@ exit 0
 	logText := string(data)
 	for _, want := range []string{
 		"docker security mode=baseline",
+		"env_secrets=false",
 		"cpus=2",
 		"memory=4g",
 		"pids=256",
 	} {
 		if !strings.Contains(logText, want) {
 			t.Fatalf("expected %q in runner log:\n%s", want, logText)
+		}
+	}
+}
+
+func TestDockerRunnerMountsSecretsReadOnlyByDefault(t *testing.T) {
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "docker_calls.log")
+	fakeDocker := filepath.Join(tmp, "docker")
+	script := `#!/bin/sh
+set -eu
+echo "$@" >> "` + logPath + `"
+if [ "${1:-}" = "run" ]; then
+  echo "container-secrets"
+fi
+exit 0
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	runDir := filepath.Join(tmp, "run")
+	secretsDir := filepath.Join(tmp, ".run-secrets")
+	if err := os.MkdirAll(filepath.Join(secretsDir), 0o700); err != nil {
+		t.Fatalf("create secrets dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "codex_auth.json"), []byte(`{"token":"test"}`), 0o600); err != nil {
+		t.Fatalf("write codex auth: %v", err)
+	}
+
+	launcher := DockerRunner{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
+	_, err := launcher.StartDetached(context.Background(), Spec{
+		RunID:       "run_secrets",
+		TaskID:      "task_secrets",
+		Repo:        "owner/repo",
+		Instruction: "secrets",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/task-secrets",
+		Trigger:     "cli",
+		Debug:       true,
+		RunDir:      runDir,
+		SecretsDir:  secretsDir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected start error: %v", err)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake docker log: %v", err)
+	}
+	call := string(logData)
+	if strings.Contains(call, "-e GH_TOKEN=gh-token") {
+		t.Fatalf("did not expect raw GH_TOKEN env in docker args:\n%s", call)
+	}
+	for _, want := range []string{
+		"-e GH_TOKEN_FILE=/run/rascal-secrets/gh_token",
+		"-e CODEX_AUTH_FILE=/run/rascal-secrets/codex_auth.json",
+		secretsDir + ":/run/rascal-secrets:ro",
+	} {
+		if !strings.Contains(call, want) {
+			t.Fatalf("expected %q in docker args:\n%s", want, call)
 		}
 	}
 }

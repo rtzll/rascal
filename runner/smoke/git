@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "${1:-}" == "clone" && "${2:-}" == https://x-access-token:*@github.com/* ]]; then
+if [[ "${1:-}" == "clone" && "${2:-}" == https://github.com/* ]]; then
   remote_url="file:///opt/rascal-smoke/remote.git"
   target_dir="${3:-}"
   if [[ -z "$target_dir" ]]; then

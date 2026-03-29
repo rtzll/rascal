@@ -278,6 +278,55 @@ func TestRunClaudeFreshSession(t *testing.T) {
 	}
 }
 
+func TestEnsureCodexHomeUsesConfiguredAuthFile(t *testing.T) {
+	root := t.TempDir()
+	authFile := filepath.Join(root, "secrets", "codex_auth.json")
+	if err := os.MkdirAll(filepath.Dir(authFile), 0o755); err != nil {
+		t.Fatalf("mkdir auth dir: %v", err)
+	}
+	if err := os.WriteFile(authFile, []byte(`{"token":"file-auth"}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	cfg := Config{
+		MetaDir:       root,
+		CodexHome:     filepath.Join(root, "codex-home"),
+		CodexAuthFile: authFile,
+	}
+	if err := ensureCodexHome(cfg); err != nil {
+		t.Fatalf("ensureCodexHome() error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(cfg.CodexHome, "auth.json"))
+	if err != nil {
+		t.Fatalf("read copied auth: %v", err)
+	}
+	if string(data) != `{"token":"file-auth"}` {
+		t.Fatalf("copied auth = %q", string(data))
+	}
+}
+
+func TestLoadClaudeOAuthTokenUsesConfiguredTokenFile(t *testing.T) {
+	root := t.TempDir()
+	tokenFile := filepath.Join(root, "secrets", "claude_oauth_token")
+	if err := os.MkdirAll(filepath.Dir(tokenFile), 0o755); err != nil {
+		t.Fatalf("mkdir token dir: %v", err)
+	}
+	if err := os.WriteFile(tokenFile, []byte("configured-token\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+
+	token, err := loadClaudeOAuthToken(Config{
+		MetaDir:              root,
+		ClaudeOAuthTokenFile: tokenFile,
+	})
+	if err != nil {
+		t.Fatalf("loadClaudeOAuthToken() error = %v", err)
+	}
+	if token != "configured-token" {
+		t.Fatalf("token = %q, want configured-token", token)
+	}
+}
+
 func TestGooseRuntimeEnvLoadsClaudeToken(t *testing.T) {
 	root := t.TempDir()
 	cfg := Config{

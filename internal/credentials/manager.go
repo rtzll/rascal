@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/state"
 )
@@ -27,10 +28,11 @@ type CredentialManager struct {
 }
 
 type CredentialRequest struct {
-	RunID   string
-	RunDir  string
-	UserID  string
-	Runtime runtime.Runtime
+	RunID      string
+	RunDir     string
+	SecretsDir string
+	UserID     string
+	Runtime    runtime.Runtime
 }
 
 type CredentialHandle struct {
@@ -51,7 +53,17 @@ func NewCredentialManager(store CredentialStore, broker CredentialBroker) *Crede
 	}
 }
 
-func AuthPath(runDir string, rt runtime.Runtime) (dir, file string) {
+func AuthPath(runDir, secretsDir string, rt runtime.Runtime) (dir, file string) {
+	if strings.TrimSpace(secretsDir) != "" {
+		dir = strings.TrimSpace(secretsDir)
+		switch runtime.NormalizeRuntime(string(rt)) {
+		case runtime.RuntimeClaude, runtime.RuntimeGooseClaude:
+			file = filepath.Join(dir, "claude_oauth_token")
+		default:
+			file = filepath.Join(dir, "codex_auth.json")
+		}
+		return dir, file
+	}
 	switch runtime.NormalizeRuntime(string(rt)) {
 	case runtime.RuntimeClaude, runtime.RuntimeGooseClaude:
 		dir = filepath.Join(runDir, "claude")
@@ -91,6 +103,7 @@ func (m *CredentialManager) PrepareCredential(ctx context.Context, req Credentia
 
 	req.RunID = strings.TrimSpace(req.RunID)
 	req.RunDir = strings.TrimSpace(req.RunDir)
+	req.SecretsDir = strings.TrimSpace(req.SecretsDir)
 	req.UserID = strings.TrimSpace(req.UserID)
 	if req.RunID == "" {
 		return nil, fmt.Errorf("run id is required")
@@ -99,7 +112,7 @@ func (m *CredentialManager) PrepareCredential(ctx context.Context, req Credentia
 		req.UserID = "system"
 	}
 
-	authDir, authPath := AuthPath(req.RunDir, req.Runtime)
+	authDir, authPath := AuthPath(req.RunDir, req.SecretsDir, req.Runtime)
 	if err := os.MkdirAll(authDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create auth dir: %w", err)
 	}
@@ -139,7 +152,15 @@ func (m *CredentialManager) ActiveHandleForRun(runID, runDir string, rt runtime.
 		}
 		return nil, false, nil
 	}
-	_, authPath := AuthPath(runDir, rt)
+	secretsDir := runner.SecretsDir(runDir)
+	if _, err := os.Stat(secretsDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			secretsDir = ""
+		} else {
+			return nil, false, fmt.Errorf("stat secrets dir for run %s: %w", runID, err)
+		}
+	}
+	_, authPath := AuthPath(runDir, secretsDir, rt)
 	return &CredentialHandle{
 		LeaseID:      lease.ID,
 		CredentialID: lease.CredentialID,

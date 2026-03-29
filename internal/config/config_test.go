@@ -244,6 +244,9 @@ func TestLoadServerConfigDefaultsDockerSecurityToBaseline(t *testing.T) {
 	if cfg.RunnerSecurity.TmpfsTmpSize != "512m" {
 		t.Fatalf("RunnerSecurity.TmpfsTmpSize = %q, want 512m", cfg.RunnerSecurity.TmpfsTmpSize)
 	}
+	if cfg.RunnerSecurity.AllowEnvSecrets {
+		t.Fatal("RunnerSecurity.AllowEnvSecrets = true, want false")
+	}
 }
 
 func TestLoadServerConfigDockerSecurityOverrides(t *testing.T) {
@@ -252,6 +255,7 @@ func TestLoadServerConfigDockerSecurityOverrides(t *testing.T) {
 	t.Setenv("RASCAL_RUNNER_DOCKER_MEMORY", "6g")
 	t.Setenv("RASCAL_RUNNER_DOCKER_PIDS_LIMIT", "384")
 	t.Setenv("RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE", "768m")
+	t.Setenv("RASCAL_RUNNER_ALLOW_ENV_SECRETS", "true")
 
 	cfg, err := LoadServerConfig()
 	if err != nil {
@@ -271,6 +275,9 @@ func TestLoadServerConfigDockerSecurityOverrides(t *testing.T) {
 	}
 	if cfg.RunnerSecurity.TmpfsTmpSize != "768m" {
 		t.Fatalf("RunnerSecurity.TmpfsTmpSize = %q, want 768m", cfg.RunnerSecurity.TmpfsTmpSize)
+	}
+	if !cfg.RunnerSecurity.AllowEnvSecrets {
+		t.Fatal("RunnerSecurity.AllowEnvSecrets = false, want true")
 	}
 }
 

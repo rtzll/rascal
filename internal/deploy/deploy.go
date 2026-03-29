@@ -656,6 +656,7 @@ func serverEnvFile(cfg Config) string {
 		"RASCAL_RUNNER_DOCKER_MEMORY=4g",
 		"RASCAL_RUNNER_DOCKER_PIDS_LIMIT=256",
 		"RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE=512m",
+		"RASCAL_RUNNER_ALLOW_ENV_SECRETS=false",
 		"RASCAL_TASK_SESSION_MODE=all",
 		fmt.Sprintf("RASCAL_TASK_SESSION_ROOT=%s", filepath.Join(cfg.ServerDataDir, defaults.AgentSessionDirName)),
 		"RASCAL_TASK_SESSION_TTL_DAYS=14",

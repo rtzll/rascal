@@ -178,7 +178,7 @@ func RunWithExecutor(ex CommandExecutor) error {
 	var authorEmail string
 	if err := RunStage("resolve_identity", func() error {
 		var err error
-		authorName, authorEmail, err = resolveGitIdentity(ex)
+		authorName, authorEmail, err = resolveGitIdentityWithToken(ex, cfg.GitHubToken)
 		if err != nil {
 			return fmt.Errorf("resolve git identity: %w", err)
 		}
@@ -282,7 +282,7 @@ func RunWithExecutor(ex CommandExecutor) error {
 
 	if err := RunStage("push_branch", func() error {
 		log.Printf("[%s] pushing branch", nowUTC())
-		if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "push", "-u", "origin", cfg.HeadBranch); err != nil {
+		if _, err := runCommand(ex, cfg.RepoDir, gitHubRemoteEnv(cfg.GitHubToken), "git", "push", "-u", "origin", cfg.HeadBranch); err != nil {
 			return fmt.Errorf("git push failed: %w", err)
 		}
 		return nil
@@ -322,7 +322,7 @@ func RunWithExecutor(ex CommandExecutor) error {
 				return fmt.Errorf("write pr body: %w", err)
 			}
 
-			out, err := runCommand(ex, cfg.RepoDir, nil, "gh", "pr", "create",
+			out, err := runCommand(ex, cfg.RepoDir, githubCLIEnv(cfg.GitHubToken), "gh", "pr", "create",
 				"--repo", cfg.Repo,
 				"--base", cfg.BaseBranch,
 				"--head", cfg.HeadBranch,

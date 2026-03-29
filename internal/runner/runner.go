@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ type Spec struct {
 	Trigger                runtrigger.Name
 	Debug                  bool
 	RunDir                 string
+	SecretsDir             string
 	IssueNumber            int
 	PRNumber               int
 	Context                string
@@ -50,11 +52,12 @@ const (
 )
 
 type DockerSecurityConfig struct {
-	Mode         DockerSecurityMode
-	CPUs         string
-	Memory       string
-	PidsLimit    int
-	TmpfsTmpSize string
+	Mode            DockerSecurityMode
+	CPUs            string
+	Memory          string
+	PidsLimit       int
+	TmpfsTmpSize    string
+	AllowEnvSecrets bool
 }
 
 type ExecutionBackend string
@@ -146,6 +149,7 @@ func (c DockerSecurityConfig) Normalize() DockerSecurityConfig {
 func (c DockerSecurityConfig) Summary() string {
 	c = c.Normalize()
 	parts := []string{fmt.Sprintf("mode=%s", c.Mode)}
+	parts = append(parts, fmt.Sprintf("env_secrets=%t", c.AllowEnvSecrets))
 	if c.Mode != DockerSecurityOpen {
 		parts = append(parts,
 			fmt.Sprintf("cpus=%s", defaultSummaryValue(c.CPUs)),
@@ -172,6 +176,16 @@ func defaultSummaryInt(value int) string {
 		return "off"
 	}
 	return strconv.Itoa(value)
+}
+
+func SecretsDir(runDir string) string {
+	runDir = filepath.Clean(strings.TrimSpace(runDir))
+	if runDir == "" {
+		return ""
+	}
+	parent := filepath.Dir(runDir)
+	base := filepath.Base(runDir)
+	return filepath.Join(parent, "."+base+"-secrets")
 }
 
 // Runner starts a run inside an execution environment (Docker in v1).

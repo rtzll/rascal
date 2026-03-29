@@ -184,10 +184,11 @@ func (s *Server) ExecuteRun(runID string) {
 		requesterID = "system"
 	}
 	credentialHandle, err := s.credentialManager().PrepareCredential(context.Background(), credentials.CredentialRequest{
-		RunID:   run.ID,
-		RunDir:  run.RunDir,
-		UserID:  requesterID,
-		Runtime: run.AgentRuntime,
+		RunID:      run.ID,
+		RunDir:     run.RunDir,
+		SecretsDir: runner.SecretsDir(run.RunDir),
+		UserID:     requesterID,
+		Runtime:    run.AgentRuntime,
 	})
 	if err != nil {
 		errText := fmt.Sprintf("acquire credential lease: %v", err)
@@ -280,6 +281,7 @@ func (s *Server) ExecuteRun(runID string) {
 		HeadBranch:             run.HeadBranch,
 		Trigger:                runtrigger.Normalize(run.Trigger.String()),
 		RunDir:                 run.RunDir,
+		SecretsDir:             runner.SecretsDir(run.RunDir),
 		IssueNumber:            run.IssueNumber,
 		PRNumber:               run.PRNumber,
 		Context:                run.Context,
@@ -686,7 +688,11 @@ func (s *Server) cleanupDetachedExecution(runID string, execRec state.RunExecuti
 		log.Printf("run %s clear run lease failed: %v", runID, err)
 	}
 	if run, ok := s.Store.GetRun(runID); ok {
-		_, authPath := credentials.AuthPath(run.RunDir, run.AgentRuntime)
+		secretsDir := runner.SecretsDir(run.RunDir)
+		if _, err := os.Stat(secretsDir); err != nil && errors.Is(err, os.ErrNotExist) {
+			secretsDir = ""
+		}
+		_, authPath := credentials.AuthPath(run.RunDir, secretsDir, run.AgentRuntime)
 		if err := os.Remove(authPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("run %s remove auth file failed: %v", runID, err)
 		}

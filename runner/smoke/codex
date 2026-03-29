@@ -37,6 +37,19 @@ session_id="${resume_session:-smoke-session-001}"
 session_root="${CODEX_HOME:-/rascal-meta/codex}/sessions/2026/03"
 session_path="${session_root}/smoke-session.jsonl"
 
+if [[ -n "${GH_TOKEN:-}" ]]; then
+  printf 'GH_TOKEN should not be present in container env\n' >&2
+  exit 1
+fi
+if [[ -z "${GH_TOKEN_FILE:-}" || ! -f "${GH_TOKEN_FILE}" ]]; then
+  printf 'GH_TOKEN_FILE missing or unreadable\n' >&2
+  exit 1
+fi
+if [[ -z "${CODEX_AUTH_FILE:-}" || ! -f "${CODEX_AUTH_FILE}" ]]; then
+  printf 'CODEX_AUTH_FILE missing or unreadable\n' >&2
+  exit 1
+fi
+
 mkdir -p "$(dirname "${output_path:-/rascal-meta/agent_output.txt}")" "$session_root"
 
 if [[ -f README.md ]]; then

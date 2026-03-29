@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +15,8 @@ import (
 	"github.com/rtzll/rascal/internal/runsummary"
 )
 
-func resolveGitIdentity(ex CommandExecutor) (string, string, error) {
-	out, err := runCommand(ex, "", nil, "gh", "api", "user")
+func resolveGitIdentityWithToken(ex CommandExecutor, token string) (string, string, error) {
+	out, err := runCommand(ex, "", githubCLIEnv(token), "gh", "api", "user")
 	if err != nil {
 		return "", "", fmt.Errorf("query GitHub user: %w", err)
 	}
@@ -33,20 +34,21 @@ func resolveGitIdentity(ex CommandExecutor) (string, string, error) {
 }
 
 func checkoutRepo(ex CommandExecutor, cfg Config) error {
-	repoURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", cfg.GitHubToken, cfg.Repo)
+	repoURL := fmt.Sprintf("https://github.com/%s.git", cfg.Repo)
+	gitHubEnv := gitHubRemoteEnv(cfg.GitHubToken)
 	if _, err := os.Stat(filepath.Join(cfg.RepoDir, ".git")); err == nil {
 		log.Printf("[%s] repo already present, refreshing", nowUTC())
-		if _, err := runCommand(ex, "", nil, "git", "-C", cfg.RepoDir, "fetch", "--all", "--prune"); err != nil {
+		if _, err := runCommand(ex, "", gitHubEnv, "git", "-C", cfg.RepoDir, "fetch", "--all", "--prune"); err != nil {
 			return fmt.Errorf("refresh existing checkout: %w", err)
 		}
 	} else {
 		log.Printf("[%s] cloning %s", nowUTC(), cfg.Repo)
-		if _, err := runCommand(ex, "", nil, "git", "clone", repoURL, cfg.RepoDir); err != nil {
+		if _, err := runCommand(ex, "", gitHubEnv, "git", "clone", repoURL, cfg.RepoDir); err != nil {
 			return fmt.Errorf("clone repository: %w", err)
 		}
 	}
 
-	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "fetch", "origin", cfg.BaseBranch, cfg.HeadBranch); err != nil {
+	if _, err := runCommand(ex, cfg.RepoDir, gitHubEnv, "git", "fetch", "origin", cfg.BaseBranch, cfg.HeadBranch); err != nil {
 		log.Printf("[%s] git fetch warning: %v", nowUTC(), err)
 	}
 	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "checkout", cfg.BaseBranch); err != nil {
@@ -54,7 +56,7 @@ func checkoutRepo(ex CommandExecutor, cfg Config) error {
 			return fmt.Errorf("checkout base branch %s: %w", cfg.BaseBranch, createErr)
 		}
 	}
-	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "pull", "--ff-only", "origin", cfg.BaseBranch); err != nil {
+	if _, err := runCommand(ex, cfg.RepoDir, gitHubEnv, "git", "pull", "--ff-only", "origin", cfg.BaseBranch); err != nil {
 		log.Printf("[%s] git pull warning: %v", nowUTC(), err)
 	}
 
@@ -65,7 +67,7 @@ func checkoutRepo(ex CommandExecutor, cfg Config) error {
 		}
 		return nil
 	}
-	if _, err := runCommand(ex, cfg.RepoDir, nil, "git", "ls-remote", "--exit-code", "--heads", "origin", cfg.HeadBranch); err == nil {
+	if _, err := runCommand(ex, cfg.RepoDir, gitHubEnv, "git", "ls-remote", "--exit-code", "--heads", "origin", cfg.HeadBranch); err == nil {
 		_, err = runCommand(ex, cfg.RepoDir, nil, "git", "checkout", "-b", cfg.HeadBranch, "origin/"+cfg.HeadBranch)
 		if err != nil {
 			return fmt.Errorf("checkout remote head branch %s: %w", cfg.HeadBranch, err)
@@ -77,6 +79,27 @@ func checkoutRepo(ex CommandExecutor, cfg Config) error {
 		return fmt.Errorf("create head branch %s: %w", cfg.HeadBranch, err)
 	}
 	return nil
+}
+
+func githubCLIEnv(token string) []string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil
+	}
+	return []string{"GH_TOKEN=" + token}
+}
+
+func gitHubRemoteEnv(token string) []string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil
+	}
+	header := "AUTHORIZATION: basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token))
+	return []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+		"GIT_CONFIG_VALUE_0=" + header,
+	}
 }
 
 func LoadAgentCommitMessage(path string) (title, body string, err error) {
@@ -138,7 +161,7 @@ func firstNonEmptyLine(s string) string {
 }
 
 func loadPRView(ex CommandExecutor, cfg Config) (prView, bool, error) {
-	out, err := runCommand(ex, cfg.RepoDir, nil, "gh", "pr", "view", cfg.HeadBranch, "--repo", cfg.Repo, "--json", "number,url")
+	out, err := runCommand(ex, cfg.RepoDir, githubCLIEnv(cfg.GitHubToken), "gh", "pr", "view", cfg.HeadBranch, "--repo", cfg.Repo, "--json", "number,url")
 	if err != nil {
 		return prView{}, false, nil
 	}

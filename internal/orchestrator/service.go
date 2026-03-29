@@ -248,6 +248,7 @@ func (s *Server) removeRunExecutionBestEffort(ctx context.Context, handle runner
 func (s *Server) finishRun(run state.Run) {
 	if runStatusIsDone(run.Status) {
 		s.clearRunCancelBestEffort(run.ID)
+		s.cleanupRunSecretsBestEffort(run.ID, run.RunDir)
 	}
 	taskCompleted := s.Store.IsTaskCompleted(run.TaskID)
 
@@ -257,6 +258,16 @@ func (s *Server) finishRun(run state.Run) {
 
 	if !s.isDraining() {
 		s.ScheduleRuns(run.TaskID)
+	}
+}
+
+func (s *Server) cleanupRunSecretsBestEffort(runID, runDir string) {
+	secretsDir := runner.SecretsDir(runDir)
+	if strings.TrimSpace(secretsDir) == "" {
+		return
+	}
+	if err := os.RemoveAll(secretsDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("run %s remove secrets dir failed: %v", runID, err)
 	}
 }
 

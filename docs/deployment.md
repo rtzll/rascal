@@ -67,6 +67,9 @@ default):
   `RASCAL_RUNNER_DOCKER_PIDS_LIMIT=256`
 - `strict` currently adds a size-bounded `/tmp` mount via
   `RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE`
+- Runner secrets default to file-scoped injection:
+  `RASCAL_RUNNER_ALLOW_ENV_SECRETS=false`
+  mounts per-run secrets read-only at `/run/rascal-secrets`
 - `RASCAL_AGENT_RUNTIME` is optional and overrides the default runtime when set
 
 ## Blue/Green Sequence

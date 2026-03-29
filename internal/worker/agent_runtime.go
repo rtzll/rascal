@@ -285,7 +285,7 @@ func ClaudeRunArgs(cfg Config, resume bool) []string {
 }
 
 func loadClaudeOAuthToken(cfg Config) (string, error) {
-	sourcePath := filepath.Join(cfg.MetaDir, "claude", defaultClaudeOAuthFile)
+	sourcePath := firstNonEmptyValue(strings.TrimSpace(cfg.ClaudeOAuthTokenFile), filepath.Join(cfg.MetaDir, "claude", defaultClaudeOAuthFile))
 	data, err := os.ReadFile(sourcePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -325,7 +325,7 @@ func ensureCodexHome(cfg Config) error {
 	if err := os.MkdirAll(cfg.CodexHome, 0o755); err != nil {
 		return fmt.Errorf("create codex home: %w", err)
 	}
-	sourcePath := filepath.Join(cfg.MetaDir, "codex", defaultCodexAuthFile)
+	sourcePath := firstNonEmptyValue(strings.TrimSpace(cfg.CodexAuthFile), filepath.Join(cfg.MetaDir, "codex", defaultCodexAuthFile))
 	if _, err := os.Stat(sourcePath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil

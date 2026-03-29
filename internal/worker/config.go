@@ -14,15 +14,18 @@ import (
 )
 
 type Config struct {
-	RunID       string
-	TaskID      string
-	Instruction string
-	Repo        string
-	BaseBranch  string
-	HeadBranch  string
-	IssueNumber int
-	Trigger     runtrigger.Name
-	GitHubToken string
+	RunID                string
+	TaskID               string
+	Instruction          string
+	Repo                 string
+	BaseBranch           string
+	HeadBranch           string
+	IssueNumber          int
+	Trigger              runtrigger.Name
+	GitHubToken          string
+	GitHubTokenFile      string
+	CodexAuthFile        string
+	ClaudeOAuthTokenFile string
 
 	MetaDir                    string
 	WorkRoot                   string
@@ -58,9 +61,20 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	ghToken, err := requiredEnv("GH_TOKEN")
-	if err != nil {
-		return Config{}, err
+	ghToken := strings.TrimSpace(os.Getenv("GH_TOKEN"))
+	ghTokenFile := strings.TrimSpace(os.Getenv("GH_TOKEN_FILE"))
+	if ghToken == "" && ghTokenFile == "" {
+		return Config{}, fmt.Errorf("required env GH_TOKEN or GH_TOKEN_FILE is not set")
+	}
+	if ghToken == "" {
+		tokenData, err := os.ReadFile(ghTokenFile)
+		if err != nil {
+			return Config{}, fmt.Errorf("read GH_TOKEN_FILE: %w", err)
+		}
+		ghToken = strings.TrimSpace(string(tokenData))
+	}
+	if ghToken == "" {
+		return Config{}, fmt.Errorf("github token is empty")
 	}
 
 	baseBranch := strings.TrimSpace(os.Getenv("RASCAL_BASE_BRANCH"))
@@ -128,6 +142,8 @@ func LoadConfig() (Config, error) {
 	goosePathRoot := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")), filepath.Join(metaDir, "goose"))
 	codexHome := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CODEX_HOME")), filepath.Join(metaDir, "codex"))
 	claudeConfigDir := firstNonEmptyValue(strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")), filepath.Join(metaDir, "claude"))
+	codexAuthFile := strings.TrimSpace(os.Getenv("CODEX_AUTH_FILE"))
+	claudeOAuthTokenFile := strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN_FILE"))
 	persistentInstructionsPath := firstNonEmptyValue(strings.TrimSpace(os.Getenv("GOOSE_MOIM_MESSAGE_FILE")), filepath.Join(metaDir, defaultPersistentInstructionsFile))
 
 	return Config{
@@ -140,6 +156,9 @@ func LoadConfig() (Config, error) {
 		IssueNumber:                issueNumber,
 		Trigger:                    trigger,
 		GitHubToken:                ghToken,
+		GitHubTokenFile:            ghTokenFile,
+		CodexAuthFile:              codexAuthFile,
+		ClaudeOAuthTokenFile:       claudeOAuthTokenFile,
 		MetaDir:                    metaDir,
 		WorkRoot:                   workRoot,
 		RepoDir:                    repoDir,

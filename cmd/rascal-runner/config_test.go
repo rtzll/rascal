@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,6 +53,29 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if cfg.PersistentInstructionsPath != filepath.Join("/rascal-meta", "persistent_instructions.md") {
 		t.Fatalf("expected default persistent instructions path, got %q", cfg.PersistentInstructionsPath)
+	}
+}
+
+func TestLoadConfigReadsGitHubTokenFromFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "gh_token")
+	if err := os.WriteFile(tokenFile, []byte("token-from-file\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	t.Setenv("RASCAL_RUN_ID", "run_file")
+	t.Setenv("RASCAL_TASK_ID", "task_file")
+	t.Setenv("RASCAL_REPO", "owner/repo")
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_FILE", tokenFile)
+
+	cfg, err := worker.LoadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if cfg.GitHubToken != "token-from-file" {
+		t.Fatalf("GitHubToken = %q, want token-from-file", cfg.GitHubToken)
+	}
+	if cfg.GitHubTokenFile != tokenFile {
+		t.Fatalf("GitHubTokenFile = %q, want %q", cfg.GitHubTokenFile, tokenFile)
 	}
 }
 

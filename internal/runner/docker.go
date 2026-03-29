@@ -41,6 +41,10 @@ const (
 	containerContextJSONPath  = "/rascal-meta/context.json"
 	containerGooseMOIMPath    = "/rascal-meta/persistent_instructions.md"
 	containerControlDir       = "/rascal-control"
+	containerSecretsDir       = "/run/rascal-secrets"
+	containerGitHubTokenFile  = "/run/rascal-secrets/gh_token"
+	containerCodexAuthFile    = "/run/rascal-secrets/codex_auth.json"
+	containerClaudeTokenFile  = "/run/rascal-secrets/claude_oauth_token"
 )
 
 type dockerRuntimeLayout struct {
@@ -59,6 +63,7 @@ type dockerContainerEnvBuilder struct {
 	runtimeSessionID string
 	layout           dockerRuntimeLayout
 	githubToken      string
+	allowEnvSecrets  bool
 }
 
 func newDockerRuntimeLayout(agentRuntime runtime.Runtime, taskSession TaskSessionSpec) dockerRuntimeLayout {
@@ -84,7 +89,7 @@ func newDockerRuntimeLayout(agentRuntime runtime.Runtime, taskSession TaskSessio
 	return layout
 }
 
-func newDockerContainerEnvBuilder(spec Spec, agentRuntime runtime.Runtime, layout dockerRuntimeLayout, githubToken string) dockerContainerEnvBuilder {
+func newDockerContainerEnvBuilder(spec Spec, agentRuntime runtime.Runtime, layout dockerRuntimeLayout, githubToken string, allowEnvSecrets bool) dockerContainerEnvBuilder {
 	return dockerContainerEnvBuilder{
 		spec:             spec,
 		agentRuntime:     agentRuntime,
@@ -94,6 +99,7 @@ func newDockerContainerEnvBuilder(spec Spec, agentRuntime runtime.Runtime, layou
 		runtimeSessionID: strings.TrimSpace(spec.TaskSession.RuntimeSessionID),
 		layout:           layout,
 		githubToken:      strings.TrimSpace(githubToken),
+		allowEnvSecrets:  allowEnvSecrets,
 	}
 }
 
@@ -142,8 +148,16 @@ func (b dockerContainerEnvBuilder) Build() map[string]string {
 	case runtime.RuntimeClaude:
 		envPairs["CLAUDE_CONFIG_DIR"] = b.layout.claudeConfigDir
 	}
-	if b.githubToken != "" {
+	if b.githubToken != "" && b.allowEnvSecrets {
 		envPairs["GH_TOKEN"] = b.githubToken
+	} else if b.githubToken != "" {
+		envPairs["GH_TOKEN_FILE"] = containerGitHubTokenFile
+	}
+	switch b.agentRuntime.Provider() {
+	case runtime.ModelProviderAnthropic:
+		envPairs["CLAUDE_CODE_OAUTH_TOKEN_FILE"] = containerClaudeTokenFile
+	default:
+		envPairs["CODEX_AUTH_FILE"] = containerCodexAuthFile
 	}
 	return envPairs
 }
@@ -166,6 +180,15 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 	workspaceDir := filepath.Join(spec.RunDir, "workspace")
 	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("create workspace dir: %w", err)
+	}
+	secretsDir := strings.TrimSpace(spec.SecretsDir)
+	if secretsDir == "" {
+		secretsDir = SecretsDir(spec.RunDir)
+	}
+	if !l.Security.AllowEnvSecrets && strings.TrimSpace(l.GitHubToken) != "" {
+		if err := writeDockerSecretFile(secretsDir, "gh_token", []byte(strings.TrimSpace(l.GitHubToken))); err != nil {
+			return ExecutionHandle{}, fmt.Errorf("write github token secret: %w", err)
+		}
 	}
 	sessionDir := strings.TrimSpace(spec.TaskSession.TaskDir)
 	sessionResume := spec.TaskSession.Resume
@@ -201,7 +224,7 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 
 	layout := newDockerRuntimeLayout(agentRuntime, spec.TaskSession)
 	sessionMountTarget := layout.sessionTarget
-	envPairs := newDockerContainerEnvBuilder(spec, agentRuntime, layout, l.GitHubToken).Build()
+	envPairs := newDockerContainerEnvBuilder(spec, agentRuntime, layout, l.GitHubToken, l.Security.AllowEnvSecrets).Build()
 	containerName := sanitizeContainerName("rascal-" + spec.RunID)
 	args := []string{
 		"run",
@@ -228,6 +251,9 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 	)
 	if socketPath := strings.TrimSpace(spec.ResultReportSocketPath); socketPath != "" {
 		args = append(args, "-v", fmt.Sprintf("%s:%s", filepath.Dir(socketPath), containerControlDir))
+	}
+	if strings.TrimSpace(secretsDir) != "" {
+		args = append(args, "-v", fmt.Sprintf("%s:%s:ro", secretsDir, containerSecretsDir))
 	}
 	if sessionMountTarget != "" {
 		args = append(args, "-v", fmt.Sprintf("%s:%s", sessionDir, sessionMountTarget))
@@ -268,6 +294,22 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		ID:      containerID,
 		Name:    containerName,
 	}, nil
+}
+
+func writeDockerSecretFile(secretDir, name string, data []byte) error {
+	secretDir = strings.TrimSpace(secretDir)
+	name = strings.TrimSpace(name)
+	if secretDir == "" || name == "" {
+		return nil
+	}
+	if err := os.MkdirAll(secretDir, 0o700); err != nil {
+		return fmt.Errorf("create secret dir: %w", err)
+	}
+	path := filepath.Join(secretDir, name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write secret file %s: %w", path, err)
+	}
+	return nil
 }
 
 func (c DockerSecurityConfig) dockerRunArgs() []string {
