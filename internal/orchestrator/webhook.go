@@ -287,6 +287,60 @@ func (s *Server) executeWebhookAction(ctx context.Context, action WebhookAction)
 			return nil
 		}
 		return err
+	case WebhookActionCreatePRCheckFailureRun:
+		task, responseIssue, ok := s.activeTaskForCheckFailure(action.Repo, action.PRNumber, action.HeadBranch)
+		if !ok {
+			return nil
+		}
+		if _, active := s.Store.ActiveRunForTask(task.ID); active {
+			return nil
+		}
+		if action.HeadSHA != "" {
+			if lastRun, ok := s.Store.LastRunForTask(task.ID); ok && lastRun.Trigger == runtrigger.NamePRCheckFailure && strings.TrimSpace(lastRun.HeadSHA) == strings.TrimSpace(action.HeadSHA) {
+				return nil
+			}
+		}
+		prNumber := action.PRNumber
+		prStatus := state.PRStatusNone
+		if task.PRNumber > 0 {
+			if prNumber <= 0 {
+				prNumber = task.PRNumber
+			}
+			prStatus = state.PRStatusOpen
+		}
+		run, err := s.CreateAndQueueRun(RunRequest{
+			TaskID:      task.ID,
+			Repo:        action.Repo,
+			Instruction: action.Instruction,
+			Trigger:     action.Trigger,
+			IssueNumber: task.IssueNumber,
+			PRNumber:    prNumber,
+			PRStatus:    prStatus,
+			Context:     action.Context,
+			BaseBranch:  s.firstKnownBaseBranch(task.ID, action.BaseBranch),
+			HeadBranch:  s.firstKnownHeadBranch(task.ID, action.HeadBranch),
+			Debug:       boolPtr(true),
+			ResponseTarget: &RunResponseTarget{
+				Repo:        action.Repo,
+				IssueNumber: responseIssue,
+				Trigger:     action.Trigger,
+			},
+		})
+		if errors.Is(err, errTaskCompleted) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(action.HeadSHA) != "" {
+			if _, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
+				r.HeadSHA = strings.TrimSpace(action.HeadSHA)
+				return nil
+			}); err != nil {
+				return fmt.Errorf("persist check failure head sha for run %s: %w", run.ID, err)
+			}
+		}
+		return nil
 	case WebhookActionCancelPRThreadRuns:
 		task, ok := s.taskForPR(action.Repo, action.PRNumber)
 		if !ok {
@@ -346,6 +400,24 @@ func (s *Server) executeWebhookAction(ctx context.Context, action WebhookAction)
 	default:
 		return nil
 	}
+}
+
+func (s *Server) activeTaskForCheckFailure(repo string, prNumber int, headBranch string) (state.Task, int, bool) {
+	if prNumber > 0 {
+		task, ok := s.activeTaskForPR(repo, prNumber)
+		if ok {
+			return task, prNumber, true
+		}
+	}
+	task, ok := s.activeTaskForHeadBranch(repo, headBranch)
+	if !ok {
+		return state.Task{}, 0, false
+	}
+	responseIssue := task.IssueNumber
+	if task.PRNumber > 0 {
+		responseIssue = task.PRNumber
+	}
+	return task, responseIssue, true
 }
 
 func isOpenGitHubState(raw string) bool {

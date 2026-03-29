@@ -945,6 +945,26 @@ func pullRequestEventPayload(t *testing.T, action, repo, sender string, pr ghapi
 	})
 }
 
+func checkRunEventPayload(t *testing.T, action, repo, sender string, check ghapi.CheckRun) []byte {
+	t.Helper()
+	return mustMarshalJSONBytes(t, ghapi.CheckRunEvent{
+		Action:     action,
+		CheckRun:   check,
+		Repository: ghapi.Repository{FullName: repo},
+		Sender:     ghapi.User{Login: sender},
+	})
+}
+
+func checkSuiteEventPayload(t *testing.T, action, repo, sender string, suite ghapi.CheckSuite) []byte {
+	t.Helper()
+	return mustMarshalJSONBytes(t, ghapi.CheckSuiteEvent{
+		Action:     action,
+		CheckSuite: suite,
+		Repository: ghapi.Repository{FullName: repo},
+		Sender:     ghapi.User{Login: sender},
+	})
+}
+
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -2936,6 +2956,166 @@ func TestReadyForReviewResumesQueuedDraftPRRuns(t *testing.T) {
 	}
 	if calls := launcher.Calls(); calls != 1 {
 		t.Fatalf("expected exactly one launch after ready_for_review, got %d", calls)
+	}
+}
+
+func TestHandleWebhookCheckRunFailedQueuesManagedPRRepairRun(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	taskID := "owner/repo#1400"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", IssueNumber: 1400, PRNumber: 1401}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+
+	payload := checkRunEventPayload(t, "completed", "owner/repo", "github-actions[bot]", ghapi.CheckRun{
+		Name:       "test",
+		Status:     "completed",
+		Conclusion: "failure",
+		HeadSHA:    "abc123",
+		CheckSuite: ghapi.CheckSuiteRef{HeadBranch: "rascal/task-1400"},
+		PullRequests: []ghapi.CheckPullRequest{{
+			Number: 1401,
+			Base: struct {
+				Ref string `json:"ref"`
+			}{Ref: "main"},
+			Head: struct {
+				Ref string `json:"ref"`
+			}{Ref: "rascal/task-1400"},
+		}},
+		Output: ghapi.CheckOutput{Summary: "tests failed"},
+	})
+	req := webhookRequest(t, payload, "check_run", "delivery-check-run-failed", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for failed check_run event, got %d", rec.Code)
+	}
+
+	run, ok := s.Store.LastRunForTask(taskID)
+	if !ok {
+		t.Fatal("expected ci repair run to be queued")
+	}
+	if run.Trigger != runtrigger.NamePRCheckFailure {
+		t.Fatalf("trigger = %q, want %q", run.Trigger, runtrigger.NamePRCheckFailure)
+	}
+	if run.PRNumber != 1401 {
+		t.Fatalf("pr number = %d, want 1401", run.PRNumber)
+	}
+	if run.HeadSHA != "abc123" {
+		t.Fatalf("head sha = %q, want %q", run.HeadSHA, "abc123")
+	}
+	if !strings.Contains(run.Context, "tests failed") {
+		t.Fatalf("expected check output in context, got %q", run.Context)
+	}
+}
+
+func TestHandleWebhookCheckSuiteFailedQueuesBranchRepairRun(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	taskID := "owner/repo#1500"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", IssueNumber: 1500}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	existingRun, err := s.Store.AddRun(state.CreateRunInput{
+		ID:          "run_existing_branch",
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Instruction: "existing work",
+		Trigger:     runtrigger.NameIssueLabel,
+		RunDir:      t.TempDir(),
+		IssueNumber: 1500,
+		HeadBranch:  "rascal/task-1500-aaaa",
+		BaseBranch:  "main",
+	})
+	if err != nil {
+		t.Fatalf("add existing run: %v", err)
+	}
+	markRunSucceeded(t, s, existingRun.ID)
+
+	payload := checkSuiteEventPayload(t, "completed", "owner/repo", "github-actions[bot]", ghapi.CheckSuite{
+		Status:     "completed",
+		Conclusion: "failure",
+		HeadBranch: "rascal/task-1500-aaaa",
+		HeadSHA:    "def456",
+	})
+	req := webhookRequest(t, payload, "check_suite", "delivery-check-suite-failed", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for failed check_suite event, got %d", rec.Code)
+	}
+
+	run, ok := s.Store.LastRunForTask(taskID)
+	if !ok {
+		t.Fatal("expected branch repair run to be queued")
+	}
+	if run.Trigger != runtrigger.NamePRCheckFailure {
+		t.Fatalf("trigger = %q, want %q", run.Trigger, runtrigger.NamePRCheckFailure)
+	}
+	if run.HeadBranch != "rascal/task-1500-aaaa" {
+		t.Fatalf("head branch = %q, want rascal/task-1500-aaaa", run.HeadBranch)
+	}
+	if run.HeadSHA != "def456" {
+		t.Fatalf("head sha = %q, want %q", run.HeadSHA, "def456")
+	}
+}
+
+func TestHandleWebhookCheckRunFailedSkipsDuplicateHeadSHA(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	taskID := "owner/repo#1600"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", IssueNumber: 1600, PRNumber: 1601}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := s.Store.AddRun(state.CreateRunInput{
+		ID:          "run_previous_check_failure",
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Instruction: "previous ci repair",
+		Trigger:     runtrigger.NamePRCheckFailure,
+		RunDir:      t.TempDir(),
+		IssueNumber: 1600,
+		PRNumber:    1601,
+		HeadBranch:  "rascal/task-1600",
+		BaseBranch:  "main",
+	})
+	if err != nil {
+		t.Fatalf("add previous run: %v", err)
+	}
+	if _, err := s.Store.UpdateRun(run.ID, func(r *state.Run) error {
+		r.HeadSHA = "same-sha"
+		return nil
+	}); err != nil {
+		t.Fatalf("set head sha: %v", err)
+	}
+	markRunSucceeded(t, s, run.ID)
+
+	payload := checkRunEventPayload(t, "completed", "owner/repo", "github-actions[bot]", ghapi.CheckRun{
+		Name:       "test",
+		Status:     "completed",
+		Conclusion: "failure",
+		HeadSHA:    "same-sha",
+		CheckSuite: ghapi.CheckSuiteRef{HeadBranch: "rascal/task-1600"},
+		PullRequests: []ghapi.CheckPullRequest{{
+			Number: 1601,
+		}},
+	})
+	req := webhookRequest(t, payload, "check_run", "delivery-check-run-duplicate", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for duplicate failed check_run event, got %d", rec.Code)
+	}
+
+	runs := s.Store.ListRuns(100)
+	count := 0
+	for _, current := range runs {
+		if current.TaskID == taskID {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("task run count = %d, want 1", count)
 	}
 }
 

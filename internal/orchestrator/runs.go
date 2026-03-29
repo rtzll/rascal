@@ -68,7 +68,7 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 		}
 	}
 	if req.HeadBranch == "" {
-		if hasLastRun && (req.Trigger == runtrigger.NamePRComment || req.Trigger == runtrigger.NamePRReview) && lastRun.HeadBranch != "" {
+		if hasLastRun && (req.Trigger == runtrigger.NamePRComment || req.Trigger == runtrigger.NamePRReview || req.Trigger == runtrigger.NamePRCheckFailure) && lastRun.HeadBranch != "" {
 			req.HeadBranch = lastRun.HeadBranch
 		} else {
 			req.HeadBranch = BuildHeadBranch(req.TaskID, req.Instruction, runID)

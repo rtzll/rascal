@@ -169,6 +169,32 @@ func (s *Server) activeTaskForPR(repo string, prNumber int) (state.Task, bool) {
 	return task, true
 }
 
+func (s *Server) taskForHeadBranch(repo, headBranch string) (state.Task, bool) {
+	repo = state.NormalizeRepo(repo)
+	headBranch = strings.TrimSpace(headBranch)
+	if repo == "" || headBranch == "" {
+		return state.Task{}, false
+	}
+	for _, run := range s.Store.ListRuns(10000) {
+		if !strings.EqualFold(run.Repo, repo) || strings.TrimSpace(run.HeadBranch) != headBranch {
+			continue
+		}
+		task, ok := s.Store.GetTask(run.TaskID)
+		if ok {
+			return task, true
+		}
+	}
+	return state.Task{}, false
+}
+
+func (s *Server) activeTaskForHeadBranch(repo, headBranch string) (state.Task, bool) {
+	task, ok := s.taskForHeadBranch(repo, headBranch)
+	if !ok || task.Status != state.TaskOpen || task.PRDraft {
+		return state.Task{}, false
+	}
+	return task, true
+}
+
 func (s *Server) defaultBaseBranchForTask(taskID string) string {
 	if run, ok := s.Store.LastRunForTask(taskID); ok && run.BaseBranch != "" {
 		return run.BaseBranch

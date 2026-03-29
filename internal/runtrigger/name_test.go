@@ -13,6 +13,7 @@ func TestParse(t *testing.T) {
 	}{
 		{name: "cli", in: " cli ", want: NameCLI},
 		{name: "review thread", in: "PR_REVIEW_THREAD", want: NamePRReviewThread},
+		{name: "check failure", in: "pr_check_failure", want: NamePRCheckFailure},
 		{name: "invalid", in: "issue", wantErr: true},
 	}
 
@@ -61,6 +62,9 @@ func TestHelpers(t *testing.T) {
 	}
 	if !NameRetry.EnablesPROnlySession() {
 		t.Fatal("expected retry to enable pr-only sessions")
+	}
+	if !NamePRCheckFailure.EnablesPROnlySession() {
+		t.Fatal("expected pr_check_failure to enable pr-only sessions")
 	}
 	if NameIssueLabel.EnablesPROnlySession() {
 		t.Fatal("did not expect issue_label to enable pr-only sessions")

@@ -240,6 +240,48 @@ func TestWebhookInterpreterPullRequestReadyForReviewResumes(t *testing.T) {
 	}
 }
 
+func TestWebhookInterpreterCheckRunCompletedFailureQueuesPRRun(t *testing.T) {
+	actions := interpretWebhookActions(t, "check_run", ghapi.CheckRunEvent{
+		Action: "completed",
+		CheckRun: ghapi.CheckRun{
+			Name:       "test",
+			Conclusion: "failure",
+			HeadSHA:    "abc123",
+			CheckSuite: ghapi.CheckSuiteRef{HeadBranch: "rascal/branch"},
+			PullRequests: []ghapi.CheckPullRequest{{
+				Number: 77,
+			}},
+		},
+		Repository: ghapi.Repository{FullName: "owner/repo"},
+	})
+
+	if got, want := actionKinds(actions), []WebhookActionKind{WebhookActionCreatePRCheckFailureRun}; !sameActionKinds(got, want) {
+		t.Fatalf("action kinds = %v, want %v", got, want)
+	}
+	if actions[0].PRNumber != 77 {
+		t.Fatalf("pr number = %d, want 77", actions[0].PRNumber)
+	}
+	if actions[0].Trigger != runtrigger.NamePRCheckFailure {
+		t.Fatalf("trigger = %q, want %q", actions[0].Trigger, runtrigger.NamePRCheckFailure)
+	}
+}
+
+func TestWebhookInterpreterCheckSuiteIgnoresNonRascalBranchWithoutPR(t *testing.T) {
+	actions := interpretWebhookActions(t, "check_suite", ghapi.CheckSuiteEvent{
+		Action: "completed",
+		CheckSuite: ghapi.CheckSuite{
+			Conclusion: "failure",
+			HeadBranch: "feature/not-rascal",
+			HeadSHA:    "abc123",
+		},
+		Repository: ghapi.Repository{FullName: "owner/repo"},
+	})
+
+	if len(actions) != 0 {
+		t.Fatalf("actions = %v, want none", actionKinds(actions))
+	}
+}
+
 func TestWebhookInterpreterUnknownEventIsIgnored(t *testing.T) {
 	interpreter := NewWebhookInterpreter("rascal-bot")
 	actions, err := interpreter.Interpret("unknown", []byte(`{}`))

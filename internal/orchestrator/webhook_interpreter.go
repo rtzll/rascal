@@ -28,6 +28,7 @@ const (
 	WebhookActionReopenPullRequest        WebhookActionKind = "reopen_pull_request"
 	WebhookActionConvertPullRequestDraft  WebhookActionKind = "convert_pull_request_draft"
 	WebhookActionReadyPullRequest         WebhookActionKind = "ready_pull_request"
+	WebhookActionCreatePRCheckFailureRun  WebhookActionKind = "create_pr_check_failure_run"
 )
 
 type WebhookAction struct {
@@ -52,6 +53,7 @@ type WebhookAction struct {
 
 	BaseBranch string
 	HeadBranch string
+	HeadSHA    string
 
 	Merged bool
 
@@ -81,6 +83,10 @@ func (wi WebhookInterpreter) Interpret(eventType string, payload []byte) ([]Webh
 		return wi.interpretPullRequestReviewThread(payload)
 	case "pull_request":
 		return wi.interpretPullRequest(payload)
+	case "check_run":
+		return wi.interpretCheckRun(payload)
+	case "check_suite":
+		return wi.interpretCheckSuite(payload)
 	default:
 		return nil, nil
 	}
@@ -355,6 +361,109 @@ func (wi WebhookInterpreter) interpretPullRequest(payload []byte) ([]WebhookActi
 	default:
 		return nil, nil
 	}
+}
+
+func (wi WebhookInterpreter) interpretCheckRun(payload []byte) ([]WebhookAction, error) {
+	var ev ghapi.CheckRunEvent
+	if err := json.Unmarshal(payload, &ev); err != nil {
+		return nil, fmt.Errorf("decode check_run event: %w", err)
+	}
+	if ev.Action != "completed" || !isFailedCheckConclusion(ev.CheckRun.Conclusion) {
+		return nil, nil
+	}
+	return wi.buildCheckFailureActions(
+		ev.Repository.FullName,
+		ev.CheckRun.PullRequests,
+		ev.CheckRun.CheckSuite.HeadBranch,
+		ev.CheckRun.HeadSHA,
+		ev.CheckRun.Name,
+		renderCheckFailureContext(ev.CheckRun.Name, ev.CheckRun.Conclusion, ev.CheckRun.DetailsURL, ev.CheckRun.Output),
+	), nil
+}
+
+func (wi WebhookInterpreter) interpretCheckSuite(payload []byte) ([]WebhookAction, error) {
+	var ev ghapi.CheckSuiteEvent
+	if err := json.Unmarshal(payload, &ev); err != nil {
+		return nil, fmt.Errorf("decode check_suite event: %w", err)
+	}
+	if ev.Action != "completed" || !isFailedCheckConclusion(ev.CheckSuite.Conclusion) {
+		return nil, nil
+	}
+	return wi.buildCheckFailureActions(
+		ev.Repository.FullName,
+		ev.CheckSuite.PullRequests,
+		ev.CheckSuite.HeadBranch,
+		ev.CheckSuite.HeadSHA,
+		"check suite",
+		renderCheckFailureContext("check suite", ev.CheckSuite.Conclusion, "", ghapi.CheckOutput{}),
+	), nil
+}
+
+func (wi WebhookInterpreter) buildCheckFailureActions(repo string, prs []ghapi.CheckPullRequest, headBranch, headSHA, checkName, contextText string) []WebhookAction {
+	repo = state.NormalizeRepo(repo)
+	headBranch = strings.TrimSpace(headBranch)
+	headSHA = strings.TrimSpace(headSHA)
+	if repo == "" {
+		return nil
+	}
+	action := WebhookAction{
+		Kind:        WebhookActionCreatePRCheckFailureRun,
+		Repo:        repo,
+		Trigger:     runtrigger.NamePRCheckFailure,
+		Context:     contextText,
+		Instruction: "Investigate and fix CI failure on Rascal branch",
+		HeadBranch:  headBranch,
+		HeadSHA:     headSHA,
+	}
+	if len(prs) > 0 {
+		action.PRNumber = prs[0].Number
+		action.BaseBranch = strings.TrimSpace(prs[0].Base.Ref)
+		if action.HeadBranch == "" {
+			action.HeadBranch = strings.TrimSpace(prs[0].Head.Ref)
+		}
+		action.Instruction = fmt.Sprintf("Investigate and fix CI failure on PR #%d", action.PRNumber)
+		return []WebhookAction{action}
+	}
+	if !isRascalBranch(action.HeadBranch) {
+		return nil
+	}
+	if strings.TrimSpace(checkName) != "" {
+		action.Instruction = fmt.Sprintf("Investigate and fix CI failure for check '%s'", strings.TrimSpace(checkName))
+	}
+	return []WebhookAction{action}
+}
+
+func isFailedCheckConclusion(conclusion string) bool {
+	switch strings.ToLower(strings.TrimSpace(conclusion)) {
+	case "failure", "timed_out", "action_required", "startup_failure":
+		return true
+	default:
+		return false
+	}
+}
+
+func renderCheckFailureContext(name, conclusion, detailsURL string, output ghapi.CheckOutput) string {
+	lines := []string{
+		fmt.Sprintf("CI check failure: %s", firstNonEmpty(strings.TrimSpace(name), "unknown check")),
+		fmt.Sprintf("Conclusion: %s", firstNonEmpty(strings.TrimSpace(conclusion), "unknown")),
+	}
+	if strings.TrimSpace(detailsURL) != "" {
+		lines = append(lines, fmt.Sprintf("Details: %s", strings.TrimSpace(detailsURL)))
+	}
+	if strings.TrimSpace(output.Title) != "" {
+		lines = append(lines, fmt.Sprintf("Title: %s", strings.TrimSpace(output.Title)))
+	}
+	if strings.TrimSpace(output.Summary) != "" {
+		lines = append(lines, fmt.Sprintf("Summary: %s", strings.TrimSpace(output.Summary)))
+	}
+	if strings.TrimSpace(output.Text) != "" {
+		lines = append(lines, fmt.Sprintf("Text: %s", strings.TrimSpace(output.Text)))
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func isRascalBranch(headBranch string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(headBranch)), "rascal/")
 }
 
 func (wi WebhookInterpreter) isBotActor(login string) bool {

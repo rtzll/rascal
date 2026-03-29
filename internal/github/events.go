@@ -128,3 +128,58 @@ type PullRequestEvent struct {
 	Repository  Repository  `json:"repository"`
 	Sender      User        `json:"sender"`
 }
+
+type CheckPullRequest struct {
+	Number int `json:"number"`
+	Base   struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+	Head struct {
+		Ref string `json:"ref"`
+	} `json:"head"`
+}
+
+type CheckOutput struct {
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+	Text    string `json:"text"`
+}
+
+type CheckSuiteRef struct {
+	HeadBranch string `json:"head_branch"`
+	HeadSHA    string `json:"head_sha"`
+}
+
+type CheckRun struct {
+	Name         string             `json:"name"`
+	Status       string             `json:"status"`
+	Conclusion   string             `json:"conclusion"`
+	HeadSHA      string             `json:"head_sha"`
+	HTMLURL      string             `json:"html_url"`
+	DetailsURL   string             `json:"details_url"`
+	Output       CheckOutput        `json:"output"`
+	CheckSuite   CheckSuiteRef      `json:"check_suite"`
+	PullRequests []CheckPullRequest `json:"pull_requests"`
+}
+
+type CheckSuite struct {
+	Status       string             `json:"status"`
+	Conclusion   string             `json:"conclusion"`
+	HeadBranch   string             `json:"head_branch"`
+	HeadSHA      string             `json:"head_sha"`
+	PullRequests []CheckPullRequest `json:"pull_requests"`
+}
+
+type CheckRunEvent struct {
+	Action     string     `json:"action"`
+	CheckRun   CheckRun   `json:"check_run"`
+	Repository Repository `json:"repository"`
+	Sender     User       `json:"sender"`
+}
+
+type CheckSuiteEvent struct {
+	Action     string     `json:"action"`
+	CheckSuite CheckSuite `json:"check_suite"`
+	Repository Repository `json:"repository"`
+	Sender     User       `json:"sender"`
+}
