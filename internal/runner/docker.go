@@ -200,7 +200,7 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 			return ExecutionHandle{}, fmt.Errorf("create agent session dir: %w", err)
 		}
 	}
-	if err := prepareMountAccess(spec.RunDir, workspaceDir, sessionDir); err != nil {
+	if err := prepareMountAccess(spec.RunDir, workspaceDir, sessionDir, secretsDir); err != nil {
 		return ExecutionHandle{}, err
 	}
 
@@ -438,7 +438,7 @@ func dockerNotFoundOutput(err error, output []byte) bool {
 	return strings.Contains(text, "no such object") || strings.Contains(text, "no such container")
 }
 
-func prepareMountAccess(runDir, workspaceDir, sessionDir string) error {
+func prepareMountAccess(runDir, workspaceDir, sessionDir, secretsDir string) error {
 	if os.Geteuid() == 0 {
 		if err := chownTree(runDir, runtimeUID, runtimeGID); err != nil {
 			return fmt.Errorf("prepare run dir ownership: %w", err)
@@ -446,6 +446,11 @@ func prepareMountAccess(runDir, workspaceDir, sessionDir string) error {
 		if strings.TrimSpace(sessionDir) != "" {
 			if err := chownTree(sessionDir, runtimeUID, runtimeGID); err != nil {
 				return fmt.Errorf("prepare goose session dir ownership: %w", err)
+			}
+		}
+		if strings.TrimSpace(secretsDir) != "" {
+			if err := chownTree(secretsDir, runtimeUID, runtimeGID); err != nil {
+				return fmt.Errorf("prepare secrets dir ownership: %w", err)
 			}
 		}
 		return nil
@@ -456,6 +461,9 @@ func prepareMountAccess(runDir, workspaceDir, sessionDir string) error {
 	if strings.TrimSpace(sessionDir) != "" {
 		targets = append(targets, sessionDir)
 	}
+	if strings.TrimSpace(secretsDir) != "" {
+		targets = append(targets, secretsDir)
+	}
 	for _, target := range targets {
 		if err := chmodIfExists(target, 0o777); err != nil {
 			return fmt.Errorf("prepare writable mount %s: %w", target, err)
@@ -463,6 +471,15 @@ func prepareMountAccess(runDir, workspaceDir, sessionDir string) error {
 	}
 	if err := chmodIfExists(filepath.Join(runDir, "codex", "auth.json"), 0o644); err != nil {
 		return fmt.Errorf("prepare codex auth readability: %w", err)
+	}
+	for _, path := range []string{
+		filepath.Join(strings.TrimSpace(secretsDir), "gh_token"),
+		filepath.Join(strings.TrimSpace(secretsDir), "codex_auth.json"),
+		filepath.Join(strings.TrimSpace(secretsDir), "claude_oauth_token"),
+	} {
+		if err := chmodIfExists(path, 0o644); err != nil {
+			return fmt.Errorf("prepare secret readability %s: %w", path, err)
+		}
 	}
 	return nil
 }

@@ -829,3 +829,53 @@ exit 0
 		}
 	}
 }
+
+func TestPrepareMountAccessMakesSecretsReadableForNonRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("non-root readability path only")
+	}
+
+	tmp := t.TempDir()
+	runDir := filepath.Join(tmp, "run")
+	workspaceDir := filepath.Join(runDir, "workspace")
+	secretsDir := filepath.Join(tmp, ".run-secrets")
+
+	for _, dir := range []string{runDir, workspaceDir, secretsDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	for _, file := range []string{
+		filepath.Join(secretsDir, "gh_token"),
+		filepath.Join(secretsDir, "codex_auth.json"),
+		filepath.Join(secretsDir, "claude_oauth_token"),
+	} {
+		if err := os.WriteFile(file, []byte("secret"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", file, err)
+		}
+	}
+
+	if err := prepareMountAccess(runDir, workspaceDir, "", secretsDir); err != nil {
+		t.Fatalf("prepareMountAccess: %v", err)
+	}
+
+	for _, path := range []string{
+		secretsDir,
+		filepath.Join(secretsDir, "gh_token"),
+		filepath.Join(secretsDir, "codex_auth.json"),
+		filepath.Join(secretsDir, "claude_oauth_token"),
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		got := info.Mode().Perm()
+		want := os.FileMode(0o644)
+		if path == secretsDir {
+			want = 0o777
+		}
+		if got != want {
+			t.Fatalf("%s mode = %#o, want %#o", path, got, want)
+		}
+	}
+}
