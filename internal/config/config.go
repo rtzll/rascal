@@ -133,6 +133,9 @@ func (c ServerConfig) Ensure() error {
 	if c.DataDir == "" {
 		return fmt.Errorf("data directory cannot be empty")
 	}
+	if !c.AuthEnabled() {
+		return fmt.Errorf("RASCAL_API_TOKEN is required")
+	}
 	if err := os.MkdirAll(c.DataDir, 0o755); err != nil {
 		return fmt.Errorf("create data directory: %w", err)
 	}

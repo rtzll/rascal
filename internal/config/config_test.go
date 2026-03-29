@@ -330,3 +330,31 @@ func TestLoadServerConfigRejectsInvalidEnumEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestServerConfigEnsureRejectsMissingAPIToken(t *testing.T) {
+	t.Setenv("RASCAL_DATA_DIR", filepath.Join(t.TempDir(), "rascal-data"))
+	t.Setenv("RASCAL_API_TOKEN", "")
+
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
+	if err := cfg.Ensure(); err == nil {
+		t.Fatal("Ensure error = nil, want missing token failure")
+	} else if !strings.Contains(err.Error(), "RASCAL_API_TOKEN is required") {
+		t.Fatalf("Ensure error = %q, want missing token message", err.Error())
+	}
+}
+
+func TestServerConfigEnsureAllowsPresentAPIToken(t *testing.T) {
+	t.Setenv("RASCAL_DATA_DIR", filepath.Join(t.TempDir(), "rascal-data"))
+	t.Setenv("RASCAL_API_TOKEN", "test-token")
+
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig returned error: %v", err)
+	}
+	if err := cfg.Ensure(); err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+}
