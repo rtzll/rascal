@@ -71,6 +71,10 @@ rascal deploy \
   --github-runtime-token "$RASCAL_GITHUB_TOKEN"
 ```
 
+Deploy now includes an explicit bootstrap phase. If a host package change is
+needed, update `internal/deploy/assets/bootstrap_host.sh`; `deploy.go` only
+orchestrates the upload/order of that bootstrap step plus the Rascal rollout.
+
 To rotate only the server-side GitHub runtime token later, you can sync auth
 without re-supplying the webhook secret:
 

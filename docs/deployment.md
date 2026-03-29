@@ -28,6 +28,19 @@ It also writes:
 
 - `/etc/rascal/active_slot` with `blue` or `green`
 
+## Phases
+
+Rascal host setup is split into three phases:
+
+- `provision`: create the VM and network resources only
+- `bootstrap`: install OS-level dependencies and host prerequisites
+- `deploy`: upload Rascal artifacts, build runner images, switch slots, and
+  reload services
+
+The source of truth for host packages now lives in
+`internal/deploy/assets/bootstrap_host.sh`. Package additions should be made
+there, not inline in `deploy.go`.
+
 ## Runtime Topology
 
 - `rascal@blue` listens on `127.0.0.1:18080`
@@ -55,7 +68,8 @@ Given active slot `A` and inactive slot `B`, deploy does:
 
 1. Build `rascald` for Linux and upload artifacts.
 2. Build `rascal-runner` for Linux and upload artifacts.
-3. Ensure base packages (`docker`, `caddy`, `curl`, `sqlite3`, `ripgrep`) exist.
+3. Upload bootstrap assets and execute `bootstrap_host.sh` to ensure base
+   packages (`docker`, `caddy`, `curl`, `sqlite3`, `ripgrep`) and host layout.
 4. Install uploaded `rascal-runner` into `/opt/rascal/runner/rascal-runner`.
 5. Build/update runner images on host.
 6. Install/update systemd unit and env files.
