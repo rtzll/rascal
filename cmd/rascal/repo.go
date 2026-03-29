@@ -66,6 +66,10 @@ type repoGitHubClient interface {
 	UpsertWebhook(ctx context.Context, repo, webhookURL, secret string, events []string) error
 }
 
+var newRepoGitHubClientFn = func(token string) repoGitHubClient {
+	return ghapi.NewAPIClient(token)
+}
+
 func (a *app) runRepoEnable(input repoEnableInput) (repoEnableResult, error) {
 	repo := strings.TrimSpace(input.Repo)
 	if repo == "" {
@@ -114,7 +118,7 @@ func (a *app) runRepoEnable(input repoEnableInput) (repoEnableResult, error) {
 
 	client := input.Client
 	if client == nil {
-		client = ghapi.NewAPIClient(githubAdminToken)
+		client = newRepoGitHubClientFn(githubAdminToken)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
