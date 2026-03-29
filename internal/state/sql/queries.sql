@@ -220,6 +220,27 @@ SET
   updated_at = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(run_id);
 
+-- name: GetRunNotification :one
+SELECT run_id, kind, repo, issue_number, github_comment_id, posted_at
+FROM run_notifications
+WHERE run_id = ? AND kind = ?;
+
+-- name: UpsertRunNotification :exec
+INSERT INTO run_notifications (
+  run_id,
+  kind,
+  repo,
+  issue_number,
+  github_comment_id,
+  posted_at
+)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(run_id, kind) DO UPDATE SET
+  repo = excluded.repo,
+  issue_number = excluded.issue_number,
+  github_comment_id = COALESCE(excluded.github_comment_id, run_notifications.github_comment_id),
+  posted_at = excluded.posted_at;
+
 -- name: CancelQueuedRuns :exec
 UPDATE runs
 SET status = 'canceled', error = ?, status_reason = ?, updated_at = ?, completed_at = ?

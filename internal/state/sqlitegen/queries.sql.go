@@ -1148,6 +1148,31 @@ func (q *Queries) GetRunLease(ctx context.Context, runID string) (RunLease, erro
 	return i, err
 }
 
+const getRunNotification = `-- name: GetRunNotification :one
+SELECT run_id, kind, repo, issue_number, github_comment_id, posted_at
+FROM run_notifications
+WHERE run_id = ? AND kind = ?
+`
+
+type GetRunNotificationParams struct {
+	RunID string `json:"run_id"`
+	Kind  string `json:"kind"`
+}
+
+func (q *Queries) GetRunNotification(ctx context.Context, arg GetRunNotificationParams) (RunNotification, error) {
+	row := q.db.QueryRowContext(ctx, getRunNotification, arg.RunID, arg.Kind)
+	var i RunNotification
+	err := row.Scan(
+		&i.RunID,
+		&i.Kind,
+		&i.Repo,
+		&i.IssueNumber,
+		&i.GithubCommentID,
+		&i.PostedAt,
+	)
+	return i, err
+}
+
 const getRunTokenUsage = `-- name: GetRunTokenUsage :one
 SELECT
   run_id,
@@ -2838,6 +2863,44 @@ func (q *Queries) UpsertRunLease(ctx context.Context, arg UpsertRunLeaseParams) 
 		arg.OwnerID,
 		arg.HeartbeatAt,
 		arg.LeaseExpiresAt,
+	)
+	return err
+}
+
+const upsertRunNotification = `-- name: UpsertRunNotification :exec
+INSERT INTO run_notifications (
+  run_id,
+  kind,
+  repo,
+  issue_number,
+  github_comment_id,
+  posted_at
+)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(run_id, kind) DO UPDATE SET
+  repo = excluded.repo,
+  issue_number = excluded.issue_number,
+  github_comment_id = COALESCE(excluded.github_comment_id, run_notifications.github_comment_id),
+  posted_at = excluded.posted_at
+`
+
+type UpsertRunNotificationParams struct {
+	RunID           string        `json:"run_id"`
+	Kind            string        `json:"kind"`
+	Repo            string        `json:"repo"`
+	IssueNumber     int64         `json:"issue_number"`
+	GithubCommentID sql.NullInt64 `json:"github_comment_id"`
+	PostedAt        int64         `json:"posted_at"`
+}
+
+func (q *Queries) UpsertRunNotification(ctx context.Context, arg UpsertRunNotificationParams) error {
+	_, err := q.db.ExecContext(ctx, upsertRunNotification,
+		arg.RunID,
+		arg.Kind,
+		arg.Repo,
+		arg.IssueNumber,
+		arg.GithubCommentID,
+		arg.PostedAt,
 	)
 	return err
 }

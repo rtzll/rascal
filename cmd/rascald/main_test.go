@@ -3338,8 +3338,10 @@ func TestExecuteRunRequeuesRunForGooseUsageLimit(t *testing.T) {
 	if calls := launcher.Calls(); calls != 1 {
 		t.Fatalf("expected run not to restart before pause expiry, got launcher calls=%d", calls)
 	}
-	if _, err := os.Stat(orchestrator.RunFailureCommentMarkerPath(run.RunDir)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected no failure marker, got err=%v", err)
+	if _, ok, err := s.Store.GetRunNotification(run.ID, state.RunNotificationKindFailure); err != nil {
+		t.Fatalf("GetRunNotification(failure): %v", err)
+	} else if ok {
+		t.Fatal("expected no failure notification record")
 	}
 	if pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(orchestrator.SchedulerPauseScope, time.Now().UTC()); err != nil {
 		t.Fatalf("load scheduler pause: %v", err)
@@ -3652,17 +3654,15 @@ func TestPostRunStartCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	if !strings.Contains(comments[0].body, orchestrator.RunStartCommentBodyMarker) {
 		t.Fatalf("expected start marker in comment body, got:\n%s", comments[0].body)
 	}
-	markerPath := orchestrator.RunStartCommentMarkerPath(run.RunDir)
-	markerData, err := os.ReadFile(markerPath)
+	notification, ok, err := s.Store.GetRunNotification(run.ID, state.RunNotificationKindStart)
 	if err != nil {
-		t.Fatalf("read start marker: %v", err)
+		t.Fatalf("GetRunNotification(start): %v", err)
 	}
-	var marker orchestrator.RunCommentMarker
-	if err := json.Unmarshal(markerData, &marker); err != nil {
-		t.Fatalf("decode start marker: %v", err)
+	if !ok {
+		t.Fatal("expected start notification record")
 	}
-	if marker.RunID != run.ID {
-		t.Fatalf("marker run_id = %q, want %q", marker.RunID, run.ID)
+	if notification.RunID != run.ID {
+		t.Fatalf("notification run_id = %q, want %q", notification.RunID, run.ID)
 	}
 }
 
@@ -3713,8 +3713,10 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 0 {
 		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
 	}
-	if _, err := os.Stat(orchestrator.RunStartCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
-		t.Fatalf("expected start marker to be absent after failed post, stat err=%v", err)
+	if _, ok, err := s.Store.GetRunNotification(run.ID, state.RunNotificationKindStart); err != nil {
+		t.Fatalf("GetRunNotification(start): %v", err)
+	} else if ok {
+		t.Fatal("expected start notification record to be absent after failed post")
 	}
 
 	s.PostRunStartCommentBestEffort(run, agentrt.SessionModeAll, false)
@@ -3725,8 +3727,10 @@ func TestPostRunStartCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 1 {
 		t.Fatalf("expected one posted start comment after retry, got %d", len(comments))
 	}
-	if _, err := os.Stat(orchestrator.RunStartCommentMarkerPath(run.RunDir)); err != nil {
-		t.Fatalf("expected start marker after successful retry: %v", err)
+	if _, ok, err := s.Store.GetRunNotification(run.ID, state.RunNotificationKindStart); err != nil {
+		t.Fatalf("GetRunNotification(start): %v", err)
+	} else if !ok {
+		t.Fatal("expected start notification record after successful retry")
 	}
 }
 
@@ -3840,6 +3844,11 @@ func TestPostRunCompletionCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
 	}
 	if persisted.CompletionCommentPostedAt == nil {
 		t.Fatalf("completion comment posted_at not recorded")
+	}
+	if _, ok, err := s.Store.GetRunNotification(run.ID, state.RunNotificationKindCompletion); err != nil {
+		t.Fatalf("GetRunNotification(completion): %v", err)
+	} else if !ok {
+		t.Fatal("expected completion notification record")
 	}
 }
 
@@ -3968,6 +3977,11 @@ func TestPostRunCompletionCommentAmbiguousFailureUsesTokenReconciliation(t *test
 	if persisted.CompletionCommentState != state.CompletionCommentStatePosted {
 		t.Fatalf("completion comment state = %q, want %q", persisted.CompletionCommentState, state.CompletionCommentStatePosted)
 	}
+	if _, ok, err := s.Store.GetRunNotification(run.ID, state.RunNotificationKindCompletion); err != nil {
+		t.Fatalf("GetRunNotification(completion): %v", err)
+	} else if !ok {
+		t.Fatal("expected completion notification record after ambiguous failure reconciliation")
+	}
 }
 
 func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
@@ -4016,8 +4030,10 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 	if comments := fakeGH.postedComments(); len(comments) != 0 {
 		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
 	}
-	if _, err := os.Stat(orchestrator.RunFailureCommentMarkerPath(run.RunDir)); !os.IsNotExist(err) {
-		t.Fatalf("expected failure marker to be absent after failed post, stat err=%v", err)
+	if _, ok, err := s.Store.GetRunNotification(run.ID, state.RunNotificationKindFailure); err != nil {
+		t.Fatalf("GetRunNotification(failure): %v", err)
+	} else if ok {
+		t.Fatal("expected failure notification record to be absent after failed post")
 	}
 
 	s.PostRunFailureCommentBestEffort(run)
@@ -4032,8 +4048,10 @@ func TestPostRunFailureCommentRetriesAfterPostFailure(t *testing.T) {
 	if !strings.Contains(comments[0].body, "Reason: goose run failed: exit status 1") {
 		t.Fatalf("expected generic failure reason in comment, got body:\n%s", comments[0].body)
 	}
-	if _, err := os.Stat(orchestrator.RunFailureCommentMarkerPath(run.RunDir)); err != nil {
-		t.Fatalf("expected failure marker after successful retry: %v", err)
+	if _, ok, err := s.Store.GetRunNotification(run.ID, state.RunNotificationKindFailure); err != nil {
+		t.Fatalf("GetRunNotification(failure): %v", err)
+	} else if !ok {
+		t.Fatal("expected failure notification record after successful retry")
 	}
 }
 

@@ -132,13 +132,6 @@ type RunResponseTarget struct {
 	ReviewThreadID int64           `json:"review_thread_id,omitempty"`
 }
 
-type RunCommentMarker struct {
-	RunID       string `json:"run_id"`
-	Repo        string `json:"repo"`
-	IssueNumber int    `json:"issue_number"`
-	PostedAt    string `json:"posted_at"`
-}
-
 type RunFailureSummary struct {
 	Headline string
 	RetryAt  string

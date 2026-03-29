@@ -181,69 +181,6 @@ func runFailureCommentMarkerExists(runDir string) (bool, error) {
 	return RunCommentMarkerExists(runDir, runFailureCommentMarkerFile, "failure comment")
 }
 
-func writeRunCommentMarker(run state.Run, repo string, issueNumber int, markerFile, markerKind string) error {
-	marker := RunCommentMarker{
-		RunID:       run.ID,
-		Repo:        strings.TrimSpace(repo),
-		IssueNumber: issueNumber,
-		PostedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-	}
-	data, err := json.MarshalIndent(marker, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode %s marker: %w", markerKind, err)
-	}
-	path := RunCommentMarkerPath(run.RunDir, markerFile)
-	if err := writeFileAtomically(path, data, 0o644); err != nil {
-		return fmt.Errorf("write %s marker: %w", markerKind, err)
-	}
-	return nil
-}
-
-func writeRunStartCommentMarker(run state.Run, repo string, issueNumber int) error {
-	return writeRunCommentMarker(run, repo, issueNumber, runStartCommentMarkerFile, "start comment")
-}
-
-func writeRunFailureCommentMarker(run state.Run, repo string, issueNumber int) error {
-	return writeRunCommentMarker(run, repo, issueNumber, runFailureCommentMarkerFile, "failure comment")
-}
-
-func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(path)
-	tempFile, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temp file for %s: %w", path, err)
-	}
-	tempPath := tempFile.Name()
-	removeTemp := true
-	defer func() {
-		if removeTemp {
-			if err := os.Remove(tempPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-				log.Printf("remove temp file %s: %v", tempPath, err)
-			}
-		}
-	}()
-	if _, err := tempFile.Write(data); err != nil {
-		if closeErr := tempFile.Close(); closeErr != nil {
-			return fmt.Errorf("write temp file: %w (close temp file: %v)", err, closeErr)
-		}
-		return fmt.Errorf("write temp file for %s: %w", path, err)
-	}
-	if err := tempFile.Chmod(mode); err != nil {
-		if closeErr := tempFile.Close(); closeErr != nil {
-			return fmt.Errorf("chmod temp file: %w (close temp file: %v)", err, closeErr)
-		}
-		return fmt.Errorf("chmod temp file for %s: %w", path, err)
-	}
-	if err := tempFile.Close(); err != nil {
-		return fmt.Errorf("close temp file for %s: %w", path, err)
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return fmt.Errorf("rename temp file to %s: %w", path, err)
-	}
-	removeTemp = false
-	return nil
-}
-
 func requesterForRun(run state.Run, target RunResponseTarget, requesterUserID string) string {
 	requestedBy := strings.TrimSpace(target.RequestedBy)
 	if requestedBy != "" {

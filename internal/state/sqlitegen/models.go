@@ -121,6 +121,15 @@ type RunLease struct {
 	LeaseExpiresAt int64  `json:"lease_expires_at"`
 }
 
+type RunNotification struct {
+	RunID           string        `json:"run_id"`
+	Kind            string        `json:"kind"`
+	Repo            string        `json:"repo"`
+	IssueNumber     int64         `json:"issue_number"`
+	GithubCommentID sql.NullInt64 `json:"github_comment_id"`
+	PostedAt        int64         `json:"posted_at"`
+}
+
 type RunTokenUsage struct {
 	RunID                 string        `json:"run_id"`
 	Backend               string        `json:"backend"`

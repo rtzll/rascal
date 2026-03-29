@@ -41,6 +41,12 @@ func (n *GitHubRunNotifier) NotifyRunStarted(run state.Run, sessionMode runtime.
 	if !ok {
 		target = RunResponseTarget{}
 	}
+	if posted, err := n.notificationAlreadyPosted(run.ID, state.RunNotificationKindStart); err != nil {
+		log.Printf("failed to check start notification record for run %s: %v", run.ID, err)
+		return
+	} else if posted {
+		return
+	}
 	if markerExists, err := runStartCommentMarkerExists(run.RunDir); err != nil {
 		log.Printf("failed to check start comment marker for run %s: %v", run.ID, err)
 		return
@@ -62,8 +68,14 @@ func (n *GitHubRunNotifier) NotifyRunStarted(run state.Run, sessionMode runtime.
 		log.Printf("failed to post start comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
 		return
 	}
-	if err := writeRunStartCommentMarker(run, repo, issueNumber); err != nil {
-		log.Printf("failed to persist start comment marker for run %s: %v", run.ID, err)
+	if err := n.Store.UpsertRunNotification(state.RunNotification{
+		RunID:       run.ID,
+		Kind:        state.RunNotificationKindStart,
+		Repo:        repo,
+		IssueNumber: issueNumber,
+		PostedAt:    time.Now().UTC(),
+	}); err != nil {
+		log.Printf("failed to persist start notification for run %s: %v", run.ID, err)
 	}
 }
 
@@ -92,6 +104,12 @@ func (n *GitHubRunNotifier) NotifyRunCompleted(run state.Run) {
 	if repo == "" || issueNumber <= 0 {
 		return
 	}
+	if posted, err := n.notificationAlreadyPosted(run.ID, state.RunNotificationKindCompletion); err != nil {
+		log.Printf("failed to check completion notification record for run %s: %v", run.ID, err)
+		return
+	} else if posted {
+		return
+	}
 
 	claimedRun, claimed, err := n.Store.ClaimRunCompletionComment(run.ID, n.completionCommentClaimOwner(), time.Now().UTC().Add(-completionCommentClaimTimeout))
 	if err != nil {
@@ -114,6 +132,15 @@ func (n *GitHubRunNotifier) NotifyRunCompleted(run state.Run) {
 		return
 	}
 	if posted {
+		if err := n.Store.UpsertRunNotification(state.RunNotification{
+			RunID:       run.ID,
+			Kind:        state.RunNotificationKindCompletion,
+			Repo:        repo,
+			IssueNumber: issueNumber,
+			PostedAt:    time.Now().UTC(),
+		}); err != nil {
+			log.Printf("failed to persist completion notification for run %s: %v", run.ID, err)
+		}
 		if err := n.Store.MarkRunCompletionCommentPosted(run.ID, time.Now().UTC()); err != nil {
 			log.Printf("failed to mark completion comment posted for run %s: %v", run.ID, err)
 		}
@@ -137,6 +164,15 @@ func (n *GitHubRunNotifier) NotifyRunCompleted(run state.Run) {
 	if err := n.GitHub.CreateIssueComment(ctx, repo, issueNumber, body); err != nil {
 		posted, postedErr := n.completionCommentAlreadyPosted(ctx, repo, issueNumber, run.ID)
 		if postedErr == nil && posted {
+			if err := n.Store.UpsertRunNotification(state.RunNotification{
+				RunID:       run.ID,
+				Kind:        state.RunNotificationKindCompletion,
+				Repo:        repo,
+				IssueNumber: issueNumber,
+				PostedAt:    time.Now().UTC(),
+			}); err != nil {
+				log.Printf("failed to persist completion notification for run %s after ambiguous post: %v", run.ID, err)
+			}
 			if markErr := n.Store.MarkRunCompletionCommentPosted(run.ID, time.Now().UTC()); markErr != nil {
 				log.Printf("failed to mark completion comment posted for run %s after ambiguous post: %v", run.ID, markErr)
 			}
@@ -150,6 +186,15 @@ func (n *GitHubRunNotifier) NotifyRunCompleted(run state.Run) {
 		}
 		log.Printf("failed to post completion comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
 		return
+	}
+	if err := n.Store.UpsertRunNotification(state.RunNotification{
+		RunID:       run.ID,
+		Kind:        state.RunNotificationKindCompletion,
+		Repo:        repo,
+		IssueNumber: issueNumber,
+		PostedAt:    time.Now().UTC(),
+	}); err != nil {
+		log.Printf("failed to persist completion notification for run %s: %v", run.ID, err)
 	}
 	if err := n.Store.MarkRunCompletionCommentPosted(run.ID, time.Now().UTC()); err != nil {
 		log.Printf("failed to mark completion comment posted for run %s: %v", run.ID, err)
@@ -167,6 +212,12 @@ func (n *GitHubRunNotifier) NotifyRunFailed(run state.Run) {
 	}
 	if !ok {
 		target = RunResponseTarget{}
+	}
+	if posted, err := n.notificationAlreadyPosted(run.ID, state.RunNotificationKindFailure); err != nil {
+		log.Printf("failed to check failure notification record for run %s: %v", run.ID, err)
+		return
+	} else if posted {
+		return
 	}
 	if markerExists, err := runFailureCommentMarkerExists(run.RunDir); err != nil {
 		log.Printf("failed to check failure comment marker for run %s: %v", run.ID, err)
@@ -192,8 +243,14 @@ func (n *GitHubRunNotifier) NotifyRunFailed(run state.Run) {
 		log.Printf("failed to post failure comment for run %s on %s#%d: %v", run.ID, repo, issueNumber, err)
 		return
 	}
-	if err := writeRunFailureCommentMarker(run, repo, issueNumber); err != nil {
-		log.Printf("failed to persist failure comment marker for run %s: %v", run.ID, err)
+	if err := n.Store.UpsertRunNotification(state.RunNotification{
+		RunID:       run.ID,
+		Kind:        state.RunNotificationKindFailure,
+		Repo:        repo,
+		IssueNumber: issueNumber,
+		PostedAt:    time.Now().UTC(),
+	}); err != nil {
+		log.Printf("failed to persist failure notification for run %s: %v", run.ID, err)
 	}
 }
 
@@ -302,4 +359,12 @@ func (n *GitHubRunNotifier) completionCommentClaimOwner() string {
 		return slot
 	}
 	return "rascald"
+}
+
+func (n *GitHubRunNotifier) notificationAlreadyPosted(runID string, kind state.RunNotificationKind) (bool, error) {
+	_, ok, err := n.Store.GetRunNotification(runID, kind)
+	if err != nil {
+		return false, fmt.Errorf("get %s notification for run %s: %w", kind, strings.TrimSpace(runID), err)
+	}
+	return ok, nil
 }

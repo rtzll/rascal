@@ -136,8 +136,10 @@ func TestGitHubRunNotifierNotifyRunStartedIdempotent(t *testing.T) {
 	if body := gh.issueComments[0].body; !containsAll(body, runStartCommentBodyMarker, "run_start") {
 		t.Fatalf("start comment body missing marker/run id: %q", body)
 	}
-	if _, err := os.Stat(RunStartCommentMarkerPath(runDir)); err != nil {
-		t.Fatalf("start comment marker missing: %v", err)
+	if _, ok, err := store.GetRunNotification(run.ID, state.RunNotificationKindStart); err != nil {
+		t.Fatalf("GetRunNotification(start): %v", err)
+	} else if !ok {
+		t.Fatal("expected start notification record")
 	}
 }
 
@@ -194,6 +196,11 @@ func TestGitHubRunNotifierNotifyRunCompletedIdempotent(t *testing.T) {
 	if persisted.CompletionCommentPostedAt == nil {
 		t.Fatalf("completion comment posted_at not recorded")
 	}
+	if _, ok, err := store.GetRunNotification(run.ID, state.RunNotificationKindCompletion); err != nil {
+		t.Fatalf("GetRunNotification(completion): %v", err)
+	} else if !ok {
+		t.Fatal("expected completion notification record")
+	}
 }
 
 func TestGitHubRunNotifierNotifyRunFailedIdempotent(t *testing.T) {
@@ -222,8 +229,10 @@ func TestGitHubRunNotifierNotifyRunFailedIdempotent(t *testing.T) {
 	if body := gh.issueComments[0].body; !containsAll(body, runFailureCommentBodyMarker, "run_failed", "gh pr create failed") {
 		t.Fatalf("failure comment body missing expected content: %q", body)
 	}
-	if _, err := os.Stat(RunFailureCommentMarkerPath(runDir)); err != nil {
-		t.Fatalf("failure comment marker missing: %v", err)
+	if _, ok, err := store.GetRunNotification(run.ID, state.RunNotificationKindFailure); err != nil {
+		t.Fatalf("GetRunNotification(failure): %v", err)
+	} else if !ok {
+		t.Fatal("expected failure notification record")
 	}
 }
 

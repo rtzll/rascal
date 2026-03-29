@@ -250,6 +250,34 @@ func NormalizeCompletionCommentState(raw CompletionCommentState) CompletionComme
 	}
 }
 
+type RunNotificationKind string
+
+const (
+	RunNotificationKindStart      RunNotificationKind = "start"
+	RunNotificationKindCompletion RunNotificationKind = "completion"
+	RunNotificationKindFailure    RunNotificationKind = "failure"
+)
+
+func NormalizeRunNotificationKind(raw RunNotificationKind) RunNotificationKind {
+	switch strings.ToLower(strings.TrimSpace(string(raw))) {
+	case string(RunNotificationKindCompletion):
+		return RunNotificationKindCompletion
+	case string(RunNotificationKindFailure):
+		return RunNotificationKindFailure
+	default:
+		return RunNotificationKindStart
+	}
+}
+
+type RunNotification struct {
+	RunID           string              `json:"run_id"`
+	Kind            RunNotificationKind `json:"kind"`
+	Repo            string              `json:"repo"`
+	IssueNumber     int                 `json:"issue_number"`
+	GitHubCommentID int64               `json:"github_comment_id,omitempty"`
+	PostedAt        time.Time           `json:"posted_at"`
+}
+
 type Task struct {
 	ID           string          `json:"id"`
 	Repo         string          `json:"repo"`

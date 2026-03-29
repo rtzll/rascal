@@ -569,6 +569,57 @@ func (s *Store) MarkRunCompletionCommentFailed(runID, errText string) error {
 	return nil
 }
 
+func (s *Store) GetRunNotification(runID string, kind RunNotificationKind) (RunNotification, bool, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return RunNotification{}, false, fmt.Errorf("run id is required")
+	}
+	row, err := s.q.GetRunNotification(context.Background(), sqlitegen.GetRunNotificationParams{
+		RunID: runID,
+		Kind:  string(NormalizeRunNotificationKind(kind)),
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RunNotification{}, false, nil
+		}
+		return RunNotification{}, false, fmt.Errorf("get run notification for %q/%q: %w", runID, kind, err)
+	}
+	return fromDBRunNotification(row), true, nil
+}
+
+func (s *Store) UpsertRunNotification(notification RunNotification) error {
+	notification.RunID = strings.TrimSpace(notification.RunID)
+	notification.Kind = NormalizeRunNotificationKind(notification.Kind)
+	notification.Repo = NormalizeRepo(notification.Repo)
+	if notification.RunID == "" {
+		return fmt.Errorf("run_id is required")
+	}
+	if notification.Repo == "" {
+		return fmt.Errorf("repo is required")
+	}
+	if notification.IssueNumber <= 0 {
+		return fmt.Errorf("issue_number must be positive")
+	}
+	if notification.PostedAt.IsZero() {
+		notification.PostedAt = time.Now().UTC()
+	}
+	var githubCommentID sql.NullInt64
+	if notification.GitHubCommentID > 0 {
+		githubCommentID = sql.NullInt64{Int64: notification.GitHubCommentID, Valid: true}
+	}
+	if err := s.q.UpsertRunNotification(context.Background(), sqlitegen.UpsertRunNotificationParams{
+		RunID:           notification.RunID,
+		Kind:            string(notification.Kind),
+		Repo:            notification.Repo,
+		IssueNumber:     int64(notification.IssueNumber),
+		GithubCommentID: githubCommentID,
+		PostedAt:        notification.PostedAt.UTC().UnixNano(),
+	}); err != nil {
+		return fmt.Errorf("upsert run notification for %q/%q: %w", notification.RunID, notification.Kind, err)
+	}
+	return nil
+}
+
 func (s *Store) SetRunStatusWithReason(runID string, status RunStatus, errText string, statusReason RunStatusReason) (Run, error) {
 	parsedStatus, ok := ParseRunStatus(string(status))
 	if !ok {
@@ -1250,6 +1301,20 @@ func fromDBClaimNextQueuedRunForTaskRow(r sqlitegen.ClaimNextQueuedRunForTaskRow
 
 func fromDBClaimRunCompletionCommentRow(r sqlitegen.ClaimRunCompletionCommentRow) Run {
 	return fromDBRunParts(r.ID, r.TaskID, r.Repo, r.Task, r.AgentRuntime, r.BaseBranch, r.HeadBranch, r.Trigger, r.Debug, r.Status, r.RunDir, r.IssueNumber, r.PrNumber, r.PrUrl, r.PrStatus, r.HeadSha, r.Context, r.Error, r.StatusReason, r.CompletionCommentState, r.CompletionCommentClaimedBy, r.CompletionCommentError, r.CompletionCommentClaimedAt, r.CompletionCommentPostedAt, r.CreatedAt, r.UpdatedAt, r.StartedAt, r.CompletedAt)
+}
+
+func fromDBRunNotification(r sqlitegen.RunNotification) RunNotification {
+	notification := RunNotification{
+		RunID:       r.RunID,
+		Kind:        NormalizeRunNotificationKind(RunNotificationKind(r.Kind)),
+		Repo:        NormalizeRepo(r.Repo),
+		IssueNumber: int(r.IssueNumber),
+		PostedAt:    time.Unix(0, r.PostedAt).UTC(),
+	}
+	if r.GithubCommentID.Valid {
+		notification.GitHubCommentID = r.GithubCommentID.Int64
+	}
+	return notification
 }
 
 func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {

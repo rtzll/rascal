@@ -252,6 +252,43 @@ func TestStoreAllowsRecoveryTransitionRunningToQueued(t *testing.T) {
 	}
 }
 
+func TestStoreUpsertRunNotification(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	postedAt := time.Now().UTC().Truncate(time.Second)
+	if err := store.UpsertRunNotification(RunNotification{
+		RunID:       "run_1",
+		Kind:        RunNotificationKindStart,
+		Repo:        "Owner/Repo",
+		IssueNumber: 42,
+		PostedAt:    postedAt,
+	}); err != nil {
+		t.Fatalf("UpsertRunNotification: %v", err)
+	}
+
+	notification, ok, err := store.GetRunNotification("run_1", RunNotificationKindStart)
+	if err != nil {
+		t.Fatalf("GetRunNotification: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected run notification")
+	}
+	if notification.Repo != "owner/repo" {
+		t.Fatalf("repo = %q, want owner/repo", notification.Repo)
+	}
+	if notification.IssueNumber != 42 {
+		t.Fatalf("issue number = %d, want 42", notification.IssueNumber)
+	}
+	if !notification.PostedAt.Equal(postedAt) {
+		t.Fatalf("posted_at = %s, want %s", notification.PostedAt, postedAt)
+	}
+}
+
 func TestStoreRejectsInvalidRunStatusTransition(t *testing.T) {
 	t.Parallel()
 

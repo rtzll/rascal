@@ -52,6 +52,18 @@ CREATE INDEX idx_runs_task_seq ON runs (task_id, seq DESC);
 CREATE INDEX idx_runs_created_by ON runs (created_by_user_id, seq DESC);
 CREATE INDEX idx_runs_credential_id ON runs (credential_id, seq DESC);
 
+CREATE TABLE run_notifications (
+  run_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  issue_number INTEGER NOT NULL DEFAULT 0,
+  github_comment_id INTEGER,
+  posted_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, kind)
+);
+
+CREATE INDEX idx_run_notifications_posted_at ON run_notifications (posted_at DESC);
+
 CREATE TABLE task_sessions (
   task_id TEXT PRIMARY KEY,
   agent_runtime TEXT NOT NULL,
