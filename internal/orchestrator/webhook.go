@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -80,407 +79,247 @@ func (s *Server) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) processWebhookEvent(ctx context.Context, eventType string, payload []byte) error {
-	switch eventType {
-	case "issues":
-		var ev ghapi.IssuesEvent
-		if err := json.Unmarshal(payload, &ev); err != nil {
-			return fmt.Errorf("decode issues event: %w", err)
-		}
-		if ev.Issue.PullRequest != nil {
-			return nil
-		}
-		if s.isBotActor(ev.Sender.Login) {
-			return nil
-		}
-		switch ev.Action {
-		case "labeled":
-			if !runtime.IsRascalLabel(ev.Label.Name) {
-				return nil
-			}
-			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
-			// Dedup: if task already has an active (queued or running) run, skip.
-			if _, active := s.Store.ActiveRunForTask(taskID); active {
-				return nil
-			}
-			agentRuntime, err := s.runtimeFromIssueLabels(ctx, ev.Repository.FullName, ev.Issue.Number, ev.Issue.Labels)
-			if err != nil {
-				return err
-			}
-			_, err = s.CreateAndQueueRun(RunRequest{
-				TaskID:       taskID,
-				Repo:         ev.Repository.FullName,
-				Instruction:  ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
-				AgentRuntime: agentRuntime,
-				Trigger:      runtrigger.NameIssueLabel,
-				IssueNumber:  ev.Issue.Number,
-				Context:      fmt.Sprintf("Triggered by label '%s' on issue #%d", ev.Label.Name, ev.Issue.Number),
-				Debug:        boolPtr(true),
-				ResponseTarget: &RunResponseTarget{
-					Repo:        ev.Repository.FullName,
-					IssueNumber: ev.Issue.Number,
-					RequestedBy: strings.TrimSpace(ev.Sender.Login),
-					Trigger:     runtrigger.NameIssueLabel,
-				},
-			})
-			if errors.Is(err, errTaskCompleted) {
-				return nil
-			}
+	actions, err := NewWebhookInterpreter(s.Config.BotLogin).Interpret(eventType, payload)
+	if err != nil {
+		return err
+	}
+	for _, action := range actions {
+		if err := s.executeWebhookAction(ctx, action); err != nil {
 			return err
-		case "unlabeled":
-			if !runtime.IsRascalLabel(ev.Label.Name) {
-				return nil
-			}
-			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
-			if err := s.Store.CancelQueuedRuns(taskID, "label removed", state.RunStatusReasonUserCanceled); err != nil {
-				return fmt.Errorf("cancel queued runs for unlabeled issue: %w", err)
-			}
-			s.cancelRunningTaskRuns(taskID, "label removed", state.RunStatusReasonUserCanceled)
-			s.removeIssueReactionsBestEffort(ev.Repository.FullName, ev.Issue.Number)
-			return nil
-		case "edited":
-			if !ghapi.IssueHasRascalLabel(ev.Issue.Labels) {
-				return nil
-			}
-			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
-			if err := s.Store.CancelQueuedRuns(taskID, "issue edited", state.RunStatusReasonIssueEdited); err != nil {
-				return fmt.Errorf("cancel queued runs for edited issue: %w", err)
-			}
-			agentRuntime, err := s.runtimeFromIssueLabels(ctx, ev.Repository.FullName, ev.Issue.Number, ev.Issue.Labels)
-			if err != nil {
-				return err
-			}
-			_, err = s.CreateAndQueueRun(RunRequest{
-				TaskID:       taskID,
-				Repo:         ev.Repository.FullName,
-				Instruction:  ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
-				AgentRuntime: agentRuntime,
-				Trigger:      runtrigger.NameIssueEdited,
-				IssueNumber:  ev.Issue.Number,
-				Context:      fmt.Sprintf("Triggered by issue edit on issue #%d", ev.Issue.Number),
-				Debug:        boolPtr(true),
-				ResponseTarget: &RunResponseTarget{
-					Repo:        ev.Repository.FullName,
-					IssueNumber: ev.Issue.Number,
-					RequestedBy: strings.TrimSpace(ev.Sender.Login),
-					Trigger:     runtrigger.NameIssueEdited,
-				},
-			})
-			if errors.Is(err, errTaskCompleted) {
-				return nil
-			}
-			return err
-		case "closed":
-			if !ghapi.IssueHasRascalLabel(ev.Issue.Labels) {
-				return nil
-			}
-			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
-			if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
-				ID:          taskID,
-				Repo:        ev.Repository.FullName,
-				IssueNumber: ev.Issue.Number,
-			}); err != nil {
-				return fmt.Errorf("upsert task for closed issue: %w", err)
-			}
-			if err := s.Store.MarkTaskCompleted(taskID); err != nil {
-				return fmt.Errorf("mark task completed for closed issue: %w", err)
-			}
-			if err := s.Store.CancelQueuedRuns(taskID, "issue closed", state.RunStatusReasonIssueClosed); err != nil {
-				return fmt.Errorf("cancel queued runs for closed issue: %w", err)
-			}
-			s.cancelRunningTaskRuns(taskID, "issue closed", state.RunStatusReasonIssueClosed)
-			return nil
-		case "reopened":
-			if !ghapi.IssueHasRascalLabel(ev.Issue.Labels) {
-				return nil
-			}
-			taskID := repoIssueTaskID(ev.Repository.FullName, ev.Issue.Number)
-			if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
-				ID:          taskID,
-				Repo:        ev.Repository.FullName,
-				IssueNumber: ev.Issue.Number,
-			}); err != nil {
-				return fmt.Errorf("upsert task for reopened issue: %w", err)
-			}
-			if err := s.Store.MarkTaskOpen(taskID); err != nil {
-				return fmt.Errorf("mark task open for reopened issue: %w", err)
-			}
-			agentRuntime, err := s.runtimeFromIssueLabels(ctx, ev.Repository.FullName, ev.Issue.Number, ev.Issue.Labels)
-			if err != nil {
-				return err
-			}
-			_, err = s.CreateAndQueueRun(RunRequest{
-				TaskID:       taskID,
-				Repo:         ev.Repository.FullName,
-				Instruction:  ghapi.IssueTaskFromIssue(ev.Issue.Title, ev.Issue.Body),
-				AgentRuntime: agentRuntime,
-				Trigger:      runtrigger.NameIssueReopened,
-				IssueNumber:  ev.Issue.Number,
-				PRStatus:     state.PRStatusNone,
-				Context:      fmt.Sprintf("Triggered by issue reopen on issue #%d", ev.Issue.Number),
-				Debug:        boolPtr(true),
-				ResponseTarget: &RunResponseTarget{
-					Repo:        ev.Repository.FullName,
-					IssueNumber: ev.Issue.Number,
-					RequestedBy: strings.TrimSpace(ev.Sender.Login),
-					Trigger:     runtrigger.NameIssueReopened,
-				},
-			})
-			if errors.Is(err, errTaskCompleted) {
-				return nil
-			}
-			return err
-		default:
-			return nil
 		}
-	case "issue_comment":
-		var ev ghapi.IssueCommentEvent
-		if err := json.Unmarshal(payload, &ev); err != nil {
-			return fmt.Errorf("decode issue_comment event: %w", err)
-		}
-		if ev.Issue.PullRequest == nil {
-			return nil
-		}
-		if !isOpenGitHubState(ev.Issue.State) {
-			return nil
-		}
-		switch ev.Action {
-		case "created":
-		case "edited":
-			if !ghapi.IssueCommentBodyChanged(ev) {
-				return nil
-			}
-		default:
-			return nil
-		}
-		if ghapi.IsAutomationComment(ev.Comment.Body, runCompletionCommentBodyMarker, runStartCommentBodyMarker, runFailureCommentBodyMarker) {
-			return nil
-		}
-		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
-			return nil
-		}
-		task, ok := s.activeTaskForPR(ev.Repository.FullName, ev.Issue.Number)
-		if !ok {
-			return nil
-		}
-		s.addIssueCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
-		baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.Issue.Number, "", "")
+	}
+	return nil
+}
 
-		_, err := s.CreateAndQueueRun(RunRequest{
-			TaskID:      task.ID,
-			Repo:        ev.Repository.FullName,
-			Instruction: fmt.Sprintf("Address PR #%d feedback", ev.Issue.Number),
-			Trigger:     runtrigger.NamePRComment,
-			IssueNumber: task.IssueNumber,
-			PRNumber:    ev.Issue.Number,
-			PRStatus:    state.PRStatusOpen,
-			Context:     strings.TrimSpace(ev.Comment.Body),
-			BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
-			HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
-			Debug:       boolPtr(true),
+func (s *Server) executeWebhookAction(ctx context.Context, action WebhookAction) error {
+	switch action.Kind {
+	case WebhookActionCreateIssueRun:
+		if action.TaskID == "" {
+			return nil
+		}
+		if action.Trigger == runtrigger.NameIssueLabel {
+			if _, active := s.Store.ActiveRunForTask(action.TaskID); active {
+				return nil
+			}
+		}
+		agentRuntime, err := s.runtimeFromIssueLabels(ctx, action.Repo, action.IssueNumber, action.Labels)
+		if err != nil {
+			return err
+		}
+		_, err = s.CreateAndQueueRun(RunRequest{
+			TaskID:       action.TaskID,
+			Repo:         action.Repo,
+			Instruction:  action.Instruction,
+			AgentRuntime: agentRuntime,
+			Trigger:      action.Trigger,
+			IssueNumber:  action.IssueNumber,
+			PRStatus:     state.PRStatusNone,
+			Context:      action.Context,
+			Debug:        boolPtr(true),
 			ResponseTarget: &RunResponseTarget{
-				Repo:        ev.Repository.FullName,
-				IssueNumber: ev.Issue.Number,
-				RequestedBy: strings.TrimSpace(ev.Sender.Login),
-				Trigger:     runtrigger.NamePRComment,
+				Repo:        action.Repo,
+				IssueNumber: action.IssueNumber,
+				RequestedBy: action.RequestedBy,
+				Trigger:     action.Trigger,
 			},
 		})
 		if errors.Is(err, errTaskCompleted) {
 			return nil
 		}
 		return err
-	case "pull_request_review":
-		var ev ghapi.PullRequestReviewEvent
-		if err := json.Unmarshal(payload, &ev); err != nil {
-			return fmt.Errorf("decode pull_request_review event: %w", err)
-		}
-		if ev.Action != "submitted" {
+	case WebhookActionCancelTaskRuns:
+		if action.TaskID == "" {
 			return nil
 		}
-		if !isOpenGitHubState(ev.PullRequest.State) {
-			return nil
+		if err := s.Store.CancelQueuedRuns(action.TaskID, action.CancelReason, action.StatusReason); err != nil {
+			return fmt.Errorf("cancel queued runs for task %s: %w", action.TaskID, err)
 		}
-		if s.isBotActor(ev.Review.User.Login) || s.isBotActor(ev.Sender.Login) {
-			return nil
+		s.cancelRunningTaskRuns(action.TaskID, action.CancelReason, action.StatusReason)
+		return nil
+	case WebhookActionClearIssueReactions:
+		s.notifier().ClearIssueReactions(action.Repo, action.IssueNumber)
+		return nil
+	case WebhookActionCompleteIssueTask:
+		if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
+			ID:          action.TaskID,
+			Repo:        action.Repo,
+			IssueNumber: action.IssueNumber,
+		}); err != nil {
+			return fmt.Errorf("upsert task for closed issue: %w", err)
 		}
-		task, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
+		if err := s.Store.MarkTaskCompleted(action.TaskID); err != nil {
+			return fmt.Errorf("mark task completed for closed issue: %w", err)
+		}
+		if err := s.Store.CancelQueuedRuns(action.TaskID, "issue closed", state.RunStatusReasonIssueClosed); err != nil {
+			return fmt.Errorf("cancel queued runs for closed issue: %w", err)
+		}
+		s.cancelRunningTaskRuns(action.TaskID, "issue closed", state.RunStatusReasonIssueClosed)
+		return nil
+	case WebhookActionReopenIssueTask:
+		if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
+			ID:          action.TaskID,
+			Repo:        action.Repo,
+			IssueNumber: action.IssueNumber,
+		}); err != nil {
+			return fmt.Errorf("upsert task for reopened issue: %w", err)
+		}
+		if err := s.Store.MarkTaskOpen(action.TaskID); err != nil {
+			return fmt.Errorf("mark task open for reopened issue: %w", err)
+		}
+		return nil
+	case WebhookActionCreatePRCommentRun:
+		task, ok := s.activeTaskForPR(action.Repo, action.PRNumber)
 		if !ok {
 			return nil
 		}
-		s.addPullRequestReviewReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ev.Review.ID, ghapi.ReactionEyes)
-		baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.PullRequest.Number, ev.PullRequest.Base.Ref, ev.PullRequest.Head.Ref)
-
-		contextText := strings.TrimSpace(ev.Review.Body)
-		if contextText == "" {
-			contextText = fmt.Sprintf("review state: %s", ev.Review.State)
-		}
+		s.notifier().ReactToIssueComment(action.Repo, action.CommentID, ghapi.ReactionEyes)
+		baseBranch, headBranch := s.resolvePRBranches(ctx, action.Repo, action.PRNumber, action.BaseBranch, action.HeadBranch)
 		_, err := s.CreateAndQueueRun(RunRequest{
 			TaskID:      task.ID,
-			Repo:        ev.Repository.FullName,
-			Instruction: fmt.Sprintf("Address PR #%d review feedback", ev.PullRequest.Number),
-			Trigger:     runtrigger.NamePRReview,
+			Repo:        action.Repo,
+			Instruction: action.Instruction,
+			Trigger:     action.Trigger,
 			IssueNumber: task.IssueNumber,
-			PRNumber:    ev.PullRequest.Number,
+			PRNumber:    action.PRNumber,
 			PRStatus:    state.PRStatusOpen,
-			Context:     contextText,
+			Context:     action.Context,
 			BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
 			HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
 			Debug:       boolPtr(true),
 			ResponseTarget: &RunResponseTarget{
-				Repo:        ev.Repository.FullName,
-				IssueNumber: ev.PullRequest.Number,
-				RequestedBy: strings.TrimSpace(ev.Sender.Login),
-				Trigger:     runtrigger.NamePRReview,
+				Repo:        action.Repo,
+				IssueNumber: action.PRNumber,
+				RequestedBy: action.RequestedBy,
+				Trigger:     action.Trigger,
 			},
 		})
 		if errors.Is(err, errTaskCompleted) {
 			return nil
 		}
 		return err
-	case "pull_request_review_comment":
-		var ev ghapi.PullRequestReviewCommentEvent
-		if err := json.Unmarshal(payload, &ev); err != nil {
-			return fmt.Errorf("decode pull_request_review_comment event: %w", err)
-		}
-		if !isOpenGitHubState(ev.PullRequest.State) {
-			return nil
-		}
-		switch ev.Action {
-		case "created":
-		case "edited":
-			if !ghapi.ReviewCommentBodyChanged(ev) {
-				return nil
-			}
-		default:
-			return nil
-		}
-		if s.isBotActor(ev.Comment.User.Login) || s.isBotActor(ev.Sender.Login) {
-			return nil
-		}
-		task, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
+	case WebhookActionCreatePRReviewRun:
+		task, ok := s.activeTaskForPR(action.Repo, action.PRNumber)
 		if !ok {
 			return nil
 		}
-		s.addPullRequestReviewCommentReactionBestEffort(ev.Repository.FullName, ev.Comment.ID, ghapi.ReactionEyes)
-		baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.PullRequest.Number, ev.PullRequest.Base.Ref, ev.PullRequest.Head.Ref)
-
-		contextText := strings.TrimSpace(ev.Comment.Body)
-		if location := ghapi.FormatReviewCommentLocation(ev.Comment.Path, ev.Comment.StartLine, ev.Comment.Line); location != "" {
-			if contextText == "" {
-				contextText = fmt.Sprintf("inline review comment at %s", location)
-			} else {
-				contextText = fmt.Sprintf(`%s
-
-Inline comment location: %s`, contextText, location)
-			}
-		}
+		s.notifier().ReactToPullRequestReview(action.Repo, action.PRNumber, action.ReviewID, ghapi.ReactionEyes)
+		baseBranch, headBranch := s.resolvePRBranches(ctx, action.Repo, action.PRNumber, action.BaseBranch, action.HeadBranch)
 		_, err := s.CreateAndQueueRun(RunRequest{
 			TaskID:      task.ID,
-			Repo:        ev.Repository.FullName,
-			Instruction: fmt.Sprintf("Address PR #%d inline review comment", ev.PullRequest.Number),
-			Trigger:     runtrigger.NamePRReviewComment,
+			Repo:        action.Repo,
+			Instruction: action.Instruction,
+			Trigger:     action.Trigger,
 			IssueNumber: task.IssueNumber,
-			PRNumber:    ev.PullRequest.Number,
+			PRNumber:    action.PRNumber,
 			PRStatus:    state.PRStatusOpen,
-			Context:     contextText,
+			Context:     action.Context,
 			BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
 			HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
 			Debug:       boolPtr(true),
 			ResponseTarget: &RunResponseTarget{
-				Repo:        ev.Repository.FullName,
-				IssueNumber: ev.PullRequest.Number,
-				RequestedBy: strings.TrimSpace(ev.Sender.Login),
-				Trigger:     runtrigger.NamePRReviewComment,
+				Repo:        action.Repo,
+				IssueNumber: action.PRNumber,
+				RequestedBy: action.RequestedBy,
+				Trigger:     action.Trigger,
 			},
 		})
 		if errors.Is(err, errTaskCompleted) {
 			return nil
 		}
 		return err
-	case "pull_request_review_thread":
-		var ev ghapi.PullRequestReviewThreadEvent
-		if err := json.Unmarshal(payload, &ev); err != nil {
-			return fmt.Errorf("decode pull_request_review_thread event: %w", err)
-		}
-		if !isOpenGitHubState(ev.PullRequest.State) {
-			return nil
-		}
-		switch ev.Action {
-		case "unresolved":
-			if s.isBotActor(ev.Sender.Login) {
-				return nil
-			}
-			task, ok := s.activeTaskForPR(ev.Repository.FullName, ev.PullRequest.Number)
-			if !ok {
-				return nil
-			}
-			baseBranch, headBranch := s.resolvePRBranches(ctx, ev.Repository.FullName, ev.PullRequest.Number, ev.PullRequest.Base.Ref, ev.PullRequest.Head.Ref)
-			_, err := s.CreateAndQueueRun(RunRequest{
-				TaskID:      task.ID,
-				Repo:        ev.Repository.FullName,
-				Instruction: fmt.Sprintf("Address PR #%d unresolved review thread", ev.PullRequest.Number),
-				Trigger:     runtrigger.NamePRReviewThread,
-				IssueNumber: task.IssueNumber,
-				PRNumber:    ev.PullRequest.Number,
-				PRStatus:    state.PRStatusOpen,
-				Context:     ghapi.ReviewThreadContext(ev.Thread),
-				BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
-				HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
-				Debug:       boolPtr(true),
-				ResponseTarget: &RunResponseTarget{
-					Repo:           ev.Repository.FullName,
-					IssueNumber:    ev.PullRequest.Number,
-					RequestedBy:    strings.TrimSpace(ev.Sender.Login),
-					Trigger:        runtrigger.NamePRReviewThread,
-					ReviewThreadID: ev.Thread.ID,
-				},
-			})
-			if errors.Is(err, errTaskCompleted) {
-				return nil
-			}
-			return err
-		case "resolved":
-			task, ok := s.taskForPR(ev.Repository.FullName, ev.PullRequest.Number)
-			if !ok {
-				return nil
-			}
-			s.cancelQueuedReviewThreadRuns(task.ID, ev.Repository.FullName, ev.PullRequest.Number, ev.Thread.ID, "review thread resolved")
-			return nil
-		default:
-			return nil
-		}
-	case "pull_request":
-		var ev ghapi.PullRequestEvent
-		if err := json.Unmarshal(payload, &ev); err != nil {
-			return fmt.Errorf("decode pull_request event: %w", err)
-		}
-		task, ok := s.taskForPR(ev.Repository.FullName, ev.PullRequest.Number)
+	case WebhookActionCreatePRReviewCommentRun:
+		task, ok := s.activeTaskForPR(action.Repo, action.PRNumber)
 		if !ok {
 			return nil
 		}
-		if ev.Action == "closed" {
-			taskID := task.ID
-			if ev.PullRequest.Merged {
-				if err := s.Store.MarkTaskCompleted(taskID); err != nil {
-					return fmt.Errorf("mark task completed for merged PR: %w", err)
-				}
-				if err := s.Store.CancelQueuedRuns(taskID, "pull request merged", state.RunStatusReasonPRMerged); err != nil {
-					return fmt.Errorf("cancel queued runs for merged PR: %w", err)
-				}
-				s.cancelRunningTaskRuns(taskID, "pull request merged", state.RunStatusReasonPRMerged)
-				s.reconcileClosedPRRuns(ev.Repository.FullName, ev.PullRequest.Number, true)
-				s.addIssueReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ghapi.ReactionRocket)
-			} else {
-				if err := s.Store.CancelQueuedRuns(taskID, "pull request closed", state.RunStatusReasonPRClosed); err != nil {
-					return fmt.Errorf("cancel queued runs for closed PR: %w", err)
-				}
-				s.cancelRunningTaskRuns(taskID, "pull request closed", state.RunStatusReasonPRClosed)
-				s.reconcileClosedPRRuns(ev.Repository.FullName, ev.PullRequest.Number, false)
-				s.addIssueReactionBestEffort(ev.Repository.FullName, ev.PullRequest.Number, ghapi.ReactionMinusOne)
+		s.notifier().ReactToPullRequestReviewComment(action.Repo, action.CommentID, ghapi.ReactionEyes)
+		baseBranch, headBranch := s.resolvePRBranches(ctx, action.Repo, action.PRNumber, action.BaseBranch, action.HeadBranch)
+		_, err := s.CreateAndQueueRun(RunRequest{
+			TaskID:      task.ID,
+			Repo:        action.Repo,
+			Instruction: action.Instruction,
+			Trigger:     action.Trigger,
+			IssueNumber: task.IssueNumber,
+			PRNumber:    action.PRNumber,
+			PRStatus:    state.PRStatusOpen,
+			Context:     action.Context,
+			BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
+			HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
+			Debug:       boolPtr(true),
+			ResponseTarget: &RunResponseTarget{
+				Repo:        action.Repo,
+				IssueNumber: action.PRNumber,
+				RequestedBy: action.RequestedBy,
+				Trigger:     action.Trigger,
+			},
+		})
+		if errors.Is(err, errTaskCompleted) {
+			return nil
+		}
+		return err
+	case WebhookActionCreatePRThreadRun:
+		task, ok := s.activeTaskForPR(action.Repo, action.PRNumber)
+		if !ok {
+			return nil
+		}
+		baseBranch, headBranch := s.resolvePRBranches(ctx, action.Repo, action.PRNumber, action.BaseBranch, action.HeadBranch)
+		_, err := s.CreateAndQueueRun(RunRequest{
+			TaskID:      task.ID,
+			Repo:        action.Repo,
+			Instruction: action.Instruction,
+			Trigger:     action.Trigger,
+			IssueNumber: task.IssueNumber,
+			PRNumber:    action.PRNumber,
+			PRStatus:    state.PRStatusOpen,
+			Context:     action.Context,
+			BaseBranch:  s.firstKnownBaseBranch(task.ID, baseBranch),
+			HeadBranch:  s.firstKnownHeadBranch(task.ID, headBranch),
+			Debug:       boolPtr(true),
+			ResponseTarget: &RunResponseTarget{
+				Repo:           action.Repo,
+				IssueNumber:    action.PRNumber,
+				RequestedBy:    action.RequestedBy,
+				Trigger:        action.Trigger,
+				ReviewThreadID: action.ReviewThreadID,
+			},
+		})
+		if errors.Is(err, errTaskCompleted) {
+			return nil
+		}
+		return err
+	case WebhookActionCancelPRThreadRuns:
+		task, ok := s.taskForPR(action.Repo, action.PRNumber)
+		if !ok {
+			return nil
+		}
+		s.cancelQueuedReviewThreadRuns(task.ID, action.Repo, action.PRNumber, action.ReviewThreadID, action.CancelReason)
+		return nil
+	case WebhookActionClosePullRequest:
+		task, ok := s.taskForPR(action.Repo, action.PRNumber)
+		if !ok {
+			return nil
+		}
+		if action.Merged {
+			if err := s.Store.MarkTaskCompleted(task.ID); err != nil {
+				return fmt.Errorf("mark task completed for merged PR: %w", err)
 			}
+			if err := s.Store.CancelQueuedRuns(task.ID, "pull request merged", state.RunStatusReasonPRMerged); err != nil {
+				return fmt.Errorf("cancel queued runs for merged PR: %w", err)
+			}
+			s.cancelRunningTaskRuns(task.ID, "pull request merged", state.RunStatusReasonPRMerged)
+			s.reconcileClosedPRRuns(action.Repo, action.PRNumber, true)
+			s.notifier().ReactToIssue(action.Repo, action.PRNumber, ghapi.ReactionRocket)
+			return nil
 		}
-		if ev.Action == "reopened" {
-			s.reconcileReopenedPRRuns(ev.Repository.FullName, ev.PullRequest.Number)
+		if err := s.Store.CancelQueuedRuns(task.ID, "pull request closed", state.RunStatusReasonPRClosed); err != nil {
+			return fmt.Errorf("cancel queued runs for closed PR: %w", err)
 		}
+		s.cancelRunningTaskRuns(task.ID, "pull request closed", state.RunStatusReasonPRClosed)
+		s.reconcileClosedPRRuns(action.Repo, action.PRNumber, false)
+		s.notifier().ReactToIssue(action.Repo, action.PRNumber, ghapi.ReactionMinusOne)
+		return nil
+	case WebhookActionReopenPullRequest:
+		s.reconcileReopenedPRRuns(action.Repo, action.PRNumber)
 		return nil
 	default:
 		return nil
@@ -507,15 +346,4 @@ func (s *Server) runtimeFromIssueLabels(ctx context.Context, repo string, issueN
 		return nil, nil
 	}
 	return &rt, nil
-}
-
-func (s *Server) isBotActor(login string) bool {
-	login = strings.TrimSpace(strings.ToLower(login))
-	if login == "" {
-		return false
-	}
-	if strings.TrimSpace(s.Config.BotLogin) != "" && login == strings.ToLower(strings.TrimSpace(s.Config.BotLogin)) {
-		return true
-	}
-	return strings.Contains(login, "[bot]")
 }

@@ -786,19 +786,3 @@ func (s *Server) ensureResumeTimer(until time.Time) {
 func (s *Server) addIssueReactionBestEffort(repo string, issueNumber int, reaction string) {
 	s.notifier().ReactToIssue(repo, issueNumber, reaction)
 }
-
-func (s *Server) removeIssueReactionsBestEffort(repo string, issueNumber int) {
-	s.notifier().ClearIssueReactions(repo, issueNumber)
-}
-
-func (s *Server) addIssueCommentReactionBestEffort(repo string, commentID int64, reaction string) {
-	s.notifier().ReactToIssueComment(repo, commentID, reaction)
-}
-
-func (s *Server) addPullRequestReviewReactionBestEffort(repo string, pullNumber int, reviewID int64, reaction string) {
-	s.notifier().ReactToPullRequestReview(repo, pullNumber, reviewID, reaction)
-}
-
-func (s *Server) addPullRequestReviewCommentReactionBestEffort(repo string, commentID int64, reaction string) {
-	s.notifier().ReactToPullRequestReviewComment(repo, commentID, reaction)
-}
