@@ -1,3 +1,15 @@
+{
+  servers {
+    timeouts {
+      read_header 5s
+      read_body 30s
+      write 30s
+      idle 2m
+    }
+    max_header_size 32768
+  }
+}
+
 (rascal_common) {
   encode gzip zstd
 
@@ -18,6 +30,9 @@
     method GET POST
     path /v1/runs /v1/runs/* /v1/tasks /v1/tasks/* /v1/tasks/issue
   }
+  request_body @allowed_api {
+    max_size 2097152
+  }
   handle @allowed_api {
     import /etc/caddy/rascal-upstream.caddy
   }
@@ -25,6 +40,9 @@
   @allowed_repository_api {
     method GET POST PATCH PUT DELETE
     path /v1/repositories /v1/repositories/*
+  }
+  request_body @allowed_repository_api {
+    max_size 2097152
   }
   handle @allowed_repository_api {
     import /etc/caddy/rascal-upstream.caddy
@@ -36,6 +54,9 @@
     header X-GitHub-Event *
     header X-GitHub-Delivery *
     header X-Hub-Signature-256 *
+  }
+  request_body @allowed_webhook {
+    max_size 5242880
   }
   handle @allowed_webhook {
     import /etc/caddy/rascal-upstream.caddy

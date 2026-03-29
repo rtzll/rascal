@@ -79,10 +79,20 @@ func TestRenderCaddyfileVariants(t *testing.T) {
 		t.Fatalf("domain caddyfile missing domain block:\n%s", domain)
 	}
 	for _, want := range []string{
+		"servers {",
+		"read_header 5s",
+		"read_body 30s",
+		"write 30s",
+		"idle 2m",
+		"max_header_size 32768",
 		"@allowed_health",
 		"@allowed_api",
+		"request_body @allowed_api {",
+		"max_size 2097152",
 		"@allowed_repository_api",
 		"@allowed_webhook",
+		"request_body @allowed_webhook {",
+		"max_size 5242880",
 		"path /v1/webhooks/github",
 		"header X-GitHub-Event *",
 		"header X-GitHub-Delivery *",
@@ -104,16 +114,17 @@ func TestRenderCaddyfileAllowsRepositoryWriteMethods(t *testing.T) {
 		t.Fatalf("render caddyfile: %v", err)
 	}
 
-	wantBlock := strings.TrimSpace(`
-@allowed_repository_api {
-    method GET POST PATCH PUT DELETE
-    path /v1/repositories /v1/repositories/*
-  }
-  handle @allowed_repository_api {
-    import /etc/caddy/rascal-upstream.caddy
-  }`)
-	if !strings.Contains(rendered, wantBlock) {
-		t.Fatalf("repository API matcher missing required methods or paths:\n%s", rendered)
+	for _, want := range []string{
+		"@allowed_repository_api {",
+		"method GET POST PATCH PUT DELETE",
+		"path /v1/repositories /v1/repositories/*",
+		"request_body @allowed_repository_api {",
+		"max_size 2097152",
+		"handle @allowed_repository_api {",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("repository API matcher missing %q:\n%s", want, rendered)
+		}
 	}
 }
 

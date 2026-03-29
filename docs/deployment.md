@@ -46,6 +46,9 @@ there, not inline in `deploy.go`.
 - `rascal@blue` listens on `127.0.0.1:18080`
 - `rascal@green` listens on `127.0.0.1:18081`
 - Caddy proxies external traffic to the currently selected slot
+- Caddy also enforces request-shape guardrails before `rascald` sees traffic:
+  method/path/header gating, request body size caps, header-size caps, and
+  server-side read/write timeouts
 - Legacy single-unit `rascal` service mode is not supported
 - Slot identity is set by env:
   - `rascal@blue` gets `RASCAL_SLOT=blue`

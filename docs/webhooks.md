@@ -34,6 +34,10 @@ curl -i -X POST https://YOUR_DOMAIN/v1/webhooks/github
 
 Without signature, `401/403/405` can be expected. `3xx` redirects are a problem.
 
+The public proxy also rejects malformed webhook traffic before it reaches
+`rascald`: only the expected method/path/header shape is forwarded, request
+bodies are size-capped, and slow/oversized requests are cut off at Caddy.
+
 Synthetic webhook test from CLI:
 
 ```bash
