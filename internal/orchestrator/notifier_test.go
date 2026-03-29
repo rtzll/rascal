@@ -7,11 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/rtzll/rascal/internal/config"
 	ghapi "github.com/rtzll/rascal/internal/github"
+	"github.com/rtzll/rascal/internal/runner"
 	"github.com/rtzll/rascal/internal/runtime"
 	"github.com/rtzll/rascal/internal/runtrigger"
 	"github.com/rtzll/rascal/internal/state"
@@ -49,12 +51,19 @@ type testReviewCommentReaction struct {
 }
 
 type recordingGitHubClient struct {
+	mu sync.Mutex
+
 	issueComments          []testIssueComment
 	issueReactions         []testIssueReaction
 	removedIssueReactions  []testIssueReaction
 	issueCommentReactions  []testIssueCommentReaction
 	reviewReactions        []testReviewReaction
 	reviewCommentReactions []testReviewCommentReaction
+
+	createIssueCommentErr             error
+	createIssueCommentErrSeq          []error
+	createIssueCommentPostsOnErrorSeq []bool
+	createIssueCommentCalls           int
 }
 
 func (r *recordingGitHubClient) GetIssue(context.Context, string, int) (ghapi.IssueData, error) {
@@ -66,36 +75,67 @@ func (r *recordingGitHubClient) GetPullRequest(context.Context, string, int) (gh
 }
 
 func (r *recordingGitHubClient) AddIssueReaction(_ context.Context, repo string, issueNumber int, content string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.issueReactions = append(r.issueReactions, testIssueReaction{repo: repo, issueNumber: issueNumber, content: content})
 	return nil
 }
 
 func (r *recordingGitHubClient) RemoveIssueReactions(_ context.Context, repo string, issueNumber int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.removedIssueReactions = append(r.removedIssueReactions, testIssueReaction{repo: repo, issueNumber: issueNumber})
 	return nil
 }
 
 func (r *recordingGitHubClient) AddIssueCommentReaction(_ context.Context, repo string, commentID int64, content string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.issueCommentReactions = append(r.issueCommentReactions, testIssueCommentReaction{repo: repo, commentID: commentID, content: content})
 	return nil
 }
 
 func (r *recordingGitHubClient) AddPullRequestReviewReaction(_ context.Context, repo string, pullNumber int, reviewID int64, content string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.reviewReactions = append(r.reviewReactions, testReviewReaction{repo: repo, pullNumber: pullNumber, reviewID: reviewID, content: content})
 	return nil
 }
 
 func (r *recordingGitHubClient) AddPullRequestReviewCommentReaction(_ context.Context, repo string, commentID int64, content string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.reviewCommentReactions = append(r.reviewCommentReactions, testReviewCommentReaction{repo: repo, commentID: commentID, content: content})
 	return nil
 }
 
 func (r *recordingGitHubClient) CreateIssueComment(_ context.Context, repo string, issueNumber int, body string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	callIdx := r.createIssueCommentCalls
+	r.createIssueCommentCalls++
+	err := r.createIssueCommentErr
+	postOnError := false
+	if callIdx < len(r.createIssueCommentErrSeq) {
+		err = r.createIssueCommentErrSeq[callIdx]
+	}
+	if callIdx < len(r.createIssueCommentPostsOnErrorSeq) {
+		postOnError = r.createIssueCommentPostsOnErrorSeq[callIdx]
+	}
+	if err != nil && !postOnError {
+		return err
+	}
 	r.issueComments = append(r.issueComments, testIssueComment{repo: repo, issueNumber: issueNumber, body: body})
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
 func (r *recordingGitHubClient) ListIssueComments(_ context.Context, repo string, issueNumber int) ([]ghapi.Comment, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	comments := make([]ghapi.Comment, 0, len(r.issueComments))
 	for _, comment := range r.issueComments {
 		if comment.repo != repo || comment.issueNumber != issueNumber {
@@ -104,6 +144,28 @@ func (r *recordingGitHubClient) ListIssueComments(_ context.Context, repo string
 		comments = append(comments, ghapi.Comment{Body: comment.body})
 	}
 	return comments, nil
+}
+
+func (r *recordingGitHubClient) commentCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.createIssueCommentCalls
+}
+
+func (r *recordingGitHubClient) comments() []testIssueComment {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]testIssueComment, len(r.issueComments))
+	copy(out, r.issueComments)
+	return out
+}
+
+func (r *recordingGitHubClient) reactions() []testIssueReaction {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]testIssueReaction, len(r.issueReactions))
+	copy(out, r.issueReactions)
+	return out
 }
 
 func TestGitHubRunNotifierNotifyRunStartedIdempotent(t *testing.T) {
@@ -233,6 +295,304 @@ func TestGitHubRunNotifierNotifyRunFailedIdempotent(t *testing.T) {
 		t.Fatalf("GetRunNotification(failure): %v", err)
 	} else if !ok {
 		t.Fatal("expected failure notification record")
+	}
+}
+
+func TestGitHubRunNotifierNotifyRunStartedRetriesAfterPostFailure(t *testing.T) {
+	store := newNotifierTestStore(t)
+	gh := &recordingGitHubClient{
+		createIssueCommentErrSeq: []error{
+			errors.New("transient github failure"),
+			nil,
+		},
+	}
+	notifier := NewGitHubRunNotifier(config.ServerConfig{GitHubToken: "token"}, store, gh)
+
+	runDir := t.TempDir()
+	writeNotifierJSON(t, filepath.Join(runDir, RunResponseTargetFile), RunResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 86,
+		RequestedBy: "alice",
+		Trigger:     runtrigger.NameIssueLabel,
+	})
+	startedAt := time.Now().UTC()
+	run := state.Run{
+		ID:           "run_start_comment_retry",
+		TaskID:       "owner/repo#86",
+		Repo:         "owner/repo",
+		Instruction:  "Investigate issue #86",
+		BaseBranch:   "main",
+		HeadBranch:   "rascal/issue-86",
+		Trigger:      runtrigger.NameIssueLabel,
+		RunDir:       runDir,
+		IssueNumber:  86,
+		AgentRuntime: runtime.RuntimeCodex,
+		StartedAt:    &startedAt,
+	}
+
+	notifier.NotifyRunStarted(run, runtime.SessionModeAll, false)
+
+	if got := gh.commentCalls(); got != 1 {
+		t.Fatalf("comment calls after first attempt = %d, want 1", got)
+	}
+	if comments := gh.comments(); len(comments) != 0 {
+		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
+	}
+	if _, ok, err := store.GetRunNotification(run.ID, state.RunNotificationKindStart); err != nil {
+		t.Fatalf("GetRunNotification(start): %v", err)
+	} else if ok {
+		t.Fatal("expected start notification record to be absent after failed post")
+	}
+
+	notifier.NotifyRunStarted(run, runtime.SessionModeAll, false)
+
+	if got := gh.commentCalls(); got != 2 {
+		t.Fatalf("comment calls after retry = %d, want 2", got)
+	}
+	if comments := gh.comments(); len(comments) != 1 {
+		t.Fatalf("expected one posted start comment after retry, got %d", len(comments))
+	}
+	if _, ok, err := store.GetRunNotification(run.ID, state.RunNotificationKindStart); err != nil {
+		t.Fatalf("GetRunNotification(start): %v", err)
+	} else if !ok {
+		t.Fatal("expected start notification record after successful retry")
+	}
+}
+
+func TestGitHubRunNotifierNotifyRunStartedIncludesRunnerBuildCommit(t *testing.T) {
+	store := newNotifierTestStore(t)
+	gh := &recordingGitHubClient{}
+	notifier := NewGitHubRunNotifier(config.ServerConfig{GitHubToken: "token"}, store, gh)
+
+	runDir := t.TempDir()
+	writeNotifierJSON(t, filepath.Join(runDir, RunResponseTargetFile), RunResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 85,
+		RequestedBy: "alice",
+		Trigger:     runtrigger.NameIssueLabel,
+	})
+	if err := runner.WriteMeta(filepath.Join(runDir, "meta.json"), runner.Meta{
+		RunID:       "run_start_comment_commit",
+		TaskID:      "owner/repo#85",
+		Repo:        "owner/repo",
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/issue-85",
+		BuildCommit: "deadbee",
+		ExitCode:    1,
+	}); err != nil {
+		t.Fatalf("write meta: %v", err)
+	}
+	startedAt := time.Now().UTC()
+	run := state.Run{
+		ID:           "run_start_comment_commit",
+		TaskID:       "owner/repo#85",
+		Repo:         "owner/repo",
+		Instruction:  "Investigate issue #85",
+		BaseBranch:   "main",
+		HeadBranch:   "rascal/issue-85",
+		Trigger:      runtrigger.NameIssueLabel,
+		RunDir:       runDir,
+		IssueNumber:  85,
+		AgentRuntime: runtime.RuntimeCodex,
+		StartedAt:    &startedAt,
+	}
+
+	notifier.NotifyRunStarted(run, runtime.SessionModeAll, false)
+
+	comments := gh.comments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted start comment, got %d", len(comments))
+	}
+	if !strings.Contains(comments[0].body, "- Runner commit: `deadbee`") {
+		t.Fatalf("expected runner commit in start comment, got:\n%s", comments[0].body)
+	}
+}
+
+func TestGitHubRunNotifierNotifyRunCompletedRetriesAfterPostFailure(t *testing.T) {
+	store := newNotifierTestStore(t)
+	gh := &recordingGitHubClient{
+		createIssueCommentErrSeq: []error{
+			errors.New("transient github failure"),
+			nil,
+		},
+	}
+	notifier := NewGitHubRunNotifier(config.ServerConfig{GitHubToken: "token"}, store, gh)
+
+	runDir := t.TempDir()
+	writeNotifierJSON(t, filepath.Join(runDir, RunResponseTargetFile), RunResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 89,
+		RequestedBy: "alice",
+		Trigger:     runtrigger.NamePRComment,
+	})
+	run, err := store.AddRun(state.CreateRunInput{
+		ID:           "run_comment_retry",
+		TaskID:       "owner/repo#89",
+		Repo:         "owner/repo",
+		Instruction:  "Address PR #89 feedback",
+		BaseBranch:   "main",
+		HeadBranch:   "rascal/pr-89",
+		Trigger:      runtrigger.NamePRComment,
+		RunDir:       runDir,
+		PRNumber:     89,
+		AgentRuntime: runtime.RuntimeGooseCodex,
+	})
+	if err != nil {
+		t.Fatalf("store.AddRun: %v", err)
+	}
+
+	notifier.NotifyRunCompleted(run)
+
+	if got := gh.commentCalls(); got != 1 {
+		t.Fatalf("comment calls after first attempt = %d, want 1", got)
+	}
+	if comments := gh.comments(); len(comments) != 0 {
+		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
+	}
+	persisted, ok := store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("store.GetRun(%q) not found", run.ID)
+	}
+	if persisted.CompletionCommentState != state.CompletionCommentStateFailed {
+		t.Fatalf("completion comment state after failure = %q, want %q", persisted.CompletionCommentState, state.CompletionCommentStateFailed)
+	}
+
+	notifier.NotifyRunCompleted(run)
+
+	if got := gh.commentCalls(); got != 2 {
+		t.Fatalf("comment calls after retry = %d, want 2", got)
+	}
+	if comments := gh.comments(); len(comments) != 1 {
+		t.Fatalf("expected one posted comment after retry, got %d", len(comments))
+	}
+	persisted, ok = store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("store.GetRun(%q) not found", run.ID)
+	}
+	if persisted.CompletionCommentState != state.CompletionCommentStatePosted {
+		t.Fatalf("completion comment state after retry = %q, want %q", persisted.CompletionCommentState, state.CompletionCommentStatePosted)
+	}
+}
+
+func TestGitHubRunNotifierNotifyRunCompletedReconcilesAmbiguousPostFailure(t *testing.T) {
+	store := newNotifierTestStore(t)
+	gh := &recordingGitHubClient{
+		createIssueCommentErrSeq:          []error{errors.New("timeout after post")},
+		createIssueCommentPostsOnErrorSeq: []bool{true},
+	}
+	notifier := NewGitHubRunNotifier(config.ServerConfig{GitHubToken: "token"}, store, gh)
+
+	runDir := t.TempDir()
+	writeNotifierJSON(t, filepath.Join(runDir, RunResponseTargetFile), RunResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 91,
+		RequestedBy: "alice",
+		Trigger:     runtrigger.NamePRComment,
+	})
+	run, err := store.AddRun(state.CreateRunInput{
+		ID:           "run_comment_ambiguous",
+		TaskID:       "owner/repo#91",
+		Repo:         "owner/repo",
+		Instruction:  "Address PR #91 feedback",
+		BaseBranch:   "main",
+		HeadBranch:   "rascal/pr-91",
+		Trigger:      runtrigger.NamePRComment,
+		RunDir:       runDir,
+		PRNumber:     91,
+		AgentRuntime: runtime.RuntimeGooseCodex,
+	})
+	if err != nil {
+		t.Fatalf("store.AddRun: %v", err)
+	}
+
+	notifier.NotifyRunCompleted(run)
+	notifier.NotifyRunCompleted(run)
+
+	if got := gh.commentCalls(); got != 1 {
+		t.Fatalf("comment calls after ambiguous failure reconciliation = %d, want 1", got)
+	}
+	comments := gh.comments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted comment after ambiguous failure, got %d", len(comments))
+	}
+	if !strings.Contains(comments[0].body, runCompletionCommentToken(run.ID)) {
+		t.Fatalf("completion comment missing run token:\n%s", comments[0].body)
+	}
+	persisted, ok := store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("store.GetRun(%q) not found", run.ID)
+	}
+	if persisted.CompletionCommentState != state.CompletionCommentStatePosted {
+		t.Fatalf("completion comment state = %q, want %q", persisted.CompletionCommentState, state.CompletionCommentStatePosted)
+	}
+	if _, ok, err := store.GetRunNotification(run.ID, state.RunNotificationKindCompletion); err != nil {
+		t.Fatalf("GetRunNotification(completion): %v", err)
+	} else if !ok {
+		t.Fatal("expected completion notification record after ambiguous failure reconciliation")
+	}
+}
+
+func TestGitHubRunNotifierNotifyRunFailedRetriesAfterPostFailure(t *testing.T) {
+	store := newNotifierTestStore(t)
+	gh := &recordingGitHubClient{
+		createIssueCommentErrSeq: []error{
+			errors.New("transient github failure"),
+			nil,
+		},
+	}
+	notifier := NewGitHubRunNotifier(config.ServerConfig{GitHubToken: "token"}, store, gh)
+
+	runDir := t.TempDir()
+	writeNotifierJSON(t, filepath.Join(runDir, RunResponseTargetFile), RunResponseTarget{
+		Repo:        "owner/repo",
+		IssueNumber: 90,
+		RequestedBy: "alice",
+		Trigger:     runtrigger.NamePRComment,
+	})
+	run := state.Run{
+		ID:           "run_failure_retry",
+		TaskID:       "owner/repo#90",
+		Repo:         "owner/repo",
+		Instruction:  "Address PR #90 feedback",
+		BaseBranch:   "main",
+		HeadBranch:   "rascal/pr-90",
+		Trigger:      runtrigger.NamePRComment,
+		RunDir:       runDir,
+		PRNumber:     90,
+		AgentRuntime: runtime.RuntimeCodex,
+		Error:        "goose run failed: exit status 1",
+	}
+
+	notifier.NotifyRunFailed(run)
+
+	if got := gh.commentCalls(); got != 1 {
+		t.Fatalf("comment calls after first attempt = %d, want 1", got)
+	}
+	if comments := gh.comments(); len(comments) != 0 {
+		t.Fatalf("expected no posted comments after failed attempt, got %d", len(comments))
+	}
+	if _, ok, err := store.GetRunNotification(run.ID, state.RunNotificationKindFailure); err != nil {
+		t.Fatalf("GetRunNotification(failure): %v", err)
+	} else if ok {
+		t.Fatal("expected failure notification record to be absent after failed post")
+	}
+
+	notifier.NotifyRunFailed(run)
+
+	if got := gh.commentCalls(); got != 2 {
+		t.Fatalf("comment calls after retry = %d, want 2", got)
+	}
+	comments := gh.comments()
+	if len(comments) != 1 {
+		t.Fatalf("expected one posted comment after retry, got %d", len(comments))
+	}
+	if !strings.Contains(comments[0].body, "Reason: goose run failed: exit status 1") {
+		t.Fatalf("expected generic failure reason in comment, got body:\n%s", comments[0].body)
+	}
+	if _, ok, err := store.GetRunNotification(run.ID, state.RunNotificationKindFailure); err != nil {
+		t.Fatalf("GetRunNotification(failure): %v", err)
+	} else if !ok {
+		t.Fatal("expected failure notification record after successful retry")
 	}
 }
 
