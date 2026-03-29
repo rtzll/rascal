@@ -1362,29 +1362,18 @@ func (a *app) streamRunLogs(runID string, follow bool, interval, since time.Dura
 		return out, nil
 	}
 
-	last := ""
+	renderer := newRunLogsFollowRenderer(since, time.Now)
 	for {
 		payload, err := fetchFollow()
 		if err != nil {
 			return err
 		}
-		body := payload.Logs
-		if since > 0 {
-			body = filterLogsSince(body, time.Now().Add(-since))
-		}
-		if strings.HasPrefix(body, last) {
-			diff := strings.TrimPrefix(body, last)
-			if diff != "" {
-				if _, err := io.WriteString(os.Stdout, diff); err != nil {
-					return fmt.Errorf("write incremental run logs: %w", err)
-				}
-			}
-		} else if body != last {
-			if _, err := io.WriteString(os.Stdout, body); err != nil {
-				return fmt.Errorf("write run logs: %w", err)
+		out := renderer.Render(payload)
+		if out != "" {
+			if _, err := io.WriteString(os.Stdout, out); err != nil {
+				return fmt.Errorf("write incremental run logs: %w", err)
 			}
 		}
-		last = body
 		if payload.Done {
 			return nil
 		}
