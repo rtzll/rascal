@@ -223,6 +223,13 @@ func (s *Server) firstKnownHeadBranch(taskID, preferred string) string {
 	return s.defaultHeadBranchForTask(taskID)
 }
 
+func (s *Server) firstKnownInstruction(taskID, fallback string) string {
+	if run, ok := s.Store.LastRunForTask(taskID); ok && strings.TrimSpace(run.Instruction) != "" {
+		return strings.TrimSpace(run.Instruction)
+	}
+	return strings.TrimSpace(fallback)
+}
+
 func (s *Server) resolvePRBranches(ctx context.Context, repo string, prNumber int, baseBranch, headBranch string) (string, string) {
 	baseBranch = strings.TrimSpace(baseBranch)
 	headBranch = strings.TrimSpace(headBranch)

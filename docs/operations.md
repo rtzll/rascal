@@ -94,6 +94,7 @@ Server env controls:
 `pr-only` resumes for iterative PR triggers:
 
 - `pr_comment`
+- `pr_synchronize`
 - `pr_review`
 - `pr_review_comment`
 - `pr_review_thread`

@@ -121,6 +121,7 @@ type RunRequest struct {
 	IssueNumber     int
 	PRNumber        int
 	PRStatus        state.PRStatus
+	HeadSHA         string
 	Context         string
 	Debug           *bool
 	CreatedByUserID string
@@ -416,6 +417,8 @@ func statusReasonFromCancelSource(source string) state.RunStatusReason {
 		return state.RunStatusReasonIssueEdited
 	case string(state.RunStatusReasonPRClosed):
 		return state.RunStatusReasonPRClosed
+	case string(state.RunStatusReasonPRSynchronized):
+		return state.RunStatusReasonPRSynchronized
 	case string(state.RunStatusReasonPRDraft):
 		return state.RunStatusReasonPRDraft
 	case string(state.RunStatusReasonPRMerged):

@@ -38,6 +38,7 @@ func TestSessionEnabled(t *testing.T) {
 	}
 	for _, trigger := range []runtrigger.Name{
 		runtrigger.NamePRComment,
+		runtrigger.NamePRSynchronize,
 		runtrigger.NamePRReview,
 		runtrigger.NamePRReviewComment,
 		runtrigger.NamePRReviewThread,

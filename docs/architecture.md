@@ -278,7 +278,7 @@ Each run directory stores metadata and artifacts such as:
 
 - Session policy is configured at the orchestrator via `off`, `pr-only`, or
   `all`.
-- `pr-only` currently resumes for `pr_comment`, `pr_review`,
+- `pr-only` currently resumes for `pr_comment`, `pr_synchronize`, `pr_review`,
   `pr_review_comment`, `pr_review_thread`, `retry`, and `issue_edited`.
 - Goose resumes by named Goose session plus mounted session storage.
 - Codex resumes by reusing a task-scoped `CODEX_HOME` and the discovered harness

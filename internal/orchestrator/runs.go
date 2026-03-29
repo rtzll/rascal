@@ -23,6 +23,7 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 	req.TaskID = strings.TrimSpace(req.TaskID)
 	req.BaseBranch = strings.TrimSpace(req.BaseBranch)
 	req.HeadBranch = strings.TrimSpace(req.HeadBranch)
+	req.HeadSHA = strings.TrimSpace(req.HeadSHA)
 	req.Context = strings.TrimSpace(req.Context)
 	req.CreatedByUserID = strings.TrimSpace(req.CreatedByUserID)
 	if req.Repo == "" || req.Instruction == "" {
@@ -68,7 +69,7 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 		}
 	}
 	if req.HeadBranch == "" {
-		if hasLastRun && (req.Trigger == runtrigger.NamePRComment || req.Trigger == runtrigger.NamePRReview || req.Trigger == runtrigger.NamePRCheckFailure) && lastRun.HeadBranch != "" {
+		if hasLastRun && (req.Trigger == runtrigger.NamePRComment || req.Trigger == runtrigger.NamePRSynchronize || req.Trigger == runtrigger.NamePRReview || req.Trigger == runtrigger.NamePRCheckFailure) && lastRun.HeadBranch != "" {
 			req.HeadBranch = lastRun.HeadBranch
 		} else {
 			req.HeadBranch = BuildHeadBranch(req.TaskID, req.Instruction, runID)
@@ -104,6 +105,7 @@ func (s *Server) CreateAndQueueRun(req RunRequest) (state.Run, error) {
 		IssueNumber:  req.IssueNumber,
 		PRNumber:     req.PRNumber,
 		PRStatus:     req.PRStatus,
+		HeadSHA:      req.HeadSHA,
 		Context:      req.Context,
 		Debug:        req.Debug,
 	})

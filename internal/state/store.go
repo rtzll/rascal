@@ -444,7 +444,7 @@ ON CONFLICT(id) DO UPDATE SET
 		PrNumber:                   int64(in.PRNumber),
 		PrUrl:                      "",
 		PrStatus:                   string(in.PRStatus),
-		HeadSha:                    "",
+		HeadSha:                    strings.TrimSpace(in.HeadSHA),
 		Context:                    in.Context,
 		Error:                      "",
 		StatusReason:               string(RunStatusReasonNone),

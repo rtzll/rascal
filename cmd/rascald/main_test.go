@@ -1542,6 +1542,7 @@ func TestHandleWebhookIssueCommentResolvesPRBranchWithoutPriorRun(t *testing.T) 
 			}{Ref: "main"},
 			Head: struct {
 				Ref string `json:"ref"`
+				SHA string `json:"sha"`
 			}{Ref: "add-goreleaser"},
 		},
 	}
@@ -2647,6 +2648,149 @@ func TestReadyForReviewResumesQueuedDraftPRRuns(t *testing.T) {
 	}
 	if calls := launcher.Calls(); calls != 1 {
 		t.Fatalf("expected exactly one launch after ready_for_review, got %d", calls)
+	}
+}
+
+func TestPullRequestSynchronizeCancelsQueuedRunAndQueuesReplacement(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeRunner{})
+	defer waitForServerIdle(t, s)
+
+	taskID := "owner/repo#1350"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 1350}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	staleRun, err := s.Store.AddRun(state.CreateRunInput{
+		ID:          "run_pr_sync_stale",
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Instruction: "Address PR #1350 feedback",
+		Trigger:     runtrigger.NamePRComment,
+		RunDir:      t.TempDir(),
+		IssueNumber: 1350,
+		PRNumber:    1350,
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/owner-repo-1350-old",
+		HeadSHA:     "old-sha",
+	})
+	if err != nil {
+		t.Fatalf("add stale run: %v", err)
+	}
+
+	pr := testPullRequest(1350, false, "main", "rascal/owner-repo-1350-new")
+	pr.Head.SHA = "new-sha"
+	payload := pullRequestEventPayload(t, "synchronize", "owner/repo", "dev", pr)
+	req := webhookRequest(t, payload, "pull_request", "delivery-pr-synchronize-queued", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for synchronize event, got %d", rec.Code)
+	}
+
+	waitFor(t, 3*time.Second, func() bool {
+		return len(s.Store.ListRuns(10)) == 2
+	}, "replacement run created after synchronize")
+
+	updated, ok := s.Store.GetRun(staleRun.ID)
+	if !ok {
+		t.Fatalf("run %s not found", staleRun.ID)
+	}
+	if updated.Status != state.StatusCanceled {
+		t.Fatalf("stale run status = %s, want canceled", updated.Status)
+	}
+	if updated.StatusReason != state.RunStatusReasonPRSynchronized {
+		t.Fatalf("stale run status reason = %q, want %q", updated.StatusReason, state.RunStatusReasonPRSynchronized)
+	}
+
+	replacement, ok := s.Store.LastRunForTask(taskID)
+	if !ok {
+		t.Fatal("expected replacement run")
+	}
+	if replacement.ID == staleRun.ID {
+		t.Fatal("expected a new replacement run, got stale run")
+	}
+	if replacement.Trigger != runtrigger.NamePRSynchronize {
+		t.Fatalf("trigger = %q, want %q", replacement.Trigger, runtrigger.NamePRSynchronize)
+	}
+	if replacement.BaseBranch != "main" || replacement.HeadBranch != "rascal/owner-repo-1350-new" {
+		t.Fatalf("replacement branches = %q -> %q, want main -> rascal/owner-repo-1350-new", replacement.BaseBranch, replacement.HeadBranch)
+	}
+	if replacement.HeadSHA != "new-sha" {
+		t.Fatalf("replacement head sha = %q, want new-sha", replacement.HeadSHA)
+	}
+	if replacement.Instruction != staleRun.Instruction {
+		t.Fatalf("replacement instruction = %q, want %q", replacement.Instruction, staleRun.Instruction)
+	}
+}
+
+func TestPullRequestSynchronizeCancelsRunningRunAndQueuesReplacement(t *testing.T) {
+	t.Parallel()
+	waitCh := make(chan struct{})
+	launcher := &fakeRunner{waitCh: waitCh}
+	s := newTestServer(t, launcher)
+	defer func() {
+		close(waitCh)
+		waitForServerIdle(t, s)
+	}()
+
+	taskID := "owner/repo#1351"
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{ID: taskID, Repo: "owner/repo", PRNumber: 1351}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	run, err := s.CreateAndQueueRun(orchestrator.RunRequest{
+		TaskID:      taskID,
+		Repo:        "owner/repo",
+		Instruction: "Address PR #1351 feedback",
+		IssueNumber: 1351,
+		PRNumber:    1351,
+		Trigger:     runtrigger.NamePRComment,
+		BaseBranch:  "main",
+		HeadBranch:  "rascal/owner-repo-1351-old",
+		HeadSHA:     "old-sha",
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_ = waitForRunExecution(t, s, run.ID)
+
+	pr := testPullRequest(1351, false, "main", "rascal/owner-repo-1351-new")
+	pr.Head.SHA = "new-sha"
+	payload := pullRequestEventPayload(t, "synchronize", "owner/repo", "dev", pr)
+	req := webhookRequest(t, payload, "pull_request", "delivery-pr-synchronize-running", "")
+	rec := httptest.NewRecorder()
+	s.HandleWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for synchronize event, got %d", rec.Code)
+	}
+
+	waitFor(t, 3*time.Second, func() bool {
+		updated, ok := s.Store.GetRun(run.ID)
+		return ok && updated.Status == state.StatusCanceled && launcher.Calls() == 2
+	}, "running synchronize run canceled and replacement launched")
+
+	updated, ok := s.Store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("run %s not found", run.ID)
+	}
+	if updated.StatusReason != state.RunStatusReasonPRSynchronized {
+		t.Fatalf("status reason = %q, want %q", updated.StatusReason, state.RunStatusReasonPRSynchronized)
+	}
+	if !strings.Contains(updated.Error, "synchronized") {
+		t.Fatalf("expected synchronized cancel reason, got %q", updated.Error)
+	}
+
+	replacement, ok := s.Store.LastRunForTask(taskID)
+	if !ok {
+		t.Fatal("expected replacement run")
+	}
+	if replacement.ID == run.ID {
+		t.Fatal("expected a new replacement run, got original run")
+	}
+	if replacement.Trigger != runtrigger.NamePRSynchronize {
+		t.Fatalf("trigger = %q, want %q", replacement.Trigger, runtrigger.NamePRSynchronize)
+	}
+	if replacement.HeadBranch != "rascal/owner-repo-1351-new" || replacement.HeadSHA != "new-sha" {
+		t.Fatalf("replacement branch/sha = %q / %q, want rascal/owner-repo-1351-new / new-sha", replacement.HeadBranch, replacement.HeadSHA)
 	}
 }
 

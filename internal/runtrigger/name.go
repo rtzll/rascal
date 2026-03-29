@@ -15,6 +15,7 @@ const (
 	NameIssueEdited     Name = "issue_edited"
 	NameIssueReopened   Name = "issue_reopened"
 	NamePRComment       Name = "pr_comment"
+	NamePRSynchronize   Name = "pr_synchronize"
 	NamePRReview        Name = "pr_review"
 	NamePRReviewComment Name = "pr_review_comment"
 	NamePRReviewThread  Name = "pr_review_thread"
@@ -53,6 +54,7 @@ func (n Name) IsKnown() bool {
 		NameIssueEdited,
 		NameIssueReopened,
 		NamePRComment,
+		NamePRSynchronize,
 		NamePRReview,
 		NamePRReviewComment,
 		NamePRReviewThread,
@@ -65,7 +67,7 @@ func (n Name) IsKnown() bool {
 
 func (n Name) IsComment() bool {
 	switch Normalize(n.String()) {
-	case NamePRComment, NamePRReview, NamePRReviewComment, NamePRReviewThread:
+	case NamePRComment, NamePRSynchronize, NamePRReview, NamePRReviewComment, NamePRReviewThread:
 		return true
 	default:
 		return false
@@ -83,7 +85,7 @@ func (n Name) IsIssue() bool {
 
 func (n Name) EnablesPROnlySession() bool {
 	switch Normalize(n.String()) {
-	case NamePRComment, NamePRReview, NamePRReviewComment, NamePRReviewThread, NamePRCheckFailure, NameRetry, NameIssueEdited:
+	case NamePRComment, NamePRSynchronize, NamePRReview, NamePRReviewComment, NamePRReviewThread, NamePRCheckFailure, NameRetry, NameIssueEdited:
 		return true
 	default:
 		return false

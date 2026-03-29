@@ -240,6 +240,54 @@ func TestWebhookInterpreterPullRequestReadyForReviewResumes(t *testing.T) {
 	}
 }
 
+func TestWebhookInterpreterPullRequestSynchronizeCancelsAndRequeues(t *testing.T) {
+	actions := interpretWebhookActions(t, "pull_request", ghapi.PullRequestEvent{
+		Action: "synchronize",
+		PullRequest: ghapi.PullRequest{
+			Number: 88,
+			State:  "open",
+			Base: struct {
+				Ref string `json:"ref"`
+			}{Ref: "main"},
+			Head: struct {
+				Ref string `json:"ref"`
+				SHA string `json:"sha"`
+			}{Ref: "feature/new-head", SHA: "abc123"},
+		},
+		Repository: ghapi.Repository{FullName: "owner/repo"},
+		Sender:     ghapi.User{Login: "reviewer"},
+	})
+
+	if got, want := actionKinds(actions), []WebhookActionKind{WebhookActionSynchronizePullRequest}; !sameActionKinds(got, want) {
+		t.Fatalf("action kinds = %v, want %v", got, want)
+	}
+	if actions[0].Trigger != runtrigger.NamePRSynchronize {
+		t.Fatalf("trigger = %q, want %q", actions[0].Trigger, runtrigger.NamePRSynchronize)
+	}
+	if actions[0].StatusReason != state.RunStatusReasonPRSynchronized {
+		t.Fatalf("status reason = %q, want %q", actions[0].StatusReason, state.RunStatusReasonPRSynchronized)
+	}
+	if actions[0].HeadBranch != "feature/new-head" || actions[0].HeadSHA != "abc123" {
+		t.Fatalf("expected head branch/sha to be preserved: %#v", actions[0])
+	}
+}
+
+func TestWebhookInterpreterPullRequestSynchronizeIgnoresBotActor(t *testing.T) {
+	actions := interpretWebhookActions(t, "pull_request", ghapi.PullRequestEvent{
+		Action: "synchronize",
+		PullRequest: ghapi.PullRequest{
+			Number: 88,
+			State:  "open",
+		},
+		Repository: ghapi.Repository{FullName: "owner/repo"},
+		Sender:     ghapi.User{Login: "rascal[bot]"},
+	})
+
+	if len(actions) != 0 {
+		t.Fatalf("actions = %v, want none", actionKinds(actions))
+	}
+}
+
 func TestWebhookInterpreterCheckRunCompletedFailureQueuesPRRun(t *testing.T) {
 	actions := interpretWebhookActions(t, "check_run", ghapi.CheckRunEvent{
 		Action: "completed",

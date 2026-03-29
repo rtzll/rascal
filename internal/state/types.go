@@ -28,6 +28,7 @@ const (
 	RunStatusReasonIssueClosed          RunStatusReason = "issue_closed"
 	RunStatusReasonIssueEdited          RunStatusReason = "issue_edited"
 	RunStatusReasonPRClosed             RunStatusReason = "pr_closed"
+	RunStatusReasonPRSynchronized       RunStatusReason = "pr_synchronized"
 	RunStatusReasonPRDraft              RunStatusReason = "pr_draft"
 	RunStatusReasonPRMerged             RunStatusReason = "pr_merged"
 	RunStatusReasonReviewThreadResolved RunStatusReason = "review_thread_resolved"
@@ -47,6 +48,8 @@ func NormalizeRunStatusReason(reason RunStatusReason) RunStatusReason {
 		return RunStatusReasonIssueEdited
 	case string(RunStatusReasonPRClosed):
 		return RunStatusReasonPRClosed
+	case string(RunStatusReasonPRSynchronized):
+		return RunStatusReasonPRSynchronized
 	case string(RunStatusReasonPRDraft):
 		return RunStatusReasonPRDraft
 	case string(RunStatusReasonPRMerged):
@@ -463,6 +466,7 @@ type CreateRunInput struct {
 	IssueNumber  int
 	PRNumber     int
 	PRStatus     PRStatus
+	HeadSHA      string
 	Context      string
 }
 
@@ -492,6 +496,7 @@ func (in CreateRunInput) WithDefaults() (CreateRunInput, error) {
 	if in.PRStatus == PRStatusNone && in.PRNumber > 0 {
 		in.PRStatus = PRStatusOpen
 	}
+	in.HeadSHA = strings.TrimSpace(in.HeadSHA)
 
 	return in, nil
 }

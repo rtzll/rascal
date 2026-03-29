@@ -41,6 +41,7 @@ type PullRequest struct {
 	} `json:"base"`
 	Head struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"head"`
 }
 

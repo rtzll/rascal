@@ -26,6 +26,7 @@ const (
 	WebhookActionCancelPRThreadRuns       WebhookActionKind = "cancel_pr_review_thread_runs"
 	WebhookActionClosePullRequest         WebhookActionKind = "close_pull_request"
 	WebhookActionReopenPullRequest        WebhookActionKind = "reopen_pull_request"
+	WebhookActionSynchronizePullRequest   WebhookActionKind = "synchronize_pull_request"
 	WebhookActionConvertPullRequestDraft  WebhookActionKind = "convert_pull_request_draft"
 	WebhookActionReadyPullRequest         WebhookActionKind = "ready_pull_request"
 	WebhookActionCreatePRCheckFailureRun  WebhookActionKind = "create_pr_check_failure_run"
@@ -345,6 +346,22 @@ func (wi WebhookInterpreter) interpretPullRequest(payload []byte) ([]WebhookActi
 			Kind:     WebhookActionReopenPullRequest,
 			Repo:     ev.Repository.FullName,
 			PRNumber: ev.PullRequest.Number,
+		}}, nil
+	case "synchronize":
+		if wi.isBotActor(ev.Sender.Login) || !isOpenGitHubState(ev.PullRequest.State) {
+			return nil, nil
+		}
+		return []WebhookAction{{
+			Kind:         WebhookActionSynchronizePullRequest,
+			Repo:         ev.Repository.FullName,
+			PRNumber:     ev.PullRequest.Number,
+			Trigger:      runtrigger.NamePRSynchronize,
+			RequestedBy:  strings.TrimSpace(ev.Sender.Login),
+			BaseBranch:   strings.TrimSpace(ev.PullRequest.Base.Ref),
+			HeadBranch:   strings.TrimSpace(ev.PullRequest.Head.Ref),
+			HeadSHA:      strings.TrimSpace(ev.PullRequest.Head.SHA),
+			CancelReason: "pull request synchronized",
+			StatusReason: state.RunStatusReasonPRSynchronized,
 		}}, nil
 	case "converted_to_draft":
 		return []WebhookAction{{

@@ -375,6 +375,43 @@ func (s *Server) executeWebhookAction(ctx context.Context, action WebhookAction)
 	case WebhookActionReopenPullRequest:
 		s.reconcileReopenedPRRuns(action.Repo, action.PRNumber)
 		return nil
+	case WebhookActionSynchronizePullRequest:
+		task, ok := s.taskForPR(action.Repo, action.PRNumber)
+		if !ok {
+			return nil
+		}
+		if err := s.Store.CancelQueuedRuns(task.ID, action.CancelReason, action.StatusReason); err != nil {
+			return fmt.Errorf("cancel queued runs for synchronized PR: %w", err)
+		}
+		s.cancelRunningTaskRuns(task.ID, action.CancelReason, action.StatusReason)
+		if task.Status != state.TaskOpen || task.PRDraft {
+			return nil
+		}
+		instruction := s.firstKnownInstruction(task.ID, fmt.Sprintf("Continue work for PR #%d after synchronize", action.PRNumber))
+		_, err := s.CreateAndQueueRun(RunRequest{
+			TaskID:      task.ID,
+			Repo:        action.Repo,
+			Instruction: instruction,
+			Trigger:     action.Trigger,
+			IssueNumber: task.IssueNumber,
+			PRNumber:    action.PRNumber,
+			PRStatus:    state.PRStatusOpen,
+			BaseBranch:  s.firstKnownBaseBranch(task.ID, action.BaseBranch),
+			HeadBranch:  s.firstKnownHeadBranch(task.ID, action.HeadBranch),
+			HeadSHA:     action.HeadSHA,
+			Context:     firstNonEmpty(action.Context, fmt.Sprintf("Triggered by pull_request synchronize on PR #%d", action.PRNumber)),
+			Debug:       boolPtr(true),
+			ResponseTarget: &RunResponseTarget{
+				Repo:        action.Repo,
+				IssueNumber: action.PRNumber,
+				RequestedBy: action.RequestedBy,
+				Trigger:     action.Trigger,
+			},
+		})
+		if errors.Is(err, errTaskCompleted) {
+			return nil
+		}
+		return err
 	case WebhookActionConvertPullRequestDraft:
 		task, ok := s.taskForPR(action.Repo, action.PRNumber)
 		if !ok {
