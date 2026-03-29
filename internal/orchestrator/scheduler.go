@@ -268,7 +268,7 @@ func (s *Server) cancelQueuedReviewThreadRuns(taskID, repo string, prNumber int,
 		if run.TaskID != taskID || run.Repo != repo || run.PRNumber != prNumber || run.Trigger != "pr_review_thread" || run.Status != state.StatusQueued {
 			continue
 		}
-		target, ok, err := LoadRunResponseTarget(run.RunDir)
+		target, ok, err := loadPersistedRunResponseTarget(s.Store, run)
 		if err != nil {
 			log.Printf("run %s load response target for review thread cancellation failed: %v", run.ID, err)
 			continue

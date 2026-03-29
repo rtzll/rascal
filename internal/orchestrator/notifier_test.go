@@ -177,6 +177,7 @@ func TestGitHubRunNotifierNotifyRunStartedIdempotent(t *testing.T) {
 	startedAt := time.Now().UTC()
 	run := state.Run{
 		ID:           "run_start",
+		TaskID:       "owner/repo#42",
 		Repo:         "owner/repo",
 		RunDir:       runDir,
 		IssueNumber:  42,
@@ -184,6 +185,29 @@ func TestGitHubRunNotifierNotifyRunStartedIdempotent(t *testing.T) {
 		AgentRuntime: runtime.RuntimeCodex,
 		CreatedAt:    startedAt.Add(-2 * time.Second),
 		StartedAt:    &startedAt,
+	}
+	if _, err := store.UpsertTask(state.UpsertTaskInput{ID: run.TaskID, Repo: run.Repo, IssueNumber: run.IssueNumber}); err != nil {
+		t.Fatalf("UpsertTask(start): %v", err)
+	}
+	if _, err := store.AddRun(state.CreateRunInput{
+		ID:           run.ID,
+		TaskID:       run.TaskID,
+		Repo:         run.Repo,
+		Instruction:  "Investigate issue #42",
+		AgentRuntime: run.AgentRuntime,
+		Trigger:      run.Trigger,
+		RunDir:       run.RunDir,
+		IssueNumber:  run.IssueNumber,
+	}); err != nil {
+		t.Fatalf("AddRun(start): %v", err)
+	}
+	if err := store.UpsertRunResponseTarget(state.RunResponseTargetRecord{
+		RunID:       run.ID,
+		Repo:        "owner/repo",
+		IssueNumber: 42,
+		Trigger:     runtrigger.NameIssueLabel,
+	}); err != nil {
+		t.Fatalf("UpsertRunResponseTarget(start): %v", err)
 	}
 
 	notifier.NotifyRunStarted(run, runtime.SessionModeAll, true)
@@ -211,12 +235,6 @@ func TestGitHubRunNotifierNotifyRunCompletedIdempotent(t *testing.T) {
 	notifier := NewGitHubRunNotifier(config.ServerConfig{GitHubToken: "token"}, store, gh)
 
 	runDir := t.TempDir()
-	writeNotifierJSON(t, filepath.Join(runDir, RunResponseTargetFile), RunResponseTarget{
-		Repo:        "owner/repo",
-		IssueNumber: 77,
-		RequestedBy: "rtzll",
-		Trigger:     runtrigger.NamePRComment,
-	})
 	if err := os.WriteFile(filepath.Join(runDir, agentLogFile), []byte("implemented the requested change"), 0o644); err != nil {
 		t.Fatalf("write agent log: %v", err)
 	}
@@ -234,6 +252,15 @@ func TestGitHubRunNotifierNotifyRunCompletedIdempotent(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("store.AddRun: %v", err)
+	}
+	if err := store.UpsertRunResponseTarget(state.RunResponseTargetRecord{
+		RunID:       run.ID,
+		Repo:        "owner/repo",
+		IssueNumber: 77,
+		RequestedBy: "rtzll",
+		Trigger:     runtrigger.NamePRComment,
+	}); err != nil {
+		t.Fatalf("UpsertRunResponseTarget(completion): %v", err)
 	}
 
 	notifier.NotifyRunCompleted(run)

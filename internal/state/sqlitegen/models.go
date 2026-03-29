@@ -136,6 +136,15 @@ type RunNotification struct {
 	PostedAt        int64         `json:"posted_at"`
 }
 
+type RunResponseTarget struct {
+	RunID          string `json:"run_id"`
+	Repo           string `json:"repo"`
+	IssueNumber    int64  `json:"issue_number"`
+	RequestedBy    string `json:"requested_by"`
+	Trigger        string `json:"trigger"`
+	ReviewThreadID int64  `json:"review_thread_id"`
+}
+
 type RunTokenUsage struct {
 	RunID                 string        `json:"run_id"`
 	Backend               string        `json:"backend"`

@@ -287,6 +287,15 @@ type RunNotification struct {
 	PostedAt        time.Time           `json:"posted_at"`
 }
 
+type RunResponseTargetRecord struct {
+	RunID          string          `json:"run_id"`
+	Repo           string          `json:"repo"`
+	IssueNumber    int             `json:"issue_number"`
+	RequestedBy    string          `json:"requested_by,omitempty"`
+	Trigger        runtrigger.Name `json:"trigger"`
+	ReviewThreadID int64           `json:"review_thread_id,omitempty"`
+}
+
 type Task struct {
 	ID           string          `json:"id"`
 	Repo         string          `json:"repo"`

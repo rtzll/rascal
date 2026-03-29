@@ -289,6 +289,63 @@ func TestStoreUpsertRunNotification(t *testing.T) {
 	}
 }
 
+func TestStoreUpsertRunResponseTarget(t *testing.T) {
+	t.Parallel()
+
+	store, err := New(filepath.Join(t.TempDir(), "state.db"), 200)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.UpsertTask(UpsertTaskInput{ID: "task_1", Repo: "owner/repo", PRNumber: 42}); err != nil {
+		t.Fatalf("UpsertTask: %v", err)
+	}
+	if _, err := store.AddRun(CreateRunInput{
+		ID:          "run_1",
+		TaskID:      "task_1",
+		Repo:        "owner/repo",
+		Instruction: "Address PR #42 feedback",
+		Trigger:     runtrigger.NamePRComment,
+		RunDir:      "/tmp/run_1",
+		PRNumber:    42,
+	}); err != nil {
+		t.Fatalf("AddRun: %v", err)
+	}
+
+	if err := store.UpsertRunResponseTarget(RunResponseTargetRecord{
+		RunID:          "run_1",
+		Repo:           "Owner/Repo",
+		IssueNumber:    42,
+		RequestedBy:    "alice",
+		Trigger:        runtrigger.NamePRComment,
+		ReviewThreadID: 99,
+	}); err != nil {
+		t.Fatalf("UpsertRunResponseTarget: %v", err)
+	}
+
+	target, ok, err := store.GetRunResponseTarget("run_1")
+	if err != nil {
+		t.Fatalf("GetRunResponseTarget: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected run response target")
+	}
+	if target.Repo != "owner/repo" {
+		t.Fatalf("repo = %q, want owner/repo", target.Repo)
+	}
+	if target.IssueNumber != 42 {
+		t.Fatalf("issue number = %d, want 42", target.IssueNumber)
+	}
+	if target.RequestedBy != "alice" {
+		t.Fatalf("requested_by = %q, want alice", target.RequestedBy)
+	}
+	if target.Trigger != runtrigger.NamePRComment {
+		t.Fatalf("trigger = %q, want %q", target.Trigger, runtrigger.NamePRComment)
+	}
+	if target.ReviewThreadID != 99 {
+		t.Fatalf("review_thread_id = %d, want 99", target.ReviewThreadID)
+	}
+}
+
 func TestStoreRejectsInvalidRunStatusTransition(t *testing.T) {
 	t.Parallel()
 

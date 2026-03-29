@@ -146,6 +146,29 @@ func LoadRunResponseTarget(runDir string) (RunResponseTarget, bool, error) {
 	return target, true, nil
 }
 
+func loadPersistedRunResponseTarget(store *state.Store, run state.Run) (RunResponseTarget, bool, error) {
+	if store != nil {
+		target, ok, err := store.GetRunResponseTarget(run.ID)
+		if err != nil {
+			return RunResponseTarget{}, false, fmt.Errorf("load run response target from sqlite: %w", err)
+		}
+		if ok {
+			return RunResponseTarget{
+				Repo:           target.Repo,
+				IssueNumber:    target.IssueNumber,
+				RequestedBy:    target.RequestedBy,
+				Trigger:        target.Trigger,
+				ReviewThreadID: target.ReviewThreadID,
+			}, true, nil
+		}
+	}
+	target, ok, err := LoadRunResponseTarget(run.RunDir)
+	if err != nil {
+		return RunResponseTarget{}, false, err
+	}
+	return target, ok, nil
+}
+
 func RunCommentMarkerPath(runDir, markerFile string) string {
 	return filepath.Join(strings.TrimSpace(runDir), markerFile)
 }

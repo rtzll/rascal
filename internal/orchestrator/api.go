@@ -348,7 +348,7 @@ func (s *Server) hydrateRetryRunRequest(runReq RunRequest, sourceRunID string) (
 	}
 
 	if runReq.ResponseTarget == nil {
-		target, ok, err := LoadRunResponseTarget(sourceRun.RunDir)
+		target, ok, err := loadPersistedRunResponseTarget(s.Store, sourceRun)
 		if err != nil {
 			return RunRequest{}, fmt.Errorf("load response target for run %q: %w", sourceRun.ID, err)
 		}

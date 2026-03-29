@@ -217,14 +217,15 @@ func (s *Server) WriteRunResponseTarget(run state.Run, target *RunResponseTarget
 	if out.Repo == "" || out.IssueNumber <= 0 {
 		return nil
 	}
-
-	data, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode run response target: %w", err)
-	}
-	path := filepath.Join(run.RunDir, RunResponseTargetFile)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write run response target: %w", err)
+	if err := s.Store.UpsertRunResponseTarget(state.RunResponseTargetRecord{
+		RunID:          run.ID,
+		Repo:           out.Repo,
+		IssueNumber:    out.IssueNumber,
+		RequestedBy:    out.RequestedBy,
+		Trigger:        out.Trigger,
+		ReviewThreadID: out.ReviewThreadID,
+	}); err != nil {
+		return fmt.Errorf("persist run response target: %w", err)
 	}
 	return nil
 }

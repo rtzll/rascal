@@ -186,12 +186,12 @@ func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	target, ok, err := LoadRunResponseTarget(run.RunDir)
+	target, ok, err := s.Store.GetRunResponseTarget(run.ID)
 	if err != nil {
-		t.Fatalf("load run response target: %v", err)
+		t.Fatalf("get run response target: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected run response target file")
+		t.Fatal("expected persisted run response target")
 	}
 	if target.Repo != "owner/repo" {
 		t.Fatalf("target repo = %q, want owner/repo", target.Repo)
@@ -207,6 +207,11 @@ func TestCreateAndQueueRunWritesResponseTarget(t *testing.T) {
 	}
 	if target.ReviewThreadID != 0 {
 		t.Fatalf("target review_thread_id = %d, want 0", target.ReviewThreadID)
+	}
+	if _, ok, err := LoadRunResponseTarget(run.RunDir); err != nil {
+		t.Fatalf("load legacy run response target: %v", err)
+	} else if ok {
+		t.Fatal("expected no legacy response_target.json for new runs")
 	}
 }
 
@@ -230,12 +235,12 @@ func TestCreateAndQueueRunWritesReviewThreadResponseTarget(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	target, ok, err := LoadRunResponseTarget(run.RunDir)
+	target, ok, err := s.Store.GetRunResponseTarget(run.ID)
 	if err != nil {
-		t.Fatalf("load run response target: %v", err)
+		t.Fatalf("get run response target: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected run response target file")
+		t.Fatal("expected persisted run response target")
 	}
 	if target.ReviewThreadID != 42 {
 		t.Fatalf("target review_thread_id = %d, want 42", target.ReviewThreadID)

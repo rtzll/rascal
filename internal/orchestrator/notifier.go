@@ -34,7 +34,7 @@ func (n *GitHubRunNotifier) NotifyRunStarted(run state.Run, sessionMode runtime.
 		return
 	}
 
-	target, ok, err := LoadRunResponseTarget(run.RunDir)
+	target, ok, err := loadPersistedRunResponseTarget(n.Store, run)
 	if err != nil {
 		log.Printf("failed to load run response target for %s: %v", run.ID, err)
 	}
@@ -84,7 +84,7 @@ func (n *GitHubRunNotifier) NotifyRunCompleted(run state.Run) {
 		return
 	}
 
-	target, ok, err := LoadRunResponseTarget(run.RunDir)
+	target, ok, err := loadPersistedRunResponseTarget(n.Store, run)
 	if err != nil {
 		log.Printf("failed to load run response target for %s: %v", run.ID, err)
 		return
@@ -206,7 +206,7 @@ func (n *GitHubRunNotifier) NotifyRunFailed(run state.Run) {
 		return
 	}
 
-	target, ok, err := LoadRunResponseTarget(run.RunDir)
+	target, ok, err := loadPersistedRunResponseTarget(n.Store, run)
 	if err != nil {
 		log.Printf("failed to load run response target for %s: %v", run.ID, err)
 	}

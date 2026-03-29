@@ -713,6 +713,48 @@ func (s *Store) UpsertRunNotification(notification RunNotification) error {
 	return nil
 }
 
+func (s *Store) GetRunResponseTarget(runID string) (RunResponseTargetRecord, bool, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return RunResponseTargetRecord{}, false, fmt.Errorf("run id is required")
+	}
+	row, err := s.q.GetRunResponseTarget(context.Background(), runID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RunResponseTargetRecord{}, false, nil
+		}
+		return RunResponseTargetRecord{}, false, fmt.Errorf("get run response target for %q: %w", runID, err)
+	}
+	return fromDBRunResponseTarget(row), true, nil
+}
+
+func (s *Store) UpsertRunResponseTarget(target RunResponseTargetRecord) error {
+	target.RunID = strings.TrimSpace(target.RunID)
+	target.Repo = NormalizeRepo(target.Repo)
+	target.RequestedBy = strings.TrimSpace(target.RequestedBy)
+	target.Trigger = runtrigger.Normalize(target.Trigger.String())
+	if target.RunID == "" {
+		return fmt.Errorf("run_id is required")
+	}
+	if target.Repo == "" {
+		return fmt.Errorf("repo is required")
+	}
+	if target.IssueNumber <= 0 {
+		return fmt.Errorf("issue_number must be positive")
+	}
+	if err := s.q.UpsertRunResponseTarget(context.Background(), sqlitegen.UpsertRunResponseTargetParams{
+		RunID:          target.RunID,
+		Repo:           target.Repo,
+		IssueNumber:    int64(target.IssueNumber),
+		RequestedBy:    target.RequestedBy,
+		Trigger:        target.Trigger.String(),
+		ReviewThreadID: target.ReviewThreadID,
+	}); err != nil {
+		return fmt.Errorf("upsert run response target for %q: %w", target.RunID, err)
+	}
+	return nil
+}
+
 func (s *Store) SetRunStatusWithReason(runID string, status RunStatus, errText string, statusReason RunStatusReason) (Run, error) {
 	parsedStatus, ok := ParseRunStatus(string(status))
 	if !ok {
@@ -1580,6 +1622,17 @@ func fromDBRunNotification(r sqlitegen.RunNotification) RunNotification {
 		notification.GitHubCommentID = r.GithubCommentID.Int64
 	}
 	return notification
+}
+
+func fromDBRunResponseTarget(r sqlitegen.RunResponseTarget) RunResponseTargetRecord {
+	return RunResponseTargetRecord{
+		RunID:          strings.TrimSpace(r.RunID),
+		Repo:           NormalizeRepo(r.Repo),
+		IssueNumber:    int(r.IssueNumber),
+		RequestedBy:    strings.TrimSpace(r.RequestedBy),
+		Trigger:        runtrigger.Normalize(r.Trigger),
+		ReviewThreadID: r.ReviewThreadID,
+	}
 }
 
 func fromDBRunExecution(r sqlitegen.RunExecution) RunExecution {

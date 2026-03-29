@@ -271,7 +271,7 @@ Each run directory stores metadata and artifacts such as:
 - `commit_message.txt`
 - `pr_body.md`
 - `meta.json`
-- `response_target.json` and completion-comment markers when comment-triggered
+- SQLite-backed run response targets and completion-comment state, with file fallbacks only for legacy runs
   flows are used
 
 ## Session Behavior

@@ -3114,9 +3114,9 @@ func TestHandleCreateTaskRetryHydratesIssueContextFromSourceRun(t *testing.T) {
 	if out.Run.HeadBranch != "rascal/owner-repo-170-source" {
 		t.Fatalf("head_branch = %q, want rascal/owner-repo-170-source", out.Run.HeadBranch)
 	}
-	target, ok, err := orchestrator.LoadRunResponseTarget(out.Run.RunDir)
+	target, ok, err := s.Store.GetRunResponseTarget(out.Run.ID)
 	if err != nil {
-		t.Fatalf("load retry response target: %v", err)
+		t.Fatalf("get retry response target: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected retry response target")
@@ -3202,9 +3202,9 @@ func TestHandleCreateTaskRetryHydratesPRContextFromSourceRun(t *testing.T) {
 	if out.Run.HeadBranch != "rascal/owner-repo-170-pr" {
 		t.Fatalf("head_branch = %q, want rascal/owner-repo-170-pr", out.Run.HeadBranch)
 	}
-	target, ok, err := orchestrator.LoadRunResponseTarget(out.Run.RunDir)
+	target, ok, err := s.Store.GetRunResponseTarget(out.Run.ID)
 	if err != nil {
-		t.Fatalf("load retry response target: %v", err)
+		t.Fatalf("get retry response target: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected retry response target")

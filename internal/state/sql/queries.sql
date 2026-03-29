@@ -241,6 +241,28 @@ ON CONFLICT(run_id, kind) DO UPDATE SET
   github_comment_id = COALESCE(excluded.github_comment_id, run_notifications.github_comment_id),
   posted_at = excluded.posted_at;
 
+-- name: GetRunResponseTarget :one
+SELECT run_id, repo, issue_number, requested_by, trigger, review_thread_id
+FROM run_response_targets
+WHERE run_id = ?;
+
+-- name: UpsertRunResponseTarget :exec
+INSERT INTO run_response_targets (
+  run_id,
+  repo,
+  issue_number,
+  requested_by,
+  trigger,
+  review_thread_id
+)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET
+  repo = excluded.repo,
+  issue_number = excluded.issue_number,
+  requested_by = excluded.requested_by,
+  trigger = excluded.trigger,
+  review_thread_id = excluded.review_thread_id;
+
 -- name: CancelQueuedRuns :exec
 UPDATE runs
 SET status = 'canceled', error = ?, status_reason = ?, updated_at = ?, completed_at = ?

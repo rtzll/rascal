@@ -1179,6 +1179,26 @@ func (q *Queries) GetRunNotification(ctx context.Context, arg GetRunNotification
 	return i, err
 }
 
+const getRunResponseTarget = `-- name: GetRunResponseTarget :one
+SELECT run_id, repo, issue_number, requested_by, trigger, review_thread_id
+FROM run_response_targets
+WHERE run_id = ?
+`
+
+func (q *Queries) GetRunResponseTarget(ctx context.Context, runID string) (RunResponseTarget, error) {
+	row := q.db.QueryRowContext(ctx, getRunResponseTarget, runID)
+	var i RunResponseTarget
+	err := row.Scan(
+		&i.RunID,
+		&i.Repo,
+		&i.IssueNumber,
+		&i.RequestedBy,
+		&i.Trigger,
+		&i.ReviewThreadID,
+	)
+	return i, err
+}
+
 const getRunTokenUsage = `-- name: GetRunTokenUsage :one
 SELECT
   run_id,
@@ -2975,6 +2995,45 @@ func (q *Queries) UpsertRunNotification(ctx context.Context, arg UpsertRunNotifi
 		arg.IssueNumber,
 		arg.GithubCommentID,
 		arg.PostedAt,
+	)
+	return err
+}
+
+const upsertRunResponseTarget = `-- name: UpsertRunResponseTarget :exec
+INSERT INTO run_response_targets (
+  run_id,
+  repo,
+  issue_number,
+  requested_by,
+  trigger,
+  review_thread_id
+)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET
+  repo = excluded.repo,
+  issue_number = excluded.issue_number,
+  requested_by = excluded.requested_by,
+  trigger = excluded.trigger,
+  review_thread_id = excluded.review_thread_id
+`
+
+type UpsertRunResponseTargetParams struct {
+	RunID          string `json:"run_id"`
+	Repo           string `json:"repo"`
+	IssueNumber    int64  `json:"issue_number"`
+	RequestedBy    string `json:"requested_by"`
+	Trigger        string `json:"trigger"`
+	ReviewThreadID int64  `json:"review_thread_id"`
+}
+
+func (q *Queries) UpsertRunResponseTarget(ctx context.Context, arg UpsertRunResponseTargetParams) error {
+	_, err := q.db.ExecContext(ctx, upsertRunResponseTarget,
+		arg.RunID,
+		arg.Repo,
+		arg.IssueNumber,
+		arg.RequestedBy,
+		arg.Trigger,
+		arg.ReviewThreadID,
 	)
 	return err
 }
