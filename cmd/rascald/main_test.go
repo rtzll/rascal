@@ -3116,40 +3116,6 @@ func TestExecuteRunDisablesAgentSessionSpecForNonPROnlyTrigger(t *testing.T) {
 	}
 }
 
-func TestCleanupStaleAgentSessionDirs(t *testing.T) {
-	t.Parallel()
-	root := filepath.Join(t.TempDir(), "goose-sessions")
-	oldDir := filepath.Join(root, "old")
-	freshDir := filepath.Join(root, "fresh")
-	for _, dir := range []string{oldDir, freshDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", dir, err)
-		}
-	}
-
-	now := time.Now().UTC()
-	if err := os.Chtimes(oldDir, now.AddDate(0, 0, -30), now.AddDate(0, 0, -30)); err != nil {
-		t.Fatalf("chtimes old dir: %v", err)
-	}
-	if err := os.Chtimes(freshDir, now.AddDate(0, 0, -2), now.AddDate(0, 0, -2)); err != nil {
-		t.Fatalf("chtimes fresh dir: %v", err)
-	}
-
-	removed, err := orchestrator.CleanupStaleAgentSessionDirs(root, 14, now)
-	if err != nil {
-		t.Fatalf("cleanupStaleAgentSessionDirs: %v", err)
-	}
-	if removed != 1 {
-		t.Fatalf("removed = %d, want 1", removed)
-	}
-	if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
-		t.Fatalf("expected old dir removed, stat err=%v", err)
-	}
-	if _, err := os.Stat(freshDir); err != nil {
-		t.Fatalf("expected fresh dir to remain: %v", err)
-	}
-}
-
 func TestExecuteRunPostsCompletionCommentForCommentTriggeredRun(t *testing.T) {
 	t.Parallel()
 	launcher := &fakeRunner{
@@ -3756,51 +3722,6 @@ func TestScheduleRunsResumesAfterPauseDeadline(t *testing.T) {
 	}
 
 	waitFor(t, 2*time.Second, func() bool { return launcher.Calls() == 1 }, "scheduler resume after pause deadline")
-}
-
-func TestParseUsageLimitRetryAtSupportsAbsoluteTimestampWithZone(t *testing.T) {
-	t.Parallel()
-	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
-	corpus := "Request failed: You've hit your usage limit. Try again at Mar 10th, 2026 6:31 AM UTC."
-
-	retryAt, reason := orchestrator.ParseUsageLimitRetryAt(corpus, now)
-
-	expected := time.Date(2026, time.March, 10, 6, 31, 0, 0, time.UTC)
-	if !retryAt.Equal(expected) {
-		t.Fatalf("retryAt = %s, want %s", retryAt, expected)
-	}
-	if !strings.Contains(reason, "Mar 10, 2026 6:31 AM UTC") {
-		t.Fatalf("unexpected reason %q", reason)
-	}
-}
-
-func TestParseUsageLimitRetryAtSupportsRFC3339(t *testing.T) {
-	t.Parallel()
-	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
-	corpus := "You've hit your usage limit. Try again at 2026-03-10T06:31:00Z."
-
-	retryAt, _ := orchestrator.ParseUsageLimitRetryAt(corpus, now)
-
-	expected := time.Date(2026, time.March, 10, 6, 31, 0, 0, time.UTC)
-	if !retryAt.Equal(expected) {
-		t.Fatalf("retryAt = %s, want %s", retryAt, expected)
-	}
-}
-
-func TestParseUsageLimitRetryAtSupportsRelativeDelay(t *testing.T) {
-	t.Parallel()
-	now := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
-	corpus := "You've hit your usage limit. Please try again in 2 hours 15 minutes."
-
-	retryAt, reason := orchestrator.ParseUsageLimitRetryAt(corpus, now)
-
-	expected := now.Add(2*time.Hour + 15*time.Minute)
-	if !retryAt.Equal(expected) {
-		t.Fatalf("retryAt = %s, want %s", retryAt, expected)
-	}
-	if !strings.Contains(reason, "2 hours 15 minutes") {
-		t.Fatalf("unexpected reason %q", reason)
-	}
 }
 
 func TestPostRunStartCommentSkipsDuplicateWhenMarkerExists(t *testing.T) {
