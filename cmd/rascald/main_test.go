@@ -707,8 +707,16 @@ func newTestServerWithPaths(t *testing.T, launcher runner.Runner, dataDir, state
 		t.Fatalf("start run result reporter: %v", err)
 	}
 	t.Cleanup(func() {
+		s.BeginDrain()
+		s.StopRunSupervisors()
+		if err := s.WaitForNoActiveSupervisors(2 * time.Second); err != nil {
+			t.Fatalf("wait for test supervisors to stop: %v", err)
+		}
 		if err := s.StopRunResultReporter(); err != nil {
 			t.Fatalf("stop run result reporter: %v", err)
+		}
+		if err := store.Close(); err != nil {
+			t.Fatalf("close test state store: %v", err)
 		}
 	})
 	return s
@@ -980,7 +988,7 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 func waitForServerIdle(t *testing.T, s *orchestrator.Server) {
 	t.Helper()
 	waitFor(t, 2*time.Second, func() bool {
-		return s.ActiveRunCount() == 0
+		return s.ActiveRunCount() == 0 && s.ActiveSupervisorCount() == 0
 	}, "server idle")
 }
 

@@ -346,6 +346,26 @@ func (s *Server) WaitForNoActiveRuns(timeout time.Duration) error {
 	return fmt.Errorf("timed out waiting for active runs to finish")
 }
 
+func (s *Server) ActiveSupervisorCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.runCancels)
+}
+
+func (s *Server) WaitForNoActiveSupervisors(timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if s.ActiveSupervisorCount() == 0 {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for active run supervisors to stop")
+}
+
 func (s *Server) ActiveRunCount() int {
 	return s.Store.CountRunLeasesByOwner(s.InstanceID)
 }
