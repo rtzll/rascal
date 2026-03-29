@@ -41,6 +41,108 @@ const (
 	containerGooseMOIMPath    = "/rascal-meta/persistent_instructions.md"
 )
 
+type dockerRuntimeLayout struct {
+	codexHome       string
+	goosePathRoot   string
+	claudeConfigDir string
+	sessionTarget   string
+}
+
+type dockerContainerEnvBuilder struct {
+	spec             Spec
+	agentRuntime     runtime.Runtime
+	sessionMode      runtime.SessionMode
+	sessionResume    bool
+	sessionKey       string
+	runtimeSessionID string
+	layout           dockerRuntimeLayout
+	githubToken      string
+}
+
+func newDockerRuntimeLayout(agentRuntime runtime.Runtime, taskSession TaskSessionSpec) dockerRuntimeLayout {
+	layout := dockerRuntimeLayout{
+		codexHome:       containerCodexStateDir,
+		goosePathRoot:   containerGooseStateDir,
+		claudeConfigDir: containerClaudeStateDir,
+	}
+	if !taskSession.Resume || strings.TrimSpace(taskSession.TaskDir) == "" {
+		return layout
+	}
+	switch agentRuntime {
+	case runtime.RuntimeCodex:
+		layout.codexHome = containerCodexSessionDir
+		layout.sessionTarget = containerCodexSessionDir
+	case runtime.RuntimeClaude:
+		layout.claudeConfigDir = containerClaudeSessionDir
+		layout.sessionTarget = containerClaudeSessionDir
+	default:
+		layout.goosePathRoot = containerGooseSessionDir
+		layout.sessionTarget = containerGooseSessionDir
+	}
+	return layout
+}
+
+func newDockerContainerEnvBuilder(spec Spec, agentRuntime runtime.Runtime, layout dockerRuntimeLayout, githubToken string) dockerContainerEnvBuilder {
+	return dockerContainerEnvBuilder{
+		spec:             spec,
+		agentRuntime:     agentRuntime,
+		sessionMode:      spec.TaskSession.Mode,
+		sessionResume:    spec.TaskSession.Resume,
+		sessionKey:       strings.TrimSpace(spec.TaskSession.TaskKey),
+		runtimeSessionID: strings.TrimSpace(spec.TaskSession.RuntimeSessionID),
+		layout:           layout,
+		githubToken:      strings.TrimSpace(githubToken),
+	}
+}
+
+func (b dockerContainerEnvBuilder) Build() map[string]string {
+	envPairs := map[string]string{
+		"RASCAL_RUN_ID":              b.spec.RunID,
+		"RASCAL_TASK_ID":             b.spec.TaskID,
+		"RASCAL_INSTRUCTION":         b.spec.Instruction,
+		"RASCAL_REPO":                b.spec.Repo,
+		"RASCAL_AGENT_RUNTIME":       b.agentRuntime.String(),
+		"RASCAL_BASE_BRANCH":         b.spec.BaseBranch,
+		"RASCAL_HEAD_BRANCH":         b.spec.HeadBranch,
+		"RASCAL_TRIGGER":             b.spec.Trigger.String(),
+		"RASCAL_GOOSE_DEBUG":         strconv.FormatBool(b.spec.Debug),
+		"RASCAL_CONTEXT":             b.spec.Context,
+		"RASCAL_CONTEXT_JSON":        containerContextJSONPath,
+		"RASCAL_ISSUE_NUMBER":        strconv.Itoa(b.spec.IssueNumber),
+		"RASCAL_PR_NUMBER":           strconv.Itoa(b.spec.PRNumber),
+		"RASCAL_TASK_SESSION_MODE":   string(b.sessionMode),
+		"RASCAL_TASK_SESSION_RESUME": strconv.FormatBool(b.sessionResume),
+		"RASCAL_TASK_SESSION_KEY":    b.sessionKey,
+		"RASCAL_TASK_SESSION_ID":     b.runtimeSessionID,
+		"CODEX_HOME":                 b.layout.codexHome,
+		"GH_PROMPT_DISABLED":         "1",
+		"GIT_TERMINAL_PROMPT":        "0",
+	}
+	if b.agentRuntime.Harness() == runtime.HarnessGoose {
+		envPairs["GOOSE_PATH_ROOT"] = b.layout.goosePathRoot
+		envPairs["GOOSE_MOIM_MESSAGE_FILE"] = containerGooseMOIMPath
+		envPairs["GOOSE_MODE"] = "auto"
+		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
+		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
+		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
+	}
+	switch b.agentRuntime {
+	case runtime.RuntimeGooseCodex:
+		envPairs["GOOSE_PROVIDER"] = "codex"
+		envPairs["GOOSE_MODEL"] = "gpt-5.4"
+	case runtime.RuntimeGooseClaude:
+		envPairs["GOOSE_PROVIDER"] = "claude-code"
+		envPairs["GOOSE_MODEL"] = "claude-sonnet-4-5"
+		envPairs["CLAUDE_CONFIG_DIR"] = b.layout.claudeConfigDir
+	case runtime.RuntimeClaude:
+		envPairs["CLAUDE_CONFIG_DIR"] = b.layout.claudeConfigDir
+	}
+	if b.githubToken != "" {
+		envPairs["GH_TOKEN"] = b.githubToken
+	}
+	return envPairs
+}
+
 func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
 	agentRuntime := runtime.NormalizeRuntime(string(spec.AgentRuntime))
 	image := strings.TrimSpace(spec.RunnerImage)
@@ -89,67 +191,9 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		return ExecutionHandle{}, fmt.Errorf("write runner log header: %w", err)
 	}
 
-	codexHome := containerCodexStateDir
-	goosePathRoot := containerGooseStateDir
-	claudeConfigDir := containerClaudeStateDir
-	sessionMountTarget := ""
-	if sessionResume && sessionDir != "" {
-		switch agentRuntime {
-		case runtime.RuntimeCodex:
-			codexHome = containerCodexSessionDir
-			sessionMountTarget = containerCodexSessionDir
-		case runtime.RuntimeClaude:
-			claudeConfigDir = containerClaudeSessionDir
-			sessionMountTarget = containerClaudeSessionDir
-		default:
-			goosePathRoot = containerGooseSessionDir
-			sessionMountTarget = containerGooseSessionDir
-		}
-	}
-	envPairs := map[string]string{
-		"RASCAL_RUN_ID":              spec.RunID,
-		"RASCAL_TASK_ID":             spec.TaskID,
-		"RASCAL_INSTRUCTION":         spec.Instruction,
-		"RASCAL_REPO":                spec.Repo,
-		"RASCAL_AGENT_RUNTIME":       agentRuntime.String(),
-		"RASCAL_BASE_BRANCH":         spec.BaseBranch,
-		"RASCAL_HEAD_BRANCH":         spec.HeadBranch,
-		"RASCAL_TRIGGER":             spec.Trigger.String(),
-		"RASCAL_GOOSE_DEBUG":         strconv.FormatBool(spec.Debug),
-		"RASCAL_CONTEXT":             spec.Context,
-		"RASCAL_CONTEXT_JSON":        containerContextJSONPath,
-		"RASCAL_ISSUE_NUMBER":        strconv.Itoa(spec.IssueNumber),
-		"RASCAL_PR_NUMBER":           strconv.Itoa(spec.PRNumber),
-		"RASCAL_TASK_SESSION_MODE":   string(sessionMode),
-		"RASCAL_TASK_SESSION_RESUME": strconv.FormatBool(sessionResume),
-		"RASCAL_TASK_SESSION_KEY":    sessionKey,
-		"RASCAL_TASK_SESSION_ID":     runtimeSessionID,
-		"CODEX_HOME":                 codexHome,
-		"GH_PROMPT_DISABLED":         "1",
-		"GIT_TERMINAL_PROMPT":        "0",
-	}
-	if agentRuntime.Harness() == runtime.HarnessGoose {
-		envPairs["GOOSE_PATH_ROOT"] = goosePathRoot
-		envPairs["GOOSE_MOIM_MESSAGE_FILE"] = containerGooseMOIMPath
-		envPairs["GOOSE_MODE"] = "auto"
-		envPairs["GOOSE_DISABLE_KEYRING"] = "1"
-		envPairs["GOOSE_DISABLE_SESSION_NAMING"] = "true"
-		envPairs["GOOSE_CONTEXT_STRATEGY"] = "summarize"
-	}
-	switch agentRuntime {
-	case runtime.RuntimeGooseCodex:
-		envPairs["GOOSE_PROVIDER"] = "codex"
-		envPairs["GOOSE_MODEL"] = "gpt-5.4"
-	case runtime.RuntimeGooseClaude:
-		envPairs["GOOSE_PROVIDER"] = "claude-code"
-		envPairs["GOOSE_MODEL"] = "claude-sonnet-4-5"
-		envPairs["CLAUDE_CONFIG_DIR"] = claudeConfigDir
-	case runtime.RuntimeClaude:
-		envPairs["CLAUDE_CONFIG_DIR"] = claudeConfigDir
-	}
-	if strings.TrimSpace(l.GitHubToken) != "" {
-		envPairs["GH_TOKEN"] = l.GitHubToken
-	}
+	layout := newDockerRuntimeLayout(agentRuntime, spec.TaskSession)
+	sessionMountTarget := layout.sessionTarget
+	envPairs := newDockerContainerEnvBuilder(spec, agentRuntime, layout, l.GitHubToken).Build()
 	containerName := sanitizeContainerName("rascal-" + spec.RunID)
 	args := []string{
 		"run",
@@ -184,7 +228,7 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		sessionResume,
 		sessionKey,
 		runtimeSessionID,
-		firstNonEmptySessionPath(sessionMountTarget, goosePathRoot),
+		firstNonEmptySessionPath(sessionMountTarget, layout.goosePathRoot),
 	); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("write runner session log: %w", err)
 	}

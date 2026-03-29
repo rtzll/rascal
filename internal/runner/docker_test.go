@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rtzll/rascal/internal/runtime"
+	"github.com/rtzll/rascal/internal/runtrigger"
 )
 
 func TestSanitizeContainerName(t *testing.T) {
@@ -26,6 +28,173 @@ func TestSanitizeContainerName(t *testing.T) {
 	longOut := sanitizeContainerName(longIn)
 	if len(longOut) > 63 {
 		t.Fatalf("expected max 63 chars, got %d", len(longOut))
+	}
+}
+
+func TestDockerContainerEnvBuilderBuildGooseCodex(t *testing.T) {
+	t.Parallel()
+
+	spec := Spec{
+		RunID:        "run_1",
+		TaskID:       "owner/repo#1",
+		Repo:         "owner/repo",
+		Instruction:  "task",
+		AgentRuntime: runtime.RuntimeGooseCodex,
+		BaseBranch:   "main",
+		HeadBranch:   "rascal/task-1",
+		Trigger:      runtrigger.NameIssueLabel,
+		Debug:        true,
+		IssueNumber:  19,
+		PRNumber:     0,
+		Context:      "repo context",
+		TaskSession: TaskSessionSpec{
+			Mode:             runtime.SessionModePROnly,
+			Resume:           true,
+			TaskDir:          "/tmp/session",
+			TaskKey:          "owner-repo-1-abc123",
+			RuntimeSessionID: "session-123",
+		},
+	}
+
+	layout := newDockerRuntimeLayout(runtime.RuntimeGooseCodex, spec.TaskSession)
+	got := newDockerContainerEnvBuilder(spec, runtime.RuntimeGooseCodex, layout, "gh-token").Build()
+	want := map[string]string{
+		"CODEX_HOME":                   containerCodexStateDir,
+		"GH_PROMPT_DISABLED":           "1",
+		"GH_TOKEN":                     "gh-token",
+		"GIT_TERMINAL_PROMPT":          "0",
+		"GOOSE_CONTEXT_STRATEGY":       "summarize",
+		"GOOSE_DISABLE_KEYRING":        "1",
+		"GOOSE_DISABLE_SESSION_NAMING": "true",
+		"GOOSE_MODE":                   "auto",
+		"GOOSE_MODEL":                  "gpt-5.4",
+		"GOOSE_MOIM_MESSAGE_FILE":      containerGooseMOIMPath,
+		"GOOSE_PATH_ROOT":              containerGooseSessionDir,
+		"GOOSE_PROVIDER":               "codex",
+		"RASCAL_AGENT_RUNTIME":         runtime.RuntimeGooseCodex.String(),
+		"RASCAL_BASE_BRANCH":           "main",
+		"RASCAL_CONTEXT":               "repo context",
+		"RASCAL_CONTEXT_JSON":          containerContextJSONPath,
+		"RASCAL_GOOSE_DEBUG":           "true",
+		"RASCAL_HEAD_BRANCH":           "rascal/task-1",
+		"RASCAL_INSTRUCTION":           "task",
+		"RASCAL_ISSUE_NUMBER":          "19",
+		"RASCAL_PR_NUMBER":             "0",
+		"RASCAL_REPO":                  "owner/repo",
+		"RASCAL_RUN_ID":                "run_1",
+		"RASCAL_TASK_ID":               "owner/repo#1",
+		"RASCAL_TASK_SESSION_ID":       "session-123",
+		"RASCAL_TASK_SESSION_KEY":      "owner-repo-1-abc123",
+		"RASCAL_TASK_SESSION_MODE":     "pr-only",
+		"RASCAL_TASK_SESSION_RESUME":   "true",
+		"RASCAL_TRIGGER":               runtrigger.NameIssueLabel.String(),
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("unexpected env map (-got +want):\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestDockerContainerEnvBuilderBuildDirectRuntimes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		runtime runtime.Runtime
+		session TaskSessionSpec
+		want    map[string]string
+	}{
+		{
+			name:    "codex resume",
+			runtime: runtime.RuntimeCodex,
+			session: TaskSessionSpec{
+				Mode:             runtime.SessionModeAll,
+				Resume:           true,
+				TaskDir:          "/tmp/codex-session",
+				TaskKey:          "task-key",
+				RuntimeSessionID: "codex-session-id",
+			},
+			want: map[string]string{
+				"CODEX_HOME":                 containerCodexSessionDir,
+				"GH_PROMPT_DISABLED":         "1",
+				"GIT_TERMINAL_PROMPT":        "0",
+				"RASCAL_AGENT_RUNTIME":       runtime.RuntimeCodex.String(),
+				"RASCAL_BASE_BRANCH":         "main",
+				"RASCAL_CONTEXT":             "",
+				"RASCAL_CONTEXT_JSON":        containerContextJSONPath,
+				"RASCAL_GOOSE_DEBUG":         "false",
+				"RASCAL_HEAD_BRANCH":         "rascal/task-2",
+				"RASCAL_INSTRUCTION":         "task",
+				"RASCAL_ISSUE_NUMBER":        "0",
+				"RASCAL_PR_NUMBER":           "24",
+				"RASCAL_REPO":                "owner/repo",
+				"RASCAL_RUN_ID":              "run_2",
+				"RASCAL_TASK_ID":             "owner/repo#2",
+				"RASCAL_TASK_SESSION_ID":     "codex-session-id",
+				"RASCAL_TASK_SESSION_KEY":    "task-key",
+				"RASCAL_TASK_SESSION_MODE":   "all",
+				"RASCAL_TASK_SESSION_RESUME": "true",
+				"RASCAL_TRIGGER":             runtrigger.NamePRComment.String(),
+			},
+		},
+		{
+			name:    "claude resume",
+			runtime: runtime.RuntimeClaude,
+			session: TaskSessionSpec{
+				Mode:             runtime.SessionModePROnly,
+				Resume:           true,
+				TaskDir:          "/tmp/claude-session",
+				TaskKey:          "task-key-2",
+				RuntimeSessionID: "claude-session-id",
+			},
+			want: map[string]string{
+				"CLAUDE_CONFIG_DIR":          containerClaudeSessionDir,
+				"CODEX_HOME":                 containerCodexStateDir,
+				"GH_PROMPT_DISABLED":         "1",
+				"GIT_TERMINAL_PROMPT":        "0",
+				"RASCAL_AGENT_RUNTIME":       runtime.RuntimeClaude.String(),
+				"RASCAL_BASE_BRANCH":         "main",
+				"RASCAL_CONTEXT":             "",
+				"RASCAL_CONTEXT_JSON":        containerContextJSONPath,
+				"RASCAL_GOOSE_DEBUG":         "false",
+				"RASCAL_HEAD_BRANCH":         "rascal/task-2",
+				"RASCAL_INSTRUCTION":         "task",
+				"RASCAL_ISSUE_NUMBER":        "0",
+				"RASCAL_PR_NUMBER":           "24",
+				"RASCAL_REPO":                "owner/repo",
+				"RASCAL_RUN_ID":              "run_2",
+				"RASCAL_TASK_ID":             "owner/repo#2",
+				"RASCAL_TASK_SESSION_ID":     "claude-session-id",
+				"RASCAL_TASK_SESSION_KEY":    "task-key-2",
+				"RASCAL_TASK_SESSION_MODE":   "pr-only",
+				"RASCAL_TASK_SESSION_RESUME": "true",
+				"RASCAL_TRIGGER":             runtrigger.NamePRComment.String(),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			spec := Spec{
+				RunID:        "run_2",
+				TaskID:       "owner/repo#2",
+				Repo:         "owner/repo",
+				Instruction:  "task",
+				AgentRuntime: tt.runtime,
+				BaseBranch:   "main",
+				HeadBranch:   "rascal/task-2",
+				Trigger:      runtrigger.NamePRComment,
+				Debug:        false,
+				PRNumber:     24,
+				TaskSession:  tt.session,
+			}
+			layout := newDockerRuntimeLayout(tt.runtime, tt.session)
+			got := newDockerContainerEnvBuilder(spec, tt.runtime, layout, "").Build()
+			if !maps.Equal(got, tt.want) {
+				t.Fatalf("unexpected env map (-got +want):\n got: %#v\nwant: %#v", got, tt.want)
+			}
+		})
 	}
 }
 
