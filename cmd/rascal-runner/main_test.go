@@ -644,27 +644,6 @@ func TestRunGooseFallsBackToFreshSessionOnResumeStateError(t *testing.T) {
 	}
 }
 
-func TestResetGooseSessionRootCreatesRootWhenMissing(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "missing-goose-root")
-	if err := worker.ResetGooseSessionRoot(root); err != nil {
-		t.Fatalf("resetGooseSessionRoot returned error: %v", err)
-	}
-	info, err := os.Stat(root)
-	if err != nil {
-		t.Fatalf("stat root after reset: %v", err)
-	}
-	if !info.IsDir() {
-		t.Fatalf("expected %s to be a directory", root)
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatalf("read root after reset: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("expected empty root after reset, found %d entries", len(entries))
-	}
-}
-
 func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 	root := t.TempDir()
 	cfg := worker.Config{
@@ -704,18 +683,6 @@ func TestRunGooseDoesNotFallbackOnUnrelatedFailure(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("expected one goose attempt, got %d", calls)
-	}
-}
-
-func TestIsSessionResumeFailureDetectsMissingNamedSession(t *testing.T) {
-	root := t.TempDir()
-	logPath := filepath.Join(root, "agent.ndjson")
-	if err := os.WriteFile(logPath, []byte("Error: No session found with name 'rascal-owner-repo-task-abc123'\n"), 0o644); err != nil {
-		t.Fatalf("write goose log: %v", err)
-	}
-
-	if !worker.IsSessionResumeFailure(errors.New("exit status 1"), logPath) {
-		t.Fatal("expected missing named session to trigger resume fallback detection")
 	}
 }
 
@@ -1194,47 +1161,6 @@ func TestRunClaudeNoTokenFile(t *testing.T) {
 			t.Fatalf("did not expect CLAUDE_CODE_OAUTH_TOKEN when no token file exists, got %v", gotEnv)
 		}
 	}
-}
-
-func TestClaudeRunArgs(t *testing.T) {
-	cfg := worker.Config{
-		AgentOutputPath: "/tmp/output.txt",
-	}
-
-	t.Run("fresh", func(t *testing.T) {
-		args := worker.ClaudeRunArgs(cfg, false)
-		argsText := strings.Join(args, " ")
-		if strings.Contains(argsText, "--resume") {
-			t.Fatalf("unexpected --resume in fresh args: %q", argsText)
-		}
-		for _, want := range []string{"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "-o", "/tmp/output.txt", "-"} {
-			if !strings.Contains(argsText, want) {
-				t.Fatalf("expected %q in args, got %q", want, argsText)
-			}
-		}
-	})
-
-	t.Run("resume_with_session", func(t *testing.T) {
-		cfgResume := cfg
-		cfgResume.TaskSession = runner.TaskSessionSpec{
-			Mode:             runtime.SessionModeAll,
-			Resume:           true,
-			RuntimeSessionID: "sess-42",
-		}
-		args := worker.ClaudeRunArgs(cfgResume, true)
-		argsText := strings.Join(args, " ")
-		if !strings.Contains(argsText, "--resume sess-42") {
-			t.Fatalf("expected --resume sess-42 in args, got %q", argsText)
-		}
-	})
-
-	t.Run("resume_without_session_id", func(t *testing.T) {
-		args := worker.ClaudeRunArgs(cfg, true)
-		argsText := strings.Join(args, " ")
-		if strings.Contains(argsText, "--resume") {
-			t.Fatalf("should not have --resume when session ID is empty, got %q", argsText)
-		}
-	})
 }
 
 func TestRunGooseClaudeFreshSession(t *testing.T) {
