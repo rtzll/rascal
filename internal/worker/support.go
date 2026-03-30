@@ -81,6 +81,21 @@ func checkoutRepo(ex CommandExecutor, cfg Config) error {
 	return nil
 }
 
+func configureRepoGitIdentity(ex CommandExecutor, repoDir, authorName, authorEmail string) error {
+	authorName = strings.TrimSpace(authorName)
+	authorEmail = strings.TrimSpace(authorEmail)
+	if authorName == "" || authorEmail == "" {
+		return fmt.Errorf("git identity requires non-empty author name and email")
+	}
+	if _, err := runCommand(ex, repoDir, nil, "git", "config", "user.name", authorName); err != nil {
+		return fmt.Errorf("configure repo git user.name: %w", err)
+	}
+	if _, err := runCommand(ex, repoDir, nil, "git", "config", "user.email", authorEmail); err != nil {
+		return fmt.Errorf("configure repo git user.email: %w", err)
+	}
+	return nil
+}
+
 func githubCLIEnv(token string) []string {
 	token = strings.TrimSpace(token)
 	if token == "" {

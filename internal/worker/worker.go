@@ -193,6 +193,11 @@ func RunWithExecutor(ex CommandExecutor) error {
 	}); err != nil {
 		return fail(err)
 	}
+	if err := RunStage("configure_repo_identity", func() error {
+		return configureRepoGitIdentity(ex, cfg.RepoDir, authorName, authorEmail)
+	}); err != nil {
+		return fail(err)
+	}
 
 	var agentOutput string
 	if err := RunStage("run_agent", func() error {

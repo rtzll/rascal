@@ -938,6 +938,11 @@ case "$cmd" in
     mkdir -p "$target/.git"
     exit 0
     ;;
+  config)
+    if [ "$#" -ge 2 ] && { [ "$1" = "user.name" ] || [ "$1" = "user.email" ]; }; then
+      exit 0
+    fi
+    ;;
   fetch|pull|checkout|add|commit|push)
     exit 0
     ;;
@@ -1115,11 +1120,18 @@ func TestRunWithExecutorUsesCodexBackend(t *testing.T) {
 	t.Setenv("CODEX_HOME", filepath.Join(metaDir, "codex-home"))
 
 	var ranCodex bool
+	var gitConfigPairs [][2]string
 	ex := fakeExecutor{
 		combinedFn: func(_ string, _ []string, name string, args ...string) (string, error) {
 			switch {
 			case name == "gh" && len(args) >= 2 && args[0] == "api" && args[1] == "user":
 				return `{"login":"rascalbot"}`, nil
+			case name == "git" && len(args) == 3 && args[0] == "config" && args[1] == "user.name":
+				gitConfigPairs = append(gitConfigPairs, [2]string{"user.name", args[2]})
+				return "", nil
+			case name == "git" && len(args) == 3 && args[0] == "config" && args[1] == "user.email":
+				gitConfigPairs = append(gitConfigPairs, [2]string{"user.email", args[2]})
+				return "", nil
 			case name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "view":
 				return `{"number":88,"url":"https://github.com/owner/repo/pull/88"}`, nil
 			case name == "git" && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain":
@@ -1162,6 +1174,15 @@ func TestRunWithExecutorUsesCodexBackend(t *testing.T) {
 	}
 	if !ranCodex {
 		t.Fatal("expected codex command to run")
+	}
+	if len(gitConfigPairs) != 2 {
+		t.Fatalf("git config calls = %v, want user.name and user.email", gitConfigPairs)
+	}
+	if gitConfigPairs[0] != [2]string{"user.name", "rascalbot"} {
+		t.Fatalf("first git config call = %v, want user.name rascalbot", gitConfigPairs[0])
+	}
+	if gitConfigPairs[1] != [2]string{"user.email", "rascalbot@users.noreply.github.com"} {
+		t.Fatalf("second git config call = %v, want user.email rascalbot@users.noreply.github.com", gitConfigPairs[1])
 	}
 
 	metaData, err := os.ReadFile(filepath.Join(metaDir, "meta.json"))
