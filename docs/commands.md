@@ -73,3 +73,12 @@ rascal completion zsh
 rascal completion bash
 rascal completion fish
 ```
+
+## Local Verification
+
+```bash
+make smoke
+```
+
+This runs both smoke checks: `smoke-noop` and `smoke-docker`.
+The Docker-backed smoke check requires a working local Docker daemon.
