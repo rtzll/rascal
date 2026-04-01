@@ -120,5 +120,5 @@ Before relying on a new setup, run the local smoke checks:
 make smoke
 ```
 
-This runs both smoke checks: `smoke-noop` and `smoke-docker`.
-The Docker-backed smoke check requires a working local Docker daemon.
+This runs both smoke checks: `smoke-noop` and `smoke-docker`. The Docker-backed
+smoke check requires a working local Docker daemon.

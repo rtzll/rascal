@@ -124,8 +124,8 @@ Agent runtime notes:
 
 Rascal uses leased stored credentials tagged by provider for all agent runs.
 
-Each credential is tagged with a `provider` (`codex` or `anthropic`). The
-broker automatically selects credentials matching the run's runtime:
+Each credential is tagged with a `provider` (`codex` or `anthropic`). The broker
+automatically selects credentials matching the run's runtime:
 
 - `codex` and `goose-codex` runs use `codex` credentials (auth.json format).
 - `claude` and `goose-claude` runs use `anthropic` credentials (OAuth token

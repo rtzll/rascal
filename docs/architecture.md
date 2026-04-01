@@ -271,8 +271,8 @@ Each run directory stores metadata and artifacts such as:
 - `commit_message.txt`
 - `pr_body.md`
 - `meta.json`
-- SQLite-backed run response targets and completion-comment state, with file fallbacks only for legacy runs
-  flows are used
+- SQLite-backed run response targets and completion-comment state, with file
+  fallbacks only for legacy runs flows are used
 
 ## Session Behavior
 
@@ -323,10 +323,9 @@ Rascal uses stored credentials tagged by provider and managed by `rascald`.
   strategy, provider compatibility filter, and tracks lease assignment per run.
 - The leased auth blob is written into a per-run secrets directory outside the
   broad `/rascal-meta` mount and then mounted read-only into the container at
-  `/run/rascal-secrets`
-  (`codex_auth.json` for codex/goose runs, `claude_oauth_token` for
-  claude/goose-claude runs). Legacy run-local auth paths remain as fallback for
-  older runs.
+  `/run/rascal-secrets` (`codex_auth.json` for codex/goose runs,
+  `claude_oauth_token` for claude/goose-claude runs). Legacy run-local auth
+  paths remain as fallback for older runs.
 - While a run is active, `rascald` renews the credential lease. If renewal is
   lost, the run is canceled.
 - Bootstrap and deploy can seed an initial shared stored credential from a local
