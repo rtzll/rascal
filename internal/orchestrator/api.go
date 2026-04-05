@@ -54,6 +54,7 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/tasks/issue", s.WithAuth(s.HandleCreateIssueTask))
 	mux.HandleFunc("/v1/credentials", s.WithAuth(s.HandleCredentials))
 	mux.HandleFunc("/v1/credentials/", s.WithAuth(s.HandleCredentialSubresources))
+	mux.HandleFunc("/v1/status", s.WithAuth(s.HandleSystemStatus))
 	mux.HandleFunc("/v1/webhooks/github", s.HandleWebhook)
 }
 
@@ -183,6 +184,28 @@ func (s *Server) HandleReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.ServiceStatusResponse{OK: true, Service: "rascald", Ready: true})
+}
+
+func (s *Server) HandleSystemStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	creds, err := s.Store.ListAllCredentials()
+	if err != nil {
+		http.Error(w, "failed to list credentials", http.StatusInternalServerError)
+		return
+	}
+	active := 0
+	for _, c := range creds {
+		if c.Status == state.CredentialStatusActive {
+			active++
+		}
+	}
+	writeJSON(w, http.StatusOK, api.SystemStatusResponse{
+		Ready:             !s.isDraining(),
+		ActiveCredentials: active,
+	})
 }
 
 func (s *Server) HandleListRuns(w http.ResponseWriter, r *http.Request) {

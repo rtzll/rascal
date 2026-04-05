@@ -351,6 +351,8 @@ func newRootCmd() *cobra.Command {
 
 	githubCmd := a.newGitHubCmd()
 	githubCmd.GroupID = "integrations"
+	statusCmd := a.newStatusCmd()
+	statusCmd.GroupID = "utilities"
 	doctorCmd := a.newDoctorCmd()
 	doctorCmd.GroupID = "utilities"
 	completionCmd := newCompletionCmd(root)
@@ -369,6 +371,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(taskCmd)
 	root.AddCommand(logsCmd)
 	root.AddCommand(githubCmd)
+	root.AddCommand(statusCmd)
 	root.AddCommand(doctorCmd)
 	root.AddCommand(completionCmd)
 

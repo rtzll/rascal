@@ -16,6 +16,11 @@ type ServiceStatusResponse struct {
 	Ready   bool   `json:"ready" toml:"ready"`
 }
 
+type SystemStatusResponse struct {
+	Ready             bool `json:"ready" toml:"ready"`
+	ActiveCredentials int  `json:"active_credentials" toml:"active_credentials"`
+}
+
 type CreateTaskRequest struct {
 	TaskID       string           `json:"task_id,omitempty"`
 	SourceRunID  string           `json:"source_run_id,omitempty"`

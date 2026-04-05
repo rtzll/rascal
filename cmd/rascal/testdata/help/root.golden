@@ -28,6 +28,7 @@ Integrations:
 Utilities:
   completion  Generate shell completion scripts
   doctor      Inspect local config and optional remote server readiness
+  status      Show system readiness
 
 Additional Commands:
   help        Help about any command
