@@ -1,10 +1,10 @@
 .DEFAULT_GOAL := build
 
 GOLANGCI_LINT_VERSION ?= v2.11.2
-SQLC_VERSION ?= v1.30.0
+SQLC_VERSION ?= v1.31.1
 GOLANGCI_LINT ?= $(or $(shell command -v golangci-lint 2>/dev/null),$(CURDIR)/bin/golangci-lint)
 GOLANGCI_LINT_CACHE := $(CURDIR)/tmp/golangci-lint-cache
-SQLC ?= $(or $(shell command -v sqlc 2>/dev/null),$(CURDIR)/bin/sqlc)
+SQLC ?= $(CURDIR)/bin/sqlc
 
 .PHONY: test test-fast build build-cli build-daemon run-daemon run-cli fmt lint codegen verify verify-generated smoke smoke-noop smoke-docker build-smoke-runner-image check-docker-daemon
 

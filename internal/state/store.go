@@ -1315,7 +1315,7 @@ func (s *Store) DeliverySeen(deliveryID string) bool {
 	if err != nil {
 		return false
 	}
-	return exists > 0
+	return exists
 }
 
 type DeliveryClaim struct {
