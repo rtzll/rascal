@@ -314,7 +314,7 @@ func TestQueriesCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTask task_1 with queued runs: %v", err)
 	}
-	if taskWithQueue.PendingInput == 0 {
+	if !taskWithQueue.PendingInput {
 		t.Fatal("expected task_1 pending_input=true with queued runs")
 	}
 
@@ -485,8 +485,8 @@ func TestQueriesCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeliverySeen before record: %v", err)
 	}
-	if seen != 0 {
-		t.Fatalf("expected delivery to be unseen, got %d", seen)
+	if seen {
+		t.Fatal("expected delivery to be unseen")
 	}
 
 	delivery1Token := "claim_1"
@@ -584,7 +584,7 @@ func TestQueriesCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeliverySeen delivery_1 after delete: %v", err)
 	}
-	if seen != 0 {
-		t.Fatalf("expected delivery_1 to be deleted, got %d", seen)
+	if seen {
+		t.Fatal("expected delivery_1 to be deleted")
 	}
 }

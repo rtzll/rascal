@@ -271,8 +271,8 @@ WHERE task_id = ? AND status = 'queued';
 -- name: ClaimRunStart :execrows
 UPDATE runs
 SET status = 'running', error = '', status_reason = '', updated_at = ?, started_at = ?
-WHERE id = ?
-  AND status = 'queued'
+WHERE runs.id = ?
+  AND runs.status = 'queued'
   AND NOT EXISTS (
     SELECT 1
     FROM runs AS other
@@ -994,30 +994,33 @@ INSERT INTO credential_leases (
 )
 SELECT
   sqlc.arg(id),
-  sqlc.arg(credential_id),
+  c.id,
   sqlc.arg(run_id),
   sqlc.arg(user_id),
   sqlc.arg(strategy),
   sqlc.arg(acquired_at),
   sqlc.arg(expires_at),
   NULL
-WHERE EXISTS (
-  SELECT 1
-  FROM credentials AS c
-  WHERE c.id = sqlc.arg(credential_id)
-    AND c.status = 'active'
-    AND (c.cooldown_until IS NULL OR c.cooldown_until <= sqlc.arg(now))
-    AND (
-      c.scope = 'shared'
-      OR (c.scope = 'personal' AND c.owner_user_id = sqlc.arg(user_id))
-    )
+FROM credentials AS c
+WHERE c.id = sqlc.arg(credential_id)
+  AND sqlc.arg(id) <> ''
+  AND sqlc.arg(run_id) <> ''
+  AND sqlc.arg(user_id) <> ''
+  AND sqlc.arg(strategy) <> ''
+  AND sqlc.arg(acquired_at) > 0
+  AND sqlc.arg(expires_at) > sqlc.arg(acquired_at)
+  AND c.status = 'active'
+  AND (c.cooldown_until IS NULL OR c.cooldown_until <= sqlc.arg(now))
+  AND (
+    c.scope = 'shared'
+    OR (c.scope = 'personal' AND c.owner_user_id = sqlc.arg(user_id))
 )
 AND NOT EXISTS (
   SELECT 1
   FROM credential_leases AS existing
-  WHERE existing.run_id = ?3
+  WHERE existing.run_id = sqlc.arg(run_id)
     AND existing.released_at IS NULL
-    AND existing.expires_at > ?8
+    AND existing.expires_at > sqlc.arg(now)
 );
 
 -- name: GetCredentialLease :one
