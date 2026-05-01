@@ -124,9 +124,11 @@ Deploy reclaim (`SIGUSR2`) is used only when the inactive slot is still draining
 during the next deploy:
 
 1. Enter drain mode and stop HTTP listeners.
-2. Cancel that slot's remaining active runs with a deploy-specific reason.
-3. Allow a short bounded cleanup window.
-4. Stop the slot so deploy can reuse it.
+2. Stop run supervisors (release in-memory cancel funcs) but do **not** touch
+   detached containers.
+3. Exit immediately. Detached containers continue executing.
+4. The new slot adopts them via `RecoverRunningRuns()` on startup.
+5. Stop the slot so deploy can reuse it.
 
 Generic host/service shutdown is separate from deploy drain and may still use a
 bounded wait on exit.

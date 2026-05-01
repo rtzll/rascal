@@ -20,8 +20,6 @@ import (
 	"github.com/rtzll/rascal/internal/state"
 )
 
-const deployReclaimCancelReason = "superseded by newer deploy while draining"
-
 func main() {
 	cfg, err := config.LoadServerConfig()
 	if err != nil {
@@ -108,7 +106,7 @@ func main() {
 					deployDrainDone = beginDeployDrain(httpServer, s)
 				}
 			case syscall.SIGUSR2:
-				log.Printf("deploy reclaim signal received; canceling active runs before shutdown")
+				log.Printf("deploy reclaim signal received; stopping supervisors and exiting without touching detached containers")
 				reclaimForDeploy(httpServer, s, 15*time.Second)
 				return
 			case os.Interrupt, syscall.SIGTERM:
@@ -135,11 +133,13 @@ func beginDeployDrain(httpServer *http.Server, s *orchestrator.Server) <-chan st
 func reclaimForDeploy(httpServer *http.Server, s *orchestrator.Server, timeout time.Duration) {
 	s.BeginDrain()
 	shutdownHTTPServer(httpServer, 15*time.Second)
-	s.CancelActiveRunsWithReason(deployReclaimCancelReason, state.RunStatusReasonDeployReclaimed)
-	if err := s.WaitForNoActiveRuns(timeout); err != nil {
-		log.Printf("deploy reclaim exiting with active detached runs still executing: %v", err)
-	}
+	// Do NOT cancel active runs. Detached containers continue executing
+	// in the execution plane. The new slot will adopt them via
+	// RecoverRunningRuns() on startup.
 	s.StopRunSupervisors()
+	if err := s.WaitForNoActiveSupervisors(timeout); err != nil {
+		log.Printf("deploy reclaim exiting with active supervisors still running: %v", err)
+	}
 }
 
 func genericShutdown(httpServer *http.Server, s *orchestrator.Server, timeout time.Duration) {

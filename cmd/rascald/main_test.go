@@ -3608,7 +3608,7 @@ func TestBeginDeployDrainWaitsForActiveRunsWithoutCanceling(t *testing.T) {
 	}, "run succeeded after deploy drain")
 }
 
-func TestReclaimForDeployCancelsActiveRunsWithDeployReason(t *testing.T) {
+func TestReclaimForDeployDoesNotCancelActiveRuns(t *testing.T) {
 	t.Parallel()
 	waitCh := make(chan struct{})
 	launcher := &fakeRunner{waitCh: waitCh}
@@ -3619,17 +3619,33 @@ func TestReclaimForDeployCancelsActiveRunsWithDeployReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	_ = waitForRunExecution(t, s, run.ID)
+	execRec := waitForRunExecution(t, s, run.ID)
 
 	reclaimForDeploy(nil, s, 2*time.Second)
 
-	waitFor(t, 2*time.Second, func() bool {
-		current, ok := s.Store.GetRun(run.ID)
-		return ok &&
-			current.Status == state.StatusCanceled &&
-			current.StatusReason == state.RunStatusReasonDeployReclaimed &&
-			strings.Contains(current.Error, deployReclaimCancelReason)
-	}, "run canceled with deploy reclaim reason")
+	// Run should still be running; detached container must not be stopped.
+	current, ok := s.Store.GetRun(run.ID)
+	if !ok {
+		t.Fatalf("run not found")
+	}
+	if current.Status != state.StatusRunning {
+		t.Fatalf("expected run to still be running, got %s", current.Status)
+	}
+
+	handle := runner.ExecutionHandle{
+		Backend: runner.ExecutionBackend(strings.TrimSpace(string(execRec.Backend))),
+		ID:      strings.TrimSpace(execRec.ContainerID),
+		Name:    strings.TrimSpace(execRec.ContainerName),
+	}
+	launcher.mu.Lock()
+	fakeExec, ok := launcher.lookupExecution(handle)
+	launcher.mu.Unlock()
+	if !ok {
+		t.Fatalf("execution not found")
+	}
+	if fakeExec.stopped {
+		t.Fatalf("expected detached execution to not be stopped")
+	}
 }
 
 func TestStopRunSupervisorsCatchesInFlightSupervisorRegistration(t *testing.T) {
