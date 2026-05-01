@@ -26,12 +26,20 @@ func (c SSHConfig) normalizedUser() string {
 	return "root"
 }
 
+func commonSSHOptions() []string {
+	return []string{
+		"-o", "BatchMode=yes",
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "ServerAliveInterval=30",
+		"-o", "ServerAliveCountMax=10",
+	}
+}
+
 func SSHArgs(cfg SSHConfig, remoteCmd string) []string {
 	args := []string{
 		"-p", fmt.Sprintf("%d", cfg.normalizedPort()),
-		"-o", "BatchMode=yes",
-		"-o", "StrictHostKeyChecking=accept-new",
 	}
+	args = append(args, commonSSHOptions()...)
 	if keyPath := NormalizedSSHKeyPath(cfg.KeyPath); keyPath != "" {
 		args = append(args, "-i", keyPath)
 	}
