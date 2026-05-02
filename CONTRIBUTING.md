@@ -8,8 +8,8 @@ This guide covers the fastest path to make and verify a typical change locally.
 - `make`
 - `curl` (used by `make lint` to install `golangci-lint` into `./bin`)
 
-You do not need a separate `sqlc` install. `make codegen` runs the pinned
-version with `go run`.
+You do not need a separate `sqlc` install. `make codegen` installs the pinned
+version into `./bin/sqlc` and runs it from there.
 
 ## Local workflow
 
