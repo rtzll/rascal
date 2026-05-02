@@ -400,10 +400,14 @@ func (s *Server) executeWebhookAction(ctx context.Context, action WebhookAction)
 		if !ok {
 			return nil
 		}
+		_, hadActiveRun := s.Store.ActiveRunForTask(task.ID)
 		if err := s.Store.CancelQueuedRuns(task.ID, action.CancelReason, action.StatusReason); err != nil {
 			return fmt.Errorf("cancel queued runs for synchronized PR: %w", err)
 		}
 		s.cancelRunningTaskRuns(task.ID, action.CancelReason, action.StatusReason)
+		if !hadActiveRun {
+			return nil
+		}
 		if task.Status != state.TaskOpen || task.PRDraft {
 			return nil
 		}

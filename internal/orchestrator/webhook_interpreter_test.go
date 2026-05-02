@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -285,6 +286,111 @@ func TestWebhookInterpreterPullRequestSynchronizeIgnoresBotActor(t *testing.T) {
 
 	if len(actions) != 0 {
 		t.Fatalf("actions = %v, want none", actionKinds(actions))
+	}
+}
+
+func TestWebhookSynchronizeDoesNotQueueRunWhenPRIdle(t *testing.T) {
+	t.Parallel()
+	s := newExecutionTestServer(t, &executionFakeRunner{})
+	defer waitForExecutionServerIdle(t, s)
+
+	if _, err := s.Store.UpsertTask(state.UpsertTaskInput{
+		ID:          "task-pr-idle",
+		Repo:        "owner/repo",
+		IssueNumber: 42,
+		PRNumber:    88,
+	}); err != nil {
+		t.Fatalf("upsert task: %v", err)
+	}
+	if _, err := s.Store.AddRun(state.CreateRunInput{
+		ID:          "run_completed",
+		TaskID:      "task-pr-idle",
+		Repo:        "owner/repo",
+		Instruction: "done",
+		PRNumber:    88,
+		RunDir:      t.TempDir(),
+	}); err != nil {
+		t.Fatalf("add completed run: %v", err)
+	}
+	if _, err := s.Store.SetRunStatus("run_completed", state.StatusRunning, ""); err != nil {
+		t.Fatalf("mark run running: %v", err)
+	}
+	if _, err := s.Store.SetRunStatus("run_completed", state.StatusSucceeded, ""); err != nil {
+		t.Fatalf("mark run succeeded: %v", err)
+	}
+
+	if err := s.executeWebhookAction(context.Background(), WebhookAction{
+		Kind:         WebhookActionSynchronizePullRequest,
+		Repo:         "owner/repo",
+		PRNumber:     88,
+		Trigger:      runtrigger.NamePRSynchronize,
+		RequestedBy:  "rtzll",
+		BaseBranch:   "main",
+		HeadBranch:   "feature",
+		HeadSHA:      "new-sha",
+		CancelReason: "pull request synchronized",
+		StatusReason: state.RunStatusReasonPRSynchronized,
+	}); err != nil {
+		t.Fatalf("execute synchronize action: %v", err)
+	}
+
+	runs := s.Store.ListRuns(10)
+	if len(runs) != 1 {
+		t.Fatalf("run count = %d, want 1: %#v", len(runs), runs)
+	}
+	if runs[0].ID != "run_completed" || runs[0].Status != state.StatusSucceeded {
+		t.Fatalf("unexpected run after idle synchronize: %#v", runs[0])
+	}
+}
+
+func TestWebhookSynchronizeReplacesActiveRun(t *testing.T) {
+	t.Parallel()
+	s := newExecutionTestServer(t, &executionFakeRunner{})
+	defer waitForExecutionServerIdle(t, s)
+
+	if _, err := s.CreateAndQueueRun(RunRequest{
+		TaskID:      "task-pr-active",
+		Repo:        "owner/repo",
+		Instruction: "Update dependency",
+		Trigger:     runtrigger.NamePRComment,
+		IssueNumber: 42,
+		PRNumber:    88,
+		BaseBranch:  "main",
+		HeadBranch:  "feature",
+	}); err != nil {
+		t.Fatalf("create active run: %v", err)
+	}
+
+	if err := s.executeWebhookAction(context.Background(), WebhookAction{
+		Kind:         WebhookActionSynchronizePullRequest,
+		Repo:         "owner/repo",
+		PRNumber:     88,
+		Trigger:      runtrigger.NamePRSynchronize,
+		RequestedBy:  "rtzll",
+		BaseBranch:   "main",
+		HeadBranch:   "feature",
+		HeadSHA:      "new-sha",
+		CancelReason: "pull request synchronized",
+		StatusReason: state.RunStatusReasonPRSynchronized,
+	}); err != nil {
+		t.Fatalf("execute synchronize action: %v", err)
+	}
+
+	runs := s.Store.ListRuns(10)
+	if len(runs) != 2 {
+		t.Fatalf("run count = %d, want 2: %#v", len(runs), runs)
+	}
+	if runs[0].Trigger != runtrigger.NamePRSynchronize {
+		t.Fatalf("latest run trigger = %q, want %q", runs[0].Trigger, runtrigger.NamePRSynchronize)
+	}
+	if runs[0].HeadSHA != "new-sha" {
+		t.Fatalf("latest run head sha = %q, want new-sha", runs[0].HeadSHA)
+	}
+	if runs[0].Status != state.StatusQueued && runs[0].Status != state.StatusRunning {
+		t.Fatalf("latest run status = %q, want queued or running", runs[0].Status)
+	}
+	if runs[1].Status != state.StatusCanceled || runs[1].StatusReason != state.RunStatusReasonPRSynchronized {
+		t.Fatalf("stale run not canceled for synchronize: %#v", runs[1])
 	}
 }
 
