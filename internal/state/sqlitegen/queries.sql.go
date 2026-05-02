@@ -2500,32 +2500,29 @@ INSERT INTO credential_leases (
   released_at
 )
 SELECT
-  ?1,
-  c.id,
-  ?2,
-  ?3,
-  ?4,
-  ?5,
-  ?6,
+  CAST(?1 AS TEXT),
+  CAST(?2 AS TEXT),
+  CAST(?3 AS TEXT),
+  CAST(?4 AS TEXT),
+  CAST(?5 AS TEXT),
+  CAST(?6 AS INTEGER),
+  CAST(?7 AS INTEGER),
   NULL
-FROM credentials AS c
-WHERE c.id = ?7
-  AND ?1 <> ''
-  AND ?2 <> ''
-  AND ?3 <> ''
-  AND ?4 <> ''
-  AND ?5 > 0
-  AND ?6 > ?5
-  AND c.status = 'active'
-  AND (c.cooldown_until IS NULL OR c.cooldown_until <= ?8)
-  AND (
-    c.scope = 'shared'
-    OR (c.scope = 'personal' AND c.owner_user_id = ?3)
+WHERE EXISTS (
+  SELECT 1
+  FROM credentials AS c
+  WHERE c.id = ?2
+    AND c.status = 'active'
+    AND (c.cooldown_until IS NULL OR c.cooldown_until <= ?8)
+    AND (
+      c.scope = 'shared'
+      OR (c.scope = 'personal' AND c.owner_user_id = ?4)
+    )
 )
 AND NOT EXISTS (
   SELECT 1
   FROM credential_leases AS existing
-  WHERE existing.run_id = ?2
+  WHERE existing.run_id = ?3
     AND existing.released_at IS NULL
     AND existing.expires_at > ?8
 )
@@ -2533,24 +2530,24 @@ AND NOT EXISTS (
 
 type TryCreateCredentialLeaseParams struct {
 	ID           string        `json:"id"`
+	CredentialID string        `json:"credential_id"`
 	RunID        string        `json:"run_id"`
 	UserID       string        `json:"user_id"`
 	Strategy     string        `json:"strategy"`
 	AcquiredAt   int64         `json:"acquired_at"`
 	ExpiresAt    int64         `json:"expires_at"`
-	CredentialID string        `json:"credential_id"`
 	Now          sql.NullInt64 `json:"now"`
 }
 
 func (q *Queries) TryCreateCredentialLease(ctx context.Context, arg TryCreateCredentialLeaseParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, tryCreateCredentialLease,
 		arg.ID,
+		arg.CredentialID,
 		arg.RunID,
 		arg.UserID,
 		arg.Strategy,
 		arg.AcquiredAt,
 		arg.ExpiresAt,
-		arg.CredentialID,
 		arg.Now,
 	)
 	if err != nil {

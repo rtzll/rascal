@@ -993,27 +993,24 @@ INSERT INTO credential_leases (
   released_at
 )
 SELECT
-  sqlc.arg(id),
-  c.id,
-  sqlc.arg(run_id),
-  sqlc.arg(user_id),
-  sqlc.arg(strategy),
-  sqlc.arg(acquired_at),
-  sqlc.arg(expires_at),
+  CAST(sqlc.arg(id) AS TEXT),
+  CAST(sqlc.arg(credential_id) AS TEXT),
+  CAST(sqlc.arg(run_id) AS TEXT),
+  CAST(sqlc.arg(user_id) AS TEXT),
+  CAST(sqlc.arg(strategy) AS TEXT),
+  CAST(sqlc.arg(acquired_at) AS INTEGER),
+  CAST(sqlc.arg(expires_at) AS INTEGER),
   NULL
-FROM credentials AS c
-WHERE c.id = sqlc.arg(credential_id)
-  AND sqlc.arg(id) <> ''
-  AND sqlc.arg(run_id) <> ''
-  AND sqlc.arg(user_id) <> ''
-  AND sqlc.arg(strategy) <> ''
-  AND sqlc.arg(acquired_at) > 0
-  AND sqlc.arg(expires_at) > sqlc.arg(acquired_at)
-  AND c.status = 'active'
-  AND (c.cooldown_until IS NULL OR c.cooldown_until <= sqlc.arg(now))
-  AND (
-    c.scope = 'shared'
-    OR (c.scope = 'personal' AND c.owner_user_id = sqlc.arg(user_id))
+WHERE EXISTS (
+  SELECT 1
+  FROM credentials AS c
+  WHERE c.id = sqlc.arg(credential_id)
+    AND c.status = 'active'
+    AND (c.cooldown_until IS NULL OR c.cooldown_until <= sqlc.arg(now))
+    AND (
+      c.scope = 'shared'
+      OR (c.scope = 'personal' AND c.owner_user_id = sqlc.arg(user_id))
+    )
 )
 AND NOT EXISTS (
   SELECT 1
