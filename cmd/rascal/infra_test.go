@@ -77,7 +77,7 @@ func TestRunDeployExistingSkipsHealthyHost(t *testing.T) {
 		return remoteDoctorStatus{
 			Host:               cfg.Host,
 			RascalService:      true,
-			DockerInstalled:    true,
+			PodmanInstalled:    true,
 			SQLiteInstalled:    true,
 			CaddyInstalled:     true,
 			EnvFilePresent:     true,

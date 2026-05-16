@@ -249,10 +249,10 @@ func (a *app) newDeployExistingCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&codexAuthPath, "codex-auth", "", "local Codex auth.json path to seed as a stored shared credential")
 	cmd.Flags().StringVar(&domain, "domain", "", "public domain for TLS/Caddy")
 	cmd.Flags().StringVar(&agentRuntime, "agent-runtime", "", "agent runtime to use on the server (goose or codex)")
-	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose-codex", defaults.GooseCodexRunnerImageTag, "goose-codex runner docker image tag")
-	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner docker image tag")
-	cmd.Flags().StringVar(&runnerImageClaude, "runner-image-claude", defaults.ClaudeRunnerImageTag, "claude runner docker image tag")
-	cmd.Flags().StringVar(&runnerImageGooseClaude, "runner-image-goose-claude", defaults.GooseClaudeRunnerImageTag, "goose-claude runner docker image tag")
+	cmd.Flags().StringVar(&runnerImageGoose, "runner-image-goose-codex", defaults.GooseCodexRunnerImageTag, "goose-codex runner container image tag")
+	cmd.Flags().StringVar(&runnerImageCodex, "runner-image-codex", defaults.CodexRunnerImageTag, "codex runner container image tag")
+	cmd.Flags().StringVar(&runnerImageClaude, "runner-image-claude", defaults.ClaudeRunnerImageTag, "claude runner container image tag")
+	cmd.Flags().StringVar(&runnerImageGooseClaude, "runner-image-goose-claude", defaults.GooseClaudeRunnerImageTag, "goose-claude runner container image tag")
 	cmd.Flags().BoolVar(&uploadEnv, "upload-env", false, "upload/update /etc/rascal/rascal.env on server")
 	return cmd
 }
@@ -410,7 +410,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 		APIToken:               apiToken,
 		WebhookSecret:          webhookSecret,
 		GitHubRuntimeToken:     githubRuntimeToken,
-		RunnerMode:             "docker",
+		RunnerMode:             "podman",
 		AgentRuntime:           agentRuntime,
 		RunnerImageGooseCodex:  runnerImageGoose,
 		RunnerImageCodex:       runnerImageCodex,
@@ -443,7 +443,7 @@ func (a *app) runDeployExisting(input deployExistingInput) (deployExistingResult
 					caddyOK = false
 				}
 			}
-			healthyExisting = st.RascalService && st.DockerInstalled && st.SQLiteInstalled && caddyOK && st.EnvFilePresent && st.AuthRuntimeSynced && st.RunnerImagePresent
+			healthyExisting = st.RascalService && st.PodmanInstalled && st.SQLiteInstalled && caddyOK && st.EnvFilePresent && st.AuthRuntimeSynced && st.RunnerImagePresent
 		}
 	}
 	deployPerformed := false

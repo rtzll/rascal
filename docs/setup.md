@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Go 1.26+
-- Docker available on the server
+- Podman available on the server
 - Agent auth completed locally (e.g., `~/.codex/auth.json` for Codex, or an
   OAuth token file for Claude Code)
 - A GitHub repository you can administer
@@ -120,5 +120,5 @@ Before relying on a new setup, run the local smoke checks:
 make smoke
 ```
 
-This runs both smoke checks: `smoke-noop` and `smoke-docker`. The Docker-backed
-smoke check requires a working local Docker daemon.
+This runs both smoke checks: `smoke-noop` and `smoke-podman`. The Podman-backed
+smoke check requires a working local Podman runtime.

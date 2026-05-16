@@ -76,7 +76,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("rascald listening on %s (runner=%s runtime=%s docker_security=%s)", cfg.ListenAddr, cfg.RunnerMode, cfg.AgentRuntime, cfg.RunnerSecurity.Summary())
+	log.Printf("rascald listening on %s (runner=%s runtime=%s podman_security=%s)", cfg.ListenAddr, cfg.RunnerMode, cfg.AgentRuntime, cfg.RunnerSecurity.Summary())
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- httpServer.ListenAndServe()

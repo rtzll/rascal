@@ -9,7 +9,7 @@ The easiest way to read Rascal is to separate control-plane responsibilities
 from execution-plane responsibilities.
 
 - Control plane: `rascal` and `rascald`
-- Execution plane: detached runner containers launched via the Docker launcher
+- Execution plane: detached runner containers launched via the Podman runner
 - Runtimes: `goose-codex`, `codex`, `claude`, and `goose-claude`
 - Harnesses (derived from runtime): `goose` and `direct`
 - Model providers (derived from runtime): `codex` and `anthropic`
@@ -46,7 +46,7 @@ rascal (CLI) or GitHub webhook
   - schedule/supervise
             |
             v
-   Docker launcher / execution plane
+   Podman launcher / execution plane
   - start detached runner container
   - inspect / stop / remove container
             |
@@ -115,7 +115,7 @@ These are the main layers in the Go codebase.
 
 - `internal/runner` defines the `Runner` launcher interface and
   `Spec`/`ExecutionHandle` contract.
-- Current production implementation is Docker; `noop` exists for
+- Current production implementation is Podman; `noop` exists for
   non-runtime/test scenarios.
 - Session mounting is harness-aware: Goose uses `GOOSE_PATH_ROOT`, Codex uses
   `CODEX_HOME`, Claude uses `CLAUDE_CONFIG_DIR`.
@@ -149,7 +149,7 @@ These are the main layers in the Go codebase.
 
 - Rascal builds and deploys one orchestrator binary: `rascald`.
 - Rascal also builds one runner binary: `rascal-runner`.
-- That runner binary is packaged into separate Docker images for Goose and
+- That runner binary is packaged into separate container images for Goose and
   Codex.
 - `rascald` selects the runner image based on the task/run runtime.
 - Blue/green deploy replaces the control plane, while runner containers remain
@@ -164,7 +164,7 @@ These are the main layers in the Go codebase.
    run lease.
 4. `rascald` resolves runtime/session settings and persists a deterministic
    detached execution handle.
-5. `internal/runner` starts a detached Docker container for `rascal-runner`.
+5. `internal/runner` starts a detached Podman container for `rascal-runner`.
 6. Active slot supervises the detached execution by inspect/stop/remove
    operations and lease heartbeats.
 7. On slot rotation or process restart, a new slot can recover the persisted
@@ -244,7 +244,7 @@ Key persisted entities:
 | SQLite state DB                  | tasks, runs, leases, execution handles, sessions, credentials | Primary control-plane source of truth           |
 | Run directory                    | per-run artifacts, logs, `meta.json`, transient auth material | Short-lived execution artifacts                 |
 | Task session directory           | resumable harness session state                               | Optional and task-scoped                        |
-| Docker runtime                   | detached runner container process state                       | Execution-plane state, not the system of record |
+| Podman runtime                   | detached runner container process state                       | Execution-plane state, not the system of record |
 | Caddy and systemd config on host | active slot routing and service activation                    | Deployment/control-plane topology               |
 
 ## Source of Truth by Object
@@ -257,7 +257,7 @@ Key persisted entities:
 | Detached container identity | `run_executions` table                              | Enables adoption and cleanup across restarts     |
 | Session resume state        | task session records plus mounted session directory | Tracks harness session identity and storage root |
 | Run artifacts               | run directory on disk                               | Execution outputs consumed during finalization   |
-| Live container process      | Docker runtime                                      | Actual execution process while the run is active |
+| Live container process      | Podman runtime                                      | Actual execution process while the run is active |
 
 ## Run Artifacts
 

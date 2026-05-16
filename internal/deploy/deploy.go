@@ -197,19 +197,20 @@ func Execute(cfg Config) error {
 set -eu
 mkdir -p /opt/rascal /etc/rascal
 tar -xzf /tmp/rascal-bootstrap/runner.tgz -C /opt/rascal
-install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner
+install -m 0755 -o rascal -g rascal /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner
+chown -R rascal:rascal /opt/rascal/runner /var/lib/rascal
 CACHE_BUST="$(sha256sum /opt/rascal/runner/rascal-runner | cut -d' ' -f1)"
-docker build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target goose-codex-runner -t %s /opt/rascal/runner
-docker build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target codex-runner -t %s /opt/rascal/runner
-docker build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target claude-runner -t %s /opt/rascal/runner
-docker build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target goose-claude-runner -t %s /opt/rascal/runner
+runuser -u rascal -- env HOME=/var/lib/rascal XDG_RUNTIME_DIR=/run/user/10001 podman build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target goose-codex-runner -t %s /opt/rascal/runner
+runuser -u rascal -- env HOME=/var/lib/rascal XDG_RUNTIME_DIR=/run/user/10001 podman build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target codex-runner -t %s /opt/rascal/runner
+runuser -u rascal -- env HOME=/var/lib/rascal XDG_RUNTIME_DIR=/run/user/10001 podman build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target claude-runner -t %s /opt/rascal/runner
+runuser -u rascal -- env HOME=/var/lib/rascal XDG_RUNTIME_DIR=/run/user/10001 podman build --quiet --build-arg CACHE_BUST="$CACHE_BUST" --target goose-claude-runner -t %s /opt/rascal/runner
 install -m 0755 /tmp/rascal-bootstrap/rascald /opt/rascal/rascald
 install -m 0644 /tmp/rascal-bootstrap/rascal@.service /etc/systemd/system/rascal@.service
 `)+"\n", shellSingleQuote(cfg.RunnerImageGooseCodex), shellSingleQuote(cfg.RunnerImageCodex), shellSingleQuote(cfg.RunnerImageClaude), shellSingleQuote(cfg.RunnerImageGooseClaude))); err != nil {
 		return err
 	}
 	if cfg.UploadEnvFile {
-		if err := runRemoteScript(cfg, "set -eu\ninstall -m 0600 /tmp/rascal-bootstrap/rascal.env /etc/rascal/rascal.env\n"); err != nil {
+		if err := runRemoteScript(cfg, "set -eu\ninstall -m 0600 -o rascal -g rascal /tmp/rascal-bootstrap/rascal.env /etc/rascal/rascal.env\n"); err != nil {
 			return err
 		}
 	} else {
@@ -651,11 +652,11 @@ func serverEnvFile(cfg Config) string {
 		fmt.Sprintf("RASCAL_RUNNER_IMAGE_CLAUDE=%s", claudeImage),
 		fmt.Sprintf("RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE=%s", gooseClaudeImage),
 		"RASCAL_RUNNER_MAX_ATTEMPTS=1",
-		"RASCAL_RUNNER_DOCKER_SECURITY_MODE=baseline",
-		"RASCAL_RUNNER_DOCKER_CPUS=2",
-		"RASCAL_RUNNER_DOCKER_MEMORY=4g",
-		"RASCAL_RUNNER_DOCKER_PIDS_LIMIT=256",
-		"RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE=512m",
+		"RASCAL_RUNNER_PODMAN_SECURITY_MODE=baseline",
+		"RASCAL_RUNNER_PODMAN_CPUS=2",
+		"RASCAL_RUNNER_PODMAN_MEMORY=4g",
+		"RASCAL_RUNNER_PODMAN_PIDS_LIMIT=256",
+		"RASCAL_RUNNER_PODMAN_TMPFS_TMP_SIZE=512m",
 		"RASCAL_RUNNER_ALLOW_ENV_SECRETS=false",
 		"RASCAL_TASK_SESSION_MODE=all",
 		fmt.Sprintf("RASCAL_TASK_SESSION_ROOT=%s", filepath.Join(cfg.ServerDataDir, defaults.AgentSessionDirName)),
@@ -671,20 +672,25 @@ func systemdServiceContent() string {
 	return strings.TrimSpace(`
 [Unit]
 Description=Rascal orchestrator service
-After=network-online.target docker.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 EnvironmentFile=/etc/rascal/rascal.env
 EnvironmentFile=-/etc/rascal/rascal-%i.env
+Environment=HOME=/var/lib/rascal
+Environment=XDG_RUNTIME_DIR=/run/user/10001
+PermissionsStartOnly=true
+ExecStartPre=/usr/bin/install -d -m 0700 -o rascal -g rascal /run/user/10001
 ExecStart=/opt/rascal/rascald
 Restart=always
 RestartSec=3
 KillSignal=SIGTERM
-KillMode=mixed
+KillMode=process
 TimeoutStopSec=330
-User=root
+User=rascal
+Group=rascal
 WorkingDirectory=/opt/rascal
 
 [Install]

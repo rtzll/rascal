@@ -8,8 +8,8 @@ func TestNormalizeMode(t *testing.T) {
 	tests := map[string]Mode{
 		"":        ModeNoop,
 		"noop":    ModeNoop,
-		"docker":  ModeDocker,
-		"DOCKER":  ModeDocker,
+		"podman":  ModePodman,
+		"PODMAN":  ModePodman,
 		"unknown": ModeNoop,
 	}
 	for in, want := range tests {
@@ -28,8 +28,8 @@ func TestParseMode(t *testing.T) {
 	}{
 		"":        {want: ModeNoop},
 		"noop":    {want: ModeNoop},
-		"docker":  {want: ModeDocker},
-		"DOCKER":  {want: ModeDocker},
+		"podman":  {want: ModePodman},
+		"PODMAN":  {want: ModePodman},
 		"unknown": {wantErr: true},
 	}
 	for in, tt := range tests {

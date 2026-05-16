@@ -209,7 +209,7 @@ func TestRecoverRunningRunMissingDetachedExecutionFails(t *testing.T) {
 	}
 	if _, err := s.Store.UpsertRunExecution(state.RunExecution{
 		RunID:         run.ID,
-		Backend:       state.RunExecutionBackendDocker,
+		Backend:       state.RunExecutionBackendPodman,
 		ContainerName: "rascal-run_recover_missing_exec",
 		ContainerID:   "missing-execution-id",
 		Status:        state.RunExecutionStatusRunning,

@@ -44,10 +44,10 @@ func TestParseRunAndTaskStatus(t *testing.T) {
 	if got, ok := ParseRunExecutionBackend(" noop "); !ok || got != RunExecutionBackendNoop {
 		t.Fatalf("ParseRunExecutionBackend(noop) = %q, %t", got, ok)
 	}
-	if got, ok := ParseRunExecutionBackend(""); !ok || got != RunExecutionBackendDocker {
+	if got, ok := ParseRunExecutionBackend(""); !ok || got != RunExecutionBackendPodman {
 		t.Fatalf("ParseRunExecutionBackend(empty) = %q, %t", got, ok)
 	}
-	if _, ok := ParseRunExecutionBackend("podman"); ok {
+	if _, ok := ParseRunExecutionBackend("docker"); ok {
 		t.Fatal("expected invalid run execution backend to be rejected")
 	}
 

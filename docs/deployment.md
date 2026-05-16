@@ -20,7 +20,7 @@ Rascal deploy uploads/builds these artifacts on the server:
 - `/etc/rascal/rascal.env` (shared runtime env)
 - `/etc/rascal/rascal-blue.env` and `/etc/rascal/rascal-green.env` (slot env)
 - `/etc/caddy/Caddyfile` + `/etc/caddy/rascal-upstream.caddy` (proxy target)
-- Docker images for the configured runner tags (defaults:
+- container images for the configured runner tags (defaults:
   `rascal-runner-goose-codex:latest`, `rascal-runner-codex:latest`,
   `rascal-runner-claude:latest`, and `rascal-runner-goose-claude:latest`)
 
@@ -63,11 +63,11 @@ default):
 - `RASCAL_RUNNER_IMAGE_GOOSE_CODEX`, `RASCAL_RUNNER_IMAGE_CODEX`,
   `RASCAL_RUNNER_IMAGE_CLAUDE`, and `RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE` set the
   runtime-specific runner images
-- Docker runner hardening defaults to `baseline` with:
-  `RASCAL_RUNNER_DOCKER_SECURITY_MODE=baseline`, `RASCAL_RUNNER_DOCKER_CPUS=2`,
-  `RASCAL_RUNNER_DOCKER_MEMORY=4g`, `RASCAL_RUNNER_DOCKER_PIDS_LIMIT=256`
+- Podman runner hardening defaults to `baseline` with:
+  `RASCAL_RUNNER_PODMAN_SECURITY_MODE=baseline`, `RASCAL_RUNNER_PODMAN_CPUS=2`,
+  `RASCAL_RUNNER_PODMAN_MEMORY=4g`, `RASCAL_RUNNER_PODMAN_PIDS_LIMIT=256`
 - `strict` currently adds a size-bounded `/tmp` mount via
-  `RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE`
+  `RASCAL_RUNNER_PODMAN_TMPFS_TMP_SIZE`
 - Runner secrets default to file-scoped injection:
   `RASCAL_RUNNER_ALLOW_ENV_SECRETS=false` mounts per-run secrets read-only at
   `/run/rascal-secrets`
@@ -80,9 +80,10 @@ Given active slot `A` and inactive slot `B`, deploy does:
 1. Build `rascald` for Linux and upload artifacts.
 2. Build `rascal-runner` for Linux and upload artifacts.
 3. Upload bootstrap assets and execute `bootstrap_host.sh` to ensure base
-   packages (`docker`, `caddy`, `curl`, `sqlite3`, `ripgrep`) and host layout.
+   packages (`podman`, `caddy`, `curl`, `sqlite3`, `ripgrep`), the dedicated
+   `rascal` user, and host layout.
 4. Install uploaded `rascal-runner` into `/opt/rascal/runner/rascal-runner`.
-5. Build/update runner images on host.
+5. Build/update runner images on host as the `rascal` user.
 6. Install/update systemd unit and env files.
 7. If slot `B` is still draining from the previous deploy, reclaim it first:
    cancel its remaining active runs, allow a short cleanup window, and stop it.

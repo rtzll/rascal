@@ -41,7 +41,7 @@ type ServerConfig struct {
 	RunnerImageClaude       string
 	RunnerImageGooseClaude  string
 	RunnerMaxAttempts       int
-	RunnerSecurity          runner.DockerSecurityConfig
+	RunnerSecurity          runner.PodmanSecurityConfig
 	CredentialStrategy      credentialstrategy.Name
 	CredentialLeaseTTL      time.Duration
 	CredentialRenewEvery    time.Duration
@@ -71,9 +71,9 @@ func LoadServerConfig() (ServerConfig, error) {
 	if err != nil {
 		return ServerConfig{}, fmt.Errorf("parse RASCAL_RUNNER_MODE: %w", err)
 	}
-	runnerSecurityMode, err := runner.ParseDockerSecurityMode(envOrDefault("RASCAL_RUNNER_DOCKER_SECURITY_MODE", string(runner.DockerSecurityBaseline)))
+	runnerSecurityMode, err := runner.ParsePodmanSecurityMode(envOrDefault("RASCAL_RUNNER_PODMAN_SECURITY_MODE", string(runner.PodmanSecurityBaseline)))
 	if err != nil {
-		return ServerConfig{}, fmt.Errorf("parse RASCAL_RUNNER_DOCKER_SECURITY_MODE: %w", err)
+		return ServerConfig{}, fmt.Errorf("parse RASCAL_RUNNER_PODMAN_SECURITY_MODE: %w", err)
 	}
 	agentRuntime, err := loadAgentRuntime()
 	if err != nil {
@@ -106,12 +106,12 @@ func LoadServerConfig() (ServerConfig, error) {
 		RunnerImageClaude:      envOrDefault("RASCAL_RUNNER_IMAGE_CLAUDE", defaults.ClaudeRunnerImageTag),
 		RunnerImageGooseClaude: envOrDefault("RASCAL_RUNNER_IMAGE_GOOSE_CLAUDE", defaults.GooseClaudeRunnerImageTag),
 		RunnerMaxAttempts:      envIntOrDefault("RASCAL_RUNNER_MAX_ATTEMPTS", 1),
-		RunnerSecurity: runner.DockerSecurityConfig{
+		RunnerSecurity: runner.PodmanSecurityConfig{
 			Mode:            runnerSecurityMode,
-			CPUs:            strings.TrimSpace(os.Getenv("RASCAL_RUNNER_DOCKER_CPUS")),
-			Memory:          strings.TrimSpace(os.Getenv("RASCAL_RUNNER_DOCKER_MEMORY")),
-			PidsLimit:       envIntOrDefault("RASCAL_RUNNER_DOCKER_PIDS_LIMIT", 256),
-			TmpfsTmpSize:    envOrDefault("RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE", "512m"),
+			CPUs:            strings.TrimSpace(os.Getenv("RASCAL_RUNNER_PODMAN_CPUS")),
+			Memory:          strings.TrimSpace(os.Getenv("RASCAL_RUNNER_PODMAN_MEMORY")),
+			PidsLimit:       envIntOrDefault("RASCAL_RUNNER_PODMAN_PIDS_LIMIT", 256),
+			TmpfsTmpSize:    envOrDefault("RASCAL_RUNNER_PODMAN_TMPFS_TMP_SIZE", "512m"),
 			AllowEnvSecrets: parseBoolEnv(envOrDefault("RASCAL_RUNNER_ALLOW_ENV_SECRETS", "false"), false),
 		}.Normalize(),
 		CredentialStrategy:      credentialStrategy,

@@ -225,23 +225,23 @@ func TestLoadServerConfigGitHubOwnerLogin(t *testing.T) {
 }
 
 func TestLoadServerConfigNormalizesRunnerMode(t *testing.T) {
-	t.Setenv("RASCAL_RUNNER_MODE", "DOCKER")
+	t.Setenv("RASCAL_RUNNER_MODE", "PODMAN")
 
 	cfg, err := LoadServerConfig()
 	if err != nil {
 		t.Fatalf("LoadServerConfig returned error: %v", err)
 	}
-	if cfg.RunnerMode != runner.ModeDocker {
-		t.Fatalf("RunnerMode = %q, want docker", cfg.RunnerMode)
+	if cfg.RunnerMode != runner.ModePodman {
+		t.Fatalf("RunnerMode = %q, want podman", cfg.RunnerMode)
 	}
 }
 
-func TestLoadServerConfigDefaultsDockerSecurityToBaseline(t *testing.T) {
+func TestLoadServerConfigDefaultsPodmanSecurityToBaseline(t *testing.T) {
 	cfg, err := LoadServerConfig()
 	if err != nil {
 		t.Fatalf("LoadServerConfig returned error: %v", err)
 	}
-	if cfg.RunnerSecurity.Mode != runner.DockerSecurityBaseline {
+	if cfg.RunnerSecurity.Mode != runner.PodmanSecurityBaseline {
 		t.Fatalf("RunnerSecurity.Mode = %q, want baseline", cfg.RunnerSecurity.Mode)
 	}
 	if cfg.RunnerSecurity.CPUs != "2" {
@@ -261,19 +261,19 @@ func TestLoadServerConfigDefaultsDockerSecurityToBaseline(t *testing.T) {
 	}
 }
 
-func TestLoadServerConfigDockerSecurityOverrides(t *testing.T) {
-	t.Setenv("RASCAL_RUNNER_DOCKER_SECURITY_MODE", "strict")
-	t.Setenv("RASCAL_RUNNER_DOCKER_CPUS", "3.5")
-	t.Setenv("RASCAL_RUNNER_DOCKER_MEMORY", "6g")
-	t.Setenv("RASCAL_RUNNER_DOCKER_PIDS_LIMIT", "384")
-	t.Setenv("RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE", "768m")
+func TestLoadServerConfigPodmanSecurityOverrides(t *testing.T) {
+	t.Setenv("RASCAL_RUNNER_PODMAN_SECURITY_MODE", "strict")
+	t.Setenv("RASCAL_RUNNER_PODMAN_CPUS", "3.5")
+	t.Setenv("RASCAL_RUNNER_PODMAN_MEMORY", "6g")
+	t.Setenv("RASCAL_RUNNER_PODMAN_PIDS_LIMIT", "384")
+	t.Setenv("RASCAL_RUNNER_PODMAN_TMPFS_TMP_SIZE", "768m")
 	t.Setenv("RASCAL_RUNNER_ALLOW_ENV_SECRETS", "true")
 
 	cfg, err := LoadServerConfig()
 	if err != nil {
 		t.Fatalf("LoadServerConfig returned error: %v", err)
 	}
-	if cfg.RunnerSecurity.Mode != runner.DockerSecurityStrict {
+	if cfg.RunnerSecurity.Mode != runner.PodmanSecurityStrict {
 		t.Fatalf("RunnerSecurity.Mode = %q, want strict", cfg.RunnerSecurity.Mode)
 	}
 	if cfg.RunnerSecurity.CPUs != "3.5" {
@@ -322,8 +322,8 @@ func TestLoadServerConfigRejectsInvalidEnumEnv(t *testing.T) {
 		value  string
 		needle string
 	}{
-		{name: "runner mode", key: "RASCAL_RUNNER_MODE", value: "podman", needle: "unknown runner mode"},
-		{name: "docker security mode", key: "RASCAL_RUNNER_DOCKER_SECURITY_MODE", value: "paranoid", needle: "unknown docker security mode"},
+		{name: "runner mode", key: "RASCAL_RUNNER_MODE", value: "docker", needle: "unknown runner mode"},
+		{name: "podman security mode", key: "RASCAL_RUNNER_PODMAN_SECURITY_MODE", value: "paranoid", needle: "unknown podman security mode"},
 		{name: "agent runtime", key: "RASCAL_AGENT_RUNTIME", value: "unknown-agent", needle: "unknown agent runtime"},
 		{name: "credential strategy", key: "RASCAL_CREDENTIAL_STRATEGY", value: "weighted", needle: "unknown credential strategy"},
 		{name: "task session mode", key: "RASCAL_TASK_SESSION_MODE", value: "sometimes", needle: "unknown agent session mode"},

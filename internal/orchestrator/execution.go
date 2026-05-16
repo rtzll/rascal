@@ -583,7 +583,7 @@ func (s *Server) finalizeDetachedRun(runID string, execRec state.RunExecution, o
 		if strings.TrimSpace(meta.Error) != "" {
 			errText = strings.TrimSpace(meta.Error)
 		} else {
-			errText = fmt.Sprintf("docker runner failed with exit code %d", meta.ExitCode)
+			errText = fmt.Sprintf("podman runner failed with exit code %d", meta.ExitCode)
 		}
 	} else if meta.PRNumber > 0 || strings.TrimSpace(meta.PRURL) != "" || run.PRNumber > 0 || strings.TrimSpace(run.PRURL) != "" {
 		status = state.StatusReview
@@ -666,7 +666,7 @@ func loadDetachedRunMeta(execRec state.RunExecution, run state.Run, observedExit
 		ExitCode:   observedExitCode,
 	}
 	if observedExitCode != 0 {
-		fallback.Error = fmt.Sprintf("docker runner failed with exit code %d", observedExitCode)
+		fallback.Error = fmt.Sprintf("podman runner failed with exit code %d", observedExitCode)
 	}
 	if writeErr := runner.WriteMeta(metaPath, fallback); writeErr != nil {
 		log.Printf("run %s write fallback meta failed: %v", run.ID, writeErr)

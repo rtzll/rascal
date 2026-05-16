@@ -49,7 +49,7 @@ rascal cancel <run_id>
 ## Deployment Model
 
 Rascal deploys `rascald` with blue/green slots, but active task execution is
-detached into Docker containers.
+detached into Podman containers.
 
 Operationally this means:
 
@@ -148,7 +148,8 @@ Operational notes:
 ## Safe Manual Interventions
 
 - Restart or inspect the inactive slot during blue/green troubleshooting.
-- Inspect detached containers with `docker ps` or `docker inspect`.
+- Inspect detached containers as the `rascal` user with `podman ps` or
+  `podman inspect`.
 - Roll traffic back to a known-good slot by restoring Caddy upstream and
   `active_slot`.
 - Retry or cancel runs through Rascal commands.

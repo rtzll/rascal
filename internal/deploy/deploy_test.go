@@ -197,18 +197,18 @@ func TestExecuteRollsOutRunnerBinaryBeforeImageBuild(t *testing.T) {
 	scripts := readCapturedSSHScripts(t, logDir)
 	foundBuildScript := false
 	for _, script := range scripts {
-		installIdx := strings.Index(script, "install -m 0755 /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner")
-		dockerIdx := strings.Index(script, "docker build --quiet --build-arg CACHE_BUST=")
-		if installIdx < 0 || dockerIdx < 0 {
+		installIdx := strings.Index(script, "install -m 0755 -o rascal -g rascal /tmp/rascal-bootstrap/rascal-runner /opt/rascal/runner/rascal-runner")
+		podmanIdx := strings.Index(script, "runuser -u rascal -- env HOME=/var/lib/rascal XDG_RUNTIME_DIR=/run/user/10001 podman build --quiet --build-arg CACHE_BUST=")
+		if installIdx < 0 || podmanIdx < 0 {
 			continue
 		}
 		foundBuildScript = true
-		if installIdx > dockerIdx {
-			t.Fatalf("expected rascal-runner install before docker build, script:\n%s", script)
+		if installIdx > podmanIdx {
+			t.Fatalf("expected rascal-runner install before podman build, script:\n%s", script)
 		}
 	}
 	if !foundBuildScript {
-		t.Fatalf("expected deploy script containing rascal-runner install and docker build, got %d scripts", len(scripts))
+		t.Fatalf("expected deploy script containing rascal-runner install and podman build, got %d scripts", len(scripts))
 	}
 }
 
@@ -235,10 +235,13 @@ func TestEmbeddedBootstrapHostScriptOwnsPackageInstallation(t *testing.T) {
 	script := string(content)
 	for _, want := range []string{
 		"ensure_base_packages()",
-		"ensure_docker()",
+		"ensure_podman()",
+		"ensure_rascal_user()",
 		"ensure_caddy()",
 		"apt-get install -y -qq sqlite3 ripgrep curl gpg debian-keyring debian-archive-keyring apt-transport-https ca-certificates gnupg lsb-release >/dev/null",
-		"apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null",
+		"apt-get install -y -qq podman uidmap slirp4netns fuse-overlayfs >/dev/null",
+		"useradd --system --uid 10001 --gid rascal --create-home --home-dir /var/lib/rascal --shell /usr/sbin/nologin rascal",
+		"loginctl enable-linger rascal",
 		"apt-get install -y -qq caddy >/dev/null",
 		"ensure_host_layout()",
 	} {
@@ -369,12 +372,16 @@ func TestResolveRunnerBuildInfoDefaults(t *testing.T) {
 	}
 }
 
-func TestSystemdServiceContentUsesMixedKillModeForDrain(t *testing.T) {
+func TestSystemdServiceContentRunsAsRootlessPodmanUser(t *testing.T) {
 	content := systemdServiceContent()
 	for _, want := range []string{
 		"KillSignal=SIGTERM",
-		"KillMode=mixed",
+		"KillMode=process",
 		"TimeoutStopSec=330",
+		"User=rascal",
+		"Group=rascal",
+		"Environment=XDG_RUNTIME_DIR=/run/user/10001",
+		"ExecStartPre=/usr/bin/install -d -m 0700 -o rascal -g rascal /run/user/10001",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("service content missing %q:\n%s", want, content)
@@ -389,14 +396,14 @@ func TestServerEnvFileEnablesAgentSessionsByDefault(t *testing.T) {
 	}
 }
 
-func TestServerEnvFileIncludesDockerHardeningDefaults(t *testing.T) {
+func TestServerEnvFileIncludesPodmanHardeningDefaults(t *testing.T) {
 	content := serverEnvFile(testDeployConfig())
 	for _, want := range []string{
-		"RASCAL_RUNNER_DOCKER_SECURITY_MODE=baseline",
-		"RASCAL_RUNNER_DOCKER_CPUS=2",
-		"RASCAL_RUNNER_DOCKER_MEMORY=4g",
-		"RASCAL_RUNNER_DOCKER_PIDS_LIMIT=256",
-		"RASCAL_RUNNER_DOCKER_TMPFS_TMP_SIZE=512m",
+		"RASCAL_RUNNER_PODMAN_SECURITY_MODE=baseline",
+		"RASCAL_RUNNER_PODMAN_CPUS=2",
+		"RASCAL_RUNNER_PODMAN_MEMORY=4g",
+		"RASCAL_RUNNER_PODMAN_PIDS_LIMIT=256",
+		"RASCAL_RUNNER_PODMAN_TMPFS_TMP_SIZE=512m",
 		"RASCAL_RUNNER_ALLOW_ENV_SECRETS=false",
 	} {
 		if !strings.Contains(content, want) {

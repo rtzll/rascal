@@ -31,8 +31,8 @@
 
 - `Control plane`: `rascal` plus `rascald`. This layer accepts work, persists
   state, schedules runs, and supervises execution.
-- `Execution plane`: detached Docker containers started for `rascal-runner`.
-- `Runner image`: Docker image used to execute a run. Rascal maintains separate
+- `Execution plane`: detached Podman containers started for `rascal-runner`.
+- `Runner image`: container image used to execute a run. Rascal maintains separate
   images per runtime (Goose-Codex, Codex, Claude, Goose-Claude).
 - `Active slot`: the currently live `rascald` slot in blue/green deploys. Only
   this slot should process webhook traffic.
@@ -53,7 +53,7 @@
 - `Cutover`: the moment traffic flips from one slot to the other.
 - `Rollback`: restoring traffic and service ownership to the previously healthy
   slot if deploy activation fails.
-- `Detached execution`: Docker container execution that continues independently
+- `Detached execution`: Podman container execution that continues independently
   of the `rascald` process that launched it.
 - `Adoption`: when a newly active or restarted `rascald` instance recovers a
   persisted run execution handle and resumes supervision.

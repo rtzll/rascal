@@ -31,7 +31,7 @@ func TestSanitizeContainerName(t *testing.T) {
 	}
 }
 
-func TestDockerContainerEnvBuilderBuildGooseCodex(t *testing.T) {
+func TestPodmanContainerEnvBuilderBuildGooseCodex(t *testing.T) {
 	t.Parallel()
 
 	spec := Spec{
@@ -56,8 +56,8 @@ func TestDockerContainerEnvBuilderBuildGooseCodex(t *testing.T) {
 		},
 	}
 
-	layout := newDockerRuntimeLayout(runtime.RuntimeGooseCodex, spec.TaskSession)
-	got := newDockerContainerEnvBuilder(spec, runtime.RuntimeGooseCodex, layout, "gh-token", false).Build()
+	layout := newPodmanRuntimeLayout(runtime.RuntimeGooseCodex, spec.TaskSession)
+	got := newPodmanContainerEnvBuilder(spec, runtime.RuntimeGooseCodex, layout, "gh-token", false).Build()
 	want := map[string]string{
 		"CODEX_HOME":                   containerCodexStateDir,
 		"CODEX_AUTH_FILE":              containerCodexAuthFile,
@@ -95,7 +95,7 @@ func TestDockerContainerEnvBuilderBuildGooseCodex(t *testing.T) {
 	}
 }
 
-func TestDockerContainerEnvBuilderBuildDirectRuntimes(t *testing.T) {
+func TestPodmanContainerEnvBuilderBuildDirectRuntimes(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -192,8 +192,8 @@ func TestDockerContainerEnvBuilderBuildDirectRuntimes(t *testing.T) {
 				PRNumber:     24,
 				TaskSession:  tt.session,
 			}
-			layout := newDockerRuntimeLayout(tt.runtime, tt.session)
-			got := newDockerContainerEnvBuilder(spec, tt.runtime, layout, "", false).Build()
+			layout := newPodmanRuntimeLayout(tt.runtime, tt.session)
+			got := newPodmanContainerEnvBuilder(spec, tt.runtime, layout, "", false).Build()
 			if !maps.Equal(got, tt.want) {
 				t.Fatalf("unexpected env map (-got +want):\n got: %#v\nwant: %#v", got, tt.want)
 			}
@@ -201,7 +201,7 @@ func TestDockerContainerEnvBuilderBuildDirectRuntimes(t *testing.T) {
 	}
 }
 
-func TestDockerContainerEnvBuilderAllowsLegacyEnvSecrets(t *testing.T) {
+func TestPodmanContainerEnvBuilderAllowsLegacyEnvSecrets(t *testing.T) {
 	t.Parallel()
 
 	spec := Spec{
@@ -215,8 +215,8 @@ func TestDockerContainerEnvBuilderAllowsLegacyEnvSecrets(t *testing.T) {
 		Trigger:      runtrigger.NameCLI,
 	}
 
-	layout := newDockerRuntimeLayout(runtime.RuntimeCodex, spec.TaskSession)
-	got := newDockerContainerEnvBuilder(spec, runtime.RuntimeCodex, layout, "gh-token", true).Build()
+	layout := newPodmanRuntimeLayout(runtime.RuntimeCodex, spec.TaskSession)
+	got := newPodmanContainerEnvBuilder(spec, runtime.RuntimeCodex, layout, "gh-token", true).Build()
 	if got["GH_TOKEN"] != "gh-token" {
 		t.Fatalf("GH_TOKEN = %q, want gh-token", got["GH_TOKEN"])
 	}
@@ -228,10 +228,10 @@ func TestDockerContainerEnvBuilderAllowsLegacyEnvSecrets(t *testing.T) {
 	}
 }
 
-func TestDockerRunnerStartDetachedUsesStableNameAndNoRM(t *testing.T) {
+func TestPodmanRunnerStartDetachedUsesStableNameAndNoRM(t *testing.T) {
 	tmp := t.TempDir()
-	logPath := filepath.Join(tmp, "docker_calls.log")
-	fakeDocker := filepath.Join(tmp, "docker")
+	logPath := filepath.Join(tmp, "podman_calls.log")
+	fakePodman := filepath.Join(tmp, "podman")
 	script := `#!/bin/sh
 set -eu
 echo "$@" >> "` + logPath + `"
@@ -242,8 +242,8 @@ if [ "$cmd" = "run" ]; then
 fi
 exit 0
 `
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
+	if err := os.WriteFile(fakePodman, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake podman: %v", err)
 	}
 
 	oldPath := os.Getenv("PATH")
@@ -254,7 +254,7 @@ exit 0
 		t.Fatalf("create run dir: %v", err)
 	}
 
-	launcher := DockerRunner{Image: "rascal-runner:latest"}
+	launcher := PodmanRunner{Image: "rascal-runner:latest"}
 	handle, err := launcher.StartDetached(context.Background(), Spec{
 		RunID:       "run_detached",
 		TaskID:      "task_detached",
@@ -269,7 +269,7 @@ exit 0
 	if err != nil {
 		t.Fatalf("start detached: %v", err)
 	}
-	if handle.Backend != ExecutionBackendDocker || handle.ID != "container-123" {
+	if handle.Backend != ExecutionBackendPodman || handle.ID != "container-123" {
 		t.Fatalf("unexpected handle: %+v", handle)
 	}
 	if handle.Name != "rascal-run_detached" {
@@ -278,7 +278,7 @@ exit 0
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {
-		t.Fatalf("read docker call log: %v", err)
+		t.Fatalf("read podman call log: %v", err)
 	}
 	logText := string(data)
 	if strings.Contains(logText, "--rm") {
@@ -286,20 +286,22 @@ exit 0
 	}
 	for _, want := range []string{
 		"run -d --name rascal-run_detached",
+		"--userns=keep-id:uid=10001,gid=10001",
+		"--cgroups=no-conmon",
 		"--label rascal.run_id=run_detached",
 		"--label rascal.task_id=task_detached",
 		"--label rascal.repo=owner/repo",
 	} {
 		if !strings.Contains(logText, want) {
-			t.Fatalf("expected %q in docker call log:\n%s", want, logText)
+			t.Fatalf("expected %q in podman call log:\n%s", want, logText)
 		}
 	}
 }
 
-func TestDockerRunnerInspectStopAndRemove(t *testing.T) {
+func TestPodmanRunnerInspectStopAndRemove(t *testing.T) {
 	tmp := t.TempDir()
-	logPath := filepath.Join(tmp, "docker_calls.log")
-	fakeDocker := filepath.Join(tmp, "docker")
+	logPath := filepath.Join(tmp, "podman_calls.log")
+	fakePodman := filepath.Join(tmp, "podman")
 	script := `#!/bin/sh
 set -eu
 echo "$@" >> "` + logPath + `"
@@ -325,14 +327,14 @@ if [ "$cmd" = "rm" ]; then
 fi
 exit 0
 `
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
+	if err := os.WriteFile(fakePodman, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake podman: %v", err)
 	}
 
 	oldPath := os.Getenv("PATH")
 	t.Setenv("PATH", tmp+string(os.PathListSeparator)+oldPath)
 
-	launcher := DockerRunner{Image: "rascal-runner:latest"}
+	launcher := PodmanRunner{Image: "rascal-runner:latest"}
 	runningState, err := launcher.Inspect(context.Background(), ExecutionHandle{ID: "running-id"})
 	if err != nil {
 		t.Fatalf("inspect running container: %v", err)
@@ -362,7 +364,7 @@ exit 0
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {
-		t.Fatalf("read docker call log: %v", err)
+		t.Fatalf("read podman call log: %v", err)
 	}
 	logText := string(data)
 	for _, want := range []string{
@@ -371,15 +373,15 @@ exit 0
 		"rm -f running-id",
 	} {
 		if !strings.Contains(logText, want) {
-			t.Fatalf("expected %q in docker call log:\n%s", want, logText)
+			t.Fatalf("expected %q in podman call log:\n%s", want, logText)
 		}
 	}
 }
 
-func TestDockerRunnerUsesTaskSessionMountWhenResumeEnabled(t *testing.T) {
+func TestPodmanRunnerUsesTaskSessionMountWhenResumeEnabled(t *testing.T) {
 	tmp := t.TempDir()
-	logPath := filepath.Join(tmp, "docker_calls.log")
-	fakeDocker := filepath.Join(tmp, "docker")
+	logPath := filepath.Join(tmp, "podman_calls.log")
+	fakePodman := filepath.Join(tmp, "podman")
 	script := `#!/bin/sh
 set -eu
 echo "$@" >> "` + logPath + `"
@@ -388,8 +390,8 @@ if [ "${1:-}" = "run" ]; then
 fi
 exit 0
 `
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
+	if err := os.WriteFile(fakePodman, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake podman: %v", err)
 	}
 	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -399,7 +401,7 @@ exit 0
 		t.Fatalf("create run dir: %v", err)
 	}
 
-	launcher := DockerRunner{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
+	launcher := PodmanRunner{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
 		AgentRuntime: runtime.RuntimeGooseCodex,
 		RunID:        "run_1",
@@ -425,7 +427,7 @@ exit 0
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {
-		t.Fatalf("read docker calls log: %v", err)
+		t.Fatalf("read podman calls log: %v", err)
 	}
 	call := string(data)
 	if !strings.Contains(call, "-e GOOSE_PATH_ROOT=/rascal-goose-session") {
@@ -456,15 +458,15 @@ exit 0
 		if int(stat.Uid) != runtimeUID || int(stat.Gid) != runtimeGID {
 			t.Fatalf("session dir ownership = %d:%d, want %d:%d", stat.Uid, stat.Gid, runtimeUID, runtimeGID)
 		}
-	} else if info.Mode().Perm() != 0o777 {
-		t.Fatalf("session dir mode = %o, want 777", info.Mode().Perm())
+	} else if info.Mode().Perm() != 0o755 {
+		t.Fatalf("session dir mode = %o, want 755", info.Mode().Perm())
 	}
 }
 
-func TestDockerRunnerKeepsRunScopedGoosePathWhenSessionResumeDisabled(t *testing.T) {
+func TestPodmanRunnerKeepsRunScopedGoosePathWhenSessionResumeDisabled(t *testing.T) {
 	tmp := t.TempDir()
-	logPath := filepath.Join(tmp, "docker_calls.log")
-	fakeDocker := filepath.Join(tmp, "docker")
+	logPath := filepath.Join(tmp, "podman_calls.log")
+	fakePodman := filepath.Join(tmp, "podman")
 	script := `#!/bin/sh
 set -eu
 echo "$@" >> "` + logPath + `"
@@ -473,8 +475,8 @@ if [ "${1:-}" = "run" ]; then
 fi
 exit 0
 `
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
+	if err := os.WriteFile(fakePodman, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake podman: %v", err)
 	}
 	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -483,7 +485,7 @@ exit 0
 		t.Fatalf("create run dir: %v", err)
 	}
 
-	launcher := DockerRunner{Image: "rascal-runner:latest"}
+	launcher := PodmanRunner{Image: "rascal-runner:latest"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
 		AgentRuntime: runtime.RuntimeGooseCodex,
 		RunID:        "run_2",
@@ -505,7 +507,7 @@ exit 0
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {
-		t.Fatalf("read docker calls log: %v", err)
+		t.Fatalf("read podman calls log: %v", err)
 	}
 	call := string(data)
 	if !strings.Contains(call, "-e GOOSE_PATH_ROOT=/rascal-meta/goose") {
@@ -519,10 +521,10 @@ exit 0
 	}
 }
 
-func TestDockerRunnerUsesTaskScopedCodexHomeWhenResumeEnabled(t *testing.T) {
+func TestPodmanRunnerUsesTaskScopedCodexHomeWhenResumeEnabled(t *testing.T) {
 	tmp := t.TempDir()
-	logPath := filepath.Join(tmp, "docker_calls.log")
-	fakeDocker := filepath.Join(tmp, "docker")
+	logPath := filepath.Join(tmp, "podman_calls.log")
+	fakePodman := filepath.Join(tmp, "podman")
 	script := `#!/bin/sh
 set -eu
 echo "$@" >> "` + logPath + `"
@@ -531,8 +533,8 @@ if [ "${1:-}" = "run" ]; then
 fi
 exit 0
 `
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
+	if err := os.WriteFile(fakePodman, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake podman: %v", err)
 	}
 	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -542,7 +544,7 @@ exit 0
 		t.Fatalf("create run dir: %v", err)
 	}
 
-	launcher := DockerRunner{Image: "rascal-runner-codex:latest", GitHubToken: "gh-token"}
+	launcher := PodmanRunner{Image: "rascal-runner-codex:latest", GitHubToken: "gh-token"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
 		RunID:        "run_codex_1",
 		TaskID:       "owner/repo#1",
@@ -568,7 +570,7 @@ exit 0
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {
-		t.Fatalf("read docker calls log: %v", err)
+		t.Fatalf("read podman calls log: %v", err)
 	}
 	call := string(data)
 	if !strings.Contains(call, "-e CODEX_HOME=/rascal-codex-session") {
@@ -588,10 +590,10 @@ exit 0
 	}
 }
 
-func TestDockerRunnerIncludesNoNewPrivilegesSecurityOpt(t *testing.T) {
+func TestPodmanRunnerIncludesNoNewPrivilegesSecurityOpt(t *testing.T) {
 	tmp := t.TempDir()
-	logPath := filepath.Join(tmp, "docker_calls.log")
-	fakeDocker := filepath.Join(tmp, "docker")
+	logPath := filepath.Join(tmp, "podman_calls.log")
+	fakePodman := filepath.Join(tmp, "podman")
 	script := `#!/bin/sh
 set -eu
 echo "$@" >> "` + logPath + `"
@@ -600,8 +602,8 @@ if [ "${1:-}" = "run" ]; then
 fi
 exit 0
 `
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
+	if err := os.WriteFile(fakePodman, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake podman: %v", err)
 	}
 
 	oldPath := os.Getenv("PATH")
@@ -612,7 +614,7 @@ exit 0
 		t.Fatalf("create run dir: %v", err)
 	}
 
-	launcher := DockerRunner{Image: "rascal-runner:latest"}
+	launcher := PodmanRunner{Image: "rascal-runner:latest"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
 		RunID:       "run_security",
 		TaskID:      "task_security",
@@ -630,42 +632,44 @@ exit 0
 
 	logData, err := os.ReadFile(logPath)
 	if err != nil {
-		t.Fatalf("read fake docker log: %v", err)
+		t.Fatalf("read fake podman log: %v", err)
 	}
 	fields := strings.Fields(string(logData))
 	securityOptIdx := slices.Index(fields, "--security-opt")
 	if securityOptIdx == -1 {
-		t.Fatalf("expected --security-opt in docker args, got: %s", string(logData))
+		t.Fatalf("expected --security-opt in podman args, got: %s", string(logData))
 	}
 	if securityOptIdx+1 >= len(fields) || fields[securityOptIdx+1] != "no-new-privileges:true" {
-		t.Fatalf("expected no-new-privileges:true in docker args, got: %s", string(logData))
+		t.Fatalf("expected no-new-privileges:true in podman args, got: %s", string(logData))
 	}
 }
 
-func TestDockerSecurityConfigDockerRunArgsByMode(t *testing.T) {
+func TestPodmanSecurityConfigPodmanRunArgsByMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
-		cfg  DockerSecurityConfig
+		cfg  PodmanSecurityConfig
 		want []string
 	}{
 		{
 			name: "open",
-			cfg: DockerSecurityConfig{
-				Mode: DockerSecurityOpen,
+			cfg: PodmanSecurityConfig{
+				Mode: PodmanSecurityOpen,
 			},
-			want: []string{"--security-opt", "no-new-privileges:true"},
+			want: []string{"--userns=keep-id:uid=10001,gid=10001", "--cgroups=no-conmon", "--security-opt", "no-new-privileges:true"},
 		},
 		{
 			name: "baseline",
-			cfg: DockerSecurityConfig{
-				Mode:      DockerSecurityBaseline,
+			cfg: PodmanSecurityConfig{
+				Mode:      PodmanSecurityBaseline,
 				CPUs:      "2",
 				Memory:    "4g",
 				PidsLimit: 256,
 			},
 			want: []string{
+				"--userns=keep-id:uid=10001,gid=10001",
+				"--cgroups=no-conmon",
 				"--security-opt", "no-new-privileges:true",
 				"--cap-drop", "ALL",
 				"--init",
@@ -676,14 +680,16 @@ func TestDockerSecurityConfigDockerRunArgsByMode(t *testing.T) {
 		},
 		{
 			name: "strict",
-			cfg: DockerSecurityConfig{
-				Mode:         DockerSecurityStrict,
+			cfg: PodmanSecurityConfig{
+				Mode:         PodmanSecurityStrict,
 				CPUs:         "2",
 				Memory:       "4g",
 				PidsLimit:    256,
 				TmpfsTmpSize: "512m",
 			},
 			want: []string{
+				"--userns=keep-id:uid=10001,gid=10001",
+				"--cgroups=no-conmon",
 				"--security-opt", "no-new-privileges:true",
 				"--cap-drop", "ALL",
 				"--init",
@@ -698,17 +704,17 @@ func TestDockerSecurityConfigDockerRunArgsByMode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := tt.cfg.dockerRunArgs()
+			got := tt.cfg.podmanRunArgs()
 			if !slices.Equal(got, tt.want) {
-				t.Fatalf("dockerRunArgs() = %#v, want %#v", got, tt.want)
+				t.Fatalf("podmanRunArgs() = %#v, want %#v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestDockerRunnerLogsSecuritySummary(t *testing.T) {
+func TestPodmanRunnerLogsSecuritySummary(t *testing.T) {
 	tmp := t.TempDir()
-	fakeDocker := filepath.Join(tmp, "docker")
+	fakePodman := filepath.Join(tmp, "podman")
 	script := `#!/bin/sh
 set -eu
 if [ "${1:-}" = "run" ]; then
@@ -716,8 +722,8 @@ if [ "${1:-}" = "run" ]; then
 fi
 exit 0
 `
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
+	if err := os.WriteFile(fakePodman, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake podman: %v", err)
 	}
 	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -726,10 +732,10 @@ exit 0
 		t.Fatalf("create run dir: %v", err)
 	}
 
-	launcher := DockerRunner{
+	launcher := PodmanRunner{
 		Image: "rascal-runner:latest",
-		Security: DockerSecurityConfig{
-			Mode:      DockerSecurityBaseline,
+		Security: PodmanSecurityConfig{
+			Mode:      PodmanSecurityBaseline,
 			CPUs:      "2",
 			Memory:    "4g",
 			PidsLimit: 256,
@@ -756,7 +762,7 @@ exit 0
 	}
 	logText := string(data)
 	for _, want := range []string{
-		"docker security mode=baseline",
+		"podman security mode=baseline",
 		"env_secrets=false",
 		"cpus=2",
 		"memory=4g",
@@ -768,10 +774,10 @@ exit 0
 	}
 }
 
-func TestDockerRunnerMountsSecretsReadOnlyByDefault(t *testing.T) {
+func TestPodmanRunnerMountsSecretsReadOnlyByDefault(t *testing.T) {
 	tmp := t.TempDir()
-	logPath := filepath.Join(tmp, "docker_calls.log")
-	fakeDocker := filepath.Join(tmp, "docker")
+	logPath := filepath.Join(tmp, "podman_calls.log")
+	fakePodman := filepath.Join(tmp, "podman")
 	script := `#!/bin/sh
 set -eu
 echo "$@" >> "` + logPath + `"
@@ -780,8 +786,8 @@ if [ "${1:-}" = "run" ]; then
 fi
 exit 0
 `
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
+	if err := os.WriteFile(fakePodman, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake podman: %v", err)
 	}
 	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -794,7 +800,7 @@ exit 0
 		t.Fatalf("write codex auth: %v", err)
 	}
 
-	launcher := DockerRunner{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
+	launcher := PodmanRunner{Image: "rascal-runner:latest", GitHubToken: "gh-token"}
 	_, err := launcher.StartDetached(context.Background(), Spec{
 		RunID:       "run_secrets",
 		TaskID:      "task_secrets",
@@ -813,11 +819,11 @@ exit 0
 
 	logData, err := os.ReadFile(logPath)
 	if err != nil {
-		t.Fatalf("read fake docker log: %v", err)
+		t.Fatalf("read fake podman log: %v", err)
 	}
 	call := string(logData)
 	if strings.Contains(call, "-e GH_TOKEN=gh-token") {
-		t.Fatalf("did not expect raw GH_TOKEN env in docker args:\n%s", call)
+		t.Fatalf("did not expect raw GH_TOKEN env in podman args:\n%s", call)
 	}
 	for _, want := range []string{
 		"-e GH_TOKEN_FILE=/run/rascal-secrets/gh_token",
@@ -825,12 +831,12 @@ exit 0
 		secretsDir + ":/run/rascal-secrets:ro",
 	} {
 		if !strings.Contains(call, want) {
-			t.Fatalf("expected %q in docker args:\n%s", want, call)
+			t.Fatalf("expected %q in podman args:\n%s", want, call)
 		}
 	}
 }
 
-func TestPrepareMountAccessMakesSecretsReadableForNonRoot(t *testing.T) {
+func TestPrepareMountAccessPreservesSecretModesForRootlessPodman(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("non-root readability path only")
 	}
@@ -870,9 +876,9 @@ func TestPrepareMountAccessMakesSecretsReadableForNonRoot(t *testing.T) {
 			t.Fatalf("stat %s: %v", path, err)
 		}
 		got := info.Mode().Perm()
-		want := os.FileMode(0o644)
+		want := os.FileMode(0o600)
 		if path == secretsDir {
-			want = 0o777
+			want = 0o700
 		}
 		if got != want {
 			t.Fatalf("%s mode = %#o, want %#o", path, got, want)

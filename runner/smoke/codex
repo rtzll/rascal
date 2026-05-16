@@ -62,7 +62,7 @@ else
 fi
 
 cat > /rascal-meta/commit_message.txt <<'EOF'
-test(smoke): exercise docker runner
+test(smoke): exercise podman runner
 EOF
 
 if [[ -n "$output_path" ]]; then
