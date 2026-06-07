@@ -3,12 +3,12 @@ module github.com/rtzll/rascal
 go 1.26
 
 require (
-	github.com/hetznercloud/hcloud-go/v2 v2.40.0
+	github.com/hetznercloud/hcloud-go/v2 v2.42.0
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	modernc.org/sqlite v1.50.0
+	modernc.org/sqlite v1.52.0
 )
 
 require (

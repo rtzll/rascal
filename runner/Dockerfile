@@ -1,5 +1,5 @@
-ARG GO_VERSION=1.26.3
-ARG GOOSE_VERSION=1.33.1
+ARG GO_VERSION=1.26.4
+ARG GOOSE_VERSION=1.37.0
 ARG GOLANGCI_LINT_VERSION=v2.12.2
 ARG SQLC_VERSION=v1.31.1
 
@@ -13,7 +13,7 @@ RUN curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b /usr/local/bin
     && GOBIN=/usr/local/bin CGO_ENABLED=0 go install github.com/sqlc-dev/sqlc/cmd/sqlc@"${SQLC_VERSION}" \
     && /usr/local/bin/sqlc version
 
-FROM node:24-bookworm-slim AS codex-runtime
+FROM node:26-bookworm-slim AS codex-runtime
 RUN npm install -g --silent --no-progress --no-fund --no-audit @openai/codex \
     && node --version \
     && npm --version \
@@ -32,7 +32,7 @@ RUN set -eux; \
       arm64) goose_asset="goose-aarch64-unknown-linux-gnu.tar.bz2" ;; \
       *) echo "unsupported architecture: ${arch}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://github.com/block/goose/releases/download/v${GOOSE_VERSION}/${goose_asset}" -o /tmp/goose.tar.bz2; \
+    curl -fsSL "https://github.com/aaif-goose/goose/releases/download/v${GOOSE_VERSION}/${goose_asset}" -o /tmp/goose.tar.bz2; \
     tar -xjf /tmp/goose.tar.bz2 -C /tmp; \
     install -m 0755 /tmp/goose /usr/local/bin/goose; \
     rm -f /tmp/goose.tar.bz2 /tmp/goose

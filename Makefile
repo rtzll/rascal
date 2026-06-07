@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := build
 
-GOLANGCI_LINT_VERSION ?= v2.11.2
+GOLANGCI_LINT_VERSION ?= v2.12.2
 SQLC_VERSION ?= v1.31.1
 GOLANGCI_LINT ?= $(or $(shell command -v golangci-lint 2>/dev/null),$(CURDIR)/bin/golangci-lint)
 GOLANGCI_LINT_CACHE := $(CURDIR)/tmp/golangci-lint-cache
