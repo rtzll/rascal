@@ -80,5 +80,5 @@ rascal completion fish
 make smoke
 ```
 
-This runs both smoke checks: `smoke-noop` and `smoke-docker`. The Docker-backed
-smoke check requires a working local Docker daemon.
+This runs both smoke checks: `smoke-noop` and `smoke-podman`. The Podman-backed
+smoke check requires a working local Podman runtime.

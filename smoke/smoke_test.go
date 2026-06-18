@@ -52,19 +52,19 @@ func TestSmokeNoop(t *testing.T) {
 	}
 }
 
-func TestSmokeDocker(t *testing.T) {
-	image := strings.TrimSpace(os.Getenv("SMOKE_DOCKER_IMAGE"))
+func TestSmokePodman(t *testing.T) {
+	image := strings.TrimSpace(os.Getenv("SMOKE_PODMAN_IMAGE"))
 	if image == "" {
 		image = "rascal-runner-smoke-codex:latest"
 	}
 
 	server := startSmokeServer(t, smokeConfig{
-		name:             "docker",
-		runnerMode:       "docker",
+		name:             "podman",
+		runnerMode:       "podman",
 		runnerImageCodex: image,
 	})
 	createSharedCodexCredential(t, server)
-	run := createTask(t, server, "Smoke docker run")
+	run := createTask(t, server, "Smoke podman run")
 	run = waitForFinalRun(t, server, run.ID, 90*time.Second)
 	if run.Status != state.StatusReview {
 		t.Fatalf("run status = %q, want %q\nserver output:\n%s", run.Status, state.StatusReview, server.output.String())
@@ -73,7 +73,7 @@ func TestSmokeDocker(t *testing.T) {
 		t.Fatalf("run pr url empty for review run\nserver output:\n%s", server.output.String())
 	}
 	logs := fetchRunLogs(t, server, run.ID)
-	for _, want := range []string{"starting docker runner", "docker security mode=baseline", "smoke codex ran"} {
+	for _, want := range []string{"starting podman runner", "podman security mode=baseline", "smoke codex ran"} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("logs missing %q:\n%s", want, logs)
 		}

@@ -1,18 +1,24 @@
 [Unit]
 Description=Rascal orchestrator service (%i)
-After=network-online.target docker.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 EnvironmentFile=/etc/rascal/rascal.env
 EnvironmentFile=-/etc/rascal/rascal-%i.env
+Environment=HOME=/var/lib/rascal
+Environment=XDG_RUNTIME_DIR=/run/user/10001
+PermissionsStartOnly=true
+ExecStartPre=/usr/bin/install -d -m 0700 -o rascal -g rascal /run/user/10001
 ExecStart=/opt/rascal/rascald
 Restart=always
 RestartSec=3
 KillSignal=SIGTERM
+KillMode=process
 TimeoutStopSec=330
-User=root
+User=rascal
+Group=rascal
 WorkingDirectory=/opt/rascal
 
 [Install]

@@ -322,7 +322,7 @@ type RunLease struct {
 type RunExecutionBackend string
 
 const (
-	RunExecutionBackendDocker RunExecutionBackend = "docker"
+	RunExecutionBackendPodman RunExecutionBackend = "podman"
 	RunExecutionBackendNoop   RunExecutionBackend = "noop"
 )
 
@@ -331,14 +331,14 @@ func NormalizeRunExecutionBackend(backend RunExecutionBackend) RunExecutionBacke
 	case string(RunExecutionBackendNoop):
 		return RunExecutionBackendNoop
 	default:
-		return RunExecutionBackendDocker
+		return RunExecutionBackendPodman
 	}
 }
 
 func ParseRunExecutionBackend(raw string) (RunExecutionBackend, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", string(RunExecutionBackendDocker):
-		return RunExecutionBackendDocker, true
+	case "", string(RunExecutionBackendPodman):
+		return RunExecutionBackendPodman, true
 	case string(RunExecutionBackendNoop):
 		return RunExecutionBackendNoop, true
 	default:

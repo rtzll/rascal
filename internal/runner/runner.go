@@ -40,19 +40,19 @@ type Mode string
 
 const (
 	ModeNoop   Mode = "noop"
-	ModeDocker Mode = "docker"
+	ModePodman Mode = "podman"
 )
 
-type DockerSecurityMode string
+type PodmanSecurityMode string
 
 const (
-	DockerSecurityOpen     DockerSecurityMode = "open"
-	DockerSecurityBaseline DockerSecurityMode = "baseline"
-	DockerSecurityStrict   DockerSecurityMode = "strict"
+	PodmanSecurityOpen     PodmanSecurityMode = "open"
+	PodmanSecurityBaseline PodmanSecurityMode = "baseline"
+	PodmanSecurityStrict   PodmanSecurityMode = "strict"
 )
 
-type DockerSecurityConfig struct {
-	Mode            DockerSecurityMode
+type PodmanSecurityConfig struct {
+	Mode            PodmanSecurityMode
 	CPUs            string
 	Memory          string
 	PidsLimit       int
@@ -63,7 +63,7 @@ type DockerSecurityConfig struct {
 type ExecutionBackend string
 
 const (
-	ExecutionBackendDocker ExecutionBackend = "docker"
+	ExecutionBackendPodman ExecutionBackend = "podman"
 	ExecutionBackendNoop   ExecutionBackend = "noop"
 )
 
@@ -82,7 +82,7 @@ func ExecutionHandleForRun(runID string) ExecutionHandle {
 	runID = strings.TrimSpace(runID)
 	name := sanitizeContainerName("rascal-" + runID)
 	return ExecutionHandle{
-		Backend: ExecutionBackendDocker,
+		Backend: ExecutionBackendPodman,
 		Name:    name,
 	}
 }
@@ -107,36 +107,36 @@ func ParseMode(raw string) (Mode, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", string(ModeNoop):
 		return ModeNoop, nil
-	case string(ModeDocker):
-		return ModeDocker, nil
+	case string(ModePodman):
+		return ModePodman, nil
 	default:
 		return "", fmt.Errorf("unknown runner mode %q", raw)
 	}
 }
 
-func NormalizeDockerSecurityMode(raw string) DockerSecurityMode {
-	mode, err := ParseDockerSecurityMode(raw)
+func NormalizePodmanSecurityMode(raw string) PodmanSecurityMode {
+	mode, err := ParsePodmanSecurityMode(raw)
 	if err != nil {
-		return DockerSecurityBaseline
+		return PodmanSecurityBaseline
 	}
 	return mode
 }
 
-func ParseDockerSecurityMode(raw string) (DockerSecurityMode, error) {
+func ParsePodmanSecurityMode(raw string) (PodmanSecurityMode, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", string(DockerSecurityBaseline):
-		return DockerSecurityBaseline, nil
-	case string(DockerSecurityOpen):
-		return DockerSecurityOpen, nil
-	case string(DockerSecurityStrict):
-		return DockerSecurityStrict, nil
+	case "", string(PodmanSecurityBaseline):
+		return PodmanSecurityBaseline, nil
+	case string(PodmanSecurityOpen):
+		return PodmanSecurityOpen, nil
+	case string(PodmanSecurityStrict):
+		return PodmanSecurityStrict, nil
 	default:
-		return "", fmt.Errorf("unknown docker security mode %q", raw)
+		return "", fmt.Errorf("unknown podman security mode %q", raw)
 	}
 }
 
-func (c DockerSecurityConfig) Normalize() DockerSecurityConfig {
-	c.Mode = NormalizeDockerSecurityMode(string(c.Mode))
+func (c PodmanSecurityConfig) Normalize() PodmanSecurityConfig {
+	c.Mode = NormalizePodmanSecurityMode(string(c.Mode))
 	c.CPUs = strings.TrimSpace(c.CPUs)
 	c.Memory = strings.TrimSpace(c.Memory)
 	c.TmpfsTmpSize = strings.TrimSpace(c.TmpfsTmpSize)
@@ -146,18 +146,18 @@ func (c DockerSecurityConfig) Normalize() DockerSecurityConfig {
 	return c
 }
 
-func (c DockerSecurityConfig) Summary() string {
+func (c PodmanSecurityConfig) Summary() string {
 	c = c.Normalize()
 	parts := []string{fmt.Sprintf("mode=%s", c.Mode)}
 	parts = append(parts, fmt.Sprintf("env_secrets=%t", c.AllowEnvSecrets))
-	if c.Mode != DockerSecurityOpen {
+	if c.Mode != PodmanSecurityOpen {
 		parts = append(parts,
 			fmt.Sprintf("cpus=%s", defaultSummaryValue(c.CPUs)),
 			fmt.Sprintf("memory=%s", defaultSummaryValue(c.Memory)),
 			fmt.Sprintf("pids=%s", defaultSummaryInt(c.PidsLimit)),
 		)
 	}
-	if c.Mode == DockerSecurityStrict {
+	if c.Mode == PodmanSecurityStrict {
 		parts = append(parts, fmt.Sprintf("tmpfs_tmp=%s", defaultSummaryValue(c.TmpfsTmpSize)))
 	}
 	return strings.Join(parts, " ")
@@ -188,7 +188,7 @@ func SecretsDir(runDir string) string {
 	return filepath.Join(parent, "."+base+"-secrets")
 }
 
-// Runner starts a run inside an execution environment (Docker in v1).
+// Runner starts a run inside an execution environment.
 type Runner interface {
 	StartDetached(ctx context.Context, spec Spec) (ExecutionHandle, error)
 	Inspect(ctx context.Context, handle ExecutionHandle) (ExecutionState, error)
@@ -196,10 +196,10 @@ type Runner interface {
 	Remove(ctx context.Context, handle ExecutionHandle) error
 }
 
-func NewRunner(mode Mode, image, githubToken string, security DockerSecurityConfig) Runner {
+func NewRunner(mode Mode, image, githubToken string, security PodmanSecurityConfig) Runner {
 	switch NormalizeMode(string(mode)) {
-	case ModeDocker:
-		return DockerRunner{DefaultImage: image, GitHubToken: githubToken, Security: security.Normalize()}
+	case ModePodman:
+		return PodmanRunner{DefaultImage: image, GitHubToken: githubToken, Security: security.Normalize()}
 	default:
 		return NoopRunner{}
 	}

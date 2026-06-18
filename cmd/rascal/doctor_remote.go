@@ -14,7 +14,7 @@ type remoteDoctorStatus struct {
 	Host                    string `json:"host"`
 	RascalService           bool   `json:"rascal_service"`
 	ActiveSlot              string `json:"active_slot,omitempty"`
-	DockerInstalled         bool   `json:"docker_installed"`
+	PodmanInstalled         bool   `json:"podman_installed"`
 	SQLiteInstalled         bool   `json:"sqlite_installed"`
 	CaddyInstalled          bool   `json:"caddy_installed"`
 	EnvFilePresent          bool   `json:"env_file_present"`
@@ -54,7 +54,7 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 	} else {
 		status.ActiveSlot = strings.TrimSpace(activeSlot)
 	}
-	status.DockerInstalled = check("command -v docker >/dev/null 2>&1 && echo ok")
+	status.PodmanInstalled = check("command -v podman >/dev/null 2>&1 && echo ok")
 	status.SQLiteInstalled = check("command -v sqlite3 >/dev/null 2>&1 && echo ok")
 	status.CaddyInstalled = check("command -v caddy >/dev/null 2>&1 && echo ok")
 	status.EnvFilePresent = check("[ -f /etc/rascal/rascal.env ] && echo ok")
@@ -111,8 +111,8 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		`codex_image=${RASCAL_RUNNER_IMAGE_CODEX:-}`,
 		`[ -n "$goose_image" ]`,
 		`[ -n "$codex_image" ]`,
-		`printf 'goose_id=%s\n' "$(docker image inspect -f '{{.Id}}' "$goose_image")"`,
-		`printf 'codex_id=%s\n' "$(docker image inspect -f '{{.Id}}' "$codex_image")"`,
+		`printf 'goose_id=%s\n' "$(runuser -u rascal -- env HOME=/var/lib/rascal XDG_RUNTIME_DIR=/run/user/10001 podman image inspect -f '{{.Id}}' "$goose_image")"`,
+		`printf 'codex_id=%s\n' "$(runuser -u rascal -- env HOME=/var/lib/rascal XDG_RUNTIME_DIR=/run/user/10001 podman image inspect -f '{{.Id}}' "$codex_image")"`,
 	}, "\n"))...)
 	if err != nil {
 		log.Printf("resolve runner image IDs over SSH failed: %v", err)
@@ -153,7 +153,7 @@ func runRemoteDoctor(cfg deployConfig) (remoteDoctorStatus, error) {
 		`  [ -n "$goose_image" ]`,
 		`  [ -n "$codex_image" ]`,
 		`fi`,
-		`docker image inspect "$goose_image" "$codex_image" >/dev/null 2>&1 && echo ok`,
+		`runuser -u rascal -- env HOME=/var/lib/rascal XDG_RUNTIME_DIR=/run/user/10001 podman image inspect "$goose_image" "$codex_image" >/dev/null 2>&1 && echo ok`,
 	}, "\n"), defaults.GooseCodexRunnerImageTag, defaults.CodexRunnerImageTag))
 	return status, nil
 }

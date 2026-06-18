@@ -19,25 +19,37 @@ ensure_base_packages() {
   apt-get install -y -qq sqlite3 ripgrep curl gpg debian-keyring debian-archive-keyring apt-transport-https ca-certificates gnupg lsb-release >/dev/null
 }
 
-ensure_docker() {
-  if command -v docker >/dev/null 2>&1; then
-    echo "docker already installed"
+ensure_podman() {
+  if command -v podman >/dev/null 2>&1; then
+    echo "podman already installed"
     return
   fi
 
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
-
-  codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
-  echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-    ${codename} stable" >/etc/apt/sources.list.d/docker.list
-
   apt-get -qq update >/dev/null
-  apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
-  systemctl enable docker
-  systemctl start docker
+  apt-get install -y -qq podman uidmap slirp4netns fuse-overlayfs >/dev/null
+}
+
+ensure_rascal_user() {
+  if ! getent group rascal >/dev/null 2>&1; then
+    groupadd --system --gid 10001 rascal
+  elif [[ "$(getent group rascal | cut -d: -f3)" != "10001" ]]; then
+    echo "existing rascal group does not use gid 10001" >&2
+    exit 1
+  fi
+  if ! id -u rascal >/dev/null 2>&1; then
+    useradd --system --uid 10001 --gid rascal --create-home --home-dir /var/lib/rascal --shell /usr/sbin/nologin rascal
+  elif [[ "$(id -u rascal)" != "10001" ]]; then
+    echo "existing rascal user does not use uid 10001" >&2
+    exit 1
+  fi
+  if ! grep -q '^rascal:' /etc/subuid 2>/dev/null; then
+    echo 'rascal:100000:65536' >>/etc/subuid
+  fi
+  if ! grep -q '^rascal:' /etc/subgid 2>/dev/null; then
+    echo 'rascal:100000:65536' >>/etc/subgid
+  fi
+  install -d -m 0700 -o rascal -g rascal /run/user/10001
+  loginctl enable-linger rascal >/dev/null 2>&1 || true
 }
 
 ensure_caddy() {
@@ -56,9 +68,11 @@ ensure_caddy() {
 
 ensure_host_layout() {
   mkdir -p /opt/rascal /etc/rascal /var/lib/rascal /tmp/rascal-bootstrap /etc/caddy
+  chown -R rascal:rascal /opt/rascal /var/lib/rascal /etc/rascal
 }
 
 ensure_base_packages
-ensure_docker
+ensure_podman
+ensure_rascal_user
 ensure_caddy
 ensure_host_layout

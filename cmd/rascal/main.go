@@ -1615,8 +1615,8 @@ func (a *app) newDoctorCmd() *cobra.Command {
 						if activeSlot == "" {
 							activeSlot = "unknown"
 						}
-						a.println("remote (%s): rascal=%v slot=%v docker=%v sqlite=%v caddy=%v env=%v auth_synced=%v codex_auth=%v runner_image_configured=%v runner_image=%v",
-							remote.Host, remote.RascalService, activeSlot, remote.DockerInstalled, remote.SQLiteInstalled, remote.CaddyInstalled, remote.EnvFilePresent, remote.AuthRuntimeSynced, false, remote.RunnerImageConfigured, remote.RunnerImagePresent)
+						a.println("remote (%s): rascal=%v slot=%v podman=%v sqlite=%v caddy=%v env=%v auth_synced=%v codex_auth=%v runner_image_configured=%v runner_image=%v",
+							remote.Host, remote.RascalService, activeSlot, remote.PodmanInstalled, remote.SQLiteInstalled, remote.CaddyInstalled, remote.EnvFilePresent, remote.AuthRuntimeSynced, false, remote.RunnerImageConfigured, remote.RunnerImagePresent)
 						if gooseImage := strings.TrimSpace(remote.RunnerImageGooseCodex); gooseImage != "" {
 							a.println("remote goose-codex runner image: %s", gooseImage)
 						}

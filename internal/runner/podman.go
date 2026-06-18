@@ -17,12 +17,12 @@ import (
 	"github.com/rtzll/rascal/internal/runtime"
 )
 
-// DockerRunner runs a task inside a Docker container.
-type DockerRunner struct {
+// PodmanRunner runs a task inside a rootless Podman container.
+type PodmanRunner struct {
 	DefaultImage string
 	Image        string
 	GitHubToken  string
-	Security     DockerSecurityConfig
+	Security     PodmanSecurityConfig
 }
 
 const (
@@ -47,27 +47,27 @@ const (
 	containerClaudeTokenFile  = "/run/rascal-secrets/claude_oauth_token"
 )
 
-type dockerRuntimeLayout struct {
+type podmanRuntimeLayout struct {
 	codexHome       string
 	goosePathRoot   string
 	claudeConfigDir string
 	sessionTarget   string
 }
 
-type dockerContainerEnvBuilder struct {
+type podmanContainerEnvBuilder struct {
 	spec             Spec
 	agentRuntime     runtime.Runtime
 	sessionMode      runtime.SessionMode
 	sessionResume    bool
 	sessionKey       string
 	runtimeSessionID string
-	layout           dockerRuntimeLayout
+	layout           podmanRuntimeLayout
 	githubToken      string
 	allowEnvSecrets  bool
 }
 
-func newDockerRuntimeLayout(agentRuntime runtime.Runtime, taskSession TaskSessionSpec) dockerRuntimeLayout {
-	layout := dockerRuntimeLayout{
+func newPodmanRuntimeLayout(agentRuntime runtime.Runtime, taskSession TaskSessionSpec) podmanRuntimeLayout {
+	layout := podmanRuntimeLayout{
 		codexHome:       containerCodexStateDir,
 		goosePathRoot:   containerGooseStateDir,
 		claudeConfigDir: containerClaudeStateDir,
@@ -89,8 +89,8 @@ func newDockerRuntimeLayout(agentRuntime runtime.Runtime, taskSession TaskSessio
 	return layout
 }
 
-func newDockerContainerEnvBuilder(spec Spec, agentRuntime runtime.Runtime, layout dockerRuntimeLayout, githubToken string, allowEnvSecrets bool) dockerContainerEnvBuilder {
-	return dockerContainerEnvBuilder{
+func newPodmanContainerEnvBuilder(spec Spec, agentRuntime runtime.Runtime, layout podmanRuntimeLayout, githubToken string, allowEnvSecrets bool) podmanContainerEnvBuilder {
+	return podmanContainerEnvBuilder{
 		spec:             spec,
 		agentRuntime:     agentRuntime,
 		sessionMode:      spec.TaskSession.Mode,
@@ -103,7 +103,7 @@ func newDockerContainerEnvBuilder(spec Spec, agentRuntime runtime.Runtime, layou
 	}
 }
 
-func (b dockerContainerEnvBuilder) Build() map[string]string {
+func (b podmanContainerEnvBuilder) Build() map[string]string {
 	envPairs := map[string]string{
 		"RASCAL_RUN_ID":              b.spec.RunID,
 		"RASCAL_TASK_ID":             b.spec.TaskID,
@@ -162,7 +162,7 @@ func (b dockerContainerEnvBuilder) Build() map[string]string {
 	return envPairs
 }
 
-func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
+func (l PodmanRunner) StartDetached(ctx context.Context, spec Spec) (handle ExecutionHandle, err error) {
 	agentRuntime := runtime.NormalizeRuntime(string(spec.AgentRuntime))
 	image := strings.TrimSpace(spec.RunnerImage)
 	if image == "" {
@@ -172,7 +172,7 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		image = strings.TrimSpace(l.Image)
 	}
 	if image == "" {
-		return ExecutionHandle{}, fmt.Errorf("docker image is required")
+		return ExecutionHandle{}, fmt.Errorf("podman image is required")
 	}
 	if err := os.MkdirAll(spec.RunDir, 0o755); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("create run dir: %w", err)
@@ -186,7 +186,7 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		secretsDir = SecretsDir(spec.RunDir)
 	}
 	if !l.Security.AllowEnvSecrets && strings.TrimSpace(l.GitHubToken) != "" {
-		if err := writeDockerSecretFile(secretsDir, "gh_token", []byte(strings.TrimSpace(l.GitHubToken))); err != nil {
+		if err := writePodmanSecretFile(secretsDir, "gh_token", []byte(strings.TrimSpace(l.GitHubToken))); err != nil {
 			return ExecutionHandle{}, fmt.Errorf("write github token secret: %w", err)
 		}
 	}
@@ -215,16 +215,16 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		}
 	}()
 
-	if _, err := fmt.Fprintf(logFile, "[%s] starting docker runner image=%s agent_runtime=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), image, agentRuntime, spec.RunID); err != nil {
+	if _, err := fmt.Fprintf(logFile, "[%s] starting podman runner image=%s agent_runtime=%s run_id=%s\n", time.Now().UTC().Format(time.RFC3339), image, agentRuntime, spec.RunID); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("write runner log header: %w", err)
 	}
-	if _, err := fmt.Fprintf(logFile, "[%s] docker security %s\n", time.Now().UTC().Format(time.RFC3339), l.Security.Normalize().Summary()); err != nil {
+	if _, err := fmt.Fprintf(logFile, "[%s] podman security %s\n", time.Now().UTC().Format(time.RFC3339), l.Security.Normalize().Summary()); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("write runner security log: %w", err)
 	}
 
-	layout := newDockerRuntimeLayout(agentRuntime, spec.TaskSession)
+	layout := newPodmanRuntimeLayout(agentRuntime, spec.TaskSession)
 	sessionMountTarget := layout.sessionTarget
-	envPairs := newDockerContainerEnvBuilder(spec, agentRuntime, layout, l.GitHubToken, l.Security.AllowEnvSecrets).Build()
+	envPairs := newPodmanContainerEnvBuilder(spec, agentRuntime, layout, l.GitHubToken, l.Security.AllowEnvSecrets).Build()
 	containerName := sanitizeContainerName("rascal-" + spec.RunID)
 	args := []string{
 		"run",
@@ -243,7 +243,7 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, envPairs[k]))
 	}
 	args = append(args,
-		l.Security.Normalize().dockerRunArgs()...,
+		l.Security.Normalize().podmanRunArgs()...,
 	)
 	args = append(args,
 		"-v", fmt.Sprintf("%s:%s", spec.RunDir, containerMetaDir),
@@ -272,31 +272,31 @@ func (l DockerRunner) StartDetached(ctx context.Context, spec Spec) (handle Exec
 		return ExecutionHandle{}, fmt.Errorf("write runner session log: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "podman", args...)
 	cmd.Stderr = logFile
 	out, err := cmd.Output()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return ExecutionHandle{}, context.Canceled
 		}
-		return ExecutionHandle{}, fmt.Errorf("start detached docker runner: %w", unwrapSyscallError(err))
+		return ExecutionHandle{}, fmt.Errorf("start detached podman runner: %w", unwrapSyscallError(err))
 	}
 
 	containerID := strings.TrimSpace(string(out))
 	if containerID == "" {
-		return ExecutionHandle{}, fmt.Errorf("docker run -d returned empty container id")
+		return ExecutionHandle{}, fmt.Errorf("podman run -d returned empty container id")
 	}
 	if _, err := fmt.Fprintf(logFile, "[%s] detached container started name=%s id=%s\n", time.Now().UTC().Format(time.RFC3339), containerName, containerID); err != nil {
 		return ExecutionHandle{}, fmt.Errorf("write runner start log: %w", err)
 	}
 	return ExecutionHandle{
-		Backend: ExecutionBackendDocker,
+		Backend: ExecutionBackendPodman,
 		ID:      containerID,
 		Name:    containerName,
 	}, nil
 }
 
-func writeDockerSecretFile(secretDir, name string, data []byte) error {
+func writePodmanSecretFile(secretDir, name string, data []byte) error {
 	secretDir = strings.TrimSpace(secretDir)
 	name = strings.TrimSpace(name)
 	if secretDir == "" || name == "" {
@@ -312,13 +312,13 @@ func writeDockerSecretFile(secretDir, name string, data []byte) error {
 	return nil
 }
 
-func (c DockerSecurityConfig) dockerRunArgs() []string {
+func (c PodmanSecurityConfig) podmanRunArgs() []string {
 	c = c.Normalize()
-	args := []string{"--security-opt", "no-new-privileges:true"}
+	args := []string{"--userns=keep-id:uid=10001,gid=10001", "--cgroups=no-conmon", "--security-opt", "no-new-privileges:true"}
 	switch c.Mode {
-	case DockerSecurityOpen:
+	case PodmanSecurityOpen:
 		return args
-	case DockerSecurityStrict, DockerSecurityBaseline:
+	case PodmanSecurityStrict, PodmanSecurityBaseline:
 		args = append(args, "--cap-drop", "ALL", "--init")
 		if c.CPUs != "" {
 			args = append(args, "--cpus", c.CPUs)
@@ -329,7 +329,7 @@ func (c DockerSecurityConfig) dockerRunArgs() []string {
 		if c.PidsLimit > 0 {
 			args = append(args, "--pids-limit", strconv.Itoa(c.PidsLimit))
 		}
-		if c.Mode == DockerSecurityStrict && c.TmpfsTmpSize != "" {
+		if c.Mode == PodmanSecurityStrict && c.TmpfsTmpSize != "" {
 			args = append(args, "--tmpfs", fmt.Sprintf("/tmp:rw,nosuid,size=%s", c.TmpfsTmpSize))
 		}
 		return args
@@ -338,25 +338,25 @@ func (c DockerSecurityConfig) dockerRunArgs() []string {
 	}
 }
 
-func (l DockerRunner) Inspect(ctx context.Context, handle ExecutionHandle) (ExecutionState, error) {
-	target := dockerExecutionTarget(handle)
+func (l PodmanRunner) Inspect(ctx context.Context, handle ExecutionHandle) (ExecutionState, error) {
+	target := podmanExecutionTarget(handle)
 	if target == "" {
 		return ExecutionState{}, fmt.Errorf("execution target is required")
 	}
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "--type", "container", "--format", "{{.State.Running}} {{.State.ExitCode}}", target)
+	cmd := exec.CommandContext(ctx, "podman", "inspect", "--type", "container", "--format", "{{.State.Running}} {{.State.ExitCode}}", target)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if dockerNotFoundOutput(err, out) {
+		if podmanNotFoundOutput(err, out) {
 			return ExecutionState{}, ErrExecutionNotFound
 		}
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return ExecutionState{}, context.Canceled
 		}
-		return ExecutionState{}, fmt.Errorf("inspect docker container %s: %w", target, unwrapSyscallError(err))
+		return ExecutionState{}, fmt.Errorf("inspect podman container %s: %w", target, unwrapSyscallError(err))
 	}
 	parts := strings.Fields(strings.TrimSpace(string(out)))
 	if len(parts) < 2 {
-		return ExecutionState{}, fmt.Errorf("unexpected docker inspect output for %s: %q", target, strings.TrimSpace(string(out)))
+		return ExecutionState{}, fmt.Errorf("unexpected podman inspect output for %s: %q", target, strings.TrimSpace(string(out)))
 	}
 	running := parts[0] == "true"
 	if running {
@@ -364,7 +364,7 @@ func (l DockerRunner) Inspect(ctx context.Context, handle ExecutionHandle) (Exec
 	}
 	exitCode, convErr := strconv.Atoi(parts[1])
 	if convErr != nil {
-		return ExecutionState{}, fmt.Errorf("parse docker exit code %q: %w", parts[1], convErr)
+		return ExecutionState{}, fmt.Errorf("parse podman exit code %q: %w", parts[1], convErr)
 	}
 	return ExecutionState{Running: false, ExitCode: &exitCode}, nil
 }
@@ -378,8 +378,8 @@ func firstNonEmptySessionPath(values ...string) string {
 	return ""
 }
 
-func (l DockerRunner) Stop(ctx context.Context, handle ExecutionHandle, timeout time.Duration) error {
-	target := dockerExecutionTarget(handle)
+func (l PodmanRunner) Stop(ctx context.Context, handle ExecutionHandle, timeout time.Duration) error {
+	target := podmanExecutionTarget(handle)
 	if target == "" {
 		return fmt.Errorf("execution target is required")
 	}
@@ -390,52 +390,55 @@ func (l DockerRunner) Stop(ctx context.Context, handle ExecutionHandle, timeout 
 	if stopSeconds < 1 {
 		stopSeconds = 1
 	}
-	cmd := exec.CommandContext(ctx, "docker", "stop", "--time", strconv.Itoa(stopSeconds), target)
+	cmd := exec.CommandContext(ctx, "podman", "stop", "--time", strconv.Itoa(stopSeconds), target)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if dockerNotFoundOutput(err, out) {
+		if podmanNotFoundOutput(err, out) {
 			return ErrExecutionNotFound
 		}
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return context.Canceled
 		}
-		return fmt.Errorf("stop docker container %s: %w", target, unwrapSyscallError(err))
+		return fmt.Errorf("stop podman container %s: %w", target, unwrapSyscallError(err))
 	}
 	return nil
 }
 
-func (l DockerRunner) Remove(ctx context.Context, handle ExecutionHandle) error {
-	target := dockerExecutionTarget(handle)
+func (l PodmanRunner) Remove(ctx context.Context, handle ExecutionHandle) error {
+	target := podmanExecutionTarget(handle)
 	if target == "" {
 		return fmt.Errorf("execution target is required")
 	}
-	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", target)
+	cmd := exec.CommandContext(ctx, "podman", "rm", "-f", target)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if dockerNotFoundOutput(err, out) {
+		if podmanNotFoundOutput(err, out) {
 			return nil
 		}
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return context.Canceled
 		}
-		return fmt.Errorf("remove docker container %s: %w", target, unwrapSyscallError(err))
+		return fmt.Errorf("remove podman container %s: %w", target, unwrapSyscallError(err))
 	}
 	return nil
 }
 
-func dockerExecutionTarget(handle ExecutionHandle) string {
+func podmanExecutionTarget(handle ExecutionHandle) string {
 	if strings.TrimSpace(handle.ID) != "" {
 		return strings.TrimSpace(handle.ID)
 	}
 	return strings.TrimSpace(handle.Name)
 }
 
-func dockerNotFoundOutput(err error, output []byte) bool {
+func podmanNotFoundOutput(err error, output []byte) bool {
 	if err == nil {
 		return false
 	}
 	text := strings.ToLower(strings.TrimSpace(string(output)))
-	return strings.Contains(text, "no such object") || strings.Contains(text, "no such container")
+	return strings.Contains(text, "no such object") ||
+		strings.Contains(text, "no such container") ||
+		strings.Contains(text, "does not exist") ||
+		strings.Contains(text, "no container with name or id")
 }
 
 func prepareMountAccess(runDir, workspaceDir, sessionDir, secretsDir string) error {
@@ -456,31 +459,9 @@ func prepareMountAccess(runDir, workspaceDir, sessionDir, secretsDir string) err
 		return nil
 	}
 
-	// Non-root launcher fallback: make bind mounts writable by the runtime UID.
-	targets := []string{runDir, workspaceDir, filepath.Join(runDir, "codex"), filepath.Join(runDir, "goose")}
-	if strings.TrimSpace(sessionDir) != "" {
-		targets = append(targets, sessionDir)
-	}
-	if strings.TrimSpace(secretsDir) != "" {
-		targets = append(targets, secretsDir)
-	}
-	for _, target := range targets {
-		if err := chmodIfExists(target, 0o777); err != nil {
-			return fmt.Errorf("prepare writable mount %s: %w", target, err)
-		}
-	}
-	if err := chmodIfExists(filepath.Join(runDir, "codex", "auth.json"), 0o644); err != nil {
-		return fmt.Errorf("prepare codex auth readability: %w", err)
-	}
-	for _, path := range []string{
-		filepath.Join(strings.TrimSpace(secretsDir), "gh_token"),
-		filepath.Join(strings.TrimSpace(secretsDir), "codex_auth.json"),
-		filepath.Join(strings.TrimSpace(secretsDir), "claude_oauth_token"),
-	} {
-		if err := chmodIfExists(path, 0o644); err != nil {
-			return fmt.Errorf("prepare secret readability %s: %w", path, err)
-		}
-	}
+	// Rootless Podman uses keep-id mapping so the container runtime UID maps
+	// back to the launcher user on the host. Files created by rascald should
+	// already be readable/writable without making secrets world-readable.
 	return nil
 }
 
@@ -495,16 +476,6 @@ func chownTree(root string, uid, gid int) error {
 		return nil
 	}); err != nil {
 		return fmt.Errorf("chown tree %s: %w", root, err)
-	}
-	return nil
-}
-
-func chmodIfExists(path string, mode os.FileMode) error {
-	if err := os.Chmod(path, mode); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("chmod %s: %w", path, err)
 	}
 	return nil
 }

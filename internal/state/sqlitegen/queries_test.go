@@ -417,7 +417,7 @@ func TestQueriesCoverage(t *testing.T) {
 
 	if err := q.UpsertRunExecution(ctx, UpsertRunExecutionParams{
 		RunID:          "run_exec_1",
-		Backend:        "docker",
+		Backend:        "podman",
 		ContainerName:  "rascal-run_exec_1",
 		ContainerID:    "container-1",
 		Status:         string(testRunExecutionStatusRunning),

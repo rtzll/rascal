@@ -873,7 +873,7 @@ func TestStoreRunExecutionLifecycle(t *testing.T) {
 
 	exec, err := store.UpsertRunExecution(RunExecution{
 		RunID:         "run_exec_1",
-		Backend:       RunExecutionBackendDocker,
+		Backend:       RunExecutionBackendPodman,
 		ContainerName: "rascal-run_exec_1",
 		ContainerID:   "container-abc",
 		Status:        RunExecutionStatusRunning,

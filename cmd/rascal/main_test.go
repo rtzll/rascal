@@ -95,7 +95,7 @@ func TestDoctorJSONOutputIncludesTypedRemoteStatus(t *testing.T) {
 			Host:                  cfg.Host,
 			RascalService:         true,
 			ActiveSlot:            "blue",
-			DockerInstalled:       true,
+			PodmanInstalled:       true,
 			SQLiteInstalled:       true,
 			CaddyInstalled:        true,
 			EnvFilePresent:        true,

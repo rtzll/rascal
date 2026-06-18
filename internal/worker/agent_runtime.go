@@ -214,7 +214,7 @@ func CodexRunArgs(cfg Config) []string {
 	if configuredSessionResume(cfg) && sessionID != "" {
 		args = append(args, "resume")
 	}
-	// The Docker runner is already the isolation boundary for Codex tasks.
+	// The Podman runner is already the isolation boundary for Codex tasks.
 	// Using Codex's inner sandbox here triggers bwrap/userns failures in the
 	// container and prevents the agent from reading the workspace at all.
 	args = append(args, "--json", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "-o", cfg.AgentOutputPath)

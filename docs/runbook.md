@@ -57,7 +57,7 @@ See also: [webhooks.md](webhooks.md)
 ## 2) Deploy Failing or Regressing
 
 Blue/green deploy and rollback are primarily for restoring `rascald` API/webhook
-service safely. In-flight task execution is detached in Docker containers and
+service safely. In-flight task execution is detached in Podman containers and
 should survive slot rotation while the active slot adopts supervision.
 
 Run deploy directly:
@@ -142,7 +142,7 @@ rascal logs rascald --host "$HOST" --follow
 Check detached execution state on host:
 
 ```bash
-ssh root@"$HOST" "docker ps -a --format '{{.Names}} {{.Status}}' | rg '^rascal-' || true"
+ssh root@"$HOST" "runuser -u rascal -- env HOME=/var/lib/rascal XDG_RUNTIME_DIR=/run/user/10001 podman ps -a --format '{{.Names}} {{.Status}}' | rg '^rascal-' || true"
 ```
 
 ## 4) Cancel Does Not Take Effect Quickly
@@ -157,7 +157,7 @@ rascal logs run RUN_ID --follow
 Verify container stop on remote host:
 
 ```bash
-ssh root@"$HOST" "docker ps --format '{{.Names}}' | rg '^rascal-' || true"
+ssh root@"$HOST" "runuser -u rascal -- env HOME=/var/lib/rascal XDG_RUNTIME_DIR=/run/user/10001 podman ps --format '{{.Names}}' | rg '^rascal-' || true"
 ```
 
 If a deploy recently rotated slots, remember execution is detached: the new

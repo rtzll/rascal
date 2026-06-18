@@ -15,7 +15,7 @@
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
 | **RunExecution**       | Detached execution metadata for a run: container identity and observed lifecycle state                             | Execution (alone, too vague), container |
 | **Execution Handle**   | Deterministic identifier (backend, name, container ID) enabling adoption and cleanup across control-plane restarts | Container ref, execution ref            |
-| **Detached Execution** | A Docker container execution that continues independently of the `rascald` process that launched it                | Background job, async process           |
+| **Detached Execution** | A Podman container execution that continues independently of the `rascald` process that launched it                | Background job, async process           |
 | **Adoption**           | When a newly active or restarted `rascald` instance recovers a persisted execution handle and resumes supervision  | Recovery, reconnect                     |
 
 ## Actors and Roles
@@ -54,7 +54,7 @@
 | Term                | Definition                                                                                                                       | Aliases to avoid             |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
 | **Control Plane**   | `rascal` (CLI) plus `rascald` (server) — accepts work, persists state, schedules runs, and supervises execution                  | Server, backend              |
-| **Execution Plane** | The set of detached Docker containers running `rascal-runner` instances                                                          | Worker pool, container fleet |
+| **Execution Plane** | The set of detached Podman containers running `rascal-runner` instances                                                          | Worker pool, container fleet |
 | **Scheduler Pause** | A temporary, time-bounded suspension of all task scheduling, triggered by control-plane conditions such as provider usage limits | Freeze, cooldown, backoff    |
 
 ## Deployment
@@ -66,7 +66,7 @@
 | **Cutover**       | The moment traffic flips from the active slot to the newly deployed slot                                                    | Switch, failover (implies failure) |
 | **Draining**      | Shutdown mode where the old slot stops accepting work and relinquishes run supervision without canceling detached execution | Graceful shutdown (too generic)    |
 | **Rollback**      | Restoring traffic and service ownership to the previously healthy slot if deploy activation fails                           | Revert                             |
-| **Runner Image**  | A Docker image used to execute runs, maintained separately per runtime                                                      | Container image (too generic)      |
+| **Runner Image**  | A container image used to execute runs, maintained separately per runtime                                                      | Container image (too generic)      |
 
 ## Relationships
 
@@ -131,7 +131,7 @@
   `runtimeSessionID`.
 - ~~**"Launcher"** was a type alias for Runner with no semantic distinction.~~
   **Resolved**: alias removed, `Runner` is the sole canonical type.
-  `DockerLauncher` → `DockerRunner`, `NoopLauncher` → `NoopRunner`.
+  `PodmanLauncher` → `PodmanRunner`, `NoopLauncher` → `NoopRunner`.
 - **"Backend"** (the `ExecutionBackend` type) is still used for container
   backend type in **Execution Handle**. Context disambiguates from **Model
   Provider**, but prefer the specific term when writing documentation.
