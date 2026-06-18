@@ -12,10 +12,10 @@ import (
 // All orchestrator code should use this instead of calling Store status
 // methods directly.
 type RunStateMachine struct {
-	store *state.Store
+	store runStateStore
 }
 
-func NewRunStateMachine(store *state.Store) *RunStateMachine {
+func NewRunStateMachine(store runStateStore) *RunStateMachine {
 	return &RunStateMachine{store: store}
 }
 

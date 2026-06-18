@@ -1268,6 +1268,17 @@ func (s *Store) ActiveSchedulerPause(scope string, now time.Time) (time.Time, st
 	return time.Unix(0, row.PausedUntil).UTC(), strings.TrimSpace(row.Reason), true, nil
 }
 
+func (s *Store) ClearSchedulerPause(scope string) error {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return nil
+	}
+	if _, err := s.db.ExecContext(context.Background(), `DELETE FROM scheduler_pauses WHERE scope = ?`, scope); err != nil {
+		return fmt.Errorf("clear scheduler pause for scope %q: %w", scope, err)
+	}
+	return nil
+}
+
 func (s *Store) ActiveRunForTask(taskID string) (Run, bool) {
 	row, err := s.q.ActiveRunForTask(context.Background(), strings.TrimSpace(taskID))
 	if err != nil {

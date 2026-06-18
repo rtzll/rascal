@@ -681,69 +681,6 @@ func parseRetryDelay(raw string) (time.Duration, bool) {
 	return total, true
 }
 
-func (s *Server) activeSchedulerPause() (time.Time, string, bool) {
-	pauseUntil, reason, ok, err := s.Store.ActiveSchedulerPause(schedulerPauseScope, time.Now().UTC())
-	if err != nil {
-		log.Printf("load active worker pause failed: %v", err)
-		return time.Time{}, "", false
-	}
-	return pauseUntil, reason, ok
-}
-
-func (s *Server) pauseWorkersUntil(until time.Time, reason string) time.Time {
-	if until.IsZero() {
-		until = time.Now().UTC().Add(defaultUsageLimitPause)
-	}
-	effective, err := s.Store.PauseScheduler(schedulerPauseScope, reason, until)
-	if err != nil {
-		log.Printf("persist worker pause until %s failed: %v", until.Format(time.RFC3339), err)
-		effective = until.UTC()
-	}
-	s.ensureResumeTimer(effective)
-	return effective
-}
-
-func (s *Server) ensureResumeTimer(until time.Time) {
-	if until.IsZero() {
-		return
-	}
-	until = until.UTC()
-	delay := time.Until(until)
-	if delay < 0 {
-		delay = 0
-	}
-
-	s.mu.Lock()
-	if s.draining {
-		s.mu.Unlock()
-		return
-	}
-	if !s.resumeAt.IsZero() && s.resumeAt.Equal(until) {
-		s.mu.Unlock()
-		return
-	}
-	if s.resumeTimer != nil {
-		s.resumeTimer.Stop()
-	}
-	s.resumeAt = until
-	s.resumeTimer = time.AfterFunc(delay, func() {
-		s.mu.Lock()
-		if !s.resumeAt.Equal(until) {
-			s.mu.Unlock()
-			return
-		}
-		s.resumeAt = time.Time{}
-		s.resumeTimer = nil
-		draining := s.draining
-		s.mu.Unlock()
-		if draining {
-			return
-		}
-		s.ScheduleRuns("")
-	})
-	s.mu.Unlock()
-}
-
 func (s *Server) addIssueReactionBestEffort(repo string, issueNumber int, reaction string) {
 	s.notifier().ReactToIssue(repo, issueNumber, reaction)
 }

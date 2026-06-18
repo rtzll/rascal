@@ -5,70 +5,17 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/rtzll/rascal/internal/state"
 )
 
 func (s *Server) ScheduleRuns(preferredTaskID string) {
-	if s.isDraining() {
+	if s.Scheduler == nil {
 		return
 	}
-	preferredTaskID = strings.TrimSpace(preferredTaskID)
-
-	if pauseUntil, pauseReason, paused := s.activeSchedulerPause(); paused {
-		s.ensureResumeTimer(pauseUntil)
-		log.Printf("run scheduling paused until %s: %s", pauseUntil.Format(time.RFC3339), pauseReason)
-		return
-	}
-
-	s.scheduleMu.Lock()
-	defer s.scheduleMu.Unlock()
-
-	for {
-		if pauseUntil, pauseReason, paused := s.activeSchedulerPause(); paused {
-			s.ensureResumeTimer(pauseUntil)
-			log.Printf("run scheduling paused until %s: %s", pauseUntil.Format(time.RFC3339), pauseReason)
-			return
-		}
-		atCapacity := s.ActiveRunCount() >= s.concurrencyLimit()
-		draining := s.isDraining()
-		if draining || atCapacity {
-			return
-		}
-
-		run, claimed, err := s.Store.ClaimNextQueuedRun(preferredTaskID)
-		preferredTaskID = ""
-		if err != nil {
-			log.Printf("failed to claim next queued run: %v", err)
-			return
-		}
-		if !claimed {
-			return
-		}
-
-		if reason, statusReason, ok := s.pendingRunCancelStatus(run.ID); ok {
-			if _, err := s.SM.Transition(run.ID, state.StatusCanceled, WithError(reason), WithReason(statusReason)); err != nil {
-				log.Printf("run %s cancel on schedule failed: %v", run.ID, err)
-			}
-			s.clearRunCancelBestEffort(run.ID)
-			continue
-		}
-
-		if s.isDraining() {
-			if _, err := s.SM.Transition(run.ID, state.StatusCanceled, WithError("orchestrator shutting down"), WithReason(state.RunStatusReasonShutdown)); err != nil {
-				log.Printf("run %s cancel on drain failed: %v", run.ID, err)
-			}
-			return
-		}
-		if err := s.Store.UpsertRunLease(run.ID, s.InstanceID, runLeaseTTL); err != nil {
-			if _, transErr := s.SM.Transition(run.ID, state.StatusFailed, WithError(fmt.Sprintf("claim run lease: %v", err))); transErr != nil {
-				log.Printf("run %s fail on lease claim failed: %v", run.ID, transErr)
-			}
-			continue
-		}
-
-		go s.ExecuteRun(run.ID)
+	s.syncComponents()
+	if err := s.Scheduler.Schedule(context.Background(), preferredTaskID); err != nil {
+		log.Printf("schedule runs failed: %v", err)
 	}
 }
 
